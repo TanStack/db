@@ -1,0 +1,9 @@
+# One completion baseline singleton successor
+
+This packet prepares exactly one new `inline-park-root` recipe for combined-v3 and the literal `completion-baseline-v1` binding profile. The program is byte-identical to the first invocation's program, SHA256 `947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664`. Every old recipe value remains unchanged except the new binding selector, new source-freeze identity, program copy path and fresh output leaf. The failed predecessor remains immutable; this packet grants no automatic retry or following-cell batch.
+
+The parent output directory exists and its exclusive singleton leaf is absent. The command keeps one worker and the original 60,000 ms outer wall, 384 MiB heap, 1 GiB aggregate RSS and 100 ms sampling, with the unchanged 20,000 ms inner receiving bound. These are operational limits, not product progress deadlines. Root alone may admit the exact command after independent combined/input review.
+
+The exact four-source independent verdict and first failed result freeze are retained. Historical input-v1 verification explicitly uses the text-archive map and resolver, with root preservation review and relocation receipt pinned. The eight old emitted evidence paths are superseded, while historical manifest bytes and all sixteen old program/recipe pairs remain unchanged. The actual historical constructor imported temporary executable modules under `/private/tmp`. This successor reuses existing JSON bytes and runs no compiler or constructor.
+
+Static hashing/copy preparation ran no source module, model/history, sample, registering test, receiving path or product mutant. All raw20 candidate states remain UNREACHED; State14 remains proposed; metadata retains its separate ownership. The prior native invocation failed provenance and has no product RED/GREEN credit.

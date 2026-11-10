@@ -1,0 +1,52 @@
+{
+  "status": "Exact scope/default quarter2 selector discovery only; no receiving recipe",
+  "selector": {
+    "id": "metadata-update-scope-default-q2-selector-v2",
+    "order": 0,
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "argv": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "list",
+      "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "--config",
+      "scripts/h02-progress/vitest.config.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--cache=false",
+      "--json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v2/names.json",
+      "-t",
+      "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'scope'\\ 'default'\\ quarter\\ 2$"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+    "envUnset": [
+      "NODE_OPTIONS",
+      "NODE_PATH",
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_CALIBRATION",
+      "H02_PROGRESS_WORKER_HISTORY",
+      "H02_PROGRESS_BINDING_DIR",
+      "H02_PROGRESS_SELECTED_ROOT",
+      "H02_PROGRESS_RECEIPTS",
+      "H02_PROGRESS_SOURCE_FREEZE"
+    ],
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "workerNodeHeapMiB": 384,
+    "outerWallContainmentMs": 30000,
+    "groupRssContainmentBytes": 1073741824,
+    "stdoutPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v2/stdout.log",
+    "stderrPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v2/stderr.log",
+    "expectedOutput": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v2/names.json",
+      "count": 1,
+      "names": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2"
+      ],
+      "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+    },
+    "status": "UNADMITTED and UNEXECUTED; collection only, no test body/pass/reach credit"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts": {
+    "beforeSha256": "d6f190138514cbe2ccb1080787cd7076365e756467c6d2d87a35ef5c157352cc",
+    "afterSha256": "6146871f28ffbb468e36fff565b55f9e8fc4a0df1800821e0e023b1bcaec5472"
+  },
+  "scripts/h02-progress/ownership-neighbor.config.ts": {
+    "beforeSha256": "28ebebd27883de2991991b1ae4725eca6b76377241d17dbc124f45209eb4a357",
+    "afterSha256": "955405bf0eef37e5bd82327694fb1d474da54f50c14fe02561faa3c5d809b27f"
+  }
+}

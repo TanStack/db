@@ -1,0 +1,57 @@
+{
+  "after": "Stop; no retry, kill, replacement identity, native lane, source edit or automatic next action",
+  "argv": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/proposed-original-absence.py",
+    "--root-admitted-one-shot"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "exactShellCommand": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/proposed-original-absence.py --root-admitted-one-shot",
+  "exclusiveOutput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-root-original-absence-v1.json",
+  "executable": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+  "executableSha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+  "limits": "Point-in-time original numeric identities only. No missing initial PPID/PGID/getpgid receipt reconstructed. Subprocess timeouts total at most 25s plus local work, not a new product or outer watchdog.",
+  "originalIdentitiesSha256": "66c09994c275dcca9ae9c3032887afdc74af7989e61a4f4f400f0aa91351bc8e",
+  "originalPids": [
+    71010,
+    71040,
+    71052,
+    71056
+  ],
+  "originalTargetGroups": [
+    71010,
+    71052
+  ],
+  "requestedToolPermission": "require_escalated for unchanged ps access",
+  "scriptSha256": "8f6682920c60c0ed8cf5ddf052f02216eb0896b0bd35c36aab8b553bf4042491",
+  "signalZero": {
+    "groupTargets": [
+      -71010,
+      -71052
+    ],
+    "maximumCalls": 6,
+    "pidTargets": [
+      71010,
+      71040,
+      71052,
+      71056
+    ],
+    "signal": 0
+  },
+  "status": "INERT, UNEXECUTED; separate exact root admission required",
+  "subprocesses": {
+    "groupSnapshotArgv": [
+      "/bin/ps",
+      "-axo",
+      "pid=,pgid=,args="
+    ],
+    "maximumCount": 5,
+    "perOriginalPidArgv": [
+      "/bin/ps",
+      "-o",
+      "pid=,pgid=,args=",
+      "-p",
+      "ORIGINAL_PID"
+    ],
+    "timeoutEachSeconds": 5
+  }
+}

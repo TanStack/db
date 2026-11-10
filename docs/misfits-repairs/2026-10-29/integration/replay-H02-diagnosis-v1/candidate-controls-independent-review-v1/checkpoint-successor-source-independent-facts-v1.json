@@ -1,0 +1,67 @@
+{
+  "at": "2026-10-30T10:13:57.890075+00:00",
+  "mode": "static read/hash/text/JSON; independent source-only controls separately authorized once in slot2, no product/model/fixture/collection/native/probes",
+  "knownArtifactDigests": {
+    "source-freeze-v1.json": "0a1978c5a8856da7aab49379462dd5f258f75b7ba910454eed320f3018f13779",
+    "packet-sha256-v1.json": "60a45f03547a64b44341b72b2a9cebe2f9c2f662efc014b613d0e840978427fd",
+    "input-freeze-v1.json": "2777d9652b05480948130b228c9c4bf8c204cb7906b3fa4e8720decb31c1277c",
+    "launcher-recipe-v1.json": "38d5a85214e1ebfe5d8d60f850f6e159c6141b5b225883f09a73a2b546162124",
+    "output-parent-preparation-receipt-v1.json": "3151981a4c8373221512336123e76a973fc77e4ea7395b17eb7fd15c67f7eec2"
+  },
+  "packetEntries": 88,
+  "sourceEntries": 584,
+  "sourceSnapshots": 73,
+  "inheritedRecordSnapshots": 199,
+  "sourceDelta": [
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts"
+  ],
+  "unchangedProduction": 511,
+  "unchangedOtherSources": 583,
+  "dependencyPayloads": 2544,
+  "Node": 1,
+  "locks": 2,
+  "links": 4,
+  "preservedOriginalEntries": 4294,
+  "preservedOriginalCounts": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/packet-sha256-v3.json": 275,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/input-packet-sha256-v1.json": 16,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/input-packet-sha256-v1.json": 53,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-held-window-result-freeze-v1.json": 1975,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-source-failed-peer-result-freeze-v1.json": 1975
+  },
+  "recipeDelta": [
+    "outputDirectory",
+    "programFile",
+    "sourceFreeze",
+    "sourceFreezeSha256"
+  ],
+  "programSha256": "c5eef9f5c5bdce78790002f0a753684c6dfb3e42fb4b68f0b0b7d5fcbd07e9e7",
+  "outputParentExistsEmpty": true,
+  "outputLeafAbsent": true,
+  "outputParentPreparationReceiptSha256": "3151981a4c8373221512336123e76a973fc77e4ea7395b17eb7fd15c67f7eec2",
+  "independentControls": {
+    "accepted": 5,
+    "rejected": 18,
+    "originalBranchRejected": true,
+    "actualChunk": "28c214",
+    "actualExit": 0,
+    "resultSha256": "1edae48884a814d1c44f0affe086acc8be502bfdeb04390222c531f508c358d1",
+    "actualReturnSha256": "0c934f5bd2f68bcc034bfcc678d9118631ca4026a8082d27514825977f1a014d",
+    "slot2": "returned"
+  },
+  "prospectiveActualLauncher": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the exact admitted H02 baseline launcher outside the sandbox so its owned native process groups can be contained and cleaned up.",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 3000
+  },
+  "nativeGroupKillEperm": "prior failure preserved and open; elevated launcher requirement does not prove cause or validated failure-kill path",
+  "errors": [],
+  "allChecksPass": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "actualHelperNoActivePublicOperationNeighbor": "required and UNREACHED",
+  "nativeRuntimeAdmission": false
+}

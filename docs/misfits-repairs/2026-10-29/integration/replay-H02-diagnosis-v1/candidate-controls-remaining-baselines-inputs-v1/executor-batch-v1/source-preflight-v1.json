@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-30T09:56:50.185790+00:00",
+  "rootAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "allAdmissionReferencesMatched": true,
+  "sourceMapFilesMatched": 584,
+  "dependencyPayloadFilesMatched": 2544,
+  "selectedNodeTwoLocksFourLinksMatched": true,
+  "exactRecipesMatched": 15,
+  "programHashesMatched": 15,
+  "all15OutputLeavesAbsent": true,
+  "slot": 2,
+  "worker": 1,
+  "nativeInvocationsSoFar": 0,
+  "processVisibility": "separate escalated preflight still required",
+  "rootFirstClassificationSha256": "b27e566437bf8033aa9b81eb3884adf9a5a702a36311b780baf6acd2837d485e",
+  "stopOnFirstFailureOrUnreachedPremise": true,
+  "canonicalImport": false
+}

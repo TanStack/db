@@ -1,0 +1,3 @@
+The admitted nonempty scope-key launcher ran once and exited0, but native Vitest skipped all five tests (tests0ms). No receiving child or receipt directory started. This is an unreached selector/setup result, not a product verdict.
+
+Outer PID/PGID92750 was independently absent in the preserved root receipt. All562 frozen live source entries still matched after the invocation. Complete outer log, launcher identity, admission, root absence and exact sourcefreeze are retained. Root withdrew the remaining four V2 recipes because they share the same native-title mismatch. No retry or live source edit occurred before this freeze.

@@ -1,0 +1,26 @@
+
+        const expected = publicationEpochs[epochIndex]
+        if (
+          !expected ||
+          activeEpoch !== expected.id ||
+          receipt.epoch !== expected.id
+        )
+          throw new Error(
+            `receiving publication interval ends out of authored order`,
+          )
+        const expectedModel = epochModels.get(expected.id)
+        if (!expectedModel)
+          throw new Error(`authored interval has no independent expectation`)
+        if (
+          [...exposedFacades].some((handle) => !subscribedFacades.has(handle))
+        )
+          throw new Error(
+            `public facade exposure lacks its actual observer installation`,
+          )
+        if (expected.kind !== `cleanup`)
+          compare(`callback replicas at ${expected.id}`, () =>
+            deliveryCheck.checkpoint(expectedModel),
+          )
+        activeEpoch = undefined
+        epochIndex++
+      

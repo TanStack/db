@@ -1,0 +1,114 @@
+{
+  "status": "Live unchanged shared publication judgment/model and V4 validating authored-payload projection passed all reached original cuts",
+  "observations": [
+    {
+      "h02": true,
+      "sequence": 3,
+      "phase": "immediate-publication",
+      "rows": [
+        {
+          "id": 2,
+          "rank": 20,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 2,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 3,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 4,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 5,
+          "rank": 50,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 5,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 1,
+          "rank": 60,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 1,
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "ready": true
+    },
+    {
+      "h02": true,
+      "sequence": 4,
+      "phase": "final-publication",
+      "rows": [
+        {
+          "id": 2,
+          "rank": 20,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 2,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 3,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 4,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 5,
+          "rank": 50,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 5,
+          "$collectionId": "live-query-1"
+        },
+        {
+          "id": 1,
+          "rank": 60,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": 1,
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "ready": true
+    }
+  ],
+  "liveEvidence": "Native exact finite test passed; no primary observation error; all expected finite reaches measured; normal worker exit0.",
+  "rawMetadata": "All raw public metadata and change payloads preserved in the complete receipt stream; expected values remain in the unchanged shared model.",
+  "limits": "One finite path. No temporal virtual-metadata coherence, generated closure, candidate control or conflicting-cache progress claim."
+}

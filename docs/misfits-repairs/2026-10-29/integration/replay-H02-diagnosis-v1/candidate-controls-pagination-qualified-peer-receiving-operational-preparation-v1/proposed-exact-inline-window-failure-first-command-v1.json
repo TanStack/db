@@ -1,0 +1,59 @@
+{
+  "stage": "inline-window-failure-first",
+  "status": "PROPOSED ONLY; no invocation admitted",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.mjs",
+    "/private/tmp/h02-qualified-peer-receiving-v1/control/recipes/inline-window-failure-first.json"
+  ],
+  "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+  "actualToolRequirement": {
+    "sandbox_permissions": "require_escalated",
+    "yield_time_ms": 1000,
+    "maxInvocations": "one only if separately admitted"
+  },
+  "recipe": {
+    "inactivePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/recipes/inline-window-failure-first.json.txt",
+    "controlPath": "/private/tmp/h02-qualified-peer-receiving-v1/control/recipes/inline-window-failure-first.json",
+    "sha256": "03297e00e2683be4d22c9add73770ef5503bb639fefcb8f5645948a3758a365f",
+    "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+    "program": {
+      "inactivePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/programs/inline-window-failure-first.json.txt",
+      "controlPath": "/private/tmp/h02-qualified-peer-receiving-v1/control/programs/inline-window-failure-first.json",
+      "sha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/programs/inline-window-failure-first.json"
+    }
+  },
+  "outputRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1",
+  "outerStreamProposal": {
+    "stdout": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stdout.log",
+    "stderr": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stderr.log",
+    "parentSeparateDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/parent-command"
+  },
+  "prerequisites": [
+    "independent operational source review",
+    "separate approved materialization and full before/after file/link/tool verification",
+    "one exact compile gate admitted, executed and accepted",
+    "ROOT separate exact runtime admission; no authority transfers from this proposal"
+  ],
+  "failureOrSuccessOrdering": "Failure must be independently root-classified before success is considered. An instrument/setup/compile/resource/sink failure grants no product RED and no retry/success authority.",
+  "budgets": {
+    "outerWallMs": 60000,
+    "outerNodeHeapMiB": 384,
+    "aggregateOwnedGroupsRssBytes": 1073741824,
+    "innerWallMs": 20000,
+    "innerNodeHeapMiB": 384,
+    "innerGroupRssBytes": 1073741824,
+    "coverage": false,
+    "runtimeTypecheck": false,
+    "innerConfiguredTestTimeoutMs": 300000
+  },
+  "plainTitles": {
+    "parent": "checks a selected baseline constituent through the shared judgment",
+    "inner": "records a source-bound completion receiving gate"
+  },
+  "firstFailureBarrier": "original peer pending or observably retired, same strict guard and shared retained-window judgment; no pending-only law",
+  "sinkFaults": "Operational failure. Preserve incoming/transport/cleanup evidence actually retained; no unconditional original terminal-error fidelity claim.",
+  "stop": "No retry/normalization/automatic success. Freeze all raw/evaluated/source/tool/lifecycle evidence and original named identity absence; send for independent actual review.",
+  "executed": false
+}

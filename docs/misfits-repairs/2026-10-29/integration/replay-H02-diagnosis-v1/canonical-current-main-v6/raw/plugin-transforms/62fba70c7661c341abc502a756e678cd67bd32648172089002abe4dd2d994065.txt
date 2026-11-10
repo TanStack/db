@@ -1,0 +1,24 @@
+export function isCollection(value) {
+  return typeof value === `object` && value !== null && typeof value.subscribeChanges === `function` && typeof value.startSyncImmediate === `function` && typeof value.id === `string`;
+}
+export function getPublicCollection(collection) {
+  return collection?.publicCollection ?? collection;
+}
+export function isSingleResultCollection(collection) {
+  return collection.config?.singleResult === true;
+}
+export function isFailedStatus(status) {
+  return status === `error` || status === `crashed`;
+}
+export function getLiveQueryStatusFlags(status, health) {
+  return {
+    isLoading: status === `loading`,
+    isReady: status === `ready`,
+    isIdle: status === `idle`,
+    isLoadingError: status === `error`,
+    isCrashed: status === `crashed`,
+    isCleanedUp: status === `cleaned-up`,
+    isSyncError: status === `ready` && health?.hasErrors === true,
+    health
+  };
+}

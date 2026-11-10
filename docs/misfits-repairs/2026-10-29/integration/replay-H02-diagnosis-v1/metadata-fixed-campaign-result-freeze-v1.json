@@ -1,0 +1,90 @@
+{
+  "absenceToolChunk": "6b0821",
+  "actualAbsenceSha256": "1bd6e66f1ba7520fd20fea76101c596a22d0e34342bac6e6faf829bfe219e99f",
+  "actualOuter": {
+    "finalReturn": {
+      "chunk": "ecbf3e",
+      "exitCode": 0,
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-actual-v1/actual-final-exec-return.json",
+      "sha256": "f7afa01975b48ec933df770b5fde68a771e8f06ca2f24419262b6484b15e44ab"
+    },
+    "initialReturn": {
+      "chunk": "e190fd",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-actual-v1/actual-initial-exec-return.json",
+      "sessionId": 51279,
+      "sha256": "963cb30d3094cc163321355543e4661a94e08420f1202f9606420cbbcb542570"
+    }
+  },
+  "admissionSha256": "3ba2c1822136802033552ae11be1f740e81e1a9d02127e04c65b51b1476c8031",
+  "all31FinalCounts": 8,
+  "all31StateCumulativeCounts": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "bindingSha256": "26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1",
+  "bugClassClosureCredit": false,
+  "canonicalImport": false,
+  "capture": {
+    "manifestSha256": "9cb3ba781161b61fab3d8b1b52a6cce30175d4c68f1855965b5ba6ee4e3e7986",
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-actual-v1",
+    "rawBytes": 251021924,
+    "rawFiles": 15587,
+    "rawManifestSha256": "fa1043072d6a0241fee022a455b7c41a27d4867fdda9c021e5dbdd17c9eefb86"
+  },
+  "captureAuditActualChunk": "2ec871",
+  "captureAuditSha256": "ee5f8737bcbd8156ceb1374622947f77ed900be130bf187fdc17e5c8da62a0cd",
+  "independentPreparationReviewSha256": "6b2660f5f6581a7c68718f460bdc75e1fa0d351436963c46fd0c174e57703153",
+  "limits": [
+    "authored-key lane unvalidated",
+    "zero-quarter no-op unvalidated",
+    "subscription/conflicting-cache progress requires separate reviewed repair/freeze",
+    "unseeded campaign separately gated",
+    "no hostile production-mutant kill or product repair/bug-class closure",
+    "stable output metadata only; no changing-fetched-metadata, held-reload follow-up or new attribution law",
+    "no framework receiving, PR readiness, canonical import or publication",
+    "No dedicated finalizer/assert receipt or new parent-checker V8 provenance.",
+    "No persisted initial group getpgid or direct parent-to-outer PPID receipt.",
+    "Native coverage/typecheck remain disabled; prior standalone TS noEmit result only.",
+    "No bug-class closure, product repair, hostile mutant, PR readiness or new runtime admission."
+  ],
+  "maxSampledGroupRssBytes": 489242624,
+  "multiplier": 1,
+  "nativeCampaignInvocations": 1,
+  "nativePassedTests": 1,
+  "nativeSkippedTests": 19,
+  "newRuntimeAdmitted": false,
+  "numRuns": 8,
+  "observationSummarySha256": "02e58629ff1b88fd5991f5969f215b2a4fb8e2b95d8633e99942574e214e8982",
+  "originalIdentitiesSha256": "0898aa5ed49e592fdea19f658603a4333439b6c960ac6757ee71182fd66d780a",
+  "originalPidsAbsent": 18,
+  "originalTargetGroupsAbsent": 9,
+  "preparationManifestSha256": "a6e66e5ed2d10fe9769e6c57a6b7029dfe22b4ff7e6d290771067e3f803c991a",
+  "productRepairGreen": false,
+  "property": "query.queued-answer-metadata.scope.default",
+  "publishing": false,
+  "pythonPostcheckSha256": "6588dc8ccf2d9154e8b90017b4d8ec7e2d93fbc828a4acc954556aeba8b118b0",
+  "rawHistoryArtifacts": 8,
+  "receivingChildExitCodes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "reportSha256": "b17458e4cccfebc978bd53685281f5e85b2e7807016939cbf0c6fbe49d9af10f",
+  "retried": false,
+  "seed": 20261030,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceReachMinimumUnchanged": 1,
+  "sourceToolPostcheckSha256": "365b13b43f494cf8a276102cdbbc5193b6bc18c4cd0421a34cfbc05bacd01da7",
+  "status": "one actual fixed campaign completed; observed native pass, pending independent actual-result qualification"
+}

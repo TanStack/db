@@ -1,0 +1,128 @@
+{
+  "reviewer": "/root/review_h02_prepared",
+  "at": "2026-10-30T06:53:41.878212+00:00",
+  "verdict": "CONFIRMED OBSERVATION REPRESENTATION DEFECT; NO PRODUCT VERDICT",
+  "method": "Independent standard-library hash/parse/text inspection and diagnostic row projection; no oracle/test/project/runtime execution, source edit, retry or next admission.",
+  "packetSha256": "8aa49478501ab26f62df98a68687f92b0a22d7c4984820713199fb24a221723f",
+  "members": 1957,
+  "bytes": 30751723,
+  "qualificationSha256": "d08473cef1b810d95d4d62fc55992e3187d59f061cc1bbf5ae043f38e06c7861",
+  "rawReceipts": 159,
+  "contiguous": true,
+  "rawReceiptsSha256": "9f60b63dc6a9ea244757799c970ab62ca3ff77bb17c83f63f4994c2b74ef6244",
+  "cuts": [
+    {
+      "sequence": 86,
+      "phase": "initial-publication",
+      "rawRows": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "expectedSelectedPayload": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": []
+        }
+      ],
+      "rawDownstream": null,
+      "diagnosticOnlyProjectionEqualsModelPayload": true
+    },
+    {
+      "sequence": 133,
+      "phase": "retained-publication",
+      "rawRows": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "expectedSelectedPayload": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": []
+        }
+      ],
+      "rawDownstream": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-2"
+        }
+      ],
+      "diagnosticOnlyProjectionEqualsModelPayload": true
+    },
+    {
+      "sequence": 159,
+      "phase": "final-publication",
+      "rawRows": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "expectedSelectedPayload": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": []
+        }
+      ],
+      "rawDownstream": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-2"
+        }
+      ],
+      "diagnosticOnlyProjectionEqualsModelPayload": true
+    }
+  ],
+  "diagnosticProjectionLimit": "These offline selected-field comparisons diagnose representation only. They do not replay the production checker, establish an admitted GREEN, discharge reach or prove cleanup.",
+  "cause": "copyRows spreads full Collection-published VirtualRow roots, while ProgressRow/model/event projector describe id/rank/markers. Raw fields legitimately include four documented public virtual properties. Exact equality compares different domains.",
+  "firstFailure": "initial-publication86 before nonempty-prior marking, primary checkProgressValue176; later held133/final159 have same domain mismatch.",
+  "nativeFailed": 1,
+  "nativeSkipped": 4,
+  "bindingStatus": "bound as frozen verification reports; no repeated binder audit",
+  "terminationReason": "observation",
+  "terminationSignal": "SIGKILL",
+  "cleanupStartReceipts": 0,
+  "workerCleanedReceipts": 0,
+  "rootIndependentAbsenceSha256": "34ac660bb3466db4a41c9a88bd03cd652abea907701f9c8dadc3588e5c9e640e",
+  "preservation": "Frozen packet unchanged; source review limited to relevant accepted snapshot.",
+  "metadataObligation": "Virtual fields are public. Existing virtual-row-fields owner checks classification/presence at settled preload, not this real QueryClient reload/event temporal coherence. Retain raw metadata and identify that separate owner/limit; payload projection alone supplies no metadata verdict.",
+  "repairConditions": [
+    "Declare selected-payload abstraction with public VirtualRowProps authority; no law/model/history/cut/budget change.",
+    "Use one validating id/rank/markers projector consistently at all root/downstream snapshots, final detection, event-derived comparisons, and neighbor held-downstream assertion. Preserve array order, multiplicity, fields and marker arrays exactly.",
+    "Retain full raw rows and change payload metadata in separate receipts; do not silently drop public fields.",
+    "Do not hardcode generated Collection IDs or composite key encodings. Any metadata checks must derive identity from fixture/public boundary facts and independent metadata laws.",
+    "Calibrate valid nonempty VirtualRows plus wrong id/rank/markers/order/duplicate/missing rows, and retain missing cleanup as failure. Separate metadata-only sensitivity/gaps explicitly.",
+    "Require exact successor source/recipe review and new admission before any receiving run; do not relabel this V3 run GREEN."
+  ]
+}

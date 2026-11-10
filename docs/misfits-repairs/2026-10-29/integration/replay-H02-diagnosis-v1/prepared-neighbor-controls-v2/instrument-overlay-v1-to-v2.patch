@@ -1,0 +1,1777 @@
+--- reviewed-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ actual-v2/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -625,13 +625,20 @@
+     await hostTurn()
+     // This is a held-provider cut, before this driver releases any replay
+     // answer. A positive pending count is a measured premise, not a delay.
+-    const heldProviderAnswers = pending.filter(({ pending: waiting }) => waiting).length
+-    emit(heldProviderAnswers > 0 ? `retained-publication` : `provider-hold-unreached`, {
+-      reason: `provider-hold-before-release`,
+-      rows: readLive(),
+-      downstream: copyRows(downstream.toArray),
+-      pendingProviderAnswers: heldProviderAnswers,
+-    })
++    const heldProviderAnswers = pending.filter(
++      ({ pending: waiting }) => waiting,
++    ).length
++    emit(
++      heldProviderAnswers > 0
++        ? `retained-publication`
++        : `provider-hold-unreached`,
++      {
++        reason: `provider-hold-before-release`,
++        rows: readLive(),
++        downstream: copyRows(downstream.toArray),
++        pendingProviderAnswers: heldProviderAnswers,
++      },
++    )
+     const strict =
+       history.includes &&
+       history.window &&
+--- reviewed-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
++++ actual-v2/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
+@@ -30,72 +30,164 @@
+     name: 'nonempty conflicting replay',
+     history: { ...queuedAnswerExample, nonemptyPrior: true },
+     states: [
+-      'nonempty-prior', 'held-provider-read', 'conflicting-cache-premise',
+-      'completed-enqueue', 'answer-executed', 'final-publication', 'worker-cleaned',
++      'nonempty-prior',
++      'held-provider-read',
++      'conflicting-cache-premise',
++      'completed-enqueue',
++      'answer-executed',
++      'final-publication',
++      'worker-cleaned',
+     ],
+   },
+   {
+     name: 'nonempty scope-key publication',
+-    history: { ...queuedAnswerExample, cacheIdentity: 'scope', nonemptyPrior: true },
++    history: {
++      ...queuedAnswerExample,
++      cacheIdentity: 'scope',
++      nonemptyPrior: true,
++    },
+     states: [
+-      'nonempty-prior', 'held-provider-read', 'completed-enqueue',
+-      'answer-executed', 'root-change', 'downstream-change',
+-      'final-publication', 'worker-cleaned',
++      'nonempty-prior',
++      'held-provider-read',
++      'completed-enqueue',
++      'answer-executed',
++      'root-change',
++      'downstream-change',
++      'final-publication',
++      'worker-cleaned',
++    ],
++  },
++  {
++    name: 'empty scope-key publication',
++    history: {
++      ...queuedAnswerExample,
++      cacheIdentity: 'scope',
++      nonemptyPrior: false,
++    },
++    states: [
++      'empty-prior',
++      'held-provider-read',
++      'completed-enqueue',
++      'answer-executed',
++      'root-change',
++      'downstream-change',
++      'final-publication',
++      'worker-cleaned',
+     ],
+   },
+   {
+     name: 'literal true initial cut',
+     history: { kind: 'sync-initial', keyShift: 0, rankScale: 10 },
+-    states: [ 'literal-true-establishing-receipt', 'subscriber-return-before-preload', 'final-publication', 'worker-cleaned' ],
++    states: [
++      'literal-true-establishing-receipt',
++      'subscriber-return-before-preload',
++      'final-publication',
++      'worker-cleaned',
++    ],
+   },
+   {
+     name: 'ordinary synchronous mutation cut',
+     history: { kind: 'sync-mutation', keyShift: 0, rankScale: 10 },
+-    states: [ 'ordinary-mutation-return-before-host-turn', 'final-publication', 'worker-cleaned' ],
++    states: [
++      'ordinary-mutation-return-before-host-turn',
++      'final-publication',
++      'worker-cleaned',
++    ],
+   },
+ ]
+ 
+ describe('queued-answer receiving neighbors', () => {
+-  it.each(paths)('checks receiving neighbor $name', async ({ name, history, states }) => {
+-    const reach = createOracleReach('query.queued-answer-neighbor/' + name, states, { replaying: false })
+-    reach.beginHistory()
+-    const rootCheck = createProgressReceiptCheck(history)
+-    const downstreamCheck = createProgressReceiptCheck(history)
+-    const mark = (state: string) => { if (states.includes(state)) reach.reach(state) }
+-    try {
+-      const outcome = await receiveProgressHistory(history, (receipt) => {
+-        rootCheck(receipt)
+-        if (history.kind === 'query') {
+-          if (receipt.phase === 'downstream-change') {
+-            downstreamCheck({ ...receipt, phase: 'public-change' })
+-            mark('downstream-change')
+-          } else if (['reload-start', 'cleanup-start'].includes(receipt.phase)) {
+-            downstreamCheck(receipt)
+-          } else if (receipt.phase === 'final-publication') {
+-            downstreamCheck({ ...receipt, rows: receipt.downstream as typeof receipt.rows })
++  it.each(paths)(
++    'checks receiving neighbor $name',
++    async ({ name, history, states }) => {
++      const reach = createOracleReach(
++        'query.queued-answer-neighbor/' + name,
++        states,
++        { replaying: false },
++      )
++      reach.beginHistory()
++      const rootCheck = createProgressReceiptCheck(history)
++      const downstreamCheck = createProgressReceiptCheck(history)
++      const mark = (state: string) => {
++        if (states.includes(state)) reach.reach(state)
++      }
++      let reloadActive = false
++      try {
++        const outcome = await receiveProgressHistory(history, (receipt) => {
++          if (receipt.phase === 'reload-start') reloadActive = true
++          if (receipt.phase === 'cleanup-start') reloadActive = false
++          rootCheck(receipt)
++          if (history.kind === 'query') {
++            if (receipt.phase === 'downstream-change') {
++              downstreamCheck({ ...receipt, phase: 'public-change' })
++              if (reloadActive) mark('downstream-change')
++            } else if (
++              ['reload-start', 'cleanup-start'].includes(receipt.phase)
++            ) {
++              downstreamCheck(receipt)
++            } else if (receipt.phase === 'final-publication') {
++              downstreamCheck({
++                ...receipt,
++                rows: receipt.downstream as typeof receipt.rows,
++              })
++            }
++            if (receipt.phase === 'initial-publication' && receipt.rows) {
++              mark(receipt.rows.length > 0 ? 'nonempty-prior' : 'empty-prior')
++            }
++            if (
++              receipt.phase === 'retained-publication' &&
++              receipt.reason === 'provider-hold-before-release' &&
++              typeof receipt.pendingProviderAnswers === 'number' &&
++              receipt.pendingProviderAnswers > 0
++            ) {
++              checkReplayPublication(
++                receipt.downstream,
++                modelProgressValue(history, false),
++                'held downstream retains the same complete prior snapshot',
++              )
++              mark('held-provider-read')
++            }
++            if (reloadActive && receipt.phase === 'public-change')
++              mark('root-change')
++            if (receipt.phase === 'conflicting-cache-premise')
++              mark('conflicting-cache-premise')
++            if (
++              receipt.phase === 'answer-queued' &&
++              receipt.enqueueReturned === true
++            )
++              mark('completed-enqueue')
++            if (receipt.phase === 'answer-executed') mark('answer-executed')
++          } else {
++            if (
++              receipt.phase === 'source-establishing-receipt' &&
++              receipt.literalTrue === true
++            )
++              mark('literal-true-establishing-receipt')
++            if (
++              receipt.phase === 'immediate-publication' &&
++              history.kind === 'sync-initial' &&
++              receipt.cut === 'subscriber-return-before-preload'
++            )
++              mark('subscriber-return-before-preload')
++            if (
++              receipt.phase === 'immediate-publication' &&
++              history.kind === 'sync-mutation'
++            )
++              mark('ordinary-mutation-return-before-host-turn')
+           }
+-          if (receipt.phase === 'initial-publication' && receipt.rows && receipt.rows.length > 0) mark('nonempty-prior')
+-          if (receipt.phase === 'retained-publication' && receipt.reason === 'provider-hold-before-release' && typeof receipt.pendingProviderAnswers === 'number' && receipt.pendingProviderAnswers > 0) {
+-            checkReplayPublication(receipt.downstream, modelProgressValue(history, false), 'held downstream retains the same complete prior snapshot')
+-            mark('held-provider-read')
+-          }
+-          if (receipt.phase === 'public-change') mark('root-change')
+-          if (receipt.phase === 'conflicting-cache-premise') mark('conflicting-cache-premise')
+-          if (receipt.phase === 'answer-queued' && receipt.enqueueReturned === true) mark('completed-enqueue')
+-          if (receipt.phase === 'answer-executed') mark('answer-executed')
+-        } else {
+-          if (receipt.phase === 'source-establishing-receipt' && receipt.literalTrue === true) mark('literal-true-establishing-receipt')
+-          if (receipt.phase === 'immediate-publication' && history.kind === 'sync-initial' && receipt.cut === 'subscriber-return-before-preload') mark('subscriber-return-before-preload')
+-          if (receipt.phase === 'immediate-publication' && history.kind === 'sync-mutation') mark('ordinary-mutation-return-before-host-turn')
+-        }
+-        if (receipt.phase === 'final-publication') mark('final-publication')
+-        if (receipt.phase === 'worker-cleaned') mark('worker-cleaned')
+-      })
+-      checkQueuedAnswerProgress(history, outcome)
+-      reach.assertReached()
+-    } finally {
+-      // Preserve partial reach when a known progress RED precedes later cuts.
+-      console.info('H02 finite neighbor reach', { name, counts: Object.fromEntries(reach.counts()) })
+-    }
+-  }, 60_000)
++          if (receipt.phase === 'final-publication') mark('final-publication')
++          if (receipt.phase === 'worker-cleaned') mark('worker-cleaned')
++        })
++        checkQueuedAnswerProgress(history, outcome)
++        reach.assertReached()
++      } finally {
++        // Preserve partial reach when a known progress RED precedes later cuts.
++        console.info('H02 finite neighbor reach', {
++          name,
++          counts: Object.fromEntries(reach.counts()),
++        })
++      }
++    },
++    60_000,
++  )
+ })
+--- reviewed-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
++++ actual-v2/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
+@@ -5226,130 +5226,156 @@
+     async (history) => {
+       // Reach records these existing real-QueryClient cuts per finite history.
+       // The owner/result model and every product comparison stay unchanged.
+-      const reach = createOracleReach(`query.reacquisition-neighbor`, [
+-        `older-release-held`,
+-        `cached-reacquisition-held`,
+-        `older-release-published`,
+-        `refetch-outcome-settled`,
+-        `all-peers-released`,
+-        `final-lease-released`,
+-      ], { replaying: false })
++      const reach = createOracleReach(
++        `query.reacquisition-neighbor`,
++        [
++          `older-release-held`,
++          `cached-reacquisition-held`,
++          `older-release-published`,
++          history.staleTime === 0
++            ? `refetch-outcome-settled`
++            : `fresh-cache-without-refetch`,
++          `all-peers-released`,
++          `final-lease-released`,
++        ],
++        { replaying: false },
++      )
+       reach.beginHistory()
+-      const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
+-      const detail = categorySubset(`detail`)
+-      const peerSubsets = [
+-        categorySubset(`list`),
+-        {
+-          where: new IR.Func(`in`, [
+-            new IR.PropRef([`category`]),
+-            new IR.Value([`peer`, `shared`]),
+-          ]),
+-        },
+-      ].slice(0, history.peers)
+-      const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
+-      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+-      const persistence = createDeferred<void>()
+-      const refetch = createDeferred<Array<Item>>()
+-      void refetch.promise.catch(() => undefined)
+-      const { collection, queryClient, queryFn } = createOwnershipFixture({
+-        id,
+-        results: [leaseResult, ...peerSubsets.map(() => [shared])],
+-        staleTime: history.staleTime,
+-      })
+-      queryFn.mockImplementationOnce(() => refetch.promise)
+-      const settleRefetch = () => {
+-        if (history.refetch === `rejects`)
+-          refetch.reject(new Error(`refetch failed`))
+-        else
+-          refetch.resolve(
+-            history.refetch === `empty`
+-              ? []
+-              : leaseResult.map((item) => ({ ...item })),
++      try {
++        const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
++        const detail = categorySubset(`detail`)
++        const peerSubsets = [
++          categorySubset(`list`),
++          {
++            where: new IR.Func(`in`, [
++              new IR.PropRef([`category`]),
++              new IR.Value([`peer`, `shared`]),
++            ]),
++          },
++        ].slice(0, history.peers)
++        const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
++        const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
++        const persistence = createDeferred<void>()
++        const refetch = createDeferred<Array<Item>>()
++        void refetch.promise.catch(() => undefined)
++        const { collection, queryClient, queryFn } = createOwnershipFixture({
++          id,
++          results: [leaseResult, ...peerSubsets.map(() => [shared])],
++          staleTime: history.staleTime,
++        })
++        queryFn.mockImplementationOnce(() => refetch.promise)
++        const settleRefetch = () => {
++          if (history.refetch === `rejects`)
++            refetch.reject(new Error(`refetch failed`))
++          else
++            refetch.resolve(
++              history.refetch === `empty`
++                ? []
++                : leaseResult.map((item) => ({ ...item })),
++            )
++        }
++        const settleTurn = async () => {
++          for (let turn = 0; turn < 3; turn++)
++            await new Promise<void>((resolve) => setTimeout(resolve, 0))
++        }
++        const mutation = createTransaction({
++          mutationFn: () => persistence.promise,
++        })
++
++        await collection._sync.loadSubset(detail)
++        const detailQueries = queryClient.getQueryCache().getAll()
++        if (detailQueries.length !== 1)
++          throw new Error(`exact cached detail Query premise not reached`)
++        const cachedDetailQuery = detailQueries[0]!
++        for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
++        mutation.mutate(() => collection.insert(blocker))
++        cleanups.push(async () => {
++          persistence.resolve()
++          refetch.reject(new Error(`cleanup`))
++          await mutation.when(`settled`).catch(() => undefined)
++        })
++
++        // The release's sync transaction is accepted but held behind the blocker.
++        const pendingBefore = collection._state.pendingSyncedTransactions.length
++        collection._sync.unloadSubset(detail)
++        await vi.waitFor(() =>
++          expect(
++            collection._state.pendingSyncedTransactions.length,
++          ).toBeGreaterThan(pendingBefore),
++        )
++        reach.reach(`older-release-held`)
++        const cachedBefore =
++          queryClient.getQueryCache().getAll().includes(cachedDetailQuery) &&
++          cachedDetailQuery.state.status === `success` &&
++          Array.isArray(cachedDetailQuery.state.data) &&
++          cachedDetailQuery.state.data.some(
++            (item: Item) => item.id === shared.id,
+           )
++        if (!cachedBefore)
++          throw new Error(`cached reacquisition premise not reached`)
++        const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
++        void reacquired.catch(() => undefined)
++        await settleTurn()
++        const held = rows(collection)
++        reach.reach(`cached-reacquisition-held`)
++
++        if (history.settles === `while-held`) {
++          settleRefetch()
++          await settleTurn()
++        }
++        persistence.resolve()
++        await mutation.when(`settled`)
++        await settleTurn()
++        const published = rows(collection)
++        reach.reach(`older-release-published`)
++
++        if (history.settles === `after-publication`) {
++          settleRefetch()
++          await settleTurn()
++        }
++        await reacquired.catch(() => undefined)
++        const settled = rows(collection)
++        if (!queryClient.getQueryCache().getAll().includes(cachedDetailQuery))
++          throw new Error(`same physical cached detail Query no longer current`)
++        const expectedCalls =
++          1 + history.peers + (history.staleTime === 0 ? 1 : 0)
++        if (
++          queryFn.mock.calls.length !== expectedCalls ||
++          cachedDetailQuery.state.fetchStatus !== `idle`
++        )
++          throw new Error(`fresh-cache/refetch-settlement premise not reached`)
++        reach.reach(
++          history.staleTime === 0
++            ? `refetch-outcome-settled`
++            : `fresh-cache-without-refetch`,
++        )
++
++        for (const peer of peerSubsets) {
++          collection._sync.unloadSubset(peer)
++          await settleTurn()
++        }
++        const peerReleased = rows(collection)
++        reach.reach(`all-peers-released`)
++
++        collection._sync.unloadSubset(detail)
++        await settleTurn()
++
++        expect({
++          held,
++          published,
++          settled,
++          peerReleased,
++          released: rows(collection),
++          queryCalls: queryFn.mock.calls.length,
++        }).toEqual(modelReacquisition(history))
++        reach.reach(`final-lease-released`)
++        reach.assertReached()
++      } finally {
++        console.info(`H02 ownership neighbor reach`, {
++          history,
++          counts: Object.fromEntries(reach.counts()),
++        })
+       }
+-      const settleTurn = async () => {
+-        for (let turn = 0; turn < 3; turn++)
+-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+-      }
+-      const mutation = createTransaction({
+-        mutationFn: () => persistence.promise,
+-      })
+-
+-      await collection._sync.loadSubset(detail)
+-      const detailQueries = queryClient.getQueryCache().getAll()
+-      if (detailQueries.length !== 1)
+-        throw new Error(`exact cached detail Query premise not reached`)
+-      const cachedDetailQuery = detailQueries[0]!
+-      for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
+-      mutation.mutate(() => collection.insert(blocker))
+-      cleanups.push(async () => {
+-        persistence.resolve()
+-        refetch.reject(new Error(`cleanup`))
+-        await mutation.when(`settled`).catch(() => undefined)
+-      })
+-
+-      // The release's sync transaction is accepted but held behind the blocker.
+-      const pendingBefore = collection._state.pendingSyncedTransactions.length
+-      collection._sync.unloadSubset(detail)
+-      await vi.waitFor(() =>
+-        expect(
+-          collection._state.pendingSyncedTransactions.length,
+-        ).toBeGreaterThan(pendingBefore),
+-      )
+-      reach.reach(`older-release-held`)
+-      const cachedBefore = queryClient.getQueryCache().getAll().includes(cachedDetailQuery) &&
+-        cachedDetailQuery.state.status === `success` &&
+-        Array.isArray(cachedDetailQuery.state.data) &&
+-        cachedDetailQuery.state.data.some((item: Item) => item.id === shared.id)
+-      if (!cachedBefore) throw new Error(`cached reacquisition premise not reached`)
+-      const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+-      void reacquired.catch(() => undefined)
+-      await settleTurn()
+-      const held = rows(collection)
+-      reach.reach(`cached-reacquisition-held`)
+-
+-      if (history.settles === `while-held`) {
+-        settleRefetch()
+-        await settleTurn()
+-      }
+-      persistence.resolve()
+-      await mutation.when(`settled`)
+-      await settleTurn()
+-      const published = rows(collection)
+-      reach.reach(`older-release-published`)
+-
+-      if (history.settles === `after-publication`) {
+-        settleRefetch()
+-        await settleTurn()
+-      }
+-      await reacquired.catch(() => undefined)
+-      const settled = rows(collection)
+-      reach.reach(`refetch-outcome-settled`)
+-
+-      for (const peer of peerSubsets) {
+-        collection._sync.unloadSubset(peer)
+-        await settleTurn()
+-      }
+-      const peerReleased = rows(collection)
+-      reach.reach(`all-peers-released`)
+-
+-      collection._sync.unloadSubset(detail)
+-      await settleTurn()
+-
+-      expect({
+-        held,
+-        published,
+-        settled,
+-        peerReleased,
+-        released: rows(collection),
+-        queryCalls: queryFn.mock.calls.length,
+-      }).toEqual(modelReacquisition(history))
+-      reach.reach(`final-lease-released`)
+-      reach.assertReached()
+-      console.info(`H02 ownership neighbor reach`, {
+-        history,
+-        counts: Object.fromEntries(reach.counts()),
+-      })
+     },
+   )
+ 
+--- reviewed-v1/scripts/h02-progress/ownership-neighbor.config.ts
++++ actual-v2/scripts/h02-progress/ownership-neighbor.config.ts
+@@ -7,14 +7,29 @@
+ const root = fileURLToPath(new URL('../../', import.meta.url))
+ export default defineConfig({
+   root,
+-  resolve: { alias: [
+-    { find: /^@tanstack\/db$/, replacement: resolve(root, 'packages/db/src/index.ts') },
+-    { find: /^@tanstack\/db-ivm$/, replacement: resolve(root, 'packages/db-ivm/src/index.ts') },
+-  ] },
++  resolve: {
++    alias: [
++      {
++        find: /^@tanstack\/db$/,
++        replacement: resolve(root, 'packages/db/src/index.ts'),
++      },
++      {
++        find: /^@tanstack\/db-ivm$/,
++        replacement: resolve(root, 'packages/db-ivm/src/index.ts'),
++      },
++    ],
++  },
+   test: {
+-    include: ['packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts'],
+-    environment: 'jsdom', pool: 'forks', maxWorkers: 1, fileParallelism: false,
++    include: [
++      'packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
++    ],
++    environment: 'jsdom',
++    pool: 'forks',
++    maxWorkers: 1,
++    fileParallelism: false,
+     execArgv: ['--max-old-space-size=384'],
+-    typecheck: { enabled: false }, coverage: { enabled: false }, testTimeout: 20_000,
++    typecheck: { enabled: false },
++    coverage: { enabled: false },
++    testTimeout: 20_000,
+   },
+ })
+--- reviewed-v1/scripts/h02-progress/ownership-parent.mjs
++++ actual-v2/scripts/h02-progress/ownership-parent.mjs
+@@ -0,0 +1,515 @@
++import { execFileSync, spawn } from 'node:child_process'
++import { createHash } from 'node:crypto'
++import {
++  closeSync,
++  existsSync,
++  fstatSync,
++  lstatSync,
++  mkdirSync,
++  openSync,
++  readFileSync,
++  readSync,
++  realpathSync,
++  writeFileSync,
++} from 'node:fs'
++import { resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { createHeapDiagnostic } from './receiving-monitor.mjs'
++
++export const ownershipLimits = Object.freeze({
++  wallMs: 60_000,
++  nodeHeapMiB: 384,
++  groupRssBytes: 1024 ** 3,
++  samplingMs: 100,
++})
++
++/**
++ * This parent contains one finite invocation of the existing ownership owner.
++ * It computes no product expectation. Timeout, resource, source-identity and
++ * recording failures are operational failures, never product RED evidence.
++ * The child and its workers keep the original detached process group. Raw
++ * stdout/stderr use inherited file descriptors and survive leader exit.
++ */
++
++/** @param {string} file */
++export function hashOwnershipFile(file) {
++  const digest = createHash(`sha256`)
++  const fd = openSync(file, `r`)
++  try {
++    if (!fstatSync(fd).isFile()) throw new Error(`identity input is not a file`)
++    const bytes = Buffer.alloc(64 * 1024)
++    for (;;) {
++      const count = readSync(fd, bytes, 0, bytes.length, null)
++      if (count === 0) break
++      digest.update(bytes.subarray(0, count))
++    }
++    return digest.digest(`hex`)
++  } finally {
++    closeSync(fd)
++  }
++}
++
++/** @param {string} text @param {number} pgid */
++export function ownershipGroupRows(text, pgid) {
++  if (!Number.isSafeInteger(pgid) || pgid <= 0)
++    throw new Error(`invalid original process group`)
++  return text.split(`\n`).flatMap((line) => {
++    const fields = line.trim().split(/\s+/)
++    if (Number(fields[1]) !== pgid) return []
++    const pid = Number(fields[0])
++    const rssKiB = Number(fields[2])
++    if (
++      !Number.isSafeInteger(pid) ||
++      pid <= 0 ||
++      !Number.isSafeInteger(rssKiB) ||
++      rssKiB < 0
++    )
++      throw new Error(`invalid process group row: ${line}`)
++    return [{ pid, pgid, rssBytes: rssKiB * 1024, raw: line }]
++  })
++}
++
++/** @param {number} elapsedMs @param {number} rssBytes @param {boolean} heap */
++export function ownershipCut(elapsedMs, rssBytes, heap) {
++  if (heap) return `heap`
++  if (rssBytes > ownershipLimits.groupRssBytes) return `rss`
++  if (elapsedMs >= ownershipLimits.wallMs) return `wall`
++  return undefined
++}
++
++/**
++ * @param {{ trigger?: string, heap: boolean, observationError?: string,
++ * identityMatched: boolean, remainingGroup: number, cleanupErrors: number,
++ * exitCode: number | null, signal: string | null }} facts
++ */
++export function classifyOwnershipCommand(facts) {
++  if (
++    facts.trigger ||
++    facts.heap ||
++    facts.observationError ||
++    !facts.identityMatched ||
++    facts.remainingGroup ||
++    facts.cleanupErrors ||
++    facts.signal ||
++    facts.exitCode === null
++  )
++    return `operational failure; no product verdict`
++  return facts.exitCode === 0
++    ? `finite test command passed; inspect assertions and reach evidence`
++    : `finite test command failed; inspect original assertion diagnostics`
++}
++
++/** @param {unknown} value @returns {Record<string, unknown>} */
++function object(value) {
++  if (typeof value !== `object` || value === null || Array.isArray(value))
++    throw new Error(`expected identity record`)
++  return /** @type {Record<string, unknown>} */ (value)
++}
++
++/** @param {unknown} value @returns {string} */
++function string(value) {
++  if (typeof value !== `string` || !value)
++    throw new Error(`expected identity string`)
++  return value
++}
++
++/** @param {unknown} value @returns {Array<string>} */
++function strings(value) {
++  if (!Array.isArray(value) || !value.every((part) => typeof part === `string`))
++    throw new Error(`expected command arguments`)
++  return value
++}
++
++/** @param {unknown} input @param {unknown} sourceFreeze */
++export function validateOwnershipRecipe(input, sourceFreeze) {
++  const recipe = object(input)
++  const freeze = object(sourceFreeze)
++  const worktree = string(freeze.worktree)
++  const node = object(freeze.node)
++  const packages = object(freeze.packages)
++  const vitest = object(packages.vitest)
++  const executable = string(node.executable)
++  const expectedArgs = [
++    `--max-old-space-size=384`,
++    resolve(string(vitest.resolved), `vitest.mjs`),
++    `run`,
++    `--config`,
++    `scripts/h02-progress/ownership-neighbor.config.ts`,
++    `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`,
++    `-t`,
++    `keeps a reacquired lease's result`,
++  ]
++  if (
++    recipe.kind !== `h02-ownership-neighbor` ||
++    recipe.worktree !== worktree ||
++    recipe.executable !== executable ||
++    JSON.stringify(strings(recipe.args)) !== JSON.stringify(expectedArgs) ||
++    JSON.stringify(object(recipe.limits)) !== JSON.stringify(ownershipLimits)
++  )
++    throw new Error(`ownership recipe differs from the finite frozen command`)
++  return {
++    worktree,
++    executable,
++    args: expectedArgs,
++    outputDirectory: string(recipe.outputDirectory),
++  }
++}
++
++/** @param {Record<string, unknown>} freeze */
++export function verifyOwnershipIdentity(freeze) {
++  const worktree = string(freeze.worktree)
++  let inputs = 0
++  for (const key of [
++    `productionFiles`,
++    `instrumentFiles`,
++    `sharedInstrumentFiles`,
++  ]) {
++    for (const [relative, digest] of Object.entries(object(freeze[key]))) {
++      const file = resolve(worktree, relative)
++      if (!file.startsWith(worktree + `/`))
++        throw new Error(`outside frozen source`)
++      if (hashOwnershipFile(file) !== digest)
++        throw new Error(`source identity differs: ${relative}`)
++      inputs++
++    }
++  }
++  const node = object(freeze.node)
++  if (hashOwnershipFile(string(node.executable)) !== node.sha256)
++    throw new Error(`selected Node identity differs`)
++  const locks = object(freeze.lockfiles)
++  if (
++    hashOwnershipFile(resolve(worktree, `pnpm-lock.yaml`)) !==
++      locks.repoPnpmLock ||
++    hashOwnershipFile(resolve(worktree, `node_modules/.pnpm/lock.yaml`)) !==
++      locks.installedPnpmLock
++  )
++    throw new Error(`lockfile identity differs`)
++  for (const [relative, value] of Object.entries(
++    object(freeze.dependencyReuseLinks),
++  )) {
++    const link = object(value)
++    const file = resolve(worktree, relative)
++    if (
++      lstatSync(file).isSymbolicLink() !== link.isSymlink ||
++      realpathSync(file) !== link.resolved
++    )
++      throw new Error(`dependency reuse identity differs: ${relative}`)
++  }
++  let payloadFiles = 0
++  for (const value of Object.values(object(freeze.packages))) {
++    const pkg = object(value)
++    for (const [relative, digest] of Object.entries(
++      object(pkg.regularPayloadFilesMap),
++    )) {
++      if (hashOwnershipFile(resolve(string(pkg.resolved), relative)) !== digest)
++        throw new Error(`dependency payload differs: ${relative}`)
++      payloadFiles++
++    }
++  }
++  return {
++    diskSourcesMatched: inputs,
++    payloadFilesMatched: payloadFiles,
++    nodeAndLocksAndLinksMatched: true,
++  }
++}
++
++/** @param {string} recipePath */
++export async function runOwnershipRecipe(recipePath) {
++  const recipe = object(JSON.parse(readFileSync(recipePath, `utf8`)))
++  const freezePath = string(recipe.sourceFreeze)
++  if (hashOwnershipFile(freezePath) !== recipe.sourceFreezeSha256)
++    throw new Error(`source freeze file differs from accepted recipe`)
++  const freeze = object(JSON.parse(readFileSync(freezePath, `utf8`)))
++  const command = validateOwnershipRecipe(recipe, freeze)
++  if (
++    fileURLToPath(import.meta.url) !==
++    resolve(command.worktree, `scripts/h02-progress/ownership-parent.mjs`)
++  )
++    throw new Error(`ownership parent is outside the selected source root`)
++  // Never reuse an output directory. A failed setup cannot overwrite evidence.
++  const directory = resolve(command.outputDirectory)
++  mkdirSync(directory, { mode: 0o700 })
++  /** @param {string} name @param {unknown} value */
++  const save = (name, value) =>
++    writeFileSync(resolve(directory, name), JSON.stringify(value, null, 2), {
++      flag: `wx`,
++      mode: 0o600,
++    })
++  save(`invocation.json`, {
++    recipePath,
++    recipeSha256: hashOwnershipFile(recipePath),
++    command,
++    limits: ownershipLimits,
++    parentPid: process.pid,
++    proofBoundary: `on-disk identity only; no V8 loaded-source binding claimed`,
++  })
++  save(`identity-before.json`, verifyOwnershipIdentity(freeze))
++  writeFileSync(
++    resolve(directory, `source-freeze.json`),
++    readFileSync(freezePath),
++    { flag: `wx`, mode: 0o600 },
++  )
++  const stdoutFile = resolve(directory, `worker.stdout.log`)
++  const stderrFile = resolve(directory, `worker.stderr.log`)
++  /** @type {Array<number>} */
++  const descriptors = []
++  /** @type {number | undefined} */
++  let pgid
++  /** @type {string | undefined} */
++  let trigger
++  /** @type {string | undefined} */
++  let observationError
++  /** @type {number | null} */
++  let exitCode = null
++  /** @type {string | null} */
++  let signal = null
++  /** @type {ReturnType<typeof setInterval> | undefined} */
++  let timer
++  let stderrOffset = 0
++  let maxSampledGroupRssBytes = 0
++  /** @type {ReturnType<typeof ownershipGroupRows>} */
++  let lastRows = []
++  /** @type {Array<string>} */
++  const cleanupErrors = []
++  const heap = createHeapDiagnostic()
++  let started = performance.now()
++  /** @returns {ReturnType<typeof ownershipGroupRows>} */
++  const group = () => {
++    if (pgid === undefined) return []
++    return ownershipGroupRows(
++      execFileSync(`/bin/ps`, [`-axo`, `pid=,pgid=,rss=,args=`], {
++        encoding: `utf8`,
++        timeout: 2000,
++        maxBuffer: 4 * 1024 ** 2,
++      }),
++      pgid,
++    )
++  }
++  const killGroup = () => {
++    if (pgid === undefined) return
++    try {
++      process.kill(-pgid, `SIGKILL`)
++    } catch (error) {
++      if (!(
++        error instanceof Error &&
++        `code` in error &&
++        error.code === `ESRCH`
++      ))
++        cleanupErrors.push(String(error))
++    }
++  }
++  /** @param {string} reason */
++  const kill = (reason) => {
++    if (trigger || pgid === undefined) return
++    trigger = reason
++    try {
++      save(`before-kill.json`, {
++        trigger,
++        elapsedMonotonicMs: performance.now() - started,
++        originalPgid: pgid,
++        rows: lastRows,
++        heapDetected: heap.detected(),
++        maxSampledGroupRssBytes,
++      })
++    } catch (error) {
++      observationError ??= String(error)
++    } finally {
++      // Recording failure cannot prevent process containment.
++      killGroup()
++    }
++  }
++  /** @type {number | undefined} */
++  let stderrRead
++  /** @param {number | undefined} finalEnd */
++  const readDiagnostics = (finalEnd = undefined) => {
++    if (stderrRead === undefined) return
++    const end = finalEnd ?? fstatSync(stderrRead).size
++    const bytes = Buffer.alloc(64 * 1024)
++    // A live pass reads a finite prefix; the final pass has a captured end.
++    const stop = finalEnd ?? Math.min(end, stderrOffset + 1024 ** 2)
++    while (stderrOffset < stop) {
++      const count = readSync(
++        stderrRead,
++        bytes,
++        0,
++        Math.min(bytes.length, stop - stderrOffset),
++        stderrOffset,
++      )
++      if (count <= 0) throw new Error(`stderr read made no progress`)
++      stderrOffset += count
++      heap.feed(bytes.subarray(0, count).toString(`utf8`))
++    }
++  }
++  const sample = () => {
++    try {
++      const before = ownershipCut(
++        performance.now() - started,
++        0,
++        heap.detected(),
++      )
++      if (before) kill(before)
++      readDiagnostics()
++      lastRows = group()
++      const rss = lastRows.reduce((sum, row) => sum + row.rssBytes, 0)
++      maxSampledGroupRssBytes = Math.max(maxSampledGroupRssBytes, rss)
++      const cut = ownershipCut(
++        performance.now() - started,
++        rss,
++        heap.detected(),
++      )
++      if (cut) kill(cut)
++    } catch (error) {
++      observationError ??= String(error)
++      kill(`observation`)
++    }
++  }
++  try {
++    const stdoutFd = openSync(stdoutFile, `wx`, 0o600)
++    descriptors.push(stdoutFd)
++    const stderrFd = openSync(stderrFile, `wx`, 0o600)
++    descriptors.push(stderrFd)
++    stderrRead = openSync(stderrFile, `r`)
++    descriptors.push(stderrRead)
++    const environment = { ...process.env }
++    for (const name of [
++      `NODE_OPTIONS`,
++      `NODE_PATH`,
++      `TANSTACK_DB_ORACLE_SEED`,
++      `TANSTACK_DB_ORACLE_PATH`,
++      `TANSTACK_DB_ORACLE_PROPERTY`,
++      `TANSTACK_DB_ORACLE_CALIBRATION`,
++      `H02_PROGRESS_SOURCE_FREEZE`,
++      `H02_PROGRESS_WORKER_HISTORY`,
++      `H02_PROGRESS_BINDING_DIR`,
++      `H02_PROGRESS_SELECTED_ROOT`,
++      `H02_PROGRESS_RECEIPTS`,
++    ])
++      delete environment[name]
++    started = performance.now()
++    const child = spawn(command.executable, command.args, {
++      cwd: command.worktree,
++      detached: true,
++      stdio: [`ignore`, stdoutFd, stderrFd],
++      env: environment,
++    })
++    pgid = child.pid
++    // Install listeners before fallible post-spawn recording.
++    const completion = new Promise((done) => {
++      child.once(`error`, (error) => {
++        observationError ??= String(error)
++        done(undefined)
++      })
++      child.once(`close`, (code, childSignal) => {
++        exitCode = code
++        signal = childSignal
++        done(undefined)
++      })
++    })
++    timer = setInterval(sample, ownershipLimits.samplingMs)
++    save(`child-process.json`, {
++      pid: child.pid,
++      originalPgid: pgid,
++      detached: true,
++    })
++    await completion
++  } catch (error) {
++    observationError ??= String(error)
++    kill(`observation`)
++  } finally {
++    if (timer !== undefined) clearInterval(timer)
++    try {
++      lastRows = group()
++      if (lastRows.length) {
++        cleanupErrors.push(`leader ended while original process group remained`)
++        kill(`leader-exit-with-live-group`)
++      }
++    } catch (error) {
++      observationError ??= String(error)
++      kill(`observation`)
++    }
++    try {
++      save(`final-group-before-cleanup.json`, {
++        originalPgid: pgid,
++        rows: lastRows,
++      })
++    } catch (error) {
++      observationError ??= String(error)
++    }
++    // Always attempt cleanup even if sampling or recording failed.
++    killGroup()
++    try {
++      const cleanupStarted = performance.now()
++      do {
++        lastRows = group()
++        if (!lastRows.length) break
++        await new Promise((done) => setTimeout(done, 100))
++      } while (performance.now() - cleanupStarted < 2000)
++      if (lastRows.length)
++        cleanupErrors.push(`original process group remains live`)
++      save(`final-group.json`, { originalPgid: pgid, rows: lastRows })
++    } catch (error) {
++      observationError ??= String(error)
++    }
++    try {
++      if (stderrRead !== undefined) readDiagnostics(fstatSync(stderrRead).size)
++    } catch (error) {
++      observationError ??= String(error)
++    }
++    for (const fd of descriptors) {
++      try {
++        closeSync(fd)
++      } catch (error) {
++        cleanupErrors.push(String(error))
++      }
++    }
++  }
++  let identityMatched = false
++  try {
++    save(`identity-after.json`, verifyOwnershipIdentity(freeze))
++    identityMatched = true
++  } catch (error) {
++    observationError ??= String(error)
++  }
++  const facts = {
++    trigger,
++    heap: heap.detected(),
++    observationError,
++    identityMatched,
++    remainingGroup: lastRows.length,
++    cleanupErrors: cleanupErrors.length,
++    exitCode,
++    signal,
++  }
++  const result = {
++    classification: classifyOwnershipCommand(facts),
++    ...facts,
++    cleanupDiagnostics: cleanupErrors,
++    elapsedMonotonicMs: performance.now() - started,
++    maxSampledGroupRssBytes,
++    originalPgid: pgid,
++    stdoutSha256: existsSync(stdoutFile)
++      ? hashOwnershipFile(stdoutFile)
++      : undefined,
++    stderrSha256: existsSync(stderrFile)
++      ? hashOwnershipFile(stderrFile)
++      : undefined,
++    limits: `Finite ownership assertions and reaches require review. Operational failures never supply product RED. Only the original process group is captured; no escaped-group claim.`,
++  }
++  save(`outcome.json`, result)
++  return result
++}
++
++if (
++  process.argv[1] &&
++  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
++) {
++  const recipe = process.argv[2]
++  if (!recipe) throw new Error(`exact ownership recipe path is required`)
++  const result = await runOwnershipRecipe(recipe)
++  console.info(JSON.stringify(result))
++  process.exitCode = result.classification.startsWith(
++    `finite test command passed`,
++  )
++    ? 0
++    : 1
++}
+--- reviewed-v1/scripts/h02-progress/ownership-parent.test.mjs
++++ actual-v2/scripts/h02-progress/ownership-parent.test.mjs
+@@ -0,0 +1,199 @@
++import assert from 'node:assert/strict'
++import { createHash } from 'node:crypto'
++import {
++  mkdtempSync,
++  mkdirSync,
++  rmSync,
++  realpathSync,
++  symlinkSync,
++  writeFileSync,
++} from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import test from 'node:test'
++import {
++  classifyOwnershipCommand,
++  hashOwnershipFile,
++  ownershipCut,
++  ownershipGroupRows,
++  ownershipLimits,
++  validateOwnershipRecipe,
++  verifyOwnershipIdentity,
++} from './ownership-parent.mjs'
++
++// Pure instrument checks. Importing the parent never invokes its runner, a DB
++// history, a QueryClient, a host receiving witness, or a generated campaign.
++const facts = {
++  heap: false,
++  identityMatched: true,
++  remainingGroup: 0,
++  cleanupErrors: 0,
++  exitCode: 0,
++  signal: null,
++}
++const freeze = {
++  worktree: '/tmp/selected-worktree',
++  node: { executable: '/tmp/selected-node' },
++  packages: { vitest: { resolved: '/tmp/selected-vitest' } },
++}
++const recipe = {
++  kind: 'h02-ownership-neighbor',
++  worktree: freeze.worktree,
++  executable: freeze.node.executable,
++  args: [
++    '--max-old-space-size=384',
++    '/tmp/selected-vitest/vitest.mjs',
++    'run',
++    '--config',
++    'scripts/h02-progress/ownership-neighbor.config.ts',
++    'packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
++    '-t',
++    "keeps a reacquired lease's result",
++  ],
++  limits: ownershipLimits,
++  outputDirectory: '/tmp/unique-output',
++}
++
++test('selects only the original group and preserves child RSS', () => {
++  assert.deepEqual(
++    ownershipGroupRows(
++      ['10 10 12 parent', '11 10 25 worker', '12 12 999 foreign'].join('\n'),
++      10,
++    ).map(({ pid, pgid, rssBytes }) => ({ pid, pgid, rssBytes })),
++    [
++      { pid: 10, pgid: 10, rssBytes: 12 * 1024 },
++      { pid: 11, pgid: 10, rssBytes: 25 * 1024 },
++    ],
++  )
++})
++test('rejects invalid original groups and malformed matching rows', () => {
++  for (const pgid of [0, -1, 1.5, NaN])
++    assert.throws(() => ownershipGroupRows('', pgid))
++  assert.throws(() => ownershipGroupRows('11 10 not-rss bad', 10))
++})
++test('keeps exact 60-second and sampled RSS boundaries', () => {
++  assert.equal(
++    ownershipCut(59999, ownershipLimits.groupRssBytes, false),
++    undefined,
++  )
++  assert.equal(ownershipCut(60000, 0, false), 'wall')
++  assert.equal(ownershipCut(0, ownershipLimits.groupRssBytes + 1, false), 'rss')
++  assert.equal(
++    ownershipCut(60000, ownershipLimits.groupRssBytes + 1, true),
++    'heap',
++  )
++})
++test('admits only the exact finite frozen command', () => {
++  assert.deepEqual(validateOwnershipRecipe(recipe, freeze).args, recipe.args)
++})
++test('rejects broadened command and resource recipes', () => {
++  const changes = [
++    { kind: 'other' },
++    { executable: '/tmp/other-node' },
++    { worktree: '/tmp/other' },
++    { args: [...recipe.args, '--no-file-parallelism'] },
++    { args: ['--max-old-space-size=1536', ...recipe.args.slice(1)] },
++    { args: [...recipe.args.slice(0, -1), 'all tests'] },
++    ...Object.keys(ownershipLimits).map((key) => ({
++      limits: { ...ownershipLimits, [key]: ownershipLimits[key] + 1 },
++    })),
++  ]
++  for (const change of changes)
++    assert.throws(() =>
++      validateOwnershipRecipe({ ...recipe, ...change }, freeze),
++    )
++})
++test('distinguishes normal assertion exits from operational failure', () => {
++  assert.match(classifyOwnershipCommand(facts), /^finite test command passed/)
++  assert.match(
++    classifyOwnershipCommand({ ...facts, exitCode: 1 }),
++    /^finite test command failed/,
++  )
++})
++for (const [label, change] of [
++  ['first wall trigger', { trigger: 'wall' }],
++  [
++    'late heap diagnostic after first wall trigger',
++    { trigger: 'wall', heap: true },
++  ],
++  ['RSS trigger', { trigger: 'rss' }],
++  ['observation failure', { observationError: 'recording failed' }],
++  ['identity mismatch', { identityMatched: false }],
++  ['remaining group', { remainingGroup: 1 }],
++  ['leader exit with descendants even after cleanup', { cleanupErrors: 1 }],
++  ['signal', { signal: 'SIGKILL' }],
++  ['missing exit', { exitCode: null }],
++]) {
++  test('preserves operational failure: ' + label, () => {
++    assert.equal(
++      classifyOwnershipCommand({ ...facts, ...change }),
++      'operational failure; no product verdict',
++    )
++  })
++}
++test('hashes exact bytes and verifies source, payload, locks, Node and reuse links', () => {
++  const directory = realpathSync(
++    mkdtempSync(join(tmpdir(), 'h02-ownership-pure-')),
++  )
++  try {
++    const payload = join(directory, 'payload')
++    const worktree = join(directory, 'worktree')
++    mkdirSync(payload)
++    mkdirSync(join(worktree, 'node_modules', '.pnpm'), { recursive: true })
++    const files = {
++      'production.ts': 'immutable production',
++      'instrument.ts': 'successor instrumentation',
++      'shared.ts': 'shared comparison',
++      node: 'selected node bytes',
++      'pnpm-lock.yaml': 'repository lock',
++      'node_modules/.pnpm/lock.yaml': 'installed lock',
++    }
++    const hash = (value) => createHash('sha256').update(value).digest('hex')
++    for (const [name, value] of Object.entries(files))
++      writeFileSync(join(worktree, name), value)
++    writeFileSync(join(payload, 'index.mjs'), 'frozen payload')
++    symlinkSync(payload, join(worktree, 'node_modules', 'reused'), 'dir')
++    assert.equal(
++      hashOwnershipFile(join(worktree, 'production.ts')),
++      hash(files['production.ts']),
++    )
++    const identity = {
++      worktree,
++      productionFiles: { 'production.ts': hash(files['production.ts']) },
++      instrumentFiles: { 'instrument.ts': hash(files['instrument.ts']) },
++      sharedInstrumentFiles: { 'shared.ts': hash(files['shared.ts']) },
++      node: { executable: join(worktree, 'node'), sha256: hash(files.node) },
++      lockfiles: {
++        repoPnpmLock: hash(files['pnpm-lock.yaml']),
++        installedPnpmLock: hash(files['node_modules/.pnpm/lock.yaml']),
++      },
++      dependencyReuseLinks: {
++        'node_modules/reused': { isSymlink: true, resolved: payload },
++      },
++      packages: {
++        fixture: {
++          resolved: payload,
++          regularPayloadFilesMap: { 'index.mjs': hash('frozen payload') },
++        },
++      },
++    }
++    assert.deepEqual(verifyOwnershipIdentity(identity), {
++      diskSourcesMatched: 3,
++      payloadFilesMatched: 1,
++      nodeAndLocksAndLinksMatched: true,
++    })
++    writeFileSync(join(worktree, 'instrument.ts'), 'changed')
++    assert.throws(
++      () => verifyOwnershipIdentity(identity),
++      /source identity differs/,
++    )
++    writeFileSync(join(worktree, 'instrument.ts'), files['instrument.ts'])
++    writeFileSync(join(payload, 'index.mjs'), 'changed')
++    assert.throws(
++      () => verifyOwnershipIdentity(identity),
++      /dependency payload differs/,
++    )
++  } finally {
++    rmSync(directory, { recursive: true, force: true })
++  }
++})
+--- reviewed-v1/scripts/h02-progress/candidate-controls.ts
++++ actual-v2/scripts/h02-progress/candidate-controls.ts
+@@ -0,0 +1,292 @@
++import { existsSync } from 'node:fs'
++import { resolve } from 'node:path'
++import { vi } from 'vitest'
++import { createOracleReach } from '../../packages/db/tests/oracle-reach.js'
++
++/**
++ * Future-candidate receiving controls for the assessed v3/v4/v5 design.
++ * These are observations and fault controls, not a second product model.
++ * Install the narrow module replacement before importing the production path.
++ * Baseline has no such module: admission refuses it instead of adding a stub.
++ * Actual-host progress still uses the real scheduler in the primary driver.
++ *
++ * Local task IDs identify callback records, not private builder tokens or
++ * completion incarnations. Dispatch is not accepted graph resumption.
++ * Candidate-specific reach remains UNREACHED until an admitted receiving
++ * driver binds the exact graph, public operations, and output targets.
++ */
++export type ControlledGraphTask = {
++  id: number
++  callback: () => void
++  cancelled: boolean
++  dispatches: number
++}
++
++export function createControlledGraphTasks() {
++  const records: Array<ControlledGraphTask> = []
++  let dispatching: number | undefined
++  const select = (id: number) => {
++    const task = records.find((record) => record.id === id)
++    if (!task) throw new Error('unknown exact controlled graph task')
++    return task
++  }
++  const dispatch = (task: ControlledGraphTask) => {
++    if (dispatching !== undefined)
++      throw new Error('nested controlled task dispatch is not a host-task cut')
++    task.dispatches++
++    dispatching = task.id
++    try {
++      task.callback()
++    } finally {
++      dispatching = undefined
++    }
++  }
++  return {
++    scheduleGraphContinuation(callback: () => void) {
++      const task = {
++        id: records.length + 1,
++        callback,
++        cancelled: false,
++        dispatches: 0,
++      }
++      records.push(task)
++      return () => {
++        task.cancelled = true
++      }
++    },
++    dispatch(id: number) {
++      const task = select(id)
++      if (task.cancelled)
++        throw new Error('use deliberate stale dispatch for a cancelled task')
++      dispatch(task)
++    },
++    dispatchStale(id: number) {
++      dispatch(select(id))
++    },
++    dispatching: () => dispatching,
++    records: () =>
++      records.map(({ id, cancelled, dispatches }) => ({
++        id,
++        cancelled,
++        dispatches,
++      })),
++  }
++}
++
++export function installCandidateContinuationControl(
++  worktree: string,
++  queue: ReturnType<typeof createControlledGraphTasks>,
++) {
++  const module = resolve(
++    worktree,
++    'packages/db/src/query/live/graph-continuation.ts',
++  )
++  if (!existsSync(module))
++    throw new Error(
++      'candidate continuation seam is absent; baseline controls cannot use it',
++    )
++  vi.doMock(module, () => ({
++    scheduleGraphContinuation: queue.scheduleGraphContinuation,
++  }))
++  return () => vi.doUnmock(module)
++}
++
++/**
++ * Bind only the actual receiving query's graph instance. A stale callback can
++ * dispatch with zero graph entries; another query's run cannot satisfy reach.
++ * A fault applies once, only to this graph during a controlled task dispatch.
++ */
++export function observeExactCandidateGraph<Args extends Array<unknown>, Result>(
++  graph: { run: (...args: Args) => Result },
++  queue: ReturnType<typeof createControlledGraphTasks>,
++) {
++  const original = graph.run
++  const own = Object.getOwnPropertyDescriptor(graph, 'run')
++  const entries: Array<{ dispatchId: number | undefined; faulted: boolean }> =
++    []
++  let nextFault: { error: unknown } | undefined
++  const wrapped = function (this: typeof graph, ...args: Args): Result {
++    const dispatchId = queue.dispatching()
++    const fault = dispatchId === undefined ? undefined : nextFault
++    if (fault) nextFault = undefined
++    entries.push({ dispatchId, faulted: fault !== undefined })
++    if (fault) throw fault.error
++    return original.apply(this, args)
++  }
++  graph.run = wrapped
++  return {
++    entries: () => entries.map((entry) => ({ ...entry })),
++    failNextDispatchedRun(error: unknown) {
++      if (nextFault)
++        throw new Error('an exact graph-run fault is already armed')
++      nextFault = { error }
++    },
++    restore() {
++      if (graph.run !== wrapped)
++        throw new Error('exact graph-run instrument was replaced')
++      if (own) Object.defineProperty(graph, 'run', own)
++      else Reflect.deleteProperty(graph, 'run')
++    },
++  }
++}
++
++export type PromiseObservation =
++  | { state: 'pending' }
++  | { state: 'fulfilled' }
++  | { state: 'rejected'; error: unknown }
++
++/** Observe the original promise without substituting its result or error. */
++export function observeCandidatePromise(promise: Promise<unknown>) {
++  let observation: PromiseObservation = { state: 'pending' }
++  void promise.then(
++    () => {
++      observation = { state: 'fulfilled' }
++    },
++    (error: unknown) => {
++      observation = { state: 'rejected', error }
++    },
++  )
++  return () => observation
++}
++
++/**
++ * Attach to the real public root/facade subscription at the intended tail.
++ * This callback throws only after the driver supplies the measured delivery.
++ * It neither simulates a commit receipt nor swallows the host-reported error.
++ */
++export function failOneCandidatePublication<Delivery>(
++  error: unknown,
++  reached: (delivery: Delivery) => boolean,
++) {
++  const deliveries: Array<Delivery> = []
++  let injected = false
++  return {
++    callback(delivery: Delivery) {
++      deliveries.push(delivery)
++      if (!injected && reached(delivery)) {
++        injected = true
++        throw error
++      }
++    },
++    observations: () => ({ injected, deliveries: [...deliveries] }),
++  }
++}
++
++/**
++ * Record actual returned applied receipts and explicit rollback disposal.
++ * Receiving wrappers supply exact target/attempt objects at the real commit
++ * return and dispose call. No classification based on AbortError or age occurs.
++ * Literal true is already visible; a promise keeps its exact settlement.
++ * The driver must park writes with a legal persisting transaction.
++ */
++export function createCandidateReceiptObservations() {
++  const receipts: Array<{
++    id: number
++    target: object
++    attempt: object
++    receipt: true | Promise<unknown>
++    observe: () => PromiseObservation
++  }> = []
++  const disposals: Array<{ target: object; attempt: object }> = []
++  return {
++    returned(
++      target: object,
++      attempt: object,
++      receipt: true | Promise<unknown>,
++    ) {
++      const record = {
++        id: receipts.length + 1,
++        target,
++        attempt,
++        receipt,
++        observe:
++          receipt === true
++            ? (): PromiseObservation => ({ state: 'fulfilled' })
++            : observeCandidatePromise(receipt),
++      }
++      receipts.push(record)
++      return record.id
++    },
++    disposing(target: object, attempt: object) {
++      disposals.push({ target, attempt })
++    },
++    observations: () => ({
++      receipts: receipts.map(({ id, target, attempt, receipt, observe }) => ({
++        id,
++        target,
++        attempt,
++        literalTrue: receipt === true,
++        observation: observe(),
++      })),
++      disposals: [...disposals],
++    }),
++  }
++}
++
++/**
++ * The future receiving driver must measure each premise before marking it.
++ * Queue calibration reaches none of these product states. Baseline receiving
++ * neighbors are a separate gate and never import this candidate seam.
++ */
++export const candidateControlStates = [
++  'held-publication-changed-promise-demand-input-and-pending-D2',
++  'complete-operator-stop-with-remaining-work',
++  'answer-settled-before-exact-task-dispatch',
++  'existing-window-pending-at-host-gap',
++  'new-partial-window-pending-at-host-gap',
++  'repeated-yield-same-operation-obligation',
++  'quiescent-D2-held-flush-still-pending',
++  'prior-queued-root-and-retained-facade-receipts',
++  'facade-A-commit-before-facade-B-throw',
++  'retained-facade-restoration-receipt-pending',
++  'retry-keeps-task-and-replaces-failed-completion',
++  'old-completion-observer-after-retry',
++  'explicit-rollback-disposal-rejection-after-retry',
++  'unexpected-retained-target-receipt-rejection',
++  'terminal-graph-failure-with-unanswered-peer',
++  'ordinary-demand-failure-keeps-existing-aggregation',
++  'last-receipt-recheck-tail-throws-with-same-revisions',
++  'publication-installed-before-status-tail-throws',
++  'retryable-tail-failure-attached-and-unattached-operations',
++  'old-task-after-cleanup-restart-with-live-current-task',
++] as const
++
++export function createCandidateControlReach() {
++  return createOracleReach(
++    'query.queued-answer-candidate-controls',
++    candidateControlStates,
++    { replaying: false },
++  )
++}
++
++/**
++ * Actual receiving fixture cut: let the real host drain native microtasks while
++ * the exact module-controlled continuation stays undispatched. Operation
++ * observers must be installed when their public promises are first returned.
++ * The caller supplies public readers and compares these rows through the shared
++ * oracle; this helper has no expected row, window, error, or promise outcome.
++ */
++export async function captureCandidateHostGap<Rows, Window>(
++  queue: ReturnType<typeof createControlledGraphTasks>,
++  taskId: number,
++  readRoot: () => Rows,
++  readDownstream: () => Rows,
++  readWindow: () => Window,
++  operations: ReadonlyArray<() => PromiseObservation>,
++) {
++  const requireUndispatched = () => {
++    const task = queue.records().find(({ id }) => id === taskId)
++    if (!task || task.cancelled || task.dispatches !== 0)
++      throw new Error('exact candidate task did not remain queued at host gap')
++  }
++  requireUndispatched()
++  await new Promise<void>((done) => setTimeout(done, 0))
++  requireUndispatched()
++  return {
++    root: readRoot(),
++    downstream: readDownstream(),
++    window: readWindow(),
++    operations: operations.map((read) => read()),
++    tasks: queue.records(),
++  }
++}
+--- reviewed-v1/scripts/h02-progress/candidate-controls.test.ts
++++ actual-v2/scripts/h02-progress/candidate-controls.test.ts
+@@ -0,0 +1,176 @@
++import { describe, expect, it } from 'vitest'
++import {
++  captureCandidateHostGap,
++  createCandidateReceiptObservations,
++  createControlledGraphTasks,
++  failOneCandidatePublication,
++  installCandidateContinuationControl,
++  observeCandidatePromise,
++  observeExactCandidateGraph,
++} from './candidate-controls.js'
++
++// Instrument calibration only: local callbacks, plain fake graph objects and
++// native promises. No production import, QueryClient, DB history or host witness.
++describe('future candidate control mechanics', () => {
++  it('captures native promise settlement while the exact continuation stays queued', async () => {
++    const queue = createControlledGraphTasks()
++    queue.scheduleGraphContinuation(() => {
++      throw new Error('must stay queued')
++    })
++    const complete = observeCandidatePromise(Promise.resolve())
++    const pending = observeCandidatePromise(new Promise(() => {}))
++    const cut = await captureCandidateHostGap(
++      queue,
++      1,
++      () => [1],
++      () => [1],
++      () => ({ offset: 0, limit: 1 }),
++      [complete, pending],
++    )
++    expect(cut.operations).toEqual([
++      { state: 'fulfilled' },
++      { state: 'pending' },
++    ])
++    expect(cut.tasks).toEqual([{ id: 1, cancelled: false, dispatches: 0 }])
++  })
++  it('refuses a host gap after the retained callback already dispatched', async () => {
++    const queue = createControlledGraphTasks()
++    queue.scheduleGraphContinuation(() => {})
++    queue.dispatch(1)
++    await expect(
++      captureCandidateHostGap(
++        queue,
++        1,
++        () => [],
++        () => [],
++        () => ({}),
++        [],
++      ),
++    ).rejects.toThrow('did not remain queued')
++  })
++
++  it('records an exact deferred callback and preserves cancelled stale dispatch', () => {
++    const queue = createControlledGraphTasks()
++    let calls = 0
++    const cancel = queue.scheduleGraphContinuation(() => {
++      calls++
++    })
++    expect(calls).toBe(0)
++    cancel()
++    expect(() => queue.dispatch(1)).toThrow('deliberate stale dispatch')
++    queue.dispatchStale(1)
++    expect(calls).toBe(1)
++    expect(queue.records()).toEqual([{ id: 1, cancelled: true, dispatches: 1 }])
++  })
++  it('refuses the absent baseline seam', () => {
++    expect(() =>
++      installCandidateContinuationControl(
++        '/missing-h02-candidate',
++        createControlledGraphTasks(),
++      ),
++    ).toThrow('seam is absent')
++  })
++  it('distinguishes dispatch from entry on the exact graph', () => {
++    const queue = createControlledGraphTasks()
++    const graph = { run: () => 7 }
++    const other = { run: () => 8 }
++    const observation = observeExactCandidateGraph(graph, queue)
++    queue.scheduleGraphContinuation(() => {
++      other.run()
++    })
++    queue.scheduleGraphContinuation(() => {
++      graph.run()
++    })
++    queue.dispatch(1)
++    expect(observation.entries()).toEqual([])
++    queue.dispatch(2)
++    expect(observation.entries()).toEqual([{ dispatchId: 2, faulted: false }])
++    observation.restore()
++  })
++  it('injects a one-shot exact dispatched graph error and preserves later entry', () => {
++    const queue = createControlledGraphTasks()
++    const graph = { run: () => 7 }
++    const original = graph.run
++    const observation = observeExactCandidateGraph(graph, queue)
++    const error = new Error('exact dispatched graph failure')
++    observation.failNextDispatchedRun(error)
++    expect(graph.run()).toBe(7)
++    queue.scheduleGraphContinuation(() => {
++      graph.run()
++    })
++    expect(() => queue.dispatch(1)).toThrow(error)
++    queue.dispatch(1)
++    expect(observation.entries()).toEqual([
++      { dispatchId: undefined, faulted: false },
++      { dispatchId: 1, faulted: true },
++      { dispatchId: 1, faulted: false },
++    ])
++    observation.restore()
++    expect(graph.run).toBe(original)
++  })
++  it('records promise rejection with exact identity and no replacement outcome', async () => {
++    let reject: (error: unknown) => void = () => {
++      throw new Error('not installed')
++    }
++    const promise = new Promise((_, fail) => {
++      reject = fail
++    })
++    const read = observeCandidatePromise(promise)
++    expect(read()).toEqual({ state: 'pending' })
++    const error = new Error('original rejection')
++    reject(error)
++    await Promise.resolve()
++    expect(read()).toEqual({ state: 'rejected', error })
++  })
++  it('throws at only one measured public delivery', () => {
++    const error = new Error('publication tail')
++    const fault = failOneCandidatePublication<number>(
++      error,
++      (value) => value === 2,
++    )
++    fault.callback(1)
++    expect(() => fault.callback(2)).toThrow(error)
++    fault.callback(2)
++    expect(fault.observations()).toEqual({
++      injected: true,
++      deliveries: [1, 2, 2],
++    })
++  })
++  it('keeps forward/restoration receipts and explicit disposal observations distinct', async () => {
++    const target = {},
++      retained = {},
++      attempt = {}
++    let reject: (error: unknown) => void = () => {
++      throw new Error('not installed')
++    }
++    const parked = new Promise((_, fail) => {
++      reject = fail
++    })
++    const controls = createCandidateReceiptObservations()
++    controls.returned(target, attempt, parked)
++    controls.returned(retained, attempt, true)
++    controls.disposing(target, attempt)
++    const error = new Error('disposed old target')
++    reject(error)
++    await Promise.resolve()
++    expect(controls.observations()).toEqual({
++      receipts: [
++        {
++          id: 1,
++          target,
++          attempt,
++          literalTrue: false,
++          observation: { state: 'rejected', error },
++        },
++        {
++          id: 2,
++          target: retained,
++          attempt,
++          literalTrue: true,
++          observation: { state: 'fulfilled' },
++        },
++      ],
++      disposals: [{ target, attempt }],
++    })
++  })
++})
+--- reviewed-v1/scripts/h02-progress/candidate-controls.config.ts
++++ actual-v2/scripts/h02-progress/candidate-controls.config.ts
+@@ -0,0 +1,15 @@
++import { defineConfig } from 'vitest/config'
++
++// Pure instrument calibration. No source aliases, receiving setup or DB imports.
++export default defineConfig({
++  test: {
++    include: ['scripts/h02-progress/candidate-controls.test.ts'],
++    environment: 'node',
++    pool: 'forks',
++    maxWorkers: 1,
++    fileParallelism: false,
++    execArgv: ['--max-old-space-size=384'],
++    coverage: { enabled: false },
++    typecheck: { enabled: false },
++  },
++})

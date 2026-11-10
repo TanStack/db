@@ -1,0 +1,13 @@
+export const REF_PROXY_BRAND = /* @__PURE__ */ Symbol(`refProxy`);
+export function readRefProxyBrand(value) {
+  if (!value || typeof value !== `object`) return void 0;
+  try {
+    const brand = value[REF_PROXY_BRAND];
+    return brand === true || Array.isArray(brand) ? brand : void 0;
+  } catch {
+    return void 0;
+  }
+}
+export function isRefProxy(value) {
+  return value && typeof value === `object` && readRefProxyBrand(value) !== void 0;
+}

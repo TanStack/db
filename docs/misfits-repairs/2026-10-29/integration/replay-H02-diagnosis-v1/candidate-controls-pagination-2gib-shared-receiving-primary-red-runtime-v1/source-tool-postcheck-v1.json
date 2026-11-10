@@ -1,0 +1,20 @@
+{
+  "status": "PASS independent filesystem-only postcheck of existing expected identities",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "sourceBindings": 596,
+  "sourceCopies": 85,
+  "namedPackageRoots": 255,
+  "namedOwnPayloadFiles": 11974,
+  "dependencyResolutionEdges": 405,
+  "absentOptionalOrPeers": 112,
+  "locksVerified": 2,
+  "reuseLinksVerified": 4,
+  "PythonNodeAndPsVerified": true,
+  "outerBeforeAfterEqual": true,
+  "dependencyCensusBroadened": false,
+  "scope": "Finite existing source/tool maps; not evaluated-source equivalence or universal host/daemon census",
+  "targetLaunchesAdded": 0,
+  "launcherImported": false,
+  "supervisorImported": false
+}

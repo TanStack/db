@@ -1,0 +1,171 @@
+{
+  "count": 159,
+  "contiguousSequences": true,
+  "phaseCounts": {
+    "worker-start": 1,
+    "actual-key-prefix": 79,
+    "query-key-callback": 17,
+    "source-establishing-receipt": 1,
+    "acquisition-attempt": 11,
+    "source-stack": 1,
+    "provider-request": 7,
+    "provider-answer": 7,
+    "acquisition-accepted": 11,
+    "acquisition-release": 3,
+    "cache-success": 7,
+    "public-change": 3,
+    "downstream-change": 3,
+    "initial-publication": 1,
+    "reload-start": 1,
+    "retained-publication": 1,
+    "release-scope": 2,
+    "answer-queued": 1,
+    "answer-executed": 1,
+    "final-publication": 1
+  },
+  "file": "receiving/receipts.jsonl",
+  "sha256": "9f60b63dc6a9ea244757799c970ab62ca3ff77bb17c83f63f4994c2b74ef6244",
+  "namedCuts": [
+    {
+      "h02": true,
+      "sequence": 86,
+      "phase": "initial-publication",
+      "rows": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "ready": true
+    },
+    {
+      "h02": true,
+      "sequence": 87,
+      "phase": "reload-start",
+      "pivot": 3
+    },
+    {
+      "h02": true,
+      "sequence": 133,
+      "phase": "retained-publication",
+      "reason": "provider-hold-before-release",
+      "rows": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "downstream": [
+        {
+          "id": 4,
+          "rank": 40,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[4,null]",
+          "$collectionId": "live-query-2"
+        }
+      ],
+      "pendingProviderAnswers": 3
+    },
+    {
+      "h02": true,
+      "sequence": 151,
+      "phase": "answer-queued",
+      "kind": "lawful-control",
+      "scheduler": "microtask",
+      "enqueueReturned": true
+    },
+    {
+      "h02": true,
+      "sequence": 152,
+      "phase": "answer-executed",
+      "kind": "lawful-control"
+    },
+    {
+      "h02": true,
+      "sequence": 159,
+      "phase": "final-publication",
+      "rows": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "downstream": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-2"
+        }
+      ],
+      "ready": true,
+      "syncError": false,
+      "health": {
+        "alias": "root",
+        "collectionId": "live-query-1",
+        "kind": "live-query",
+        "status": "ready",
+        "failureReason": null,
+        "error": null,
+        "reloading": false,
+        "sources": [
+          {
+            "alias": "row",
+            "collectionId": "86cc59d9-e9bb-4b8f-8e02-7b3e0ffa1d46",
+            "kind": "source",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          },
+          {
+            "alias": "marker",
+            "collectionId": "h02-progress-markers",
+            "kind": "source",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          },
+          {
+            "alias": "child",
+            "collectionId": "h02-progress-markers",
+            "kind": "include",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          }
+        ],
+        "hasErrors": false
+      }
+    }
+  ],
+  "limits": "Raw recorded observations only. Declared oracle reaches/public judgments failed; later raw final-publication is not a passing checkpoint or cleanup evidence."
+}

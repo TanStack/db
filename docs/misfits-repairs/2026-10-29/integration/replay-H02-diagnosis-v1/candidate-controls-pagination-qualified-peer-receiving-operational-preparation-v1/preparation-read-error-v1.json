@@ -1,0 +1,7 @@
+{
+  "actualChunkId": "84bbbf",
+  "exitCode": 1,
+  "error": "cat: scripts/h02-progress/completion-typecheck.tsconfig.json: No such file or directory",
+  "scope": "Read-only filename guess; actual completion-tsconfig.json then found through rg --files and read. No file/source/tool mutation, import, compile or run.",
+  "historicalFailurePreserved": true
+}

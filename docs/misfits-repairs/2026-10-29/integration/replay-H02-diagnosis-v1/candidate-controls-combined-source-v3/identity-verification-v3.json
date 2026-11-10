@@ -1,0 +1,747 @@
+{
+  "at": "2026-10-30T09:34:51.143410+00:00",
+  "productionFilesMatched": 511,
+  "instrumentFiles": 50,
+  "exactFourChanges": {
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": {
+      "old": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+      "new": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a"
+    },
+    "scripts/h02-progress/bindings-calibration.test.mjs": {
+      "old": "c49292cb606fd65484aa2cfd7046916f9d1590a10f5395bdeb4ca02567250dc9",
+      "new": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd"
+    },
+    "scripts/h02-progress/completion-parent.mjs": {
+      "old": "e3b77f882eb26897e2660e6969a65f8868067d4c6e6ad8329f53107bfd2c962a",
+      "new": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70"
+    },
+    "scripts/h02-progress/verify-bindings.mjs": {
+      "old": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe",
+      "new": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a"
+    }
+  },
+  "sharedFilesMatched": 23,
+  "frozenSourceCopies": 73,
+  "dependencyPackages": 9,
+  "pinnedPayloadFilesMatched": 2544,
+  "nodeTwoLocksFourLinksMatched": true,
+  "priorRelativeImportsAccounted": 138,
+  "addedRelativeImports": [
+    {
+      "from": "scripts/h02-progress/bindings-calibration.test.mjs",
+      "specifier": "./completion-parent.mjs",
+      "resolved": "scripts/h02-progress/completion-parent.mjs"
+    }
+  ],
+  "relativeImports": [
+    {
+      "from": "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+      "specifier": "../oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/oracle-reach",
+      "resolved": "packages/db/tests/oracle-reach.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/utils",
+      "resolved": "packages/db/tests/utils.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/mutation-confirmation-support",
+      "resolved": "packages/db/tests/mutation-confirmation-support.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/mutation-confirmation-oracle",
+      "resolved": "packages/db/tests/mutation-confirmation-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/src/deferred.js",
+      "resolved": "packages/db/src/deferred.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/src/query/compiler/evaluators.js",
+      "resolved": "packages/db/src/query/compiler/evaluators.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../src/errors.js",
+      "resolved": "packages/query-db-collection/src/errors.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db-sqlite-persistence-core/src",
+      "resolved": "packages/db-sqlite-persistence-core/src/index.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "./ownership-lifecycle-support.js",
+      "resolved": "packages/query-db-collection/tests/ownership-lifecycle-support.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../../db/tests/mutation-confirmation-oracle",
+      "resolved": "packages/db/tests/mutation-confirmation-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "specifier": "./ownership-lifecycle-support.js",
+      "resolved": "packages/query-db-collection/tests/ownership-lifecycle-support.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../db/src/query/live/internal.js",
+      "resolved": "packages/db/src/query/live/internal.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../db/src/query/live/bucket-facade-adapter.js",
+      "resolved": "packages/db/src/query/live/bucket-facade-adapter.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../db/src/query/live/subset-demand-controller.js",
+      "resolved": "packages/db/src/query/live/subset-demand-controller.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../../scripts/h02-progress/candidate-controls.js",
+      "resolved": "scripts/h02-progress/candidate-controls.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../db/src/query/live/collection-config-builder.js",
+      "resolved": "packages/db/src/query/live/collection-config-builder.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "../../db/src/query/live/types.js",
+      "resolved": "packages/db/src/query/live/types.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-attachments.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-fixture.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-attachments.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-fixture.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "specifier": "../../db/tests/oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "specifier": "./queued-answer-completion-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "specifier": "./queued-answer-completion-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-supervisor.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-attachments.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "specifier": "./queued-answer-completion-baseline-driver.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "../../db/tests/reference-expression-oracle.js",
+      "resolved": "packages/db/tests/reference-expression-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "./queued-answer-completion-attachments.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "../../db/src/query/ir.js",
+      "resolved": "packages/db/src/query/ir.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "../../db/src/query/live/collection-config-builder.js",
+      "resolved": "packages/db/src/query/live/collection-config-builder.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "./queued-answer-completion-attachments.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "specifier": "../../db/tests/oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "specifier": "../../db/tests/oracle-reach.js",
+      "resolved": "packages/db/tests/oracle-reach.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "specifier": "../../db/tests/oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "specifier": "../../../scripts/h02-progress/receiving-monitor.mjs",
+      "resolved": "scripts/h02-progress/receiving-monitor.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "specifier": "./queued-answer-completion-baseline-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "../../db/tests/reference-expression-oracle.js",
+      "resolved": "packages/db/tests/reference-expression-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "../../../scripts/h02-progress/witness-premise.js",
+      "resolved": "scripts/h02-progress/witness-premise.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "specifier": "../../../scripts/h02-progress/witness-premise.js",
+      "resolved": "scripts/h02-progress/witness-premise.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "specifier": "../../db/tests/oracle-reach.js",
+      "resolved": "packages/db/tests/oracle-reach.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "specifier": "../../db/tests/query/load-subset-retained-publication-oracle.js",
+      "resolved": "packages/db/tests/query/load-subset-retained-publication-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "specifier": "./queued-answer-progress-supervisor.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "specifier": "../../db/tests/oracle-config.js",
+      "resolved": "packages/db/tests/oracle-config.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "specifier": "../../db/tests/oracle-reach.js",
+      "resolved": "packages/db/tests/oracle-reach.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "specifier": "./queued-answer-progress-supervisor.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "specifier": "../../db/tests/oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "specifier": "../../db/tests/query/load-subset-retained-publication-oracle.js",
+      "resolved": "packages/db/tests/query/load-subset-retained-publication-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "specifier": "./queued-answer-completion-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "specifier": "./queued-answer-completion-history-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "specifier": "./queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts",
+      "specifier": "../../../scripts/h02-progress/witness-premise.js",
+      "resolved": "scripts/h02-progress/witness-premise.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts",
+      "specifier": "../../../scripts/h02-progress/witness-premise.js",
+      "resolved": "scripts/h02-progress/witness-premise.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "specifier": "../../../scripts/h02-progress/receiving-monitor.mjs",
+      "resolved": "scripts/h02-progress/receiving-monitor.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "specifier": "../../../scripts/h02-progress/receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "specifier": "./queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "scripts/h02-progress/bindings-calibration.test.mjs",
+      "specifier": "./receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/candidate-controls.test.ts",
+      "specifier": "./candidate-controls.js",
+      "resolved": "scripts/h02-progress/candidate-controls.ts"
+    },
+    {
+      "from": "scripts/h02-progress/candidate-controls.ts",
+      "specifier": "../../packages/db/tests/oracle-reach.js",
+      "resolved": "packages/db/tests/oracle-reach.ts"
+    },
+    {
+      "from": "scripts/h02-progress/checker-calibration.test.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "scripts/h02-progress/checker-calibration.test.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-progress-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+    },
+    {
+      "from": "scripts/h02-progress/completion-checker-controls.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "scripts/h02-progress/completion-checker-controls.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+    },
+    {
+      "from": "scripts/h02-progress/completion-eslint.config.mjs",
+      "specifier": "./eslint.config.mjs",
+      "resolved": "scripts/h02-progress/eslint.config.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/completion-parent.mjs",
+      "specifier": "./receiving-monitor.mjs",
+      "resolved": "scripts/h02-progress/receiving-monitor.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/completion-receiving.config.ts",
+      "specifier": "./vitest.config.js",
+      "resolved": "scripts/h02-progress/vitest.config.ts"
+    },
+    {
+      "from": "scripts/h02-progress/eslint.config.mjs",
+      "specifier": "../../eslint.config.js",
+      "resolved": "eslint.config.js"
+    },
+    {
+      "from": "scripts/h02-progress/ownership-parent.mjs",
+      "specifier": "./receiving-monitor.mjs",
+      "resolved": "scripts/h02-progress/receiving-monitor.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/ownership-parent.test.mjs",
+      "specifier": "./ownership-parent.mjs",
+      "resolved": "scripts/h02-progress/ownership-parent.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/receipt-transport.test.mjs",
+      "specifier": "./receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/receiving-monitor.test.mjs",
+      "specifier": "./receiving-monitor.mjs",
+      "resolved": "scripts/h02-progress/receiving-monitor.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/root-setup-calibration.test.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-progress-supervisor.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts"
+    },
+    {
+      "from": "scripts/h02-progress/root-setup-calibration.test.ts",
+      "specifier": "../../packages/query-db-collection/tests/queued-answer-root-setup-probe.js",
+      "resolved": "packages/query-db-collection/tests/queued-answer-root-setup-probe.ts"
+    },
+    {
+      "from": "scripts/h02-progress/source-binding.setup.ts",
+      "specifier": "./startup-inspector.mjs",
+      "resolved": "scripts/h02-progress/startup-inspector.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/startup-inspector.test.mjs",
+      "specifier": "./startup-inspector.mjs",
+      "resolved": "scripts/h02-progress/startup-inspector.mjs"
+    },
+    {
+      "from": "scripts/h02-progress/verify-bindings.mjs",
+      "specifier": "./receipt-transport.mjs",
+      "resolved": "scripts/h02-progress/receipt-transport.mjs"
+    },
+    {
+      "from": "packages/db/tests/oracle-config.ts",
+      "specifier": "./oracle-replay-witness.js",
+      "resolved": "packages/db/tests/oracle-replay-witness.ts"
+    },
+    {
+      "from": "packages/db/tests/oracle-config.ts",
+      "specifier": "./oracle-replay-witness.js",
+      "resolved": "packages/db/tests/oracle-replay-witness.ts"
+    },
+    {
+      "from": "packages/db/tests/oracle-config.ts",
+      "specifier": "./oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/db/tests/oracle-reach.ts",
+      "specifier": "./oracle-config.js",
+      "resolved": "packages/db/tests/oracle-config.ts"
+    },
+    {
+      "from": "packages/db/tests/reference-expression-oracle.ts",
+      "specifier": "./oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/db/tests/reference-expression-oracle.ts",
+      "specifier": "../src/query/ir.js",
+      "resolved": "packages/db/src/query/ir.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/collection/index.js",
+      "resolved": "packages/db/src/collection/index.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/indexes/btree-index",
+      "resolved": "packages/db/src/indexes/btree-index.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/client",
+      "resolved": "packages/db/src/client.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/utils/comparison.js",
+      "resolved": "packages/db/src/utils/comparison.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/collection/cleanup-queue.js",
+      "resolved": "packages/db/src/collection/cleanup-queue.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/index.js",
+      "resolved": "packages/db/src/index.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/indexes/base-index",
+      "resolved": "packages/db/src/indexes/base-index.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/virtual-props.js",
+      "resolved": "packages/db/src/virtual-props.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/transactions.js",
+      "resolved": "packages/db/src/transactions.ts"
+    },
+    {
+      "from": "packages/db/tests/utils.ts",
+      "specifier": "../src/collection/index.js",
+      "resolved": "packages/db/src/collection/index.ts"
+    },
+    {
+      "from": "packages/db/tests/mutation-confirmation-oracle.ts",
+      "specifier": "./oracle-declaration.js",
+      "resolved": "packages/db/tests/oracle-declaration.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../../db/src/deferred.js",
+      "resolved": "packages/db/src/deferred.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../../db-sqlite-persistence-core/src/index.js",
+      "resolved": "packages/db-sqlite-persistence-core/src/index.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../../db-sqlite-persistence-core/src/index.js",
+      "resolved": "packages/db-sqlite-persistence-core/src/index.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../../db/src/types.js",
+      "resolved": "packages/db/src/types.ts"
+    },
+    {
+      "from": "packages/query-db-collection/tests/ownership-lifecycle-support.ts",
+      "specifier": "../src/query.js",
+      "resolved": "packages/query-db-collection/src/query.ts"
+    },
+    {
+      "from": "eslint.config.js",
+      "specifier": "./scripts/eslint-plugin-oracle/index.js",
+      "resolved": "scripts/eslint-plugin-oracle/index.js"
+    },
+    {
+      "from": "scripts/eslint-plugin-oracle/index.js",
+      "specifier": "./rules/no-disabled.js",
+      "resolved": "scripts/eslint-plugin-oracle/rules/no-disabled.js"
+    },
+    {
+      "from": "scripts/eslint-plugin-oracle/index.js",
+      "specifier": "./rules/no-unit-test.js",
+      "resolved": "scripts/eslint-plugin-oracle/rules/no-unit-test.js"
+    },
+    {
+      "from": "scripts/eslint-plugin-oracle/rules/no-unit-test.js",
+      "specifier": "../registration.js",
+      "resolved": "scripts/eslint-plugin-oracle/registration.js"
+    },
+    {
+      "from": "scripts/eslint-plugin-oracle/rules/no-disabled.js",
+      "specifier": "../registration.js",
+      "resolved": "scripts/eslint-plugin-oracle/registration.js"
+    },
+    {
+      "from": "scripts/h02-progress/bindings-calibration.test.mjs",
+      "specifier": "./completion-parent.mjs",
+      "resolved": "scripts/h02-progress/completion-parent.mjs"
+    }
+  ],
+  "predecessorCombinedPacketEntriesMatched": 222,
+  "nativeFrozenRecordsMatched": 19,
+  "failedNativeAssetsMatched": 1974,
+  "historicalInputResolution": {
+    "historicalFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+    "historicalPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+    "freezeFilesResolved": 45,
+    "packetEntriesResolved": 46,
+    "archiveKeysResolved": 8,
+    "allMatched": true
+  },
+  "oldEightEvidencePathsSuperseded": true,
+  "compilerConstructorModelHistoryTestCollectionReceivingExecutions": 0,
+  "runtimeAdmission": false
+}

@@ -1,0 +1,22 @@
+{
+  "freshOutputAbsent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2",
+  "fullOriginalSourcePreflight": "passed through unchanged original verify_inputs under broader forbidden process/PID/signal API guards",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "pureCalibration": {
+    "accepted": 5,
+    "exitCode": 0,
+    "rejected": 13,
+    "sha256": "15f58e925ccfea2d7bf7b4bc95ff4361dbba8f679d20bdc92d554c3233a05960"
+  },
+  "pythonAstAndCompile": {
+    "bytecodeWritten": false,
+    "modules": 3,
+    "passed": true
+  },
+  "sourceCopies": 0,
+  "sourceRefreezes": 0,
+  "status": "SOURCE/PURE ONLY; no native execution"
+}

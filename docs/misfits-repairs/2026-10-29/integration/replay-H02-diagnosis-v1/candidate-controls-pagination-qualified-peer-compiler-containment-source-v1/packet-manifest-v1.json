@@ -1,0 +1,43 @@
+{
+  "schema": "h02-compiler-containment-inert-source-packet-v1",
+  "status": "FROZEN small conditional wrapper/tool source for independent review; no admission",
+  "fileCount": 6,
+  "files": {
+    "compiler-containment-contract-v1.json": {
+      "sha256": "43dc71093bccfcd8981dec5be06b594d0015ae02d11b5823c5f10b6e56b3e505",
+      "bytes": 8883
+    },
+    "contain-compiler-v1.py.txt": {
+      "sha256": "424612a8f21c68feebe4920cd859da5800c818eede4ca6b3fd2e9c0ac9fa08e9",
+      "bytes": 12341
+    },
+    "lightweight-source-audit-v1.json": {
+      "sha256": "6c31f35448558551e8fee09ea8c85fed65d2a1b100420d20f46437d90d290309",
+      "bytes": 1170
+    },
+    "preparation-read-diagnostic-v1.json": {
+      "sha256": "1f435b60b601f0548ec81c0940c0f413dcb469547b3aea89690d27e0acf1cc4f",
+      "bytes": 378
+    },
+    "proposed-exact-compiler-only-tool-invocation-v1.json": {
+      "sha256": "5fa2a3a45ff2feaf31ea76a6787a021fce6017a5f952082e0e362d81ca4e27d9",
+      "bytes": 4057
+    },
+    "report-v1.md": {
+      "sha256": "093035abbd848267b343948394bb2f8c1920988ea7f551f25bf7e0631161b016",
+      "bytes": 5222
+    }
+  },
+  "selfExcluded": true,
+  "wrapperSha256": "424612a8f21c68feebe4920cd859da5800c818eede4ca6b3fd2e9c0ac9fa08e9",
+  "contractSha256": "43dc71093bccfcd8981dec5be06b594d0015ae02d11b5823c5f10b6e56b3e505",
+  "toolProposalSha256": "5fa2a3a45ff2feaf31ea76a6787a021fce6017a5f952082e0e362d81ca4e27d9",
+  "reportSha256": "093035abbd848267b343948394bb2f8c1920988ea7f551f25bf7e0631161b016",
+  "sourceAuditSha256": "6c31f35448558551e8fee09ea8c85fed65d2a1b100420d20f46437d90d290309",
+  "compilerWallMs": 45000,
+  "materialization": 0,
+  "wrapperExecution": 0,
+  "compilerInvocations": 0,
+  "processProbes": 0,
+  "laterArtifactLint": "PENDING ROOT"
+}

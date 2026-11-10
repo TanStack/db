@@ -1,0 +1,10 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ✓ scripts/h02-progress/root-setup-calibration.test.ts > separates client URL normalization from module and global URL semantics 2ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  22:22:09
+   Duration  283ms (transform 18ms, setup 0ms, import 25ms, tests 2ms, environment 174ms)
+

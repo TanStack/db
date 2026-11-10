@@ -1,0 +1,46 @@
+from pathlib import Path
+import hashlib,json,os
+from datetime import datetime,timezone
+h=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1'); e=h/'candidate-controls-pagination-shared-window-failure-receiving-runtime-v1';d=h/'candidate-controls-pagination-shared-window-receiving-operational-preparation-v1';q=h/'candidate-controls-pagination-failed-peer-shared-receiving-successor-v1';n=h/'candidate-controls-pagination-2gib-shared-receiving-containment-v1'
+sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+a=json.loads((e/'root-admission-v1.json').read_text());f=json.loads((d/'source-freeze-receiving-v1.json').read_text()); w=Path(f['worktree']);s=json.loads((n/'supplemental-tool-inputs.json').read_text())
+checks=[]
+def bound(path,expected):
+ actual=sha(path);assert actual==expected,(str(path),expected,actual);return {'path':str(path),'sha256':actual}
+for pin in a['pins']:checks.append(bound(pin['path'],pin['sha256']))
+for rel,digest in f['sourceBindings'].items():bound(w/rel,digest)
+for rel,digest in f['productionFiles'].items():bound(w/rel,digest)
+for rel,digest in f['sourceCopies'].items():bound(q/'sources'/rel,digest)
+bound(f['node']['executable'],f['node']['sha256']);bound(w/'pnpm-lock.yaml',f['lockfiles']['repoPnpmLock']);bound(w/'node_modules/.pnpm/lock.yaml',f['lockfiles']['installedPnpmLock'])
+for link,fact in f['dependencyReuseLinks'].items():
+ assert (w/link).is_symlink()==fact['isSymlink'],link;assert str((w/link).resolve())==fact['resolved'],link
+# Material package logical paths may be relative to W or historical absolute paths.
+# The exact D helper binds their resolved roots/payloads; current named reuse links
+# are checked above. Supplemental paths are current absolute closure edges.
+for p in s['packages']:assert str(Path(p['logical']).resolve())==p['resolved'],p['logical']
+packages={}
+for p in [*f['packages'].values(),*s['packages']]:
+ root=p['resolved'];mapping=p['regularPayloadFilesMap']
+ if root in packages:assert packages[root]==mapping,root
+ packages[root]=mapping
+payloads=0
+for root,mapping in packages.items():
+ base=Path(root);actual=set()
+ for directory,dirs,files in os.walk(base,followlinks=False):
+  dirs[:]=[name for name in dirs if name!='node_modules' and not (Path(directory)/name).is_symlink()]
+  for name in files:
+   p=Path(directory)/name
+   if p.is_file() and not p.is_symlink():actual.add(str(p.relative_to(base)))
+ assert actual==set(mapping),(root,'own-payload set changed')
+ for name,digest in mapping.items():bound(base/name,digest)
+ payloads+=len(mapping)
+for edge in s['resolutionEdges']:assert str(Path(edge['logical']).resolve())==edge['resolved'],edge
+for item in s['uninstalledDeclaredOptionalOrPeerDependencies']:
+ base=Path(item['from']);assert not any((ancestor/'node_modules'/item['dependency']).exists() for ancestor in [base,*base.parents]),item
+assert len(packages)==255 and payloads==11974
+records=json.loads((e/'raw-copy-verification-v1.json').read_text())['copies']
+for x in records:
+ if x['kind']=='file':bound(x['origin'],x['sha256']);bound(x['copy'],x['sha256'])
+ else:assert str(Path(x['origin']).readlink())==x['target']==str(Path(x['copy']).readlink())
+v={'schema':'h02-post-run-source-and-tool-audit-v1','at':datetime.now(timezone.utc).isoformat(),'allChecksPassed':True,'scope':'Filesystem-only post-run audit; same strict own-file-set algorithm as D exact-closure helper, not package imports or test execution','admission':bound(e/'root-admission-v1.json','61d6c5fee04057a468647bc392127d43f5f092708e287aa3b43cd932be439769'),'fivePins':checks,'allFivePinsMatched':True,'sourceBindingsMatched':len(f['sourceBindings']),'sourceCopiesMatched':len(f['sourceCopies']),'productionUnchanged':len(f['productionFiles']),'uniquePackageRootsMatched':len(packages),'ownPayloadsMatched':payloads,'ownPayloadSetsExact':True,'resolutionEdgesMatched':len(s['resolutionEdges']),'absentOptionalPeersMatched':len(s['uninstalledDeclaredOptionalOrPeerDependencies']),'nodeLocksLinksMatched':True,'allRawOriginalAndCopiesRehashedEqual':len(records),'newTestInvocations':0,'imports':0,'testDiscovery':0,'productionOrInstrumentEdits':0,'auditAttempt1Failure':{'path':str(e/'post-run-audit-attempt1-failure-v1.json'),'sha256':sha(e/'post-run-audit-attempt1-failure-v1.json')},'limits':'Finite frozen source/tool closure only. Does not grant product or oracle reach credit, and does not replace preserved historical recovery qualifications.'}
+p=e/'post-run-source-and-tool-audit-v1.json';assert not p.exists();p.write_text(json.dumps(v,indent=2)+'\n');print(json.dumps({'sha256':sha(p),'source':len(f['sourceBindings']),'copies':len(f['sourceCopies']),'production':len(f['productionFiles']),'packageRoots':len(packages),'payloads':payloads,'rawCopies':len(records)}))

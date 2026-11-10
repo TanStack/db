@@ -1,0 +1,401 @@
+{
+  "calibrationSourceSha256": "cd5c407c7647fc54e78cca05eb6fc8a9690e78aa7b7fbfa55c2cbe8077828a13",
+  "hostileRunCalibrationsRejected": 17,
+  "launcherSha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+  "malformedProcessRowsRejected": 4,
+  "nativeLists": 0,
+  "nativeProcessProbes": 0,
+  "nativeSubprocesses": 0,
+  "outerStopCalibrations": 6,
+  "results": [
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-0",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-1",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-2",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-3",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-4",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "exact-success-5",
+      "primaryFailure": null,
+      "rejected": false,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-count",
+      "primaryFailure": {
+        "error": "wrong native list count",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-name",
+      "primaryFailure": {
+        "error": "wrong native list names",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-module",
+      "primaryFailure": {
+        "error": "wrong native list entry/module",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-duplicate",
+      "primaryFailure": {
+        "error": "wrong native list names",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-malformed",
+      "primaryFailure": {
+        "error": "Expecting value: line 1 column 2 (char 1)",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-symlink",
+      "primaryFailure": {
+        "error": "JSON is not a bounded fresh regular file",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-stderr",
+      "primaryFailure": {
+        "error": "nonempty list stderr; needs review",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-stdout",
+      "primaryFailure": {
+        "error": "possible collection error in stdout",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-exit",
+      "primaryFailure": {
+        "error": "native list abnormal/nonzero exit",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-ps",
+      "primaryFailure": {
+        "error": "ps denied",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": [
+        {
+          "error": "ps denied",
+          "phase": "final-inventory"
+        }
+      ]
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-deadline",
+      "primaryFailure": {
+        "error": "30 second wall containment",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": [
+        {
+          "error": "30 second wall containment",
+          "phase": "final-inventory"
+        }
+      ]
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "kill-group",
+        "inventory"
+      ],
+      "label": "reject-rss",
+      "primaryFailure": {
+        "error": "1 GiB sampled group RSS containment",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "kill-group",
+        "inventory"
+      ],
+      "label": "reject-remaining",
+      "primaryFailure": {
+        "error": "original group or PID still present",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory"
+      ],
+      "label": "reject-pgid",
+      "primaryFailure": {
+        "error": "unknown PGID",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": [
+        {
+          "error": "original PGID verification unestablished",
+          "phase": "final-inventory"
+        }
+      ]
+    },
+    {
+      "calls": [],
+      "label": "reject-pre-receipt",
+      "primaryFailure": {
+        "error": "pre receipt write failed",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory"
+      ],
+      "label": "reject-spawn-receipt",
+      "primaryFailure": {
+        "error": "spawn receipt write failed",
+        "phase": "native-list"
+      },
+      "rejected": true,
+      "secondaryFailures": [
+        {
+          "error": "original PGID verification unestablished",
+          "phase": "final-inventory"
+        }
+      ]
+    },
+    {
+      "calls": [
+        "spawn",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "label": "reject-final-receipt",
+      "primaryFailure": {
+        "error": "final receipt write failed",
+        "phase": "final-receipt"
+      },
+      "rejected": true,
+      "secondaryFailures": []
+    },
+    {
+      "calledOrders": [
+        0
+      ],
+      "label": "outer-stop-0"
+    },
+    {
+      "calledOrders": [
+        0,
+        1
+      ],
+      "label": "outer-stop-1"
+    },
+    {
+      "calledOrders": [
+        0,
+        1,
+        2
+      ],
+      "label": "outer-stop-2"
+    },
+    {
+      "calledOrders": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "label": "outer-stop-3"
+    },
+    {
+      "calledOrders": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "label": "outer-stop-4"
+    },
+    {
+      "calledOrders": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "label": "outer-stop-5"
+    }
+  ],
+  "status": "PASS: pure stdlib only",
+  "successfulExactRecipeCalibrations": 6
+}

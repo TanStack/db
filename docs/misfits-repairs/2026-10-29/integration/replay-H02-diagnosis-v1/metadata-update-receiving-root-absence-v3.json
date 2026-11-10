@@ -1,0 +1,74 @@
+{
+  "actualPsReturnCode": 0,
+  "allAbsent": true,
+  "limits": "Supervisor records child PID as target group; it persists no initial actual getpgid receipt. No universal process/escaped-child census claimed.",
+  "probes": [
+    {
+      "actualPsMatches": [],
+      "kind": "pid",
+      "label": "outer",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12461
+    },
+    {
+      "actualPsMatches": [],
+      "kind": "pid",
+      "label": "receiving-parent",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12597
+    },
+    {
+      "actualPsMatches": [],
+      "kind": "pid",
+      "label": "detached-leader",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12600
+    },
+    {
+      "actualPsMatches": [],
+      "kind": "pid",
+      "label": "receipt-writer",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12603
+    },
+    {
+      "actualPsMatches": [],
+      "kind": "pgid",
+      "label": "recorded-outer-group",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12461
+    },
+    {
+      "actualPsMatches": [],
+      "kind": "pgid",
+      "label": "supervisor-recorded-target-group",
+      "signalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "status": "ESRCH"
+      },
+      "value": 12600
+    }
+  ],
+  "status": "actual original recorded identity absence checks"
+}

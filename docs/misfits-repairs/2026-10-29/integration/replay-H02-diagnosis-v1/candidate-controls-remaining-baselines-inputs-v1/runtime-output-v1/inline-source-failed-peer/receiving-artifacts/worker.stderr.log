@@ -1,0 +1,20 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts > records a source-bound completion receiving gate
+Error: completion instrument: actual held provider answers is a positive recorder identity
+ ❯ demand packages/query-db-collection/tests/queued-answer-completion-oracle.ts:168:25
+    166|
+    167| function demand(condition: unknown, label: string): asserts condition {
+    168|   if (!condition) throw new Error(`completion instrument: ${label}`)
+       |                         ^
+    169| }
+    170| function runtimeTag(value: unknown, expected: string): boolean {
+ ❯ positive packages/query-db-collection/tests/queued-answer-completion-oracle.ts:832:3
+ ❯ checkCompletionBaselineObservation packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1402:7
+ ❯ observe packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:891:5
+ ❯ driveCompletionBaselineProgram packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:920:12
+ ❯ packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

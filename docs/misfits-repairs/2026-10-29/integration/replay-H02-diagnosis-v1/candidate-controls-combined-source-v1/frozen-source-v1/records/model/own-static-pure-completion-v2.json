@@ -1,0 +1,10 @@
+{
+  "slot": 2,
+  "workers": 1,
+  "serial": true,
+  "name": "v2 lint-changed-equivalent completion",
+  "sessionId": 47498,
+  "exitCode": 0,
+  "output": "",
+  "runtimeReceiving": 0
+}

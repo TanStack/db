@@ -1,0 +1,26 @@
+{
+  "task": "Bounded pure calibration of title-only recipe successor; no target run",
+  "firstCalibration": {
+    "chunk": "4fb72b",
+    "exitCode": 0,
+    "wallTimeSeconds": 0.703624625
+  },
+  "finalCalibration": {
+    "chunk": "efa5b3",
+    "exitCode": 0,
+    "wallTimeSeconds": 0.724204792,
+    "reasonForSecondPureRun": "Require each corruption to fail at its intended identity/ancestry comparison, excluding setup failures."
+  },
+  "calibrationSourceSha256": "e243cd1a43ac4c78658cac8a5b7c7d7feb1d8c51d952624294399b4b48018463",
+  "resultSha256": "8ae767fcdf8e55419903cc17e4ad9b73e23fc43c13e5044e0d62fd315ebee2d9",
+  "targetExecutions": 0,
+  "launcherImports": 0,
+  "supervisorImports": 0,
+  "configOrTestImports": 0,
+  "nativeProbes": 0,
+  "wideSourceOrToolAudit": false,
+  "dependencyCensusAdded": false,
+  "readyToLaunch": false,
+  "requiredRepositoryLint": "Pending ROOT coordinated validation slot if needed; no pnpm command admitted or invoked by this preparation.",
+  "finalSealToolReturn": "Preserved separately by caller; not self-referentially included in sealed packet."
+}

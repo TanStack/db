@@ -1,0 +1,11 @@
+{
+  "parentSources": 573,
+  "parentSourceIndexSha256": "1557bba3270f29535d84b82d244a67f8249a8ff5529ec56b9a24206ca603b34b",
+  "planSha256": "a256e975e090c5db6b7b5bd199abb49615429d6ae9b28e90375630ca6130b843",
+  "reviewSha256": "81b77797c81b445fea4ec08ef819fbb1956eb14ce0bc5cb84cff3e1bdb8d32a0",
+  "sourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+  "status": "source/static/pure preparation only; no native admission",
+  "predecessor": "metadata-update-source-v1",
+  "predecessorFreezeSha256": "048170249ec3e679d289bf69c9358fc7b0ac1074d9384b06b19caa868b3ec1c0",
+  "correction": "shared per-history finalizer; whole optional stage cannot be omitted or borrow campaign reach"
+}

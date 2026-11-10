@@ -1,0 +1,16 @@
+export function runAllCallbacks(callbacks) {
+  let firstFailure;
+  for (const callback of callbacks) {
+    try {
+      callback();
+    } catch (error) {
+      firstFailure ??= { error };
+    }
+  }
+  if (firstFailure) throw firstFailure.error;
+}
+export function reportUncaught(error) {
+  queueMicrotask(() => {
+    throw error;
+  });
+}

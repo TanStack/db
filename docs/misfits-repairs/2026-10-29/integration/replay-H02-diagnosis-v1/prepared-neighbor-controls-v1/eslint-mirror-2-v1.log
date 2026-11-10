@@ -1,0 +1,7 @@
+
+/private/tmp/h02-neighbor-static-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
+  1453:26  warning  Async arrow function has no 'await' expression                     @typescript-eslint/require-await
+  1616:9   warning  'rows' is already declared in the upper scope on line 44 column 3  no-shadow
+
+✖ 2 problems (0 errors, 2 warnings)
+

@@ -1,0 +1,55 @@
+{
+  "changedMembers": 2,
+  "coordinatorDocumentationLintPending": true,
+  "eslint": {
+    "command": "node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/metadata-eslint.config.mjs packages/query-db-collection/tests/queued-answer-progress-supervisor.ts packages/query-db-collection/tests/queued-answer-progress-receipts.ts",
+    "disabledRules": false,
+    "exitCode": 0,
+    "heapMiB": 1536,
+    "log": "eslint-final.log"
+  },
+  "legacyPure": {
+    "accepted": 32,
+    "exitCode": 0,
+    "log": "legacy-pure-final.log",
+    "modeledReceiptHistories": 6720,
+    "rejected": 140
+  },
+  "modelComparisonDriverFinalizerBudgetsUnchanged": true,
+  "namedOwnPackagePayloadsMatch": 2544,
+  "noGitOperation": true,
+  "noInstall": true,
+  "noNativeCollection": true,
+  "noNativeList": true,
+  "noProductionMutant": true,
+  "noReceiving": true,
+  "oldFailedRawAssetsPreserved": 1951,
+  "oldFailedRawInnerFiles": 1948,
+  "oldFailedSourceFreezePreservedSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "predecessorMembersUnchanged": 587,
+  "prettier": {
+    "exitCode": 0,
+    "log": "format-attempt1.log"
+  },
+  "productionFilesUnchanged": 511,
+  "selectorRoundtripPure": {
+    "exitCode": 0,
+    "log": "selector-roundtrip-attempt1.log",
+    "neighbors": 12,
+    "newOutcomeAndFinalizerPassed": true,
+    "newSelected": 23,
+    "oldOutcomeMismatchPreserved": true,
+    "oldSelected": 21,
+    "rawReceipts": 206,
+    "rejected": 50,
+    "states": 31
+  },
+  "sourceFiles": 589,
+  "toolchainRecoveryGatePendingRoot": true,
+  "typecheck": {
+    "command": "node --max-old-space-size=1536 node_modules/typescript/bin/tsc --project scripts/h02-progress/metadata-tsconfig.json --noEmit",
+    "exitCode": 0,
+    "heapMiB": 1536,
+    "log": "typecheck-final.log"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "kind": "exactly one baseline singleton successor",
+  "cell": {
+    "ordinal": 1,
+    "id": "inline-park-root",
+    "profile": "inline",
+    "gate": "park-root",
+    "parameters": {
+      "keyShift": 0,
+      "rankScale": 10,
+      "nonemptyPrior": true,
+      "partial": "limit",
+      "tie": true,
+      "selectedOutput": "root",
+      "answerScheduler": "microtask"
+    },
+    "fixtureConstructions": 1
+  },
+  "bindingProfile": "completion-baseline-v1",
+  "programBytesReused": true,
+  "constructorCalls": 0,
+  "fixtureConstructionsIfAdmitted": 1,
+  "limitsPerCell": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "innerReceivingWallMs": 20000,
+  "workers": 1,
+  "serial": true,
+  "automaticReruns": 0,
+  "resourceIncreases": 0,
+  "stopOnFirstFailureOrUnreachedPremise": true,
+  "followingSixteenCellBatchAdmitted": false,
+  "runtimeAdmission": false
+}

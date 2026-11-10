@@ -1,0 +1,20 @@
+--- accepted-native-list-launcher/launch.py
++++ additive/supervisor-2gib.py
+@@ -134,7 +134,7 @@
+     for index, recipe in enumerate(batch['recipes']):
+         require(recipe['order'] == index and recipe['maxWorkers'] == 1 and not recipe['fileParallelism'],
+                 'recipe order/concurrency changed')
+-        require(recipe['outerWallContainmentMs'] == 30000 and recipe['groupRssContainmentBytes'] == 1073741824,
++        require(recipe['outerWallContainmentMs'] == 30000 and recipe['groupRssContainmentBytes'] == 2147483648,
+                 'recipe containment changed')
+         require(recipe['argv'][2] == 'list' and '--maxWorkers=1' in recipe['argv'] and
+                 '--no-file-parallelism' in recipe['argv'] and '--cache=false' in recipe['argv'],
+@@ -263,7 +263,7 @@
+                 state['samples'] += 1
+                 rss = sum(row['rssBytes'] for row in rows if row['pgid'] == state['pgid'])
+                 state['maxSampledGroupRssBytes'] = max(state['maxSampledGroupRssBytes'], rss)
+-                require(rss <= 1073741824, '1 GiB sampled group RSS containment')
++                require(rss <= 2147483648, '2 GiB sampled group RSS containment')
+                 require((time.monotonic() - start) < 30, '30 second wall containment')
+                 if child.poll() is not None:
+                     break

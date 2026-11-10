@@ -1,0 +1,305 @@
+import { codedMessage, devBuild } from "../error-message.js";
+import { isRefProxy } from "./builder/ref-proxy-identity.js";
+export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`;
+let nextCollectionSourceId = 0;
+let nextLexicalBindingId = 0;
+class BaseExpression {
+}
+export class CollectionRef extends BaseExpression {
+  constructor(collection, alias, bindingId) {
+    super();
+    this.type = `collectionRef`;
+    // Not an own property, so structural identity and hashing ignore it.
+    this.#sourceId = `source-${++nextCollectionSourceId}`;
+    this.collection = collection;
+    this.alias = alias;
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`;
+  }
+  #sourceId;
+  #bindingId;
+  /** Opaque runtime identity; aliases are lexical names only. */
+  get sourceId() {
+    return this.#sourceId;
+  }
+  get bindingId() {
+    return this.#bindingId;
+  }
+}
+export class DescriptorRef extends BaseExpression {
+  constructor(descriptor, alias, bindingId) {
+    super();
+    this.descriptor = descriptor;
+    this.alias = alias;
+    this.type = `descriptorRef`;
+    this.#sourceId = `source-${++nextCollectionSourceId}`;
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`;
+  }
+  #sourceId;
+  #bindingId;
+  /** Opaque runtime identity for this unbound source placement. */
+  get sourceId() {
+    return this.#sourceId;
+  }
+  get bindingId() {
+    return this.#bindingId;
+  }
+}
+export function requireCollectionSource(source) {
+  if (source.type === `descriptorRef`) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.` : codedMessage(113, { alias: source.alias })
+    );
+  }
+  return source.collection;
+}
+export class QueryRef extends BaseExpression {
+  constructor(query, alias, bindingId) {
+    super();
+    this.query = query;
+    this.alias = alias;
+    this.type = `queryRef`;
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`;
+  }
+  #bindingId;
+  get bindingId() {
+    return this.#bindingId;
+  }
+}
+export class UnionFrom extends BaseExpression {
+  constructor(sources) {
+    super();
+    this.sources = sources;
+    this.type = `unionFrom`;
+  }
+  get alias() {
+    return this.sources[0]?.alias ?? ``;
+  }
+}
+export class UnionAll extends BaseExpression {
+  /**
+   * Result-level UNION ALL. Downstream query clauses see the union result row
+   * shape, not the branch source aliases. Optimizers may push safe operations
+   * into branches, but compiler phases should treat this as a derived relation
+   * unless they are explicitly handling branch lowering.
+   */
+  constructor(queries) {
+    super();
+    this.queries = queries;
+    this.type = `unionAll`;
+  }
+  get alias() {
+    return ``;
+  }
+}
+export class PropRef extends BaseExpression {
+  constructor(path, sourceAlias, bindingId) {
+    super();
+    this.path = path;
+    this.type = `ref`;
+    if (sourceAlias !== void 0) {
+      ;
+      this.sourceAlias = sourceAlias;
+    }
+    if (bindingId !== void 0) {
+      Object.defineProperty(this, `bindingId`, {
+        value: bindingId,
+        enumerable: false
+      });
+    }
+  }
+}
+export function getPropRefSourceAlias(ref) {
+  return ref.sourceAlias !== void 0 && ref.path[0] === ref.sourceAlias ? ref.sourceAlias : void 0;
+}
+export function getPropRefPropertyPath(ref) {
+  return getPropRefSourceAlias(ref) === void 0 ? ref.path : ref.path.slice(1);
+}
+export class Value extends BaseExpression {
+  constructor(value) {
+    super();
+    this.value = value;
+    this.type = `val`;
+  }
+}
+export class Func extends BaseExpression {
+  constructor(name, args) {
+    super();
+    this.name = name;
+    this.args = args;
+    this.type = `func`;
+  }
+}
+export class Aggregate extends BaseExpression {
+  constructor(name, args, grouping) {
+    super();
+    this.name = name;
+    this.args = args;
+    this.grouping = grouping;
+    this.type = `agg`;
+  }
+}
+export function collectPropRefs(expression) {
+  if (expression.type === `ref`) return [expression];
+  return expression.type === `func` || expression.type === `agg` ? expression.args.flatMap(collectPropRefs) : [];
+}
+export class IncludesSubquery extends BaseExpression {
+  constructor(query, correlationField, childCorrelationField, fieldName, runtime, parentFilters, parentProjection, materialization = `collection`, scalarField) {
+    super();
+    this.query = query;
+    this.correlationField = correlationField;
+    this.childCorrelationField = childCorrelationField;
+    this.fieldName = fieldName;
+    this.runtime = runtime;
+    this.parentFilters = parentFilters;
+    this.parentProjection = parentProjection;
+    this.materialization = materialization;
+    this.scalarField = scalarField;
+    this.type = `includesSubquery`;
+  }
+}
+export class ConditionalSelect extends BaseExpression {
+  constructor(branches, defaultValue) {
+    super();
+    this.branches = branches;
+    this.defaultValue = defaultValue;
+    this.type = `conditionalSelect`;
+  }
+}
+export function isBasicOrAggregateExpression(value) {
+  return value instanceof Aggregate || value instanceof Func || value instanceof PropRef || value instanceof Value;
+}
+export function isExpressionLike(value) {
+  return isBasicOrAggregateExpression(value) || value instanceof ConditionalSelect || value instanceof IncludesSubquery;
+}
+export function collectSourceRefs(query, includeSourceIds) {
+  const sources = [];
+  const seen = /* @__PURE__ */ new Set();
+  let includeDepth = 0;
+  const visitSource = (source) => {
+    if (source.type === `collectionRef` || source.type === `descriptorRef`) {
+      if (!seen.has(source.sourceId)) {
+        seen.add(source.sourceId);
+        sources.push(source);
+        if (includeDepth > 0) includeSourceIds?.add(source.sourceId);
+      }
+    } else if (source.type === `queryRef`) {
+      visitQuery(source.query);
+    } else if (source.type === `unionFrom`) {
+      source.sources.forEach(visitSource);
+    } else {
+      source.queries.forEach(visitQuery);
+    }
+  };
+  const visitSelectValue = (value) => {
+    if (value instanceof IncludesSubquery) {
+      includeDepth++;
+      visitQuery(value.query);
+      includeDepth--;
+    } else if (value instanceof ConditionalSelect) {
+      value.branches.forEach((branch) => visitSelectValue(branch.value));
+      if (value.defaultValue !== void 0) {
+        visitSelectValue(value.defaultValue);
+      }
+    } else if (value !== null && typeof value === `object` && !Array.isArray(value) && !isExpressionLike(value) && !isRefProxy(value)) {
+      Object.values(value).forEach(visitSelectValue);
+    }
+  };
+  const visitQuery = (current) => {
+    visitSource(current.from);
+    current.join?.forEach(({ from }) => visitSource(from));
+    if (current.select) Object.values(current.select).forEach(visitSelectValue);
+  };
+  visitQuery(query);
+  return sources;
+}
+export function collectCollectionSources(query) {
+  return collectSourceRefs(query).map(
+    (source) => source.type === `descriptorRef` ? requireCollectionSource(source) : source
+  );
+}
+export function getWhereExpression(where) {
+  return typeof where === `object` && `expression` in where ? where.expression : where;
+}
+export function getHavingExpression(having) {
+  return typeof having === `object` && `expression` in having ? having.expression : having;
+}
+export function isResidualWhere(where) {
+  return typeof where === `object` && `expression` in where && where.residual === true;
+}
+export function createResidualWhere(expression) {
+  return { expression, residual: true };
+}
+export function getFromSources(from) {
+  if (from.type === `unionFrom`) return from.sources;
+  if (from.type === `unionAll`) return [];
+  return [from];
+}
+function getRefFromAlias(query, alias, bindingId) {
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === alias && (bindingId === void 0 || source.bindingId === bindingId)) {
+      return source;
+    }
+  }
+  for (const join of query.join || []) {
+    if (join.from.alias === alias && (bindingId === void 0 || join.from.bindingId === bindingId)) {
+      return join.from;
+    }
+  }
+}
+export function followRef(query, ref, collection) {
+  const explicitAlias = getPropRefSourceAlias(ref);
+  if (explicitAlias !== void 0) {
+    const aliasRef = getRefFromAlias(query, explicitAlias, ref.bindingId);
+    if (!aliasRef) return;
+    const propertyPath = getPropRefPropertyPath(ref);
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(propertyPath), collection);
+    }
+    return {
+      collection: requireCollectionSource(aliasRef),
+      path: propertyPath,
+      alias: explicitAlias,
+      sourceId: aliasRef.sourceId
+    };
+  }
+  if (ref.path.length === 0) {
+    return;
+  }
+  if (ref.path.length === 1) {
+    const field = ref.path[0];
+    if (query.select) {
+      const selectedField = query.select[field];
+      if (selectedField) {
+        return selectedField.type === `ref` ? followRef(query, selectedField, collection) : void 0;
+      }
+    }
+    const from = getFromSources(query.from)[0];
+    if (from?.type === `queryRef`) {
+      return followRef(from.query, new PropRef([field]), collection);
+    }
+    if (from?.type !== `collectionRef`) return;
+    return {
+      collection,
+      path: [field],
+      alias: from.alias,
+      sourceId: from.sourceId
+    };
+  }
+  if (ref.path.length > 1) {
+    const [alias, ...rest] = ref.path;
+    const aliasRef = getRefFromAlias(query, alias, ref.bindingId);
+    if (!aliasRef) {
+      return;
+    }
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(rest), collection);
+    } else {
+      return {
+        collection: requireCollectionSource(aliasRef),
+        path: rest,
+        alias,
+        sourceId: aliasRef.sourceId
+      };
+    }
+  }
+}

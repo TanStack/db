@@ -1,0 +1,60 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+stdout | packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+H02 finite neighbor reach {
+  name: 'nonempty scope-key publication',
+  counts: {
+    'nonempty-prior': 0,
+    'held-provider-read': 0,
+    'completed-enqueue': 1,
+    'answer-executed': 1,
+    'root-change': 0,
+    'downstream-change': 0,
+    'final-publication': 0,
+    'worker-cleaned': 0
+  }
+}
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts (5 tests | 1 failed | 4 skipped) 2395ms
+     × checks receiving neighbor 'nonempty scope-key publication' 2394ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+Error: AssertionError: pending answer retains complete publication: expected [ { id: 4, rank: 40, …(5) } ] to deeply equal [ { id: 4, rank: 40, markers: [] } ]
+    at checkReplayPublication (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/query/load-subset-retained-publication-oracle.ts:17:25)
+    at checkProgressValue (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts:176:5)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts:255:5
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts:119:11
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:246:7
+    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs:171:9)
+    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs:239:19)
+    at Timeout._onTimeout (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:283:14)
+    at listOnTimeout (node:internal/timers:635:17)
+    at processTimers (node:internal/timers:571:7)
+ ❯ checkReplayPublication packages/db/tests/query/load-subset-retained-publication-oracle.ts:17:25
+     15|   label: string,
+     16| ) {
+     17|   expect(actual, label).toEqual(expected)
+       |                         ^
+     18| }
+     19|
+ ❯ checkProgressValue packages/query-db-collection/tests/queued-answer-progress-oracle.ts:176:5
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.ts:255:5
+ ❯ packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts:119:11
+ ❯ packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:246:7
+ ❯ Object.push scripts/h02-progress/receipt-transport.mjs:171:9
+ ❯ Object.drain scripts/h02-progress/receipt-transport.mjs:239:19
+ ❯ Timeout._onTimeout packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:283:14
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:355:11
+ ❯ packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts:181:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  00:48:33
+   Duration  2.83s (transform 51ms, setup 23ms, import 80ms, tests 2.39s, environment 239ms)
+

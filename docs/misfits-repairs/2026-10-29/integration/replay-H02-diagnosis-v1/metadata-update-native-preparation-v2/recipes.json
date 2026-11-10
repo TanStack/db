@@ -1,0 +1,69 @@
+{
+  "status": "Fresh one-shot universe only; no selector/receiving entry",
+  "universe": {
+    "id": "metadata-update-native20-discovery-v2",
+    "order": 0,
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "argv": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "list",
+      "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "--config",
+      "scripts/h02-progress/vitest.config.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--cache=false",
+      "--json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/names.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+    "envUnset": [
+      "NODE_OPTIONS",
+      "NODE_PATH",
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_CALIBRATION",
+      "H02_PROGRESS_WORKER_HISTORY",
+      "H02_PROGRESS_BINDING_DIR",
+      "H02_PROGRESS_SELECTED_ROOT",
+      "H02_PROGRESS_RECEIPTS",
+      "H02_PROGRESS_SOURCE_FREEZE"
+    ],
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "workerNodeHeapMiB": 384,
+    "outerWallContainmentMs": 30000,
+    "groupRssContainmentBytes": 1073741824,
+    "stdoutPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/stdout.log",
+    "stderrPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/stderr.log",
+    "expectedOutput": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/names.json",
+      "count": 20,
+      "names": [
+        "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0",
+        "queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign",
+        "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+        "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0",
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign",
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay",
+        "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+        "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2",
+        "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0",
+        "queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign",
+        "queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay",
+        "queued-answer metadata receiving > checks metadata 'subscription' 'authored'",
+        "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2",
+        "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0",
+        "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign",
+        "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay"
+      ],
+      "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+    },
+    "status": "UNADMITTED and UNEXECUTED; collection only, no test body/pass/reach credit"
+  }
+}

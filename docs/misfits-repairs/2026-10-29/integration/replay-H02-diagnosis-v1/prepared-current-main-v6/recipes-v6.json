@@ -1,0 +1,62 @@
+{
+  "status": "PROPOSED ONLY; exact independent source/recipe acceptance and root admission required before ONE canonical run; no receiving invocation admitted yet",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source-freeze-v6.json",
+  "sourceFreezeSha256": "6bc7849769b15b3f4ad982f16ef55a0db4f5b674b1fedde72ec0ddf3398256a9",
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+    "-t",
+    "replays the finite five-root queued-answer history"
+  ],
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source-freeze-v6.json"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS"
+  ],
+  "receivingLimits": {
+    "nodeHeapMiB": 384,
+    "sampledGroupRssBytes": 1073741824,
+    "wallMs": 20000
+  },
+  "postRunVerifier": {
+    "timeoutMs": 20000,
+    "nodeHeapMiB": 384,
+    "phase": "only after receiving group exits; separate provenance gate"
+  },
+  "futureCampaigns": {
+    "blockedUntilRootPropertyRegistration": "query.queued-answer-progress",
+    "fixedSeed": 20261029,
+    "baseFamiliesPerCampaign": 8,
+    "scaling": "oracleRuns / oraclePropertyOptions",
+    "sameFamilyDriverAndComparison": true
+  },
+  "afterRun": "If admitted: freeze complete raw output and STOP after one run. No retry or production/model/grammar edits. Send actual outer/receiving PID/PGIDs to root for independent absence check.",
+  "launcher": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/launcher-v6.zsh",
+    "sha256": "cd2136cbd1775d092b5328802d5a1c2f440f5be1850c742ea6897190352f7c0c",
+    "executable": "/bin/zsh",
+    "sandboxPermissions": "require_escalated",
+    "processAccessAuthority": "previously approved process access may be used only after exact acceptance and root admission of this next run",
+    "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v6",
+    "identity": "launcher-process-v6.txt captures pre-exec outer PID/PGID; exec retains identity",
+    "resultLog": "outer-vitest-v6.log",
+    "runtimeStatus": "not executed"
+  },
+  "startupPolicy": "Skip-all-pauses acknowledged before startup Debugger.enable; strict source binding sealed after imports; Debugger.disable acknowledged and session disconnected before drive. No active inspector or precise profiler during DB history."
+}

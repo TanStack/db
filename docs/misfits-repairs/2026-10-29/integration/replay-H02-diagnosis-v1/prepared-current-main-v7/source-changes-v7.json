@@ -1,0 +1,28 @@
+{
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "productionChanged": 0,
+  "sharedChanged": 0,
+  "productModelGrammarDriverBudgetRegistryCoverageChanged": 0,
+  "changes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "previousSha256": "a1a2762148b16db893bb0793796fbea0c55da58d1a045324de9bb625ef770446",
+      "sha256": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524"
+    },
+    {
+      "path": "scripts/h02-progress/checker-calibration.test.ts",
+      "previousSha256": "d0d167b3edbb77be0c6987ea01807c016fa06ff5e718909536471f803a5c3a84",
+      "sha256": "c41c42147071517c33213ced766f434161e8ba53271113792a3cd880be591ced"
+    },
+    {
+      "path": "scripts/h02-progress/receiving-monitor.mjs",
+      "previousSha256": null,
+      "sha256": "1bb6427d29290e12270a09140d36584f3cd3ab8e5bde37cef1f00eb921f8d338"
+    },
+    {
+      "path": "scripts/h02-progress/receiving-monitor.test.mjs",
+      "previousSha256": null,
+      "sha256": "879243ccf34f1d531783117f397cef6947b0b39842afe4079b8b030648b82e29"
+    }
+  ]
+}

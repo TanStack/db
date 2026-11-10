@@ -1,0 +1,3 @@
+V4 source/pure/static preparation only; no receiving admitted. Live delta is the comparison adapter + one held-downstream call, three ordinary pure calibration tests, and an explicit coverage-map scope note. Production, raw driver, shared publication equality/model, expected payloads, five histories/schedules/checkpoints and budgets are unchanged. RED2/17 legitimate-enriched controls on V3 checker; GREEN17/17 after adapter; serial TypeScript, ESLint, changed lint, Prettier passed. Prior eight source/result archives rehashed unchanged.
+
+Independent exact V4 source/recipe review and separate root singleton admission are required before any receiving. No retry, production/candidate edit, install, commit, push or PR is authorized.

@@ -1,0 +1,14 @@
+{
+  "admissionSha256": "4b2084f7333bd92d94a1dc9337dab31352ac894988aa83393d419c476eabfbb9",
+  "nativeLaunchesSoFar": 0,
+  "pins": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/binding.json": "a95dc1d31f59c4c6c39b44864a8f528dcc93583b361eb3f62a62ca4db7e27e34",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/first-command.json": "edf6678933aa512bdcf6ca69ec38322d7a816a63960f93d0b9fb1133082c1eea",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/packet-manifest.json": "001d61d33d25af42ab5afb0c178840eb3f4ccdb9b14c71b8c43a0ca1a121d7f2",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/report.md": "923b1a50c61f4a1669f1de498a72dd885f62ae4233d064b0f47f53d215f0c770"
+  },
+  "proposalSha256": "d129a5e6e107f46ea797a2ce95a5090c422d9c8fa68a83d921ee86734eebe304",
+  "reviewSha256": "e3066d7a6022d9c4268033e0edcb283a04a28d56814f8dadee413ced31a07f5b",
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "status": "root admission, independent proposal/review/audit, four packet pins and source match; output absent before actual launch"
+}

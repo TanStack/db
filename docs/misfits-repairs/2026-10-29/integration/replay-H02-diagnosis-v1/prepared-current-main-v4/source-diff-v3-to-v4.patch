@@ -1,0 +1,274 @@
+--- v3/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
++++ v4/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
+@@ -8,7 +8,7 @@
+   writeFileSync,
+ } from 'node:fs'
+ import { tmpdir } from 'node:os'
+-import { resolve } from 'node:path'
++import { dirname, resolve } from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ import type {
+   ProgressHistory,
+@@ -22,16 +22,44 @@
+  * The 20s/1GiB limits contain the instrument; they are not product deadlines.
+  * Callback/value judgments remain in the oracle, outside this recorder.
+  */
++export function resolveProgressRoot(
++  frozenRoot: string,
++  moduleUrl = import.meta.url,
++): string {
++  // Vitest normalizes the literal new-URL asset pattern to self.location in
++  // jsdom. Read the actual file module URL without that browser asset pattern.
++  // fileURLToPath rejects non-file input; neither cwd nor the freeze can
++  // substitute for an outside or unexpectedly placed supervisor module.
++  const file = fileURLToPath(moduleUrl)
++  const root = resolve(dirname(file), `../../../`)
++  if (
++    file !==
++    resolve(
++      root,
++      `packages/query-db-collection/tests/queued-answer-progress-supervisor.ts`,
++    )
++  )
++    throw new Error(`unexpected progress supervisor location: ${file}`)
++  if (root !== frozenRoot)
++    throw new Error(
++      `progress supervisor root differs from frozen root: ${root}`,
++    )
++  return root
++}
++
+ export async function receiveProgressHistory(
+   history: ProgressHistory,
+   observe: (receipt: ProgressReceipt) => void,
+ ): Promise<ProgressOutcome> {
+-  const root = fileURLToPath(new URL(`../../../`, import.meta.url))
+   const sourceFreeze = process.env.H02_PROGRESS_SOURCE_FREEZE
+   if (!sourceFreeze)
+     throw new Error(
+       `H02_PROGRESS_SOURCE_FREEZE is required before receiving execution`,
+     )
++  const freeze: { worktree: string } = JSON.parse(
++    readFileSync(sourceFreeze, `utf8`),
++  )
++  const root = resolveProgressRoot(freeze.worktree)
+   const directory = resolve(
+     tmpdir(),
+     `h02-progress-${process.pid}-${randomUUID()}`,
+--- v3/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts
++++ v4/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts
+@@ -0,0 +1,21 @@
++import { dirname, resolve } from 'node:path'
++import { URL as NodeURL, fileURLToPath } from 'node:url'
++
++/** Pure setup fixture: no production, Query, supervisor, or history imports. */
++export function observeRootSetup() {
++  const moduleUrl = import.meta.url
++  const relative = `../../../`
++  const GlobalURL = globalThis.URL
++  return {
++    moduleUrl,
++    moduleFilename: import.meta.filename,
++    moduleDirname: import.meta.dirname,
++    locationHref: globalThis.location.href,
++    globalIsNodeURL: GlobalURL === NodeURL,
++    literal: new URL(`../../../`, import.meta.url).href,
++    indirectGlobal: new GlobalURL(relative, moduleUrl).href,
++    nodeLiteral: new NodeURL(`../../../`, import.meta.url).href,
++    nodeIndirect: new NodeURL(relative, moduleUrl).href,
++    resolvedRoot: resolve(dirname(fileURLToPath(moduleUrl)), relative),
++  }
++}
+--- v3/scripts/h02-progress/root-setup-calibration.config.ts
++++ v4/scripts/h02-progress/root-setup-calibration.config.ts
+@@ -0,0 +1,17 @@
++import { defineConfig } from 'vitest/config'
++
++// Match the receiving runner's client/jsdom transform without importing its
++// setup instrument, production aliases, driver, or oracle tests. Tests call
++// only the supervisor's pure root guard; they never invoke receiving.
++export default defineConfig({
++  test: {
++    include: [`scripts/h02-progress/root-setup-calibration.test.ts`],
++    environment: `jsdom`,
++    pool: `forks`,
++    maxWorkers: 1,
++    fileParallelism: false,
++    execArgv: [`--max-old-space-size=384`],
++    coverage: { enabled: false },
++    typecheck: { enabled: false },
++  },
++})
+--- v3/scripts/h02-progress/root-setup-calibration.test.ts
++++ v4/scripts/h02-progress/root-setup-calibration.test.ts
+@@ -0,0 +1,170 @@
++import { createHash } from 'node:crypto'
++import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
++import { resolve } from 'node:path'
++import { URL as NodeURL, pathToFileURL } from 'node:url'
++import { expect, it } from 'vitest'
++import { resolveProgressRoot } from '../../packages/query-db-collection/tests/queued-answer-progress-supervisor.js'
++import { observeRootSetup } from '../../packages/query-db-collection/tests/queued-answer-root-setup-probe.js'
++import type { EvaluatedModules } from 'vite/module-runner'
++
++/**
++ * This unit calibration records actual primitives and actual evaluated fixture
++ * code in the same client/jsdom transform as the failed outer test. It never
++ * invokes a receiving driver, production, Query, or histories. The supervisor
++ * module exports the pure root guard; importing it starts no process or load.
++ */
++it(`separates client URL normalization from module and global URL semantics`, () => {
++  const directory = process.env.H02_ROOT_SETUP_CALIBRATION_DIR
++  const freezePath = process.env.H02_PROGRESS_SOURCE_FREEZE
++  if (!directory || !freezePath)
++    throw new Error(`setup calibration paths required`)
++  const freeze: { worktree: string } = JSON.parse(
++    readFileSync(freezePath, `utf8`),
++  )
++  const observations = observeRootSetup()
++  const state: unknown = Reflect.get(globalThis, `__vitest_worker__`)
++  if (
++    typeof state !== `object` ||
++    state === null ||
++    !(`evaluatedModules` in state)
++  )
++    throw new Error(`actual evaluated-module registry missing`)
++  const modules = state.evaluatedModules as EvaluatedModules
++  const file = resolve(
++    freeze.worktree,
++    `packages/query-db-collection/tests/queued-answer-root-setup-probe.ts`,
++  )
++  const module = [...modules.idToModuleMap.values()].find(
++    (entry) => entry.file === file,
++  )
++  const code =
++    module?.meta && `code` in module.meta ? module.meta.code : undefined
++  if (!module || !code) throw new Error(`actual evaluated fixture code missing`)
++  mkdirSync(directory, { recursive: true })
++  writeFileSync(resolve(directory, `fixture-evaluated-code.txt`), code)
++  writeFileSync(
++    resolve(directory, `observations.json`),
++    JSON.stringify(
++      {
++        ...observations,
++        fixture: {
++          id: module.id,
++          file: module.file,
++          url: module.url,
++          evaluated: module.evaluated,
++          originalSha256: createHash(`sha256`)
++            .update(readFileSync(file))
++            .digest(`hex`),
++          codeSha256: createHash(`sha256`).update(code).digest(`hex`),
++        },
++        scope: `pure setup fixture; no receiving or product evidence`,
++      },
++      null,
++      2,
++    ),
++  )
++  expect(module.evaluated).toBe(true)
++  expect(new NodeURL(observations.moduleUrl).protocol).toBe(`file:`)
++  expect(code).toContain(`self.location`)
++  expect(new NodeURL(observations.literal).protocol).toBe(
++    new NodeURL(observations.locationHref).protocol,
++  )
++  expect(new NodeURL(observations.indirectGlobal).protocol).toBe(`file:`)
++  expect(new NodeURL(observations.nodeLiteral).protocol).toBe(`file:`)
++  expect(new NodeURL(observations.nodeIndirect).protocol).toBe(`file:`)
++  expect(observations.indirectGlobal).toBe(observations.nodeIndirect)
++  expect(observations.resolvedRoot).toBe(freeze.worktree)
++})
++
++it(`derives the actual supervisor root and rejects stale or substituted paths`, () => {
++  const directory = process.env.H02_ROOT_SETUP_CALIBRATION_DIR
++  const freezePath = process.env.H02_PROGRESS_SOURCE_FREEZE
++  if (!directory || !freezePath)
++    throw new Error(`setup calibration paths required`)
++  const freeze: { worktree: string } = JSON.parse(
++    readFileSync(freezePath, `utf8`),
++  )
++  const actualRoot = resolveProgressRoot(freeze.worktree)
++  expect(actualRoot).toBe(freeze.worktree)
++  const file = resolve(
++    freeze.worktree,
++    `packages/query-db-collection/tests/queued-answer-progress-supervisor.ts`,
++  )
++  const fileUrl = pathToFileURL(file).href
++  expect(resolveProgressRoot(freeze.worktree, fileUrl)).toBe(freeze.worktree)
++  expect(() =>
++    resolveProgressRoot(`${freeze.worktree}-other`, fileUrl),
++  ).toThrow(`differs from frozen root`)
++  expect(() =>
++    resolveProgressRoot(freeze.worktree, `https://stale.invalid/supervisor.ts`),
++  ).toThrow(`scheme file`)
++  expect(() =>
++    resolveProgressRoot(
++      freeze.worktree,
++      pathToFileURL(
++        `/outside/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts`,
++      ).href,
++    ),
++  ).toThrow(`differs from frozen root`)
++  expect(() =>
++    resolveProgressRoot(
++      freeze.worktree,
++      pathToFileURL(
++        resolve(
++          freeze.worktree,
++          `packages/query-db-collection/dist/queued-answer-progress-supervisor.js`,
++        ),
++      ).href,
++    ),
++  ).toThrow(`unexpected progress supervisor location`)
++  expect(() =>
++    resolveProgressRoot(
++      freeze.worktree,
++      pathToFileURL(
++        resolve(
++          freeze.worktree,
++          `packages/query-db-collection/tests/substituted-supervisor.ts`,
++        ),
++      ).href,
++    ),
++  ).toThrow(`unexpected progress supervisor location`)
++  const state: unknown = Reflect.get(globalThis, `__vitest_worker__`)
++  if (
++    typeof state !== `object` ||
++    state === null ||
++    !(`evaluatedModules` in state)
++  )
++    throw new Error(`actual evaluated-module registry missing`)
++  const modules = state.evaluatedModules as EvaluatedModules
++  const module = [...modules.idToModuleMap.values()].find(
++    (entry) => entry.file === file,
++  )
++  const code =
++    module?.meta && `code` in module.meta ? module.meta.code : undefined
++  if (!module || !code)
++    throw new Error(`actual evaluated supervisor code missing`)
++  expect(module.evaluated).toBe(true)
++  expect(code).not.toContain(`self.location`)
++  writeFileSync(resolve(directory, `supervisor-evaluated-code.txt`), code)
++  writeFileSync(
++    resolve(directory, `supervisor-setup-observation.json`),
++    JSON.stringify(
++      {
++        actualRoot,
++        module: {
++          file: module.file,
++          id: module.id,
++          url: module.url,
++          evaluated: module.evaluated,
++        },
++        originalSha256: createHash(`sha256`)
++          .update(readFileSync(file))
++          .digest(`hex`),
++        codeSha256: createHash(`sha256`).update(code).digest(`hex`),
++        limits: `pure root guard only; no receiveProgressHistory or receiving process invoked`,
++      },
++      null,
++      2,
++    ),
++  )
++})

@@ -1,0 +1,187 @@
+import { compareKeys } from "@tanstack/db-ivm";
+import { compareKeysReversed } from "../utils/array-utils.js";
+import { BTree } from "../utils/btree.js";
+import { areSameValueZeroEqual, normalizeValue } from "../utils/comparison.js";
+import { codedMessage, devBuild } from "../error-message.js";
+import {
+  BaseIndex,
+  builtInIndexResolverNames,
+  warnRemovalFailure
+} from "./base-index.js";
+export class BTreeIndex extends BaseIndex {
+  constructor() {
+    super(...arguments);
+    this.orderedEntries = new BTree(
+      (a, b) => this.compareFn(a.value, b.value)
+    );
+    this.valueMap = /* @__PURE__ */ new Map();
+    this.indexedKeys = /* @__PURE__ */ new Set();
+  }
+  add(key, item) {
+    const value = this.evaluateAddedValue(key, item);
+    const exact = normalizeValue(value);
+    this.addToBucket(key, value, exact);
+    this.addRangeValue(value);
+    this.indexedKeys.add(key);
+  }
+  addToBucket(key, value, exact) {
+    const group = this.valueMap.get(exact);
+    if (group) {
+      group.keys.set(key, value);
+      group.buckets?.get(exact).add(key);
+      return;
+    }
+    const ordered = this.orderedEntries.get({ value });
+    if (ordered) {
+      ordered.buckets ??= /* @__PURE__ */ new Map([
+        [normalizeValue(ordered.value), new Set(ordered.keys.keys())]
+      ]);
+      ordered.buckets.set(exact, /* @__PURE__ */ new Set([key]));
+      ordered.keys.set(key, value);
+      this.valueMap.set(exact, ordered);
+    } else {
+      const created = {
+        value,
+        keys: /* @__PURE__ */ new Map([[key, value]]),
+        representativeKey: key
+      };
+      this.orderedEntries.set(created, created);
+      this.valueMap.set(exact, created);
+    }
+  }
+  remove(key, item) {
+    let value;
+    try {
+      value = this.evaluateIndexExpression(item);
+    } catch (error) {
+      warnRemovalFailure(key, error);
+      return;
+    }
+    const exact = normalizeValue(value);
+    this.removeFromBucket(key, exact);
+    this.removeRangeValue(value);
+    this.indexedKeys.delete(key);
+  }
+  removeFromBucket(key, exact) {
+    const group = this.valueMap.get(exact);
+    if (!group?.keys.has(key)) return;
+    const bucket = group.buckets?.get(exact);
+    if (group.buckets && !bucket?.has(key)) return;
+    if (group.keys.size === 1) {
+      this.orderedEntries.delete(group);
+    }
+    bucket?.delete(key);
+    group.keys.delete(key);
+    if (bucket?.size === 0 || group.keys.size === 0) {
+      this.valueMap.delete(exact);
+      group.buckets?.delete(exact);
+    }
+    if (group.keys.size && group.representativeKey === key) {
+      const [nextKey, nextValue] = (group.nextRepresentative ??= group.keys.entries()).next().value;
+      group.representativeKey = nextKey;
+      group.value = nextValue;
+    }
+  }
+  update(key, oldItem, newItem) {
+    let oldValue;
+    let newValue;
+    try {
+      oldValue = this.evaluateIndexExpression(oldItem);
+      newValue = this.evaluateIndexExpression(newItem);
+    } catch {
+      this.remove(key, oldItem);
+      this.add(key, newItem);
+      return;
+    }
+    const oldExact = normalizeValue(oldValue);
+    const newExact = normalizeValue(newValue);
+    const group = this.valueMap.get(newExact);
+    const containsKey = group?.buckets ? group.buckets.get(newExact)?.has(key) : group?.keys.has(key);
+    if (areSameValueZeroEqual(oldExact, newExact) && containsKey) {
+      group.keys.set(key, newValue);
+      if (group.representativeKey === key) group.value = newValue;
+      this.removeRangeValue(oldValue);
+      this.addRangeValue(newValue);
+      return;
+    }
+    this.removeFromBucket(key, oldExact);
+    this.removeRangeValue(oldValue);
+    this.addToBucket(key, newValue, newExact);
+    this.addRangeValue(newValue);
+    this.indexedKeys.add(key);
+  }
+  build(entries) {
+    this.clear();
+    for (const [key, item] of entries) this.add(key, item);
+  }
+  clear() {
+    this.orderedEntries.clear();
+    this.valueMap.clear();
+    this.indexedKeys.clear();
+    this.clearRangeValues();
+  }
+  lookup(operation, value) {
+    const result = this.lookupSupportedOperation(operation, value);
+    if (result !== void 0) return result;
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Operation ${operation} not supported by BTreeIndex` : codedMessage(101, { operation })
+    );
+  }
+  get keyCount() {
+    return this.indexedKeys.size;
+  }
+  equalityLookup(value) {
+    return new Set(this.exactBucketKeys(value));
+  }
+  exactBucketKeys(value) {
+    const exact = normalizeValue(value);
+    const group = this.valueMap.get(exact);
+    return group?.buckets ? group.buckets.get(exact) : group?.keys.keys();
+  }
+  rangeQuery(options = {}) {
+    const result = /* @__PURE__ */ new Set();
+    if (this.orderedEntries.size === 0) return result;
+    const { from, to, fromInclusive = true, toInclusive = true } = options;
+    const low = "from" in options ? { value: from } : this.orderedEntries.minKey();
+    const high = "to" in options ? { value: to } : this.orderedEntries.maxKey();
+    this.orderedEntries.forRange(
+      low,
+      high,
+      !("to" in options) || toInclusive,
+      (sortKey, group) => {
+        if ("from" in options && !fromInclusive && this.compareFn(sortKey.value, from) === 0)
+          return;
+        for (const key of group.keys.keys()) result.add(key);
+      }
+    );
+    return result;
+  }
+  takeInternal(n, from, filterFn, reversed) {
+    const result = [];
+    let pair = reversed ? this.orderedEntries.nextLowerPair(from) : this.orderedEntries.nextHigherPair(from);
+    while (pair && result.length < n) {
+      for (const key of [...pair[1].keys.keys()].sort(
+        reversed ? compareKeysReversed : compareKeys
+      )) {
+        if (filterFn?.(key) ?? true) result.push(key);
+        if (result.length >= n) break;
+      }
+      if (result.length >= n) break;
+      pair = reversed ? this.orderedEntries.nextLowerPair(pair[0]) : this.orderedEntries.nextHigherPair(pair[0]);
+    }
+    return result;
+  }
+  take(n, from, filterFn) {
+    return this.takeInternal(n, { value: from }, filterFn, false);
+  }
+  takeFromStart(n, filterFn) {
+    return this.takeInternal(n, void 0, filterFn, false);
+  }
+  takeReversed(n, from, filterFn) {
+    return this.takeInternal(n, { value: from }, filterFn, true);
+  }
+  takeReversedFromEnd(n, filterFn) {
+    return this.takeInternal(n, void 0, filterFn, true);
+  }
+}
+builtInIndexResolverNames.set(BTreeIndex, "BTreeIndex");

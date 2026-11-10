@@ -1,0 +1,21 @@
+{
+  "status": "prospective actual launcher; no admission or execution",
+  "nativeRecipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+  "nativeRecipeSha256": "a454b52a8c6fae157b154d203ee7c976e93f6bb99e75e1565ac8982692038a45",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/source-freeze-v1.json",
+  "sourceFreezeSha256": "0a1978c5a8856da7aab49379462dd5f258f75b7ba910454eed320f3018f13779",
+  "inputFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/input-freeze-v1.json",
+  "inputFreezeSha256": "2777d9652b05480948130b228c9c4bf8c204cb7906b3fa4e8720decb31c1277c",
+  "actualExecCommandIfAdmitted": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the exact admitted H02 baseline launcher outside the sandbox so its owned native process groups can be contained and cleaned up.",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 3000
+  },
+  "permissionAppliesTo": "the actual parent launcher exec_command; an escalated ps preflight alone is insufficient",
+  "secondaryPriorNativeGroupKillEperm": "unresolved; outerabsence does not validate inner failure kill",
+  "requiresNewRootAdmission": true,
+  "runtime": 0
+}

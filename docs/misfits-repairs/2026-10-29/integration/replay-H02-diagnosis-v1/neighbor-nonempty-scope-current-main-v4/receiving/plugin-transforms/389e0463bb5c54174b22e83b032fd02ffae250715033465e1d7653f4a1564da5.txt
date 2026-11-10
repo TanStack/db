@@ -1,0 +1,438 @@
+import { DEFAULT_COMPARE_OPTIONS } from "../utils.js";
+import { ReverseIndex } from "../indexes/reverse-index.js";
+import { hasVirtualPropPath } from "../virtual-props.js";
+import { makeComparator } from "./comparison.js";
+export function supportsOrderedIndexStructure(index) {
+  return index.supports(`gt`) && index.supportsRangeOptimization;
+}
+export function supportsOrderedRange(index) {
+  return supportsOrderedIndexStructure(index) && !!index.supportsOrderOptimization;
+}
+export function findIndexForField(collection, fieldPath, compareOptions, canUse) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return void 0;
+  }
+  const compareOpts = compareOptions ?? {
+    ...DEFAULT_COMPARE_OPTIONS,
+    ...collection.compareOptions
+  };
+  for (const index of collection.indexes.values()) {
+    if (index.matchesField(fieldPath) && index.matchesCompareOptions(compareOpts)) {
+      const reader = !index.matchesDirection(compareOpts.direction) ? (
+        // Reversing the index also reverses where it keeps nulls, so the
+        // reader moves them back to the requested end.
+        new ReverseIndex(index, compareOpts.nulls === `first`)
+      ) : index;
+      if (!canUse || canUse(reader)) return reader;
+    }
+  }
+  return void 0;
+}
+export function intersectSets(sets) {
+  if (sets.length === 0) return /* @__PURE__ */ new Set();
+  if (sets.length === 1) return new Set(sets[0]);
+  let result = new Set(sets[0]);
+  for (let i = 1; i < sets.length; i++) {
+    const newResult = /* @__PURE__ */ new Set();
+    for (const item of result) {
+      if (sets[i].has(item)) {
+        newResult.add(item);
+      }
+    }
+    result = newResult;
+  }
+  return result;
+}
+export function unionSets(sets) {
+  const result = /* @__PURE__ */ new Set();
+  for (const set of sets) {
+    for (const item of set) {
+      result.add(item);
+    }
+  }
+  return result;
+}
+function isExactComparisonValue(value) {
+  return value != null;
+}
+function usesNonLexicalStringSort(collection) {
+  const opts = { ...DEFAULT_COMPARE_OPTIONS, ...collection.compareOptions };
+  return opts.stringSort !== `lexical`;
+}
+function isRangeOrderingDivergent(value, collection) {
+  switch (typeof value) {
+    case `number`:
+    case `bigint`:
+    case `boolean`:
+      return false;
+    case `string`:
+      return usesNonLexicalStringSort(collection);
+    case `symbol`:
+      return true;
+    case `object`: {
+      if (value === null) return false;
+      return !(value instanceof Date);
+    }
+    default:
+      return false;
+  }
+}
+function canRangeOptimize(value, index, collection) {
+  return !isRangeOrderingDivergent(value, collection) && index.supportsRangeOptimization && (index.canOptimizeRangeFor?.(value) ?? true);
+}
+export function optimizeExpressionWithIndexes(expression, collection) {
+  return optimizeQueryRecursive(expression, collection);
+}
+function optimizeQueryRecursive(expression, collection) {
+  if (expression.type === `func`) {
+    switch (expression.name) {
+      case `eq`:
+      case `gt`:
+      case `gte`:
+      case `lt`:
+      case `lte`:
+        return optimizeSimpleComparison(expression, collection);
+      case `and`:
+        return optimizeAndExpression(expression, collection);
+      case `or`:
+        return optimizeOrExpression(expression, collection);
+      case `in`:
+        return optimizeInArrayExpression(expression, collection);
+    }
+  }
+  return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+}
+export function canOptimizeExpression(expression, collection) {
+  if (expression.type === `func`) {
+    switch (expression.name) {
+      case `eq`:
+      case `gt`:
+      case `gte`:
+      case `lt`:
+      case `lte`:
+        return canOptimizeSimpleComparison(expression, collection);
+      case `and`:
+        return canOptimizeAndExpression(expression, collection);
+      case `or`:
+        return canOptimizeOrExpression(expression, collection);
+      case `in`:
+        return canOptimizeInArrayExpression(expression, collection);
+    }
+  }
+  return false;
+}
+function optimizeCompoundRangeQuery(expression, collection) {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return {
+      canOptimize: false,
+      matchingKeys: /* @__PURE__ */ new Set(),
+      isExact: false,
+      coveredArgIndices: /* @__PURE__ */ new Set()
+    };
+  }
+  const fieldOperations = /* @__PURE__ */ new Map();
+  for (const [argIndex, arg] of expression.args.entries()) {
+    if (arg.type === `func` && [`gt`, `gte`, `lt`, `lte`].includes(arg.name)) {
+      const rangeOp = arg;
+      if (rangeOp.args.length === 2) {
+        const leftArg = rangeOp.args[0];
+        const rightArg = rangeOp.args[1];
+        let fieldArg = null;
+        let valueArg = null;
+        let operation = rangeOp.name;
+        if (leftArg.type === `ref` && rightArg.type === `val`) {
+          fieldArg = leftArg;
+          valueArg = rightArg;
+        } else if (leftArg.type === `val` && rightArg.type === `ref`) {
+          fieldArg = rightArg;
+          valueArg = leftArg;
+          switch (operation) {
+            case `gt`:
+              operation = `lt`;
+              break;
+            case `gte`:
+              operation = `lte`;
+              break;
+            case `lt`:
+              operation = `gt`;
+              break;
+            case `lte`:
+              operation = `gte`;
+              break;
+          }
+        }
+        if (fieldArg && valueArg) {
+          const fieldPath = fieldArg.path;
+          const fieldKey = JSON.stringify(fieldPath);
+          const value = valueArg.value;
+          if (!fieldOperations.has(fieldKey)) {
+            fieldOperations.set(fieldKey, []);
+          }
+          fieldOperations.get(fieldKey).push({ operation, value, argIndex });
+        }
+      }
+    }
+  }
+  for (const [fieldKey, operations] of fieldOperations) {
+    if (operations.length >= 2) {
+      const fieldPath = JSON.parse(fieldKey);
+      const index = findIndexForField(collection, fieldPath);
+      if (index && operations.some((op) => !canRangeOptimize(op.value, index, collection))) {
+        continue;
+      }
+      if (index && index.supports(`gt`) && index.supports(`lt`)) {
+        const compare = makeComparator({
+          ...DEFAULT_COMPARE_OPTIONS,
+          ...collection.compareOptions,
+          direction: `asc`
+        });
+        let from = void 0;
+        let to = void 0;
+        let hasFromBound = false;
+        let hasToBound = false;
+        let fromInclusive = true;
+        let toInclusive = true;
+        let hasNonComparableBound = false;
+        for (const { operation, value } of operations) {
+          if (!isExactComparisonValue(value)) {
+            hasNonComparableBound = true;
+            continue;
+          }
+          switch (operation) {
+            case `gt`:
+            case `gte`: {
+              const cmp = hasFromBound ? compare(value, from) : 1;
+              if (cmp > 0) {
+                from = value;
+                hasFromBound = true;
+                fromInclusive = operation === `gte`;
+              } else if (cmp === 0 && operation === `gt`) {
+                fromInclusive = false;
+              }
+              break;
+            }
+            case `lt`:
+            case `lte`: {
+              const cmp = hasToBound ? compare(value, to) : -1;
+              if (cmp < 0) {
+                to = value;
+                hasToBound = true;
+                toInclusive = operation === `lte`;
+              } else if (cmp === 0 && operation === `lt`) {
+                toInclusive = false;
+              }
+              break;
+            }
+          }
+        }
+        const rangeOptions = {};
+        if (hasFromBound) {
+          rangeOptions.from = from;
+          rangeOptions.fromInclusive = fromInclusive;
+        }
+        if (hasToBound) {
+          rangeOptions.to = to;
+          rangeOptions.toInclusive = toInclusive;
+        }
+        const matchingKeys = index.rangeQuery(rangeOptions);
+        return {
+          canOptimize: true,
+          matchingKeys,
+          // The range result is exact only when it cannot include rows with a
+          // nullish indexed value (which a comparison would reject but the
+          // index returns, as they sort as the smallest key). That requires a
+          // non-nullish lower bound to exclude them: without `hasFromBound`
+          // the range is open at the bottom and captures those rows, and a
+          // non-comparable bound value (`hasNonComparableBound`) can never
+          // bound them out.
+          isExact: hasFromBound && !hasNonComparableBound,
+          coveredArgIndices: new Set(operations.map((op) => op.argIndex))
+        };
+      }
+    }
+  }
+  return {
+    canOptimize: false,
+    matchingKeys: /* @__PURE__ */ new Set(),
+    isExact: false,
+    coveredArgIndices: /* @__PURE__ */ new Set()
+  };
+}
+function optimizeSimpleComparison(expression, collection) {
+  if (expression.type !== `func` || expression.args.length !== 2) {
+    return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+  }
+  const leftArg = expression.args[0];
+  const rightArg = expression.args[1];
+  let fieldArg = null;
+  let valueArg = null;
+  let operation = expression.name;
+  if (leftArg.type === `ref` && rightArg.type === `val`) {
+    fieldArg = leftArg;
+    valueArg = rightArg;
+  } else if (leftArg.type === `val` && rightArg.type === `ref`) {
+    fieldArg = rightArg;
+    valueArg = leftArg;
+    switch (operation) {
+      case `gt`:
+        operation = `lt`;
+        break;
+      case `gte`:
+        operation = `lte`;
+        break;
+      case `lt`:
+        operation = `gt`;
+        break;
+      case `lte`:
+        operation = `gte`;
+        break;
+    }
+  }
+  if (fieldArg && valueArg) {
+    const fieldPath = fieldArg.path;
+    const index = findIndexForField(collection, fieldPath);
+    if (index) {
+      const queryValue = valueArg.value;
+      const indexOperation = operation;
+      if (!index.supports(indexOperation)) {
+        return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+      }
+      if ((operation === `gt` || operation === `gte` || operation === `lt` || operation === `lte`) && !canRangeOptimize(queryValue, index, collection)) {
+        return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+      }
+      const matchingKeys = index.lookup(indexOperation, queryValue);
+      const isExact = operation === `lt` || operation === `lte` ? false : isExactComparisonValue(queryValue);
+      return { canOptimize: true, matchingKeys, isExact };
+    }
+  }
+  return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+}
+function canOptimizeSimpleComparison(expression, collection) {
+  if (expression.type !== `func` || expression.args.length !== 2) {
+    return false;
+  }
+  const leftArg = expression.args[0];
+  const rightArg = expression.args[1];
+  let fieldPath = null;
+  if (leftArg.type === `ref` && rightArg.type === `val`) {
+    fieldPath = leftArg.path;
+  } else if (leftArg.type === `val` && rightArg.type === `ref`) {
+    fieldPath = rightArg.path;
+  }
+  if (fieldPath) {
+    const index = findIndexForField(collection, fieldPath);
+    return index !== void 0;
+  }
+  return false;
+}
+function optimizeAndExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+  }
+  const compoundRangeResult = optimizeCompoundRangeQuery(expression, collection);
+  const coveredArgIndices = compoundRangeResult.canOptimize ? compoundRangeResult.coveredArgIndices : /* @__PURE__ */ new Set();
+  const results = [];
+  if (compoundRangeResult.canOptimize) {
+    results.push(compoundRangeResult);
+  }
+  let allConjunctsExact = !compoundRangeResult.canOptimize ? true : compoundRangeResult.isExact;
+  for (const [argIndex, arg] of expression.args.entries()) {
+    if (coveredArgIndices.has(argIndex)) {
+      continue;
+    }
+    const result = optimizeQueryRecursive(arg, collection);
+    if (result.canOptimize) {
+      results.push(result);
+      if (!result.isExact) {
+        allConjunctsExact = false;
+      }
+    } else {
+      allConjunctsExact = false;
+    }
+  }
+  if (results.length > 0) {
+    const allMatchingSets = results.map((r) => r.matchingKeys);
+    const intersectedKeys = intersectSets(allMatchingSets);
+    return {
+      canOptimize: true,
+      matchingKeys: intersectedKeys,
+      isExact: allConjunctsExact
+    };
+  }
+  return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+}
+function canOptimizeAndExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return false;
+  }
+  return expression.args.some((arg) => canOptimizeExpression(arg, collection));
+}
+function optimizeOrExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+  }
+  const results = [];
+  for (const arg of expression.args) {
+    const result = optimizeQueryRecursive(arg, collection);
+    if (!result.canOptimize) {
+      return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+    }
+    results.push(result);
+  }
+  const allMatchingSets = results.map((r) => r.matchingKeys);
+  const unionedKeys = unionSets(allMatchingSets);
+  return {
+    canOptimize: true,
+    matchingKeys: unionedKeys,
+    // An inexact (superset) disjunct makes the union a superset as well
+    isExact: results.every((r) => r.isExact)
+  };
+}
+function canOptimizeOrExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return false;
+  }
+  return expression.args.every((arg) => canOptimizeExpression(arg, collection));
+}
+function optimizeInArrayExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length !== 2) {
+    return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+  }
+  const fieldArg = expression.args[0];
+  const arrayArg = expression.args[1];
+  if (fieldArg.type === `ref` && arrayArg.type === `val` && Array.isArray(arrayArg.value)) {
+    const fieldPath = fieldArg.path;
+    const values = arrayArg.value;
+    const index = findIndexForField(collection, fieldPath);
+    const isExact = values.every((value) => isExactComparisonValue(value));
+    if (index) {
+      if (index.supports(`in`)) {
+        const matchingKeys = index.lookup(`in`, values);
+        return { canOptimize: true, matchingKeys, isExact };
+      } else if (index.supports(`eq`)) {
+        const matchingKeys = /* @__PURE__ */ new Set();
+        for (const value of values) {
+          const keysForValue = index.lookup(`eq`, value);
+          for (const key of keysForValue) {
+            matchingKeys.add(key);
+          }
+        }
+        return { canOptimize: true, matchingKeys, isExact };
+      }
+    }
+  }
+  return { canOptimize: false, matchingKeys: /* @__PURE__ */ new Set(), isExact: false };
+}
+function canOptimizeInArrayExpression(expression, collection) {
+  if (expression.type !== `func` || expression.args.length !== 2) {
+    return false;
+  }
+  const fieldArg = expression.args[0];
+  const arrayArg = expression.args[1];
+  if (fieldArg.type === `ref` && arrayArg.type === `val` && Array.isArray(arrayArg.value)) {
+    const fieldPath = fieldArg.path;
+    const index = findIndexForField(collection, fieldPath);
+    return index !== void 0;
+  }
+  return false;
+}

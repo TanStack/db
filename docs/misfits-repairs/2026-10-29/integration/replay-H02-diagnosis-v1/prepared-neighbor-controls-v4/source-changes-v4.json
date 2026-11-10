@@ -1,0 +1,19 @@
+{
+  "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+    "beforeSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed",
+    "afterSha256": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c"
+  },
+  "scripts/h02-progress/checker-calibration.test.ts": {
+    "beforeSha256": "c41c42147071517c33213ced766f434161e8ba53271113792a3cd880be591ced",
+    "afterSha256": "268c738cd9b1452f188892e435fe66086124884cd9647b1e79e2c5f7c2d6bca4"
+  },
+  "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": {
+    "beforeSha256": "ad43de0acf2c61d0edcfe0f6b663b30861eb6c277a7029786d5c555c0c1b86e7",
+    "afterSha256": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436"
+  },
+  "docs/contributing/oracle-coverage.md": {
+    "beforeSha256": "6552b56974de18425a806098246a337fcf740fc24f09e243581fa71306446c01",
+    "afterSha256": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a",
+    "beforeAuthority": "clean current-main worktree HEAD; no prior local doc change"
+  }
+}

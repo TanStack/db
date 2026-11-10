@@ -1,0 +1,11 @@
+import { codedMessage, devBuild } from "../../error-message.js";
+export function getQueryIR(builder) {
+  const value = builder;
+  if (value === void 0 || value === null) {
+    const received = value === null ? `null` : `undefined`;
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Query must resolve to a QueryBuilder; received ${received}.` : codedMessage(237, { received })
+    );
+  }
+  return builder._getQuery();
+}

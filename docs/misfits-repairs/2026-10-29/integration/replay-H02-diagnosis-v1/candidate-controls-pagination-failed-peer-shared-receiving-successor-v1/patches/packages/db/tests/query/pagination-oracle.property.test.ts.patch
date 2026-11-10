@@ -1,0 +1,250 @@
+--- before/packages/db/tests/query/pagination-oracle.property.test.ts
++++ after/packages/db/tests/query/pagination-oracle.property.test.ts
+@@ -20,6 +20,15 @@
+ import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+ import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+ import { cleanupAll } from './pagination-support.js'
++import {
++  checkRetainedWindowSnapshot,
++  referenceJoinedWindowRows,
++  referenceWindowRows,
++} from './pagination-window-publication-oracle.js'
++import type {
++  JoinedWindowRow,
++  PaginationWindow,
++} from './pagination-window-publication-oracle.js'
+ import type { PageRow } from './pagination-support.js'
+ import type {
+   ChangeMessage,
+@@ -119,11 +128,6 @@
+   direction: `asc` | `desc`
+ }
+ 
+-type PaginationWindow = {
+-  offset: number
+-  limit: number
+-}
+-
+ type PaginationScenario = {
+   ranks: ReadonlyArray<number>
+   keeps?: ReadonlyArray<boolean>
+@@ -364,7 +368,7 @@
+ }
+ type JoinedWindowFailureReach =
+   | `joined-window-held`
+-  | `source-failed-peer-pending`
++  | `source-failure-handled`
+   | `failed-window-retained`
+   | `retry-published`
+   | `successful-window-published`
+@@ -631,32 +635,6 @@
+   window: PaginationWindow,
+ ): Array<number> {
+   return referenceWindowRows(rows, direction, window).map(({ id }) => id)
+-}
+-
+-function referenceWindowRows(
+-  rows: ReadonlyArray<PageRow>,
+-  direction: `asc` | `desc`,
+-  window: PaginationWindow,
+-): Array<PageRow> {
+-  return [...rows]
+-    .sort((left, right) => {
+-      // The public NaN contract places NaN after finite ranks in ascending
+-      // order. The key breaks ties between equal ranks, including two NaNs.
+-      const rankOrder = Number.isNaN(left.rank)
+-        ? Number.isNaN(right.rank)
+-          ? 0
+-          : 1
+-        : Number.isNaN(right.rank)
+-          ? -1
+-          : left.rank < right.rank
+-            ? -1
+-            : left.rank > right.rank
+-              ? 1
+-              : 0
+-      return rankOrder * (direction === `asc` ? 1 : -1) || left.id - right.id
+-    })
+-    .slice(window.offset, window.offset + window.limit)
+-    .map(({ id, rank }) => ({ id, rank }))
+ }
+ 
+ function expectWindowRows(
+@@ -2429,7 +2407,7 @@
+  * Authority: ARCHITECTURE.md, "Atomic window publication". The earlier
+  * failed-window mutation driver checks this with one ordered acquisition.
+  * This driver varies the missing dependent-source schedule with the same
+- * independent referenceWindowRows and complete-baseline rule.
++ * shared independent referenceJoinedWindowRows and retained-snapshot judgment.
+  *
+  * A settled prefix precedes one wider move. Its root page applies, then the
+  * anti-join and include each hold an original source-load promise for the new
+@@ -2467,13 +2445,18 @@
+   ])
+   const baselineWindow = { offset: 0, limit: scenario.initialLimit }
+   const targetWindow = { offset: 0, limit: scenario.initialLimit + 1 }
+-  const baseline = referenceWindowRows(
+-    truth,
++  const facts = {
++    roots: truth,
++    marked: marked.map(({ rowId }) => rowId),
++    children,
++  }
++  const baseline = referenceJoinedWindowRows(
++    facts,
+     scenario.direction,
+     baselineWindow,
+   )
+-  const complete = referenceWindowRows(
+-    truth.filter(({ id }) => !marked.some(({ rowId }) => rowId === id)),
++  const complete = referenceJoinedWindowRows(
++    facts,
+     scenario.direction,
+     targetWindow,
+   )
+@@ -2486,6 +2469,7 @@
+     deferred: ReturnType<typeof createDeferred<void>>
+     receipt?: true | Promise<void>
+     outcome?: `fulfilled` | `rejected`
++    error?: unknown
+   }
+   let holding = false
+   const controlled = <Row extends { id: number }>(
+@@ -2537,7 +2521,10 @@
+         else
+           void receipt.then(
+             () => (load.outcome = `fulfilled`),
+-            () => (load.outcome = `rejected`),
++            (error: unknown) => {
++              load.outcome = `rejected`
++              load.error = error
++            },
+           )
+       }
+       return receipt
+@@ -2580,13 +2567,14 @@
+           q
+             .from({ child: peer.source })
+             .where(({ child }) => eq(child.parent, row.id))
++            .orderBy(({ child }) => child.id)
+             .select(({ child }) => child.id),
+         ),
+       })),
+   )
+   type Cut = {
+     boundary: `callback` | `checkpoint`
+-    rows: Array<PublicPageRow>
++    rows: Array<JoinedWindowRow>
+     window: ReturnType<typeof live.utils.getWindow>
+     afterFailureRequest: boolean
+   }
+@@ -2596,7 +2584,11 @@
+     const window = live.utils.getWindow()
+     cuts.push({
+       boundary,
+-      rows: live.toArray.map(projectPageRow),
++      rows: live.toArray.map(({ id, rank, children }) => ({
++        id,
++        rank,
++        children: [...children],
++      })),
+       window: window && { ...window },
+       afterFailureRequest: failureRequested,
+     })
+@@ -2604,16 +2596,12 @@
+   let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+   const checkRetained = () => {
+     capture(`checkpoint`)
+-    for (const cut of cuts) {
+-      expect(
+-        cut.rows,
+-        `failed joined window retains baseline at ${cut.boundary}`,
+-      ).toStrictEqual(baseline)
+-      expect(
+-        cut.window,
+-        `failed joined window retains settled window`,
+-      ).toStrictEqual(baselineWindow)
+-    }
++    for (const cut of cuts)
++      checkRetainedWindowSnapshot(
++        { rows: baseline, window: baselineWindow },
++        cut,
++        `primary ${cut.boundary}`,
++      )
+   }
+   const failure = new Error(`joined window source failed`)
+   let operation: true | Promise<void> | undefined
+@@ -2635,7 +2623,13 @@
+   return withHistoryCleanup(
+     async () => {
+       await live.preload()
+-      expect(live.toArray.map(projectPageRow)).toStrictEqual(baseline)
++      expect(
++        live.toArray.map(({ id, rank, children }) => ({
++          id,
++          rank,
++          children: [...children],
++        })),
++      ).toStrictEqual(baseline)
+       subscription = live.subscribeChanges(() => capture(`callback`), {
+         includeInitialState: false,
+       })
+@@ -2690,10 +2684,23 @@
+           failure,
+         )
+         if (schedule === `failure-first`) {
+-          expect(peerLoad.outcome).toBeUndefined()
+-          expect(peerLoad.options.signal?.aborted).not.toBe(true)
+-          reach(`source-failed-peer-pending`)
++          const peerPending =
++            peerLoad.outcome === undefined && !peerLoad.options.signal?.aborted
++          const peerRetired =
++            peerLoad.options.signal?.aborted === true &&
++            peerLoad.outcome === `rejected` &&
++            peerLoad.error instanceof Error &&
++            peerLoad.error.name === `AbortError`
++          if (peerPending === peerRetired)
++            throw new Error(
++              `pagination instrument: failed-window peer is neither unambiguously pending nor observably retired`,
++            )
+         }
++        // Cancellation after failure is permitted. The removed pending-only
++        // reach was new and unrun; it would have imposed a no-cancel rule.
++        // Exact handling is the required checkpoint.
++        // The diagnostic below retains the narrower pending-peer RED premise.
++        reach(`source-failure-handled`)
+         // This is a diagnostic count, not a required GREEN reach: retaining
+         // an unchanged complete window need not emit any row callback.
+         const failureCallbacks = cuts.filter(
+@@ -2705,6 +2712,7 @@
+           peerScope: [pivot],
+           sourceFailureApplied: rejected === failure,
+           peerPending: peerLoad.outcome === undefined,
++          peerAborted: peerLoad.options.signal?.aborted === true,
+           callbacks: failureCallbacks.length,
+           firstCallback: failureCallbacks[0],
+         })
+@@ -2728,7 +2736,13 @@
+         expect(outcome).toBe(`fulfilled`)
+         reach(`successful-window-published`)
+       }
+-      expect(live.toArray.map(projectPageRow)).toStrictEqual(complete)
++      expect(
++        live.toArray.map(({ id, rank, children }) => ({
++          id,
++          rank,
++          children: [...children],
++        })),
++      ).toStrictEqual(complete)
+       expect(live.utils.getWindow()).toStrictEqual(targetWindow)
+       if (!isDeepStrictEqual(baseline, complete))
+         expect(cuts.some(({ boundary }) => boundary === `callback`)).toBe(true)
+@@ -5554,7 +5568,7 @@
+         `pagination.joined-window-failure:${campaign.name}`,
+         [
+           `joined-window-held`,
+-          `source-failed-peer-pending`,
++          `source-failure-handled`,
+           `failed-window-retained`,
+           `retry-published`,
+           `successful-window-published`,

@@ -1,0 +1,6 @@
+{
+  "check": "post-campaign direct binary hash only",
+  "matchesOriginalBoundInterpreter": true,
+  "path": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+}

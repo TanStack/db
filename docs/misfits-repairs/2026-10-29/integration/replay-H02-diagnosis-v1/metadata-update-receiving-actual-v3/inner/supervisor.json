@@ -1,0 +1,930 @@
+{
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  },
+  "phase": "final-with-binding",
+  "pid": 12600,
+  "elapsedMs": 2443,
+  "maxSampledGroupRssBytes": 481460224,
+  "latestGroupRows": [],
+  "killAttempted": false,
+  "heapDiagnosticDetected": false,
+  "postEnqueue": {
+    "postEnqueueWindowMs": 1000,
+    "receiptCount": 206,
+    "acquisitionCount": 12,
+    "releaseCount": 8,
+    "lastSequence": 206,
+    "lastPhase": "worker-cleaned"
+  },
+  "outcome": {
+    "reason": "exited",
+    "exitCode": 0,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "history": {
+          "kind": "query",
+          "scheduler": "microtask",
+          "cacheIdentity": "scope",
+          "includes": true,
+          "window": true,
+          "nonemptyPrior": true,
+          "keyShift": 0,
+          "rankScale": 10,
+          "metadataKeys": "default",
+          "metadataFollowupQuarter": 2
+        },
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+        "execPath": "/Users/kyle.mathews/.n/bin/node"
+      },
+      {
+        "h02": true,
+        "sequence": 4,
+        "phase": "metadata-identities",
+        "sourceId": "3bb60821-6103-400d-b2b3-b95a7284a354",
+        "rootId": "live-query-1",
+        "downstreamId": "live-query-2",
+        "keyLane": "default"
+      },
+      {
+        "h02": true,
+        "sequence": 5,
+        "phase": "source-establishing-receipt",
+        "literalTrue": true
+      },
+      {
+        "h02": true,
+        "sequence": 9,
+        "phase": "source-stack",
+        "cut": "initial-acquisition",
+        "stack": "Error: H02 current initial acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts:551:16)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/compiler/joins.ts:524:41)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.schedule (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/scheduler.ts:66:7)\n    at scheduleQueryGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/graph-scheduler.ts:23:30)\n    at CollectionConfigBuilder.scheduleGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:935:5)\n    at CollectionConfigBuilder.syncFn (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:1022:12)\n    at CollectionSyncManager.enterSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/sync.ts:284:26)\n    at CollectionSyncManager.startSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/sync.ts:219:31)\n    at CollectionChangesManager.startSyncIfStopped (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:446:17)\n    at CollectionChangesManager.startSyncForSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:425:10)\n    at CollectionChangesManager.addSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:464:14)\n    at CollectionChangesManager.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:325:10)\n    at CollectionImpl.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/index.ts:1246:26)\n    at driveQueuedAnswerHistory (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts:694:29)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts:25:11\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      },
+      {
+        "h02": true,
+        "sequence": 83,
+        "phase": "public-change",
+        "changes": [
+          {
+            "key": "[4,null]",
+            "type": "insert",
+            "value": {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 84,
+        "phase": "downstream-change",
+        "changes": [
+          {
+            "key": "[4,null]",
+            "type": "insert",
+            "value": {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "observedKey": "[4,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "upstreamEntries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 85,
+        "phase": "downstream-change",
+        "changes": [],
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "observedKey": "[4,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "upstreamEntries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 86,
+        "phase": "public-change",
+        "changes": [],
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 87,
+        "phase": "initial-publication",
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "downstream": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "observedKey": "[4,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ],
+        "downstreamEntries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "ready": true
+      },
+      {
+        "h02": true,
+        "sequence": 88,
+        "phase": "reload-start",
+        "pivot": 3
+      },
+      {
+        "h02": true,
+        "sequence": 134,
+        "phase": "retained-publication",
+        "reason": "provider-hold-before-release",
+        "rows": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "downstream": [
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "observedKey": "[4,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[4,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ],
+        "downstreamEntries": [
+          [
+            "[4,null]",
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "pendingProviderAnswers": 3
+      },
+      {
+        "h02": true,
+        "sequence": 152,
+        "phase": "answer-queued",
+        "kind": "lawful-control",
+        "scheduler": "microtask",
+        "enqueueReturned": true
+      },
+      {
+        "h02": true,
+        "sequence": 153,
+        "phase": "answer-executed",
+        "kind": "lawful-control"
+      },
+      {
+        "h02": true,
+        "sequence": 159,
+        "phase": "public-change",
+        "changes": [
+          {
+            "key": "[3,null]",
+            "type": "insert",
+            "value": {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          },
+          {
+            "key": "[4,null]",
+            "type": "delete",
+            "value": {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-1"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 160,
+        "phase": "downstream-change",
+        "changes": [
+          {
+            "key": "[4,null]",
+            "type": "delete",
+            "value": {
+              "id": 4,
+              "rank": 40,
+              "markers": [],
+              "observedKey": "[4,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[4,null]",
+              "$collectionId": "live-query-2"
+            }
+          },
+          {
+            "key": "[3,null]",
+            "type": "insert",
+            "value": {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "observedKey": "[3,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "upstreamEntries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 161,
+        "phase": "final-publication",
+        "rows": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "downstream": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "observedKey": "[3,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ],
+        "downstreamEntries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "ready": true,
+        "syncError": false,
+        "health": {
+          "alias": "root",
+          "collectionId": "live-query-1",
+          "kind": "live-query",
+          "status": "ready",
+          "failureReason": null,
+          "error": null,
+          "reloading": false,
+          "sources": [
+            {
+              "alias": "row",
+              "collectionId": "3bb60821-6103-400d-b2b3-b95a7284a354",
+              "kind": "source",
+              "status": "ready",
+              "failureReason": null,
+              "error": null,
+              "reloading": false,
+              "sources": [],
+              "hasErrors": false
+            },
+            {
+              "alias": "marker",
+              "collectionId": "h02-progress-markers",
+              "kind": "source",
+              "status": "ready",
+              "failureReason": null,
+              "error": null,
+              "reloading": false,
+              "sources": [],
+              "hasErrors": false
+            },
+            {
+              "alias": "child",
+              "collectionId": "h02-progress-markers",
+              "kind": "include",
+              "status": "ready",
+              "failureReason": null,
+              "error": null,
+              "reloading": false,
+              "sources": [],
+              "hasErrors": false
+            }
+          ],
+          "hasErrors": false
+        },
+        "reloadSettled": true,
+        "rootSubscriptionStatus": "ready",
+        "downstreamSubscriptionStatus": "ready",
+        "rootLoadingSubset": false,
+        "downstreamLoadingSubset": false
+      },
+      {
+        "h02": true,
+        "sequence": 162,
+        "phase": "followup-start"
+      },
+      {
+        "h02": true,
+        "sequence": 164,
+        "phase": "source-stack",
+        "stack": "Error: H02 current acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts:557:16)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/compiler/joins.ts:524:41)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.flush (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/scheduler.ts:132:11)\n    at withPublicationContext (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/scheduler.ts:198:32)\n    at CollectionChangesManager.publishEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:272:5)\n    at CollectionChangesManager.emitEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/changes.ts:207:10)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:1495:24\n    at capture (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:1481:11)\n    at emit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:1494:9)\n    at CollectionStateManager.commitNextPendingTransactionBatch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:1504:21)\n    at CollectionStateManager.commitPendingTransactions (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:1105:23)\n    at CollectionStateManager.acceptSyncTransaction (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/state.ts:873:10)\n    at commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/src/collection/sync.ts:411:24)\n    at Object.sourceControls.writeRank (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts:101:18)\n    at driveQueuedAnswerHistory (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts:829:38)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts:25:5\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      },
+      {
+        "h02": true,
+        "sequence": 182,
+        "phase": "public-change",
+        "changes": [
+          {
+            "key": "[3,null]",
+            "type": "update",
+            "value": {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            },
+            "previousValue": {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 3,
+            "rank": 35,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 183,
+        "phase": "downstream-change",
+        "changes": [
+          {
+            "key": "[3,null]",
+            "type": "update",
+            "value": {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            },
+            "previousValue": {
+              "id": 3,
+              "rank": 30,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 3,
+            "rank": 35,
+            "markers": [],
+            "observedKey": "[3,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "upstreamEntries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 185,
+        "phase": "followup-publication",
+        "rows": [
+          {
+            "id": 3,
+            "rank": 35,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "downstream": [
+          {
+            "id": 3,
+            "rank": 35,
+            "markers": [],
+            "observedKey": "[3,null]",
+            "observedCollectionId": "live-query-1",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-2"
+          }
+        ],
+        "entries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-1"
+            }
+          ]
+        ],
+        "downstreamEntries": [
+          [
+            "[3,null]",
+            {
+              "id": 3,
+              "rank": 35,
+              "markers": [],
+              "observedKey": "[3,null]",
+              "observedCollectionId": "live-query-1",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "live-query-2"
+            }
+          ]
+        ],
+        "ready": true,
+        "syncError": false
+      },
+      {
+        "h02": true,
+        "sequence": 186,
+        "phase": "cleanup-start"
+      },
+      {
+        "h02": true,
+        "sequence": 206,
+        "phase": "worker-cleaned"
+      }
+    ],
+    "keyCallbacks": 23,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025/receipts.jsonl",
+    "bindingStatus": "bound"
+  }
+}

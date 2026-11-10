@@ -1,0 +1,30 @@
+{
+  "kind": "h02-completion-baseline-constituent",
+  "mode": "baseline-constituent",
+  "worktree": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-parent.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "-t",
+    "checks a selected baseline constituent through the shared judgment"
+  ],
+  "sourceFreeze": "/private/tmp/h02-qualified-peer-receiving-v1/control/source-freeze-v1.json",
+  "sourceFreezeSha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca",
+  "programFile": "/private/tmp/h02-qualified-peer-receiving-v1/control/programs/inline-window-success.json",
+  "programSha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+  "gate": "held-window",
+  "profile": "inline",
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-success-runtime-v1/parent-command",
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "bindingProfile": "completion-baseline-v1"
+}

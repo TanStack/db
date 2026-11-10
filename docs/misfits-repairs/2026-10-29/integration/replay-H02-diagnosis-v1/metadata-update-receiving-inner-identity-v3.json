@@ -1,0 +1,18 @@
+{
+  "candidateWasNotPassiveBaselineMember": true,
+  "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "limit": "No persisted initial actual getpgid for detached leader; identity claim retains original limits.",
+  "matchingCandidates": [
+    "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025"
+  ],
+  "originalInnerDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025",
+  "outerPgid": 12461,
+  "outerPid": 12461,
+  "receivingParentPid": 12597,
+  "selectedAsFirstNew": false,
+  "selectedByMtime": false,
+  "selectedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+  "status": "unique exact canonical history/source/prepared/supervisor/worker-start/writer agreement",
+  "supervisorRecordedDetachedLeaderPid": 12600,
+  "writerPid": 12603
+}

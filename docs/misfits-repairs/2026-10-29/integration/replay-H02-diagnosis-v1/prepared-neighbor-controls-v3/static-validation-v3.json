@@ -1,0 +1,14 @@
+{
+  "status": "serial pure/static and bound inert native calibration passed; no DB receiving",
+  "pureOwnershipChecks": 16,
+  "pureCandidateChecks": 9,
+  "typecheck": true,
+  "eslint": true,
+  "changedLint": true,
+  "prettier": true,
+  "unchangedOrdinaryOwnershipWarnings": 2,
+  "sourceFreezeSha256": "cc2c1f0c8dee86e95506cfe6bcfd5c948c15c946fe640b86e75485cefba2daeb",
+  "nativeSelectionReceiptSha256": "bdd48b87e801e8a5aa64e6ea018120f2e7458711cb175732b097adcf409b2edf",
+  "receivingInvocations": 0,
+  "limits": "Only inert registration and console retention were executed; no DB product verdict."
+}

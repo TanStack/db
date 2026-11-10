@@ -1,0 +1,38 @@
+{
+  "packages/query-db-collection/tests/queued-answer-progress-driver.ts": {
+    "beforeSha256": "e91715a74c2b8e9ff5126b054da9ba2f5d0128e4dc373ed2c459410e463ff006",
+    "afterSha256": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc"
+  },
+  "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": {
+    "beforeSha256": null,
+    "afterSha256": "ad43de0acf2c61d0edcfe0f6b663b30861eb6c277a7029786d5c555c0c1b86e7"
+  },
+  "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts": {
+    "beforeSha256": "e691c2f8ae98bc1c703149807e0d340b9ee4e4bc27017a7aa3d492df339a8a0c",
+    "afterSha256": "d6f190138514cbe2ccb1080787cd7076365e756467c6d2d87a35ef5c157352cc"
+  },
+  "scripts/h02-progress/ownership-neighbor.config.ts": {
+    "beforeSha256": null,
+    "afterSha256": "28ebebd27883de2991991b1ae4725eca6b76377241d17dbc124f45209eb4a357"
+  },
+  "scripts/h02-progress/ownership-parent.mjs": {
+    "beforeSha256": null,
+    "afterSha256": "0a7e145856aae03a3ecee668f87a0e3cdade3ff64035c4796b0c32e2824e786e"
+  },
+  "scripts/h02-progress/ownership-parent.test.mjs": {
+    "beforeSha256": null,
+    "afterSha256": "98c48876f8b5e9dbbced72e0364d2dedf6494279b84ca85d9a7107d4b977c430"
+  },
+  "scripts/h02-progress/candidate-controls.ts": {
+    "beforeSha256": null,
+    "afterSha256": "d1b3f65b082cf18112df6531d0372b25b2e64d98052a1b8fd899f0beb64c3cb7"
+  },
+  "scripts/h02-progress/candidate-controls.test.ts": {
+    "beforeSha256": null,
+    "afterSha256": "5d8416aca20ceffcbaf9481769ba14a58889068e76466cb9e42a67406b5d23aa"
+  },
+  "scripts/h02-progress/candidate-controls.config.ts": {
+    "beforeSha256": null,
+    "afterSha256": "edef50ca95f1ad023f4285ff3f99e82e0c76b0519e25a10f3f55463dfb10e046"
+  }
+}

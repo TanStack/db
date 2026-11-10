@@ -1,0 +1,40 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "operational RSS stop only",
+  "result": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/result-freeze-v1.json",
+    "sha256": "6a3df64c714d54542e8c2cda8ea3b5def9b5c2ef8c35652d2e452ce5463c7d9d"
+  },
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/pagination-failed-peer-rss-actual-independent-review-v1.md",
+    "sha256": "83c5834c708909d37dc9db940d7112de9efe5b64ffddc50f405d64490b3040f0"
+  },
+  "actualOuter": {
+    "initial": "46d907",
+    "session": 31238,
+    "final": "5a6619",
+    "exit": 1
+  },
+  "childExit": -9,
+  "instrumentStop": {
+    "rss": 1091452928,
+    "bound": 1073741824,
+    "failureMs": 1681,
+    "finalMs": 1744,
+    "samples": 13,
+    "verifiedChildPgid": 73353,
+    "signal": "SIGKILL sent"
+  },
+  "inference": "No test report or testbody/cut/reach/assertion evidence. Expo tsconfig failures were caught scanning diagnostics; later setup unproved. Named originalouter/child PID-PGID absence and source/tool postcheck preserved.",
+  "sourceEpoch": "Historical cf550f frozen sources and runtime pre/post remain valid; current successor edits in4 test-support files are distinct. All511production bindings unchanged.",
+  "successorDesign": "2GiB operational supervisor design allowed; same30s and coverage/typecheck. New shared full-child source freeze/exact recipe/review/admission required, plus shared-toolchain recovery before runtime.",
+  "productRed": false,
+  "productGreen": false,
+  "reachCredit": false,
+  "mutantCredit": false,
+  "retryAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false
+}

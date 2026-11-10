@@ -1,0 +1,238 @@
+import { PropRef, Value, isBasicOrAggregateExpression } from "../ir.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+import { REF_PROXY_BRAND, readRefProxyBrand } from "./ref-proxy-identity.js";
+import { getWrapperExpressionName } from "./wrapper-identity.js";
+export { isRefProxy } from "./ref-proxy-identity.js";
+let nextSpreadSentinelId = 0;
+export function createSingleRowRefProxy() {
+  const cache = /* @__PURE__ */ new Map();
+  function createProxy(path) {
+    const pathKey = JSON.stringify(path);
+    if (cache.has(pathKey)) {
+      return cache.get(pathKey);
+    }
+    const proxy = new Proxy({}, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true;
+        if (prop === `__path`) return path;
+        if (prop === `__sourceAlias`) return void 0;
+        if (prop === `__bindingId`) return void 0;
+        if (prop === `__type`) return void 0;
+        if (prop === REF_PROXY_BRAND) return true;
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver);
+        const newPath = [...path, String(prop)];
+        return createProxy(newPath);
+      },
+      has(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`)
+          return true;
+        return Reflect.has(target, prop);
+      },
+      ownKeys(target) {
+        return Reflect.ownKeys(target);
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`) {
+          return { enumerable: false, configurable: true };
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop);
+      }
+    });
+    cache.set(pathKey, proxy);
+    return proxy;
+  }
+  return createProxy([]);
+}
+export function createRefProxy(aliases, bindings) {
+  const aliasProxies = /* @__PURE__ */ new Map();
+  function createProxy(path) {
+    let children;
+    let spreadSentinel;
+    const proxy = new Proxy({}, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true;
+        if (prop === `__path`) return path;
+        if (prop === `__sourceAlias`) return path[0];
+        if (prop === `__bindingId`) return bindings?.get(path[0] ?? ``);
+        if (prop === `__type`) return void 0;
+        if (prop === REF_PROXY_BRAND) return path;
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver);
+        if (prop === spreadSentinel?.key) return spreadSentinel.ref;
+        if (Object.prototype.hasOwnProperty.call(target, prop)) {
+          return Reflect.get(target, prop, receiver);
+        }
+        children ??= /* @__PURE__ */ new Map();
+        let child = children.get(prop);
+        if (child === void 0) {
+          child = createProxy([...path, prop]);
+          children.set(prop, child);
+        }
+        return child;
+      },
+      has(target, prop) {
+        if (prop === spreadSentinel?.key) return true;
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`)
+          return true;
+        return Reflect.has(target, prop);
+      },
+      ownKeys(target) {
+        const id = ++nextSpreadSentinelId;
+        const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`;
+        spreadSentinel = {
+          key: sentinelKey,
+          ref: new PropRef(path, path[0], bindings?.get(path[0] ?? ``))
+        };
+        return [...Reflect.ownKeys(target), sentinelKey];
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === spreadSentinel?.key) {
+          return {
+            enumerable: true,
+            configurable: true,
+            value: spreadSentinel.ref
+          };
+        }
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`) {
+          return { enumerable: false, configurable: true };
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop);
+      }
+    });
+    return proxy;
+  }
+  const rootProxy = new Proxy({}, {
+    get(target, prop, receiver) {
+      if (prop === `__refProxy`) return true;
+      if (prop === `__path`) return [];
+      if (prop === `__sourceAlias`) return void 0;
+      if (prop === `__bindingId`) return void 0;
+      if (prop === `__type`) return void 0;
+      if (prop === REF_PROXY_BRAND) return true;
+      if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver);
+      const propStr = String(prop);
+      if (aliases.includes(propStr) || aliases.includes(`*`)) {
+        let proxy = aliasProxies.get(propStr);
+        if (proxy === void 0) {
+          proxy = createProxy([propStr]);
+          aliasProxies.set(propStr, proxy);
+        }
+        return proxy;
+      }
+      return void 0;
+    },
+    has(target, prop) {
+      if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`)
+        return true;
+      if (typeof prop === `string` && aliases.includes(prop)) return true;
+      return Reflect.has(target, prop);
+    },
+    ownKeys(_target) {
+      return [
+        ...aliases,
+        `__refProxy`,
+        `__path`,
+        `__sourceAlias`,
+        `__bindingId`,
+        `__type`
+      ];
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`) {
+        return { enumerable: false, configurable: true };
+      }
+      if (typeof prop === `string` && aliases.includes(prop)) {
+        return { enumerable: true, configurable: true };
+      }
+      return void 0;
+    }
+  });
+  return rootProxy;
+}
+export function createRefProxyWithSelected(aliases, bindings) {
+  const baseProxy = createRefProxy(aliases, bindings);
+  const cache = /* @__PURE__ */ new Map();
+  function createSelectedProxy(path) {
+    const pathKey = JSON.stringify(path);
+    if (cache.has(pathKey)) {
+      return cache.get(pathKey);
+    }
+    const proxy = new Proxy({}, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true;
+        if (prop === `__path`) return [`$selected`, ...path];
+        if (prop === `__sourceAlias`) return `$selected`;
+        if (prop === `__bindingId`) return void 0;
+        if (prop === `__type`) return void 0;
+        if (prop === REF_PROXY_BRAND) return true;
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver);
+        const newPath = [...path, String(prop)];
+        return createSelectedProxy(newPath);
+      },
+      has(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`)
+          return true;
+        return Reflect.has(target, prop);
+      },
+      ownKeys(target) {
+        return Reflect.ownKeys(target);
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__sourceAlias` || prop === `__bindingId` || prop === `__type`) {
+          return { enumerable: false, configurable: true };
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop);
+      }
+    });
+    cache.set(pathKey, proxy);
+    return proxy;
+  }
+  const wrappedSelectedProxy = createSelectedProxy([]);
+  const selectedRootProxy = new Proxy(baseProxy, {
+    get(target, prop, receiver) {
+      if (prop === `$selected`) {
+        return wrappedSelectedProxy;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) {
+      if (prop === `$selected`) return true;
+      return Reflect.has(target, prop);
+    },
+    ownKeys(target) {
+      return [...Reflect.ownKeys(target), `$selected`];
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop === `$selected`) {
+        return {
+          enumerable: true,
+          configurable: true,
+          value: wrappedSelectedProxy
+        };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    }
+  });
+  return selectedRootProxy;
+}
+export function toExpression(value) {
+  if (value === null || typeof value !== `object` && typeof value !== `function`) {
+    return new Value(value);
+  }
+  const brand = readRefProxyBrand(value);
+  if (brand !== void 0) {
+    return Array.isArray(brand) ? new PropRef(brand, brand[0], value.__bindingId) : new PropRef(value.__path, value.__sourceAlias, value.__bindingId);
+  }
+  const name = getWrapperExpressionName(value);
+  if (name) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). Use ${name} directly as a select field value instead.` : codedMessage(126, { name })
+    );
+  }
+  if (isBasicOrAggregateExpression(value)) {
+    return value;
+  }
+  return new Value(value);
+}
+export function val(value) {
+  return new Value(value);
+}

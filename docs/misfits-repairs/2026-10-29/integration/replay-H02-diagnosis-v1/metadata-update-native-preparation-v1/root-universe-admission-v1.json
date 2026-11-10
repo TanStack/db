@@ -1,0 +1,40 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/evaluate_metadata_external",
+  "runtimeAdmission": true,
+  "reservedHeavySlot": 4,
+  "maxInvocations": 1,
+  "stage": "universe",
+  "exactCommand": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-I",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/launch.py",
+    "--execute-exact-one",
+    "universe",
+    "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "firstCommand": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/first-command.json",
+    "sha256": "0e0d0f3595e12b725eea0db0d799dc74b267540c1f7c9b8074d4adb4100f7b32"
+  },
+  "packetManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/packet-manifest.json",
+    "sha256": "6bbe4a9975268f5a4a2ef18d00cf9f5d3c98782a35bffd81cd6308e2ce33e228"
+  },
+  "binding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/binding.json",
+    "sha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65"
+  },
+  "independentPreparationReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-native-preparation-review-v1.md",
+    "sha256": "3da470eda7fd184757cb96f41ebd3dc202f71065f3ce276d4c12f030e57508bb"
+  },
+  "scope": "native registration universe only; no test-body pass/reach/product RED/GREEN credit",
+  "limits": "unchanged one worker,30s wall,384MiB heap,1GiB sampled group RSS",
+  "after": "stop after actual completion; freeze complete outputs/actual outer return/original identities absence; independent actual review and root classification required before selector admission",
+  "retry": false,
+  "canonicalImport": false,
+  "publishing": false
+}

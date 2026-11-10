@@ -1,0 +1,36 @@
+{
+  "status": "three exact singleton setup-successor admissions; original failures and held admissions preserved",
+  "admittedBy": "/root",
+  "slot": 2,
+  "maxActiveHeavyCommands": 1,
+  "workerCount": 1,
+  "requiredToolSandboxPermissions": "require_escalated",
+  "orderedAdmissions": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1-root-admission-v2.json",
+      "sha256": "544fdb0a9f57820313b13fd9faa2ffd0f81f24c40e4b7c153071af1627df906c"
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1-root-admission-v2.json",
+      "sha256": "0fdefadff1206286aefeff940b8086c2bf139a2d8588adfff3c236989a8d941e"
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1-root-admission-v2.json",
+      "sha256": "937221c4f57e306be0101da9106bc3929949c3bf2b976f91c4862e8e8eb1367c"
+    }
+  ],
+  "sourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1-independent-source-review-v1.md",
+  "sourceReviewSha256": "0c65783ceb0741c60a1ab6310669d5493259887d75d92efb14a9dd41cac2fef8",
+  "successorPacketSha256": "f25da3e002c69934d8c8d16f0880e76ecace90514e2ba650df3f1152bef5a4a8",
+  "stopFirstSurprise": true,
+  "noRetry": true,
+  "noSourceMutation": true,
+  "noPublication": true,
+  "supersedesUndispatchedBatch": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/remaining-neighbor-setup-successor-root-batch-admission-v1.json",
+    "sha256": "ab7ef2900be27e354ac0e765b3162037833b2236ad1d0dfbc1abf83cdea26efa"
+  }
+}

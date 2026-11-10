@@ -1,0 +1,9 @@
+const ACCEPTED = /* @__PURE__ */ Symbol(`tanstack-db.sync-receipt.accepted`);
+export function withAcceptedReceipt(visible, accepted) {
+  ;
+  visible[ACCEPTED] = accepted;
+  return visible;
+}
+export function whenSyncAccepted(receipt) {
+  return receipt === true ? true : receipt[ACCEPTED] ?? receipt;
+}

@@ -1,0 +1,16 @@
+{
+  "status": "bound",
+  "failures": [],
+  "bindings": 318,
+  "distinctReceivingModules": 159,
+  "byKind": {
+    "instrument": 14,
+    "production": 304
+  },
+  "actualKeyCount": 1276,
+  "emptyCallbacks": 3,
+  "sourceFreezeSha256": "55fa4125913996e46b45e205129ea2a9df0151dd11d7fac4ecdaf4ec9017872c",
+  "bindingVerificationSha256": "658a4e0f0f8ec04016e282c639445f0a0fc49df8124eecabfdefe2d75a3d137e",
+  "scope": "actual driver-start/after-all receiving evaluated-module + V8 byte binding and initial positive stack; no queued-premise or final-publication source capture exists",
+  "limits": "bound receiving code is independent from progress/semantic verdict; raw receipt I/O failed and missing receipts cannot gain reach credit"
+}

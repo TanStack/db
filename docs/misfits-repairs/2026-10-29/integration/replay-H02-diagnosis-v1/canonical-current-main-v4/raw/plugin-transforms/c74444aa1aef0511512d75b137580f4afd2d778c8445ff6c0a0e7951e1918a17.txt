@@ -1,0 +1,7 @@
+const wrapperNames = /* @__PURE__ */ new WeakMap();
+export function registerWrapper(value, name) {
+  wrapperNames.set(value, name);
+}
+export function getWrapperExpressionName(value) {
+  return value !== null && typeof value === `object` ? wrapperNames.get(value) : void 0;
+}

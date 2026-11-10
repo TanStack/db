@@ -1,0 +1,45 @@
+export function createReceiptDecoder(accept) {
+  /** @type {Buffer} */
+  let fragment = Buffer.alloc(0)
+  let sequence = 0
+  const utf8 = new TextDecoder(`utf-8`, { fatal: true, ignoreBOM: true })
+  return {
+    /** @param {Buffer} chunk */
+    push(chunk) {
+      const bytes = fragment.length ? Buffer.concat([fragment, chunk]) : chunk
+      let offset = 0
+      for (;;) {
+        const end = bytes.indexOf(0x0a, offset)
+        if (end < 0) break
+        const value = /** @type {unknown} */ (
+          JSON.parse(utf8.decode(bytes.subarray(offset, end)))
+        )
+        if (
+          typeof value !== `object` ||
+          value === null ||
+          !(`h02` in value) ||
+          value.h02 !== true ||
+          !(`phase` in value) ||
+          typeof value.phase !== `string` ||
+          !value.phase ||
+          !(`sequence` in value) ||
+          !Number.isSafeInteger(value.sequence) ||
+          value.sequence !== sequence + 1
+        )
+          throw new Error(
+            `invalid receipt envelope or sequence after ${sequence}`,
+          )
+        sequence++
+        accept(/** @type {Receipt} */ (value))
+        offset = end + 1
+      }
+      fragment = Buffer.from(bytes.subarray(offset))
+    },
+    finish() {
+      if (fragment.length)
+        throw new Error(`truncated final receipt: ${fragment.length} bytes`)
+      if (sequence === 0) throw new Error(`receipt stream is empty`)
+      return sequence
+    },
+  }
+}

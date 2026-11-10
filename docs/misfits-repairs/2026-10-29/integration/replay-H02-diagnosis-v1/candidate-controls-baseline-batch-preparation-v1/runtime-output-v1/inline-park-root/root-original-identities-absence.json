@@ -1,0 +1,42 @@
+{
+  "probes": [
+    {
+      "participant": "outer-supervisor",
+      "kind": "pid",
+      "identity": 86048,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "original-test",
+      "kind": "pid",
+      "identity": 86058,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "original-test",
+      "kind": "pgid",
+      "identity": 86058,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "receiving-supervisor",
+      "kind": "pid",
+      "identity": 86062,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "receiving-worker",
+      "kind": "pid",
+      "identity": 86065,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "receiving-worker",
+      "kind": "pgid",
+      "identity": 86065,
+      "status": "empty-ESRCH"
+    }
+  ],
+  "allNamedOriginalIdsAbsent": true,
+  "scope": "Captured parent PID and owned original/registered groups only; no escaped-descendant census"
+}

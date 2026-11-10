@@ -1,0 +1,69 @@
+{
+  "schema": "h02-fixed-finite-compiler-input-source-packet-v3",
+  "status": "FROZEN additive fixed input supplement/wrapper/tool for direct independent delta review; no retry or admission",
+  "fileCount": 10,
+  "files": {
+    "all-actual-listfiles-account-v1.json": {
+      "sha256": "9d85b0185a082848a5aebb4d4e445eee458f7599a84a263a5cad87bbec6813f8",
+      "bytes": 332850
+    },
+    "compiler-containment-contract-v1.json": {
+      "sha256": "b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1",
+      "bytes": 9283
+    },
+    "contain-compiler-v1.py.txt": {
+      "sha256": "e9fe2c0caf9e8ff3e58dc8a3cca71f28668d2c17a33ca72c9d340dbefce5620d",
+      "bytes": 12920
+    },
+    "fixed-compiler-input-supplement-v1.json": {
+      "sha256": "f579409b7d5c80624f6adca1b13b2359b69eabcc458770863e7d2ee3d701fb90",
+      "bytes": 10538
+    },
+    "fixed-input-only-v1.diff.txt": {
+      "sha256": "c80e43f160e8895f96d34e10ee1def6232871aadd17088d02a6cc7a094184c8d",
+      "bytes": 1672
+    },
+    "minimal-fixed-input-delta-evidence-v1.json": {
+      "sha256": "30b09eae912e94a3ff83c8f664134a08092ff931428ec6c65e4eea2d8c0a9e5c",
+      "bytes": 7137
+    },
+    "proposed-exact-compiler-only-tool-invocation-v1.json": {
+      "sha256": "6d63c0bada7ca78e5825885e94bbd5a9091dbf54ac48aa06d56f572e647a0f8c",
+      "bytes": 4057
+    },
+    "report-v1.md": {
+      "sha256": "fc40a981def7307ccd242f78fa68382da11e2035af84b44df26467d6f13f5dd6",
+      "bytes": 4422
+    },
+    "static-freeze-check-correction-v1.json": {
+      "sha256": "81023e905be29c9c6c0e67d0290ad6d31ae2ea05d512fc2dfeb7921960153ef3",
+      "bytes": 1306
+    },
+    "static-freeze-check-failure-v1.json": {
+      "sha256": "34a5f84f93ec12474d3eb94c47fa58453461d3c08d0c637b0244852830091d4f",
+      "bytes": 402
+    }
+  },
+  "selfExcluded": true,
+  "parentManifestSha256": "9a17c4ecc40115981a18c885c9e5ad2900eff7d4ca748d34ba9837ae8d7b434f",
+  "wrapperSha256": "e9fe2c0caf9e8ff3e58dc8a3cca71f28668d2c17a33ca72c9d340dbefce5620d",
+  "contractSha256": "b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1",
+  "toolProposalSha256": "6d63c0bada7ca78e5825885e94bbd5a9091dbf54ac48aa06d56f572e647a0f8c",
+  "supplementSha256": "f579409b7d5c80624f6adca1b13b2359b69eabcc458770863e7d2ee3d701fb90",
+  "allActualListFilesAccountSha256": "9d85b0185a082848a5aebb4d4e445eee458f7599a84a263a5cad87bbec6813f8",
+  "reportSha256": "fc40a981def7307ccd242f78fa68382da11e2035af84b44df26467d6f13f5dd6",
+  "deltaEvidenceSha256": "30b09eae912e94a3ff83c8f664134a08092ff931428ec6c65e4eea2d8c0a9e5c",
+  "staticCorrectionSha256": "81023e905be29c9c6c0e67d0290ad6d31ae2ea05d512fc2dfeb7921960153ef3",
+  "actualListFiles": 653,
+  "existingBound": 650,
+  "addedDeclarations": 3,
+  "addedPackageMetadata": 3,
+  "finiteInputs": 12586,
+  "priorFailedAttemptPreserved": true,
+  "VArgvConfigLimitsUnchanged": true,
+  "compilerExecutions": 0,
+  "processProbes": 0,
+  "materialization": 0,
+  "broadCensus": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

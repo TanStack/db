@@ -1,0 +1,34 @@
+{
+  "status": "STATIC ONLY",
+  "typescript": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=384 node_modules/typescript/bin/tsc -p scripts/h02-progress/tsconfig.json --pretty false",
+    "log": "typescript-v1.log"
+  },
+  "eslint": {
+    "exitCode": 0,
+    "scope": "all eleven new source/config/helper paths; root rules preserved with scoped resolver; final registration timeout rechecked separately",
+    "heapMiB": 1536,
+    "log": "eslint-v1.log",
+    "finalRegistrationLog": "eslint-final-registration-v1.log"
+  },
+  "oracleLint": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+    "log": "lint-changed-direct-v1.log"
+  },
+  "initialStaticOom": {
+    "tool": "full repository ESLint",
+    "heapMiB": 384,
+    "exitCode": 134,
+    "classification": "static tool resource failure; no progress/RED credit; RSS/PGID metrics not recorded"
+  },
+  "pnpmAutoInstallRefusal": {
+    "exitCode": 1,
+    "code": "ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY",
+    "log": "lint-changed-v1.log",
+    "resolution": "run exact script directly; no install, no CI/confirmModulesPurge override"
+  },
+  "runtimeRuns": 0,
+  "productionEdits": 0
+}

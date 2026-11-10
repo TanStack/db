@@ -1,0 +1,400 @@
+{
+  "status": "PREPARED SOURCES/RECIPES; independent exact review and separate root admission required per invocation; none executed",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+  "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+  "progressInvocations": [
+    {
+      "path": "nonempty conflicting replay",
+      "kind": "h02-progress-neighbor",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+      "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor nonempty conflicting replay"
+      ],
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json"
+      },
+      "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-nonempty-conflict-v2.zsh",
+      "launcherSha256": "e8d8ae9a630f6d04bff8a9949c780b38d23187cb2933d0cdc1b07b7a5bdc25a9",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-conflict-current-main-v2",
+      "receivingLimits": {
+        "nodeHeapMiB": 384,
+        "groupRssBytes": 1073741824,
+        "wallMs": 20000,
+        "postEnqueueWindowMs": 1000,
+        "samplingMs": 100
+      },
+      "outerTestTimeoutMs": 60000,
+      "receivingPostRunVerifier": {
+        "nodeHeapMiB": 384,
+        "timeoutMs": 20000
+      },
+      "progressVerdictGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "finiteHistories": 1,
+      "invocationsAdmitted": 0,
+      "run": false,
+      "beforeRun": "After exact acceptance and root admission only, create fresh outputDirectory. Launcher records pre-exec outer PID/PGID. Source bindings/receipts kept by unchanged supervisor at actual unique tmp path.",
+      "afterRun": "Freeze complete outer log and actual child receipt/binding directory; inspect first trigger, resource/observation failures and final groups; stop and send PID/PGIDs for root independent absence check. No retry."
+    },
+    {
+      "path": "nonempty scope-key publication",
+      "kind": "h02-progress-neighbor",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+      "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor nonempty scope-key publication"
+      ],
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json"
+      },
+      "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-nonempty-scope-v2.zsh",
+      "launcherSha256": "cd7d4a3d68dcc5c67daf33060f0414ee75535b642ae8376c016df16e98b57ce5",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-scope-current-main-v2",
+      "receivingLimits": {
+        "nodeHeapMiB": 384,
+        "groupRssBytes": 1073741824,
+        "wallMs": 20000,
+        "postEnqueueWindowMs": 1000,
+        "samplingMs": 100
+      },
+      "outerTestTimeoutMs": 60000,
+      "receivingPostRunVerifier": {
+        "nodeHeapMiB": 384,
+        "timeoutMs": 20000
+      },
+      "progressVerdictGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "finiteHistories": 1,
+      "invocationsAdmitted": 0,
+      "run": false,
+      "beforeRun": "After exact acceptance and root admission only, create fresh outputDirectory. Launcher records pre-exec outer PID/PGID. Source bindings/receipts kept by unchanged supervisor at actual unique tmp path.",
+      "afterRun": "Freeze complete outer log and actual child receipt/binding directory; inspect first trigger, resource/observation failures and final groups; stop and send PID/PGIDs for root independent absence check. No retry."
+    },
+    {
+      "path": "empty scope-key publication",
+      "kind": "h02-progress-neighbor",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+      "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor empty scope-key publication"
+      ],
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json"
+      },
+      "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-empty-scope-v2.zsh",
+      "launcherSha256": "fab108fc69eb953d19d08e93d6179502487033256bf3d1be369d0adac6d651af",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v2",
+      "receivingLimits": {
+        "nodeHeapMiB": 384,
+        "groupRssBytes": 1073741824,
+        "wallMs": 20000,
+        "postEnqueueWindowMs": 1000,
+        "samplingMs": 100
+      },
+      "outerTestTimeoutMs": 60000,
+      "receivingPostRunVerifier": {
+        "nodeHeapMiB": 384,
+        "timeoutMs": 20000
+      },
+      "progressVerdictGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "finiteHistories": 1,
+      "invocationsAdmitted": 0,
+      "run": false,
+      "beforeRun": "After exact acceptance and root admission only, create fresh outputDirectory. Launcher records pre-exec outer PID/PGID. Source bindings/receipts kept by unchanged supervisor at actual unique tmp path.",
+      "afterRun": "Freeze complete outer log and actual child receipt/binding directory; inspect first trigger, resource/observation failures and final groups; stop and send PID/PGIDs for root independent absence check. No retry."
+    },
+    {
+      "path": "literal true initial cut",
+      "kind": "h02-progress-neighbor",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+      "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor literal true initial cut"
+      ],
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json"
+      },
+      "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-sync-initial-v2.zsh",
+      "launcherSha256": "f08ee4a8bd4bcfd0d1774514432833a48cd7e475a56657c8b6e570df9a147561",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v2",
+      "receivingLimits": {
+        "nodeHeapMiB": 384,
+        "groupRssBytes": 1073741824,
+        "wallMs": 20000,
+        "postEnqueueWindowMs": 1000,
+        "samplingMs": 100
+      },
+      "outerTestTimeoutMs": 60000,
+      "receivingPostRunVerifier": {
+        "nodeHeapMiB": 384,
+        "timeoutMs": 20000
+      },
+      "progressVerdictGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "finiteHistories": 1,
+      "invocationsAdmitted": 0,
+      "run": false,
+      "beforeRun": "After exact acceptance and root admission only, create fresh outputDirectory. Launcher records pre-exec outer PID/PGID. Source bindings/receipts kept by unchanged supervisor at actual unique tmp path.",
+      "afterRun": "Freeze complete outer log and actual child receipt/binding directory; inspect first trigger, resource/observation failures and final groups; stop and send PID/PGIDs for root independent absence check. No retry."
+    },
+    {
+      "path": "ordinary synchronous mutation cut",
+      "kind": "h02-progress-neighbor",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json",
+      "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor ordinary synchronous mutation cut"
+      ],
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/source-freeze-v2.json"
+      },
+      "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-sync-mutation-v2.zsh",
+      "launcherSha256": "68d00a7148d21580144679308cbd03a15c9a91de87333a3af3084300c363919c",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v2",
+      "receivingLimits": {
+        "nodeHeapMiB": 384,
+        "groupRssBytes": 1073741824,
+        "wallMs": 20000,
+        "postEnqueueWindowMs": 1000,
+        "samplingMs": 100
+      },
+      "outerTestTimeoutMs": 60000,
+      "receivingPostRunVerifier": {
+        "nodeHeapMiB": 384,
+        "timeoutMs": 20000
+      },
+      "progressVerdictGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "finiteHistories": 1,
+      "invocationsAdmitted": 0,
+      "run": false,
+      "beforeRun": "After exact acceptance and root admission only, create fresh outputDirectory. Launcher records pre-exec outer PID/PGID. Source bindings/receipts kept by unchanged supervisor at actual unique tmp path.",
+      "afterRun": "Freeze complete outer log and actual child receipt/binding directory; inspect first trigger, resource/observation failures and final groups; stop and send PID/PGIDs for root independent absence check. No retry."
+    }
+  ],
+  "ownershipInvocation": {
+    "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/ownership-recipe-v2.json",
+    "recipeSha256": "59062a2ac0abf4554378120c62eded391f8d06369d3d684d71388c701a452201",
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-ownership-v2.zsh",
+    "launcherSha256": "e08093ed03f0798c564c87f54f4ec752ac85fe01397d0479a077ca38efd4da6a",
+    "parentCommand": [
+      "env",
+      "-u",
+      "NODE_OPTIONS",
+      "-u",
+      "NODE_PATH",
+      "-u",
+      "TANSTACK_DB_ORACLE_SEED",
+      "-u",
+      "TANSTACK_DB_ORACLE_PATH",
+      "-u",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "-u",
+      "TANSTACK_DB_ORACLE_CALIBRATION",
+      "-u",
+      "H02_PROGRESS_WORKER_HISTORY",
+      "-u",
+      "H02_PROGRESS_BINDING_DIR",
+      "-u",
+      "H02_PROGRESS_SELECTED_ROOT",
+      "-u",
+      "H02_PROGRESS_RECEIPTS",
+      "-u",
+      "H02_PROGRESS_SOURCE_FREEZE",
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/ownership-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/ownership-recipe-v2.json"
+    ],
+    "parentHeapMiB": 384,
+    "wrapper": "scripts/h02-progress/ownership-parent.mjs",
+    "childHeapMiB": 384,
+    "workerHeapMiB": 384,
+    "wallMs": 60000,
+    "sampledGroupRssBytes": 1073741824,
+    "rawOutput": "worker.stdout.log and worker.stderr.log use inherited file descriptors; finite captured final stderr end; raw parent log separate",
+    "finalGroups": "unique before-kill.json, final-group-before-cleanup.json and final-group.json; descendants after leader exit cause operational failure even after cleanup",
+    "classification": "Timeout/heap/RSS/observation/identity/setup/cleanup failure gives no product verdict. Normal assertion failure retains original diagnostics. Inspect exact reach evidence.",
+    "provenance": "disk identity before and after only; no V8 loaded-source binding claim",
+    "invocationsAdmitted": 0,
+    "run": false
+  },
+  "candidateControls": {
+    "source": "scripts/h02-progress/candidate-controls.ts",
+    "pureCalibrationChecksPassed": 9,
+    "moduleBinding": "packages/db/src/query/live/graph-continuation.ts#scheduleGraphContinuation",
+    "baselineActivation": "refuses absent seam; no baseline stub, timer interception or owner/token/fence public export",
+    "declaredStates": 20,
+    "receivingStatesReached": 0,
+    "sourceFixtureBindings": "Exact candidate graph/operation/receipt/fault attachments must be reviewed with candidate source; queue calibration is not product evidence."
+  },
+  "preEditGate": "Actual baseline cuts first; reviewed candidate-control sources before product edits; candidate-only reach after authorized candidate exists.",
+  "mutationPolicy": "No receiving execution, production/model/grammar/budget edit, install, commit, push or PR is authorized by this packet."
+}

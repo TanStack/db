@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-30T09:35:55.052061+00:00",
+  "allExplicitManifestHashesMatched": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/source-freeze-v3.json": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/packet-sha256-v3.json": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/input-freeze-v1.json": "b16d79c6f307e59a43f9bd1d06a64693aa98ca189dfd2893a7cb59c176fadcb5",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/input-packet-sha256-v1.json": "da70aad067b328d48e400beda1bacb14b34cebbafee4c3cae2dd4ddcbfce36e5",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/inline-park-root-result-freeze-v1.json": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v2/source-freeze-v2.json": "8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v2/packet-sha256-v2.json": "548364227e5949d42548b8d8c47f49cca0c8798e06920a26422d6111a044f3de"
+  },
+  "allPacketEntriesMatched": {
+    "candidate-controls-combined-source-v2": 222,
+    "candidate-controls-combined-source-v3": 275,
+    "candidate-controls-inline-park-root-successor-v1": 16
+  },
+  "failedNativeAssetsMatched": 1974,
+  "historicalInputResolver": {
+    "freezeFilesResolved": 45,
+    "packetEntriesResolved": 46,
+    "archiveKeysResolved": 8,
+    "allMatched": true
+  },
+  "unchangedProgramBytes": true,
+  "onlyAllowedRecipeMetadataChanged": [
+    "bindingProfile",
+    "outputDirectory",
+    "programFile",
+    "sourceFreeze",
+    "sourceFreezeSha256"
+  ],
+  "freshOutputLeafAbsent": true,
+  "runtimeExecutions": 0,
+  "validationCorrection": "One final assertion in the initial shell assembly command accidentally used a vacuous conditional expression. It supplied no validation. This additive check now explicitly compares all nine manifest hashes, all222/275/16 packet entries, all1974 failed assets, and all45/46 historical keys through the resolver. No immutable snapshot or historical byte was changed."
+}

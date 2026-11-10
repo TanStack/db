@@ -1,0 +1,47 @@
+{
+  "at": "2026-10-30T11:27:11.432797+00:00",
+  "mode": "static source/hash/JSON reasoning only",
+  "priorPrimaryAudit": {
+    "v1": {
+      "toolReturn": "87cc6f",
+      "exit": 1,
+      "factsSha256": "a702f768ecf884b34d7e56b42989d8f6ab75c9f23b1a2f566fb8e4964fa579a4",
+      "classification": "reviewer lexical guard matched checkpoint comment; preserved"
+    },
+    "v2": {
+      "toolReturn": "4cf16b",
+      "exit": 0,
+      "wallTimeSeconds": 0.351753667,
+      "factsSha256": "107e09ab6489c6c0d57e5bb18276e9c2fe254f67f96382a95d4bbcbae5744197",
+      "scriptSha256": "b54428e2549c91f05878bd4354ea08e0d0e1f893b5d7f5bb1d1b4d6bc856deb8",
+      "classification": "corrected additive guard; all static source checks pass"
+    }
+  },
+  "supplementAudit": {
+    "v1": {
+      "toolReturn": "63c5d8",
+      "exit": 1,
+      "wallTimeSeconds": 0.046014084,
+      "factsSha256": "df81dcbca22f760850de53b80203852001d40de63f58ea3090e8442622890bf9",
+      "classification": "reviewer expected different lint output formatter; preserved"
+    },
+    "v2": {
+      "toolReturn": "7aef1a",
+      "exit": 0,
+      "wallTimeSeconds": 0.065708042,
+      "factsSha256": "28b80513d0c34ab28d051bbf3d586ce55ef5069f0495ad9882a0fc47e7b2ceea",
+      "scriptSha256": "7dbb09355f41f027778d2a1038d7ca139ac86640603c86bcf39a7a4f0c01adca",
+      "classification": "exact33 rule lines/backup path guard; all supplement checks pass"
+    }
+  },
+  "report": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-window-receiving-source-independent-review-v1.md",
+  "reportSha256": "d942b55ce9fbbec48ae7726a644f1cce27808133fa3c3eb3d599df4b35d685eb",
+  "productExecutions": 0,
+  "modelExecutions": 0,
+  "testExecutions": 0,
+  "nativeRunInvocations": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0,
+  "slot2": "remains returned; no slot consumed",
+  "admission": false
+}

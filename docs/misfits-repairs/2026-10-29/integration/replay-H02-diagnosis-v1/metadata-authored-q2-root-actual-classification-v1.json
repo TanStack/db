@@ -1,0 +1,37 @@
+{
+  "kind": "Root classification of authored-q2 actual healthy singleton",
+  "disposition": "Qualified finite healthy receiving witness; no bug-class closure",
+  "actualNative": {
+    "initial": "e143cb",
+    "session": 35271,
+    "final": "12ec83",
+    "exitCode": 0
+  },
+  "independentReview": {
+    "path": "metadata-receiving-independent-review-v1/metadata-authored-q2-actual-independent-review-v1.md",
+    "sha256": "430f019d5c1c841b4f42a377a97488d1f975779a6d889238aa64b48461c30489",
+    "checks": 277
+  },
+  "observation": "One authored scope quarter2 history passed; 31 declared reaches each observed once; all eight complete callbacks, prior/current/upstream metadata and empty callbacks preserved.",
+  "absence": {
+    "actualApiChunk": "5272ae",
+    "exitCode": 0,
+    "result": "metadata-authored-q2-root-original-absence-v1.json",
+    "pids": [
+      71010,
+      71040,
+      71052,
+      71056
+    ],
+    "groups": [
+      71010,
+      71052
+    ],
+    "allAbsent": true,
+    "limits": "Point-in-time numeric identity observations only; missing initial live parent/group receipts remain missing."
+  },
+  "remaining": "No generated authored/no-op, changing fetched metadata, conflicting-cache progress, framework or hostile-mutant evidence. F01 preceding ordinary-value divergence supplies no later metadata-comparator credit.",
+  "productionGate": false,
+  "canonicalImport": false,
+  "prReadiness": "Unproven"
+}

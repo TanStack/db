@@ -1,0 +1,389 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
+@@ -1,4 +1,8 @@
+ import { isDeepStrictEqual } from 'node:util'
++import {
++  checkRetainedWindowSnapshot,
++  referenceJoinedWindowRows,
++} from '../../db/tests/query/pagination-window-publication-oracle.js'
+ import { emitProgressReceipt as emit } from '../../../scripts/h02-progress/receipt-transport.mjs'
+ import {
+   holdCompletionInsertion,
+@@ -32,6 +36,7 @@
+   CompletionAction,
+   CompletionBaselineObservation,
+   CompletionDelivery,
++  CompletionWindow,
+ } from './queued-answer-completion-oracle.js'
+ 
+ const hostTurn = () => new Promise<void>((done) => setTimeout(done, 0))
+@@ -54,6 +59,7 @@
+ type RawRootDelivery = {
+   changes: Array<RawChange<RawRow>>
+   read: Array<RawRow>
++  window?: CompletionWindow
+ }
+ type RawFacadeDelivery = {
+   target: number
+@@ -72,7 +78,7 @@
+  * operations. Their independent recipe supplies facts, dependencies, overlays,
+  * targets and failure identities. This driver never fabricates an applied
+  * receipt, operation Promise, host classification or future continuation fact.
+- * The outer unchanged 20s/384MiB/1GiB instrument bounds an unreached premise;
++ * The separately frozen outer instrument bounds an unreached premise;
+  * this recorder adds no numerical product deadline or local retry ceiling.
+  */
+ export async function driveCompletionBaselineProgram(
+@@ -108,8 +114,10 @@
+   }> = []
+   const receiveBoundary = (event: CompletionBoundaryEvent) => {
+     emit(`completion-boundary`, { boundaryEvent: event })
+-    if (callbackCapture.capture) callbackCapture.capture(event, activeEpoch.id)
+-    else admissionEvents.push({ event, epoch: activeEpoch.id })
++    // Record only. Semantic checks and even expectation lookup run outside
++    // production callbacks, at the explicit observation checkpoint below.
++    if (liveCallbackComparison)
++      admissionEvents.push({ event, epoch: activeEpoch.id })
+   }
+   const armEpoch = (epoch: typeof activeEpoch) => {
+     activeEpoch = epoch
+@@ -176,6 +184,40 @@
+     Array.isArray(row.children)
+       ? undefined
+       : handle(run, row.id, row.children.handle)
++  const semanticErrors: Array<unknown> = []
++  const compare = (check: () => void) => {
++    try {
++      check()
++    } catch (error) {
++      semanticErrors.push(error)
++    }
++  }
++  const finishCheckpoint = () => {
++    if (semanticErrors.length === 0) return
++    const failure =
++      semanticErrors.length === 1
++        ? semanticErrors[0]
++        : new AggregateError(
++            semanticErrors,
++            `completion checkpoint comparisons failed`,
++            { cause: semanticErrors[0] },
++          )
++    emit(`completion-baseline-semantic-failure`, {
++      message: String(failure),
++      errors: semanticErrors.map((error) =>
++        error instanceof Error ? (error.stack ?? String(error)) : String(error),
++      ),
++    })
++    throw failure
++  }
++  const retainedSnapshot = {
++    rows: referenceJoinedWindowRows(
++      program.setup.facts,
++      `asc`,
++      program.setup.window,
++    ),
++    window: program.setup.window,
++  }
+   callbackCapture.capture = (event, epochId) => {
+     if (!liveCallbackComparison) return
+     const epoch = need(
+@@ -239,16 +281,40 @@
+         delivery,
+         capturedAt: event.sequence,
+         epoch: epochId,
++        window: (event.detail as RawRootDelivery).window,
+       })
++      if (
++        program.gate === `source-failed-peer` &&
++        epoch.kind === `publication` &&
++        delivery.layer !== `facade`
++      )
++        compare(() =>
++          checkRetainedWindowSnapshot(
++            retainedSnapshot,
++            {
++              rows: delivery.read,
++              window: (event.detail as RawRootDelivery).window,
++            },
++            `QueryClient ${event.boundary} ${event.sequence}`,
++          ),
++        )
+       deliveryCheck(expected, delivery)
+     }
+   }
+-  for (const captured of admissionEvents)
+-    callbackCapture.capture(captured.event, captured.epoch)
++  let capturedIndex = 0
++  const drainCaptured = () => {
++    for (; capturedIndex < admissionEvents.length; capturedIndex++) {
++      const captured = admissionEvents[capturedIndex]!
++      compare(() => callbackCapture.capture!(captured.event, captured.epoch))
++    }
++  }
+   const closeEpoch = () => {
++    drainCaptured()
+     if (activeEpoch.kind !== `cleanup`)
+-      deliveryCheck.checkpoint(
+-        need(epochModels.get(activeEpoch.id), `epoch-end expectation`),
++      compare(() =>
++        deliveryCheck.checkpoint(
++          need(epochModels.get(activeEpoch.id), `epoch-end expectation`),
++        ),
+       )
+     emit(`completion-baseline-epoch-end`, { epoch: activeEpoch.id })
+   }
+@@ -372,6 +438,44 @@
+         )
+     return loads
+   }
++  const bindHeldRequest = (request: CompletionProviderRequest) => {
++    const loads = establishingLoads(request).map((load) => {
++      const receipt = need(load.receipt, `original held receipt`)
++      if (receipt === true) throw new Error(`held receipt is synchronous`)
++      const binding = {
++        load,
++        receipt,
++        options: load.options,
++        signal: load.options.signal,
++        id: load.id,
++        source: load.source,
++        generation: load.generation,
++        enteredAt: load.enteredAt,
++        queryKey: load.queryKey,
++        queryKeyValue: structuredClone(load.queryKey),
++        error: undefined as unknown,
++      }
++      void receipt.then(
++        () => undefined,
++        (error: unknown) => {
++          binding.error = error
++        },
++      )
++      return binding
++    })
++    return {
++      request,
++      appliedLoad: request.appliedLoad,
++      options: request.options,
++      queryKey: request.queryKey,
++      queryKeyValue: structuredClone(request.queryKey),
++      source: request.source,
++      id: request.id,
++      loads,
++    }
++  }
++  let heldPeer: ReturnType<typeof bindHeldRequest> | undefined
++  let peerDisposition: `pending` | `retired` | undefined
+   const releaseAnswers = async (
+     action: Extract<CompletionAction, { type: `source-answer` }>,
+   ) => {
+@@ -569,7 +673,10 @@
+   const physicalAction = async (action: CompletionAction) => {
+     if (action.type === `request-window`) {
+       callWindow(action)
+-      if (program.gate === `source-failed-peer`)
++      if (
++        program.gate === `source-failed-peer` ||
++        program.windowReceivingSchedule === `success`
++      )
+         // The held cut needs both exact descendant requests and their original
+         // pending applied-load receipts; setWindow can return before they enter.
+         await waitFor(() =>
+@@ -589,6 +696,32 @@
+             },
+           ),
+         )
++      if (
++        program.gate === `source-failed-peer` ||
++        program.windowReceivingSchedule === `success`
++      ) {
++        const request = need(
++          selectedRequest(program.answerScopes.peer),
++          `held original peer request`,
++        )
++        heldPeer = bindHeldRequest(request)
++        fixture.recorder.event(`baseline-window-peer-held`, {
++          request: request.id,
++          source: request.source,
++          queryKey: request.queryKey,
++          loads: heldPeer.loads.map(({ load, receipt }) => ({
++            source: load.source,
++            load: load.id,
++            generation: load.generation,
++            enteredAt: load.enteredAt,
++            receipt: fixture.recorder.object(receipt),
++            options: fixture.recorder.object(load.options),
++            signal:
++              load.options.signal &&
++              fixture.recorder.object(load.options.signal),
++          })),
++        })
++      }
+       return
+     }
+     if (action.type === `request-initial`) {
+@@ -658,6 +791,60 @@
+           )
+       }
+       await waitFor(() => fixture.live.utils.lastSubsetError === errors.source)
++      const peer = need(heldPeer, `original held peer binding`)
++      if (
++        peer.request.appliedLoad !== peer.appliedLoad ||
++        peer.request.options !== peer.options ||
++        peer.request.queryKey !== peer.queryKey ||
++        !isDeepStrictEqual(peer.request.queryKey, peer.queryKeyValue) ||
++        peer.request.source !== peer.source ||
++        peer.request.id !== peer.id ||
++        peer.loads.some((binding) => {
++          const { load } = binding
++          return (
++            !fixture.providers[peer.source].loads().includes(load) ||
++            load.id !== binding.id ||
++            load.source !== binding.source ||
++            load.generation !== binding.generation ||
++            load.enteredAt !== binding.enteredAt ||
++            load.receipt !== binding.receipt ||
++            load.options !== binding.options ||
++            load.options.signal !== binding.signal ||
++            load.queryKey !== binding.queryKey ||
++            !isDeepStrictEqual(load.queryKey, binding.queryKeyValue)
++          )
++        })
++      )
++        throw new Error(
++          `completion instrument: original held peer binding changed before failure barrier`,
++        )
++      const peerPending =
++        !peer.request.answered &&
++        !peer.request.cancelled() &&
++        peer.loads.every(
++          ({ load, signal }) =>
++            load.read() === undefined &&
++            load.settledAt === undefined &&
++            !signal?.aborted,
++        )
++      const peerRetired =
++        !peer.request.answered &&
++        peer.request.cancelled() &&
++        peer.loads.every(
++          ({ load, signal, error }) =>
++            signal?.aborted &&
++            load.read()?.state === `rejected` &&
++            load.settledAt !== undefined &&
++            error instanceof Error &&
++            error.name === `AbortError`,
++        )
++      if (peerPending === peerRetired)
++        throw new Error(
++          `completion instrument: failed-window peer has no unambiguous pending or retired state`,
++        )
++      // A failed move may cancel its peer. This is a physical premise, not a
++      // product no-cancel rule. The same retained snapshot is owed either way.
++      peerDisposition = peerPending ? `pending` : `retired`
+       fixture.recorder.event(`baseline-source-failure-applied`, {
+         requirement: action.requirement,
+         loads: loads.map((load) => ({
+@@ -665,6 +852,30 @@
+           load: load.id,
+           settledAt: load.settledAt,
+         })),
++        peer: {
++          request: peer.request.id,
++          source: peer.request.source,
++          queryKey: peer.request.queryKey,
++          disposition: peerDisposition,
++          requestAnswered: peer.request.answered,
++          requestCancelled: peer.request.cancelled(),
++          loads: peer.loads.map(
++            ({ load, receipt, options, signal, error }) => ({
++              load: load.id,
++              source: load.source,
++              receipt: fixture.recorder.object(receipt),
++              options: fixture.recorder.object(options),
++              signal: signal && fixture.recorder.object(signal),
++              generation: load.generation,
++              enteredAt: load.enteredAt,
++              settledAt: load.settledAt,
++              outcome: load.read(),
++              aborted: signal?.aborted === true,
++              cancellationErrorName:
++                error instanceof Error ? error.name : undefined,
++            }),
++          ),
++        },
+       })
+       return
+     }
+@@ -797,7 +1008,6 @@
+     }
+   }
+   const observe = (boundary: CompletionBaselineObservation[`boundary`]) => {
+-    closeEpoch()
+     const common = {
+       phase: `completion-baseline-cut` as const,
+       boundary,
+@@ -808,6 +1018,11 @@
+           ? fixture.operations.observations()
+           : originalFixture.operations.observations(),
+     }
++    // Freeze the physical cut before any comparison can fail. The failure
++    // history reaches this barrier before releasing the peer or waiting on the
++    // window operation; raw callback lists remain complete, including duplicates.
++    emit(`completion-baseline-checkpoint-captured`, common)
++    closeEpoch()
+     let observation: CompletionBaselineObservation
+     switch (boundary) {
+       case `public-state`:
+@@ -840,7 +1055,12 @@
+           boundary,
+           requirement: `answer`,
+           error: fixture.recorder.error(errors.source),
+-          peerPending: selectedRequest(program.answerScopes.peer) !== undefined,
++          peerPending: peerDisposition === `pending`,
++          peerRetired: peerDisposition === `retired`,
++          firstFailureBarrier:
++            program.windowReceivingSchedule === `failure-first`
++              ? true
++              : undefined,
+         }
+         break
+       case `facade-rollback`:
+@@ -908,17 +1128,35 @@
+         break
+     }
+     emit(`completion-baseline-cut`, observation)
+-    checkCompletionBaselineObservation(model, observation)
++    if (boundary === `source-failed-peer`) {
++      compare(() =>
++        checkRetainedWindowSnapshot(
++          retainedSnapshot,
++          { rows: common.view.roots, window: common.view.window },
++          `QueryClient root failure checkpoint`,
++        ),
++      )
++      compare(() =>
++        checkRetainedWindowSnapshot(
++          retainedSnapshot,
++          { rows: common.view.downstream, window: common.view.window },
++          `QueryClient downstream failure checkpoint`,
++        ),
++      )
++    }
++    compare(() => checkCompletionBaselineObservation(model, observation))
++    finishCheckpoint()
+   }
+   try {
+     if (program.setup.ready) {
+       await fixture.establish()
+-      checkCompletionBaselineView(program.setup, fixture.read())
++      compare(() => checkCompletionBaselineView(program.setup, fixture.read()))
+       closeEpoch()
+       emit(`completion-baseline-view`, {
+         setup: program.setup,
+         view: fixture.read(),
+       })
++      finishCheckpoint()
+     }
+     for (const [index, step] of program.steps.entries()) {
+       const epoch = publicationEpochs.find((entry) => entry.fromStep === index)

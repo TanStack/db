@@ -1,0 +1,479 @@
+{
+  "atMonotonicNs": 227899614387958,
+  "groupPsReturncode": 0,
+  "groupPsStderr": "",
+  "limits": "Target groups come from actual launcher and detached supervisor target identities. No persisted launch-time getpgid for inner groups; actual outer lifecycle getpgid was after exit. No new identity is substituted.",
+  "originalPidCount": 18,
+  "originalTargetGroupCount": 9,
+  "probes": [
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62130"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62130
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62146"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62146
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62199"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62199
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62211"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62211
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62232"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62232
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62237"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62237
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62258"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62258
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62261"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62261
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62330"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62330
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62333"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62333
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62356"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62356
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62359"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62359
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62379"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62379
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62382"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62382
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62404"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62404
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62407"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62407
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62427"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62427
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "62430"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-pid",
+      "target": 62430
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62130
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62199
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62232
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62258
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62330
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62356
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62379
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62404
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent"
+      },
+      "kind": "original-detached-target-group",
+      "target": 62427
+    }
+  ],
+  "status": "actual original recorded PID/target-group cleanup probes"
+}

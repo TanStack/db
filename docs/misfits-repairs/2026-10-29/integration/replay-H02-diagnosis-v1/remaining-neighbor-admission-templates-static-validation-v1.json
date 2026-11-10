@@ -1,0 +1,53 @@
+{
+  "status": "Static read/hash/parse validation only; no receiving or runtime admission",
+  "templates": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-root-admission-template-v1.json",
+      "sha256": "27361c7af7be4851b7bd6a1ec0d10556919b3012835c9cdd44f024c3e7a9ae44",
+      "selectedPath": "empty scope-key publication",
+      "expectedReach": [
+        "empty-prior",
+        "held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "root-change",
+        "downstream-change",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "nativeSelected": 1,
+      "nativeSkipped": 4,
+      "runtimeAdmitted": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-root-admission-template-v1.json",
+      "sha256": "cfde64e0b2a7d39c13a35c6f01bfcf7d9224e40a4148f78a86b7a77bea7701d3",
+      "selectedPath": "literal true initial cut",
+      "expectedReach": [
+        "literal-true-establishing-receipt",
+        "subscriber-return-before-preload",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "nativeSelected": 1,
+      "nativeSkipped": 4,
+      "runtimeAdmitted": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-root-admission-template-v1.json",
+      "sha256": "eef44006a693dbdde7f6712fdadfe88d753e4012a9877ebea449f907ddf84a50",
+      "selectedPath": "ordinary synchronous mutation cut",
+      "expectedReach": [
+        "ordinary-mutation-return-before-host-turn",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "nativeSelected": 1,
+      "nativeSkipped": 4,
+      "runtimeAdmitted": false
+    }
+  ],
+  "errors": [],
+  "candidatePlanOwner": "/root/queued_progress_design; separate candidate-controls-preproduction-plan-v1 packet in preparation;20declared/0receiving states",
+  "limits": "No tests, builds, imports, native collection or launchers executed; no source/model/grammar/budget/dependency edit. Exact result packet unchanged."
+}

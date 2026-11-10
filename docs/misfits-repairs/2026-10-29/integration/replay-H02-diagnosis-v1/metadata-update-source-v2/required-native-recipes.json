@@ -1,0 +1,1208 @@
+{
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "status": "Inert required recipes only. No native list, collection, receiving or mutants executed. Native launcher/provenance admission remains separate.",
+  "nextCandidate": "native-list-all-twenty, then separately reviewed scope/default positive-quarter2 singleton",
+  "ordering": "No batch execution or automatic retries. Root/result review and original process absence gates precede each next admitted command. Strict terminal GREEN requires independent candidate repair and a new production/source freeze.",
+  "list": {
+    "id": "native-list-all-twenty",
+    "status": "UNADMITTED and UNEXECUTED",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+    "argv": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "list",
+      "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "--config",
+      "scripts/h02-progress/vitest.config.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--cache=false",
+      "--json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/list-all-twenty.json"
+    ],
+    "envUnset": [
+      "NODE_OPTIONS",
+      "NODE_PATH",
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_CALIBRATION",
+      "H02_PROGRESS_WORKER_HISTORY",
+      "H02_PROGRESS_BINDING_DIR",
+      "H02_PROGRESS_SELECTED_ROOT",
+      "H02_PROGRESS_RECEIPTS",
+      "H02_PROGRESS_SOURCE_FREEZE"
+    ],
+    "expectedNames": [
+      "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+      "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+      "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 0",
+      "queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign",
+      "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+      "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+      "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+      "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 0",
+      "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign",
+      "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay",
+      "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 0",
+      "queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign",
+      "queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay",
+      "queued-answer metadata receiving > checks metadata 'subscription' 'authored'",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 0",
+      "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign",
+      "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay"
+    ],
+    "expectedCount": 20,
+    "expectedModule": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+    "notes": "Confirm actual native display names and space-joined filter names separately. Do not use display > separators in -t. Each needed filtered singleton must list exactly1 before its receiving command. This description is not native name evidence."
+  },
+  "receiving": [
+    {
+      "id": "original-scope-default",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "original replacement control",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ metadata\\ 'scope'\\ 'default'$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks metadata 'scope' 'default'",
+      "expectedDisplayName": "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/original-scope-default",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "property": null
+    },
+    {
+      "id": "followup-scope-default-q2",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "scope receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'scope'\\ 'default'\\ quarter\\ 2$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'scope' 'default' quarter 2",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-scope-default-q2",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "property": null
+    },
+    {
+      "id": "followup-scope-default-q0",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "scope receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'scope'\\ 'default'\\ quarter\\ 0$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'scope' 'default' quarter 0",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 0",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-scope-default-q0",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 0
+      },
+      "property": null
+    },
+    {
+      "id": "generated-scope-default-fixed",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ fixed\\ generated\\ campaign$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'default' checks the fixed generated campaign",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-scope-default-fixed",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.scope.default"
+    },
+    {
+      "id": "generated-scope-default-random",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'default' checks the unseeded generated campaign or selected replay",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-scope-default-random",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.scope.default"
+    },
+    {
+      "id": "original-scope-authored",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "original replacement control",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ metadata\\ 'scope'\\ 'authored'$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks metadata 'scope' 'authored'",
+      "expectedDisplayName": "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/original-scope-authored",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "property": null
+    },
+    {
+      "id": "followup-scope-authored-q2",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "scope receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'scope'\\ 'authored'\\ quarter\\ 2$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-scope-authored-q2",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "property": null
+    },
+    {
+      "id": "followup-scope-authored-q0",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "scope receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'scope'\\ 'authored'\\ quarter\\ 0$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 0",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 0",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-scope-authored-q0",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 0
+      },
+      "property": null
+    },
+    {
+      "id": "generated-scope-authored-fixed",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'authored'\\ checks\\ the\\ fixed\\ generated\\ campaign$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'authored' checks the fixed generated campaign",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-scope-authored-fixed",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.scope.authored"
+    },
+    {
+      "id": "generated-scope-authored-random",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history receiving calibration",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'authored'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'authored' checks the unseeded generated campaign or selected replay",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-scope-authored-random",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.scope.authored"
+    },
+    {
+      "id": "original-subscription-default",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "unchanged-production strict progress diagnostic",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ metadata\\ 'subscription'\\ 'default'$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks metadata 'subscription' 'default'",
+      "expectedDisplayName": "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/original-subscription-default",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "property": null
+    },
+    {
+      "id": "followup-subscription-default-q2",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "strict diagnostic; terminal update evidence blocked until independent progress repair",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'subscription'\\ 'default'\\ quarter\\ 2$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'subscription' 'default' quarter 2",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-subscription-default-q2",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "property": null
+    },
+    {
+      "id": "followup-subscription-default-q0",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "strict diagnostic; terminal update evidence blocked until independent progress repair",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'subscription'\\ 'default'\\ quarter\\ 0$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'subscription' 'default' quarter 0",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 0",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-subscription-default-q0",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 0
+      },
+      "property": null
+    },
+    {
+      "id": "generated-subscription-default-fixed",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history campaign; strict campaigns need repaired-production successor freeze",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'subscription'\\ 'default'\\ checks\\ the\\ fixed\\ generated\\ campaign$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'subscription' 'default' checks the fixed generated campaign",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-subscription-default-fixed",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.subscription.default"
+    },
+    {
+      "id": "generated-subscription-default-random",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history campaign; strict campaigns need repaired-production successor freeze",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'subscription'\\ 'default'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'subscription' 'default' checks the unseeded generated campaign or selected replay",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-subscription-default-random",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.subscription.default"
+    },
+    {
+      "id": "original-subscription-authored",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "unchanged-production strict progress diagnostic",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ metadata\\ 'subscription'\\ 'authored'$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks metadata 'subscription' 'authored'",
+      "expectedDisplayName": "queued-answer metadata receiving > checks metadata 'subscription' 'authored'",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/original-subscription-authored",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "property": null
+    },
+    {
+      "id": "followup-subscription-authored-q2",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "strict diagnostic; terminal update evidence blocked until independent progress repair",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'subscription'\\ 'authored'\\ quarter\\ 2$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'subscription' 'authored' quarter 2",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-subscription-authored-q2",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "property": null
+    },
+    {
+      "id": "followup-subscription-authored-q0",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "strict diagnostic; terminal update evidence blocked until independent progress repair",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ checks\\ source\\ followup\\ 'subscription'\\ 'authored'\\ quarter\\ 0$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving checks source followup 'subscription' 'authored' quarter 0",
+      "expectedDisplayName": "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 0",
+      "testTimeoutMs": 60000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/followup-subscription-authored-q0",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 0
+      },
+      "property": null
+    },
+    {
+      "id": "generated-subscription-authored-fixed",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history campaign; strict campaigns need repaired-production successor freeze",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'subscription'\\ 'authored'\\ checks\\ the\\ fixed\\ generated\\ campaign$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'subscription' 'authored' checks the fixed generated campaign",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-subscription-authored-fixed",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.subscription.authored"
+    },
+    {
+      "id": "generated-subscription-authored-random",
+      "status": "UNADMITTED and UNEXECUTED; separate source/launcher review and root singleton admission required",
+      "phase": "per-path 8-history campaign; strict campaigns need repaired-production successor freeze",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "argv": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "--reporter=verbose",
+        "--silent=false",
+        "-t",
+        "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'subscription'\\ 'authored'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "envUnset": [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "TANSTACK_DB_ORACLE_SEED",
+        "TANSTACK_DB_ORACLE_PATH",
+        "TANSTACK_DB_ORACLE_PROPERTY",
+        "TANSTACK_DB_ORACLE_CALIBRATION",
+        "H02_PROGRESS_WORKER_HISTORY",
+        "H02_PROGRESS_BINDING_DIR",
+        "H02_PROGRESS_SELECTED_ROOT",
+        "H02_PROGRESS_RECEIPTS",
+        "H02_PROGRESS_SOURCE_FREEZE"
+      ],
+      "envSet": {
+        "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json"
+      },
+      "expectedFilterName": "queued-answer metadata receiving generated 'subscription' 'authored' checks the unseeded generated campaign or selected replay",
+      "expectedDisplayName": "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay",
+      "testTimeoutMs": 300000,
+      "innerReceivingBudget": {
+        "wallMs": 20000,
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000
+      },
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/native-unexecuted/generated-subscription-authored-random",
+      "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+      "receivingHistory": null,
+      "property": "query.queued-answer-metadata.subscription.authored"
+    }
+  ],
+  "futureMutants": "After actual GREEN, prepare fresh targeted root/downstream missing-previous and full-current-previous production-mutant successors. Reuse each lane positive-quarter2 singleton against its own reviewed mutant freeze. No current recipe or pure control supplies an actual mutant kill. Copying current metadata alone is equivalent in this profile.",
+  "replayTemplate": {
+    "requiredValues": [
+      "recorded failing property",
+      "recorded seed",
+      "recorded shrink path"
+    ],
+    "envSetFields": [
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH"
+    ],
+    "selector": "matching path unseeded generated campaign or selected replay",
+    "requiredReach": "actual selected same-key root/downstream comparison in the recorded history, not all global campaign bins",
+    "status": "No seed/path exists because no native campaign ran."
+  }
+}

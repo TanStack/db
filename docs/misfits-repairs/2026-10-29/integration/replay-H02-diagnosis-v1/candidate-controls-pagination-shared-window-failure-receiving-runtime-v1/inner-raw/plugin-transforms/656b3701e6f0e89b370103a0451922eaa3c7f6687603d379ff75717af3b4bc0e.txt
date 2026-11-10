@@ -1,0 +1,729 @@
+import { createCollection } from "./collection/index.js";
+import {
+  collectionOptionsBrand,
+  collectionOptionsClaim,
+  collectionOptionsFactory,
+  hasCollectionOptionsBrand
+} from "./collection-options.js";
+import { TransactionScope } from "./transactions.js";
+import { getBuilderFromConfig } from "./query/live/collection-registry.js";
+import { createLiveQueryCollection } from "./query/live-query-collection.js";
+import { createLiveQueryObserver } from "./live-query-observer.js";
+import { LiveQueryObserverClient } from "./live-query-observer-client.js";
+import { createDeferred } from "./deferred.js";
+import {
+  getLiveQueryHash,
+  getLiveQueryRowOptions,
+  getPreparedLiveQuerySources,
+  prepareLiveQueryValue,
+  resumeDeferredLiveQueryCollections
+} from "./live-query-options.js";
+import { codedMessage, devBuild } from "./error-message.js";
+import { truncatesSourceKey } from "./collection/state.js";
+const collectionConfigFactory = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionConfig.factory`
+);
+function sameSourcesAtEachPosition(left, right) {
+  return left.length === right.length && left.every((source, index) => source === right[index]);
+}
+export function withCollectionConfigFactory(config, factory, claim) {
+  Object.defineProperty(config, collectionConfigFactory, {
+    value: factory,
+    enumerable: false
+  });
+  if (claim) {
+    Object.defineProperty(config, collectionOptionsClaim, {
+      value: claim,
+      enumerable: true
+    });
+  }
+  return config;
+}
+export function collectionOptions(optionsOrId, explicitFactory) {
+  const config = typeof optionsOrId === `string` ? void 0 : optionsOrId;
+  const id = typeof optionsOrId === `string` ? optionsOrId : optionsOrId.id;
+  if (!id) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.` : codedMessage(88)
+    );
+  }
+  if (typeof optionsOrId === `string` && !explicitFactory) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `collectionOptions("${id}") requires a factory as its second argument.` : codedMessage(89, { id })
+    );
+  }
+  const reusableFactory = config ? config[collectionConfigFactory] : explicitFactory;
+  let owner;
+  const materialize = (client) => {
+    let materialized;
+    if (reusableFactory) {
+      materialized = reusableFactory(client);
+    } else {
+      if (owner && owner !== client) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" was created from a concrete config that cannot be safely reused across DbClient instances. Use collectionOptions("${id}", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.` : codedMessage(90, { id })
+        );
+      }
+      owner = client;
+      materialized = config;
+    }
+    if (materialized.id !== void 0 && materialized.id !== id) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.` : codedMessage(91, { id, materializedId: materialized.id })
+      );
+    }
+    return materialized.id === id ? materialized : { ...materialized, id };
+  };
+  const descriptor = {
+    id,
+    ...config?.singleResult === true ? { singleResult: true } : {}
+  };
+  Object.defineProperties(descriptor, {
+    [collectionOptionsBrand]: {
+      value: true,
+      enumerable: false
+    },
+    [collectionOptionsFactory]: {
+      value: materialize,
+      enumerable: false
+    }
+  });
+  return Object.freeze(descriptor);
+}
+export function isCollectionOptions(value) {
+  return hasCollectionOptionsBrand(value);
+}
+function createAdapterAuthorityLookups(state) {
+  const rowKeys = /* @__PURE__ */ new Set();
+  const metadataKeys = /* @__PURE__ */ new Set();
+  let truncate = state.hasAppliedAdapterTruncate ? {
+    truncate: true,
+    operations: [],
+    rowMetadataWrites: /* @__PURE__ */ new Map(),
+    preserveHydrationSeedKeys: state.adapterTruncateKeptKeys,
+    sourceTruncate: true
+  } : void 0;
+  for (const transaction of [
+    ...state.pendingSyncedTransactions.filter((pending) => pending.committed),
+    ...state.getStagedSyncTransactions()
+  ]) {
+    if (transaction.truncate && (!transaction.preserveHydrationSeedKeys || transaction.sourceTruncate))
+      truncate = transaction;
+    for (const operation of transaction.operations)
+      if (!transaction.preserveHydrationSeedKeys?.has(operation.key))
+        rowKeys.add(operation.key);
+    for (const key of transaction.rowMetadataWrites.keys())
+      if (!transaction.preserveHydrationSeedKeys?.has(key))
+        metadataKeys.add(key);
+  }
+  return {
+    rows: (key) => truncate !== void 0 && truncatesSourceKey(truncate, key) || rowKeys.has(key) || state.appliedAdapterKeys?.get(key) === true || state.syncedData.has(key) && !state.hydrationSeedKeys.has(key),
+    // A key whose row an applied adapter write deleted is in the map too.
+    metadata: (key) => truncate !== void 0 && truncatesSourceKey(truncate, key) || metadataKeys.has(key) || state.appliedAdapterKeys?.has(key) === true
+  };
+}
+export class DbClient {
+  constructor(options = {}) {
+    this.options = options;
+    this.collectionsById = /* @__PURE__ */ new Map();
+    this.pendingHydration = /* @__PURE__ */ new Map();
+    this.liveQueries = /* @__PURE__ */ new Map();
+    // A committed reader cannot consume a later boundary's server snapshot.
+    // Retain transported records for server getters until this client cleans up.
+    this.hydratedLiveQueries = /* @__PURE__ */ new Map();
+    this.ssrQueryWaiters = /* @__PURE__ */ new Map();
+    this.preloadedLiveQueries = /* @__PURE__ */ new Map();
+    this.liveQueryResources = /* @__PURE__ */ new Map();
+    this.listeners = /* @__PURE__ */ new Set();
+    this.ssrStreamingEnabled = false;
+    this.ssrServerCleanupEnabled = false;
+    this.lastLiveQueryTimestamp = 0;
+    this.transactionScope = new TransactionScope();
+  }
+  getDependency(key) {
+    return this.options[key];
+  }
+  requireDependency(key) {
+    const dependency = this.getDependency(key);
+    if (dependency === void 0) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `DbClient is missing the required "${key}" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).` : codedMessage(92, { key })
+      );
+    }
+    return dependency;
+  }
+  get activeTransaction() {
+    return this.transactionScope.getActiveTransaction();
+  }
+  createTransaction(config) {
+    return this.transactionScope.createTransaction(config);
+  }
+  preloadLiveQuery(options) {
+    const deferredCollections = /* @__PURE__ */ new Set();
+    let started;
+    let primaryFailure;
+    try {
+      started = this.startLiveQueryPreload(options, deferredCollections);
+    } catch (error) {
+      primaryFailure = { error };
+    }
+    let resumeFailure;
+    try {
+      resumeDeferredLiveQueryCollections(deferredCollections, true);
+    } catch (error) {
+      resumeFailure = { error };
+    }
+    if (primaryFailure) throw primaryFailure.error;
+    if (resumeFailure) {
+      const registration = started?.registration;
+      if (registration && this.liveQueries.get(registration.queryHash) === registration.record) {
+        registration.record.fail(resumeFailure.error);
+        this.discardPreloadedLiveQuery(registration.queryHash);
+      }
+      void started?.result.catch(() => {
+      });
+      throw resumeFailure.error;
+    }
+    return started.result;
+  }
+  discardPreloadedLiveQuery(queryHash) {
+    const preloaded = this.preloadedLiveQueries.get(queryHash);
+    if (!preloaded) return;
+    preloaded.observer.dispose();
+    void preloaded.collection.cleanup({ dependents: true }).catch(() => {
+    });
+    this.preloadedLiveQueries.delete(queryHash);
+  }
+  startLiveQueryPreload(options, deferredCollections) {
+    const prepared = prepareLiveQueryValue(options, this, deferredCollections);
+    const queryHash = getLiveQueryHash(prepared, options.queryKey);
+    const sources = getPreparedLiveQuerySources(prepared);
+    const existing = this.liveQueries.get(queryHash);
+    const rowOptions = getLiveQueryRowOptions(prepared);
+    this._assertLiveQuerySources(queryHash, sources, rowOptions);
+    if (existing && (existing.status === `pending` || existing.status === `success` && existing.snapshot?.status === void 0)) {
+      return { result: existing.promise };
+    }
+    this.discardPreloadedLiveQuery(queryHash);
+    const collection = createLiveQueryCollection({
+      ...prepared,
+      startSync: true
+    });
+    const observer = createLiveQueryObserver(collection, {
+      client: this,
+      queryHash,
+      mode: `wholesale`
+    });
+    this.preloadedLiveQueries.set(queryHash, {
+      collection,
+      observer,
+      sources
+    });
+    const result = this._registerLiveQuery(
+      queryHash,
+      collection.preload().then(() => observer.dehydrate()),
+      sources,
+      rowOptions
+    );
+    return {
+      result,
+      registration: { queryHash, record: this.liveQueries.get(queryHash) }
+    };
+  }
+  collection(options, materializeOptions) {
+    return this.materializeCollection(options, materializeOptions, false);
+  }
+  /** @internal */
+  _materializeCollectionForRender(options) {
+    return this.materializeCollection(options, void 0, true);
+  }
+  materializeCollection(options, materializeOptions, deferSyncStart) {
+    const existing = this.collectionsById.get(options.id);
+    if (existing) {
+      return this.reuseMaterializedCollection(existing, deferSyncStart);
+    }
+    const config = options[collectionOptionsFactory](this);
+    const materializedDuringFactory = this.collectionsById.get(options.id);
+    if (materializedDuringFactory) {
+      return this.reuseMaterializedCollection(
+        materializedDuringFactory,
+        deferSyncStart
+      );
+    }
+    const shouldStartSync = config.startSync === true;
+    const collection = createCollection({
+      ...config,
+      startSync: false
+    });
+    collection._setTransactionScope(this.transactionScope);
+    collection._state.enableHydrationAuthorityTracking();
+    if (deferSyncStart) {
+      collection._deferSyncStart();
+    }
+    this.collectionsById.set(collection.id, {
+      collection,
+      shouldDehydrate: !deferSyncStart,
+      hydrated: this.pendingHydration.has(collection.id)
+    });
+    if (materializeOptions?.initialData?.length) {
+      this.applyRows(
+        collection,
+        {
+          collectionId: collection.id,
+          rows: materializeOptions.initialData.map((value) => ({ value }))
+        },
+        `initialData`
+      );
+    }
+    const pendingChunks = this.pendingHydration.get(collection.id);
+    if (pendingChunks) {
+      for (const chunk of pendingChunks) {
+        this.applyRows(collection, chunk, `hydration`);
+      }
+      this.pendingHydration.delete(collection.id);
+    }
+    if (shouldStartSync) {
+      collection.startSyncImmediate();
+    }
+    return collection;
+  }
+  reuseMaterializedCollection(record, deferSyncStart) {
+    if (deferSyncStart) {
+      record.collection._deferSyncStart();
+    } else {
+      record.shouldDehydrate = true;
+    }
+    return record.collection;
+  }
+  dehydrate(options = {}) {
+    const collections = [];
+    for (const {
+      collection,
+      shouldDehydrate
+    } of this.collectionsById.values()) {
+      const collectionDecision = options.shouldDehydrateCollection?.(collection);
+      if (getBuilderFromConfig(collection.config) || collectionDecision === false || !shouldDehydrate && collectionDecision !== true) {
+        continue;
+      }
+      const rows = Array.from(collection._state.syncedData.entries()).map(
+        ([key, value]) => {
+          const metadata = collection._state.syncedMetadata.get(key);
+          return {
+            key,
+            value,
+            ...metadata === void 0 ? {} : { metadata }
+          };
+        }
+      );
+      collections.push({
+        collectionId: collection.id,
+        rows,
+        syncMeta: collection.config.sync.exportSyncMeta?.()
+      });
+    }
+    const liveQueries = Array.from(this.liveQueries.values()).flatMap(
+      (query) => {
+        const decision = options.shouldDehydrateLiveQuery?.(query);
+        const shouldDehydrate = decision ?? (query.status === `success` || query.snapshot !== void 0);
+        if (!shouldDehydrate || query.status === `error`) {
+          return [];
+        }
+        return [
+          {
+            queryHash: query.queryHash,
+            dehydratedAt: query.dehydratedAt,
+            ...query.initialSnapshot && query.initialSnapshot !== query.snapshot ? { initialSnapshot: query.initialSnapshot } : {},
+            ...query.snapshot ? { snapshot: query.snapshot } : {},
+            ...query.status === `pending` && (!query.snapshot || this.ssrStreamingEnabled || decision === true) ? { promise: query.resultPromise } : {}
+          }
+        ];
+      }
+    );
+    return {
+      collections,
+      ...liveQueries.length > 0 ? { liveQueries } : {}
+    };
+  }
+  hydrate(state) {
+    for (const chunk of state.collections) {
+      const record = this.collectionsById.get(chunk.collectionId);
+      if (record) {
+        record.hydrated = true;
+        this.applyRows(record.collection, chunk, `hydration`);
+        continue;
+      }
+      const pendingChunks = this.pendingHydration.get(chunk.collectionId) ?? [];
+      pendingChunks.push(chunk);
+      this.pendingHydration.set(chunk.collectionId, pendingChunks);
+    }
+    for (const dehydratedQuery of state.liveQueries ?? []) {
+      this.hydrateLiveQuery(dehydratedQuery);
+    }
+  }
+  applyCollectionChunk(chunk) {
+    this.hydrate({ collections: [chunk] });
+  }
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  /** @internal Supply transport behavior without coupling ordinary observers to SSR. */
+  _bindLiveQueryObserver(collection, queryHash, suspendUntilReady, host) {
+    return new LiveQueryObserverClient(
+      this,
+      collection,
+      queryHash,
+      suspendUntilReady,
+      host
+    );
+  }
+  /** @internal Normalized source transport carries rows, not readiness. */
+  _hasSsrCollectionSnapshot(collection) {
+    const sources = getBuilderFromConfig(
+      collection.config
+    )?.getSourceCollections();
+    if (sources)
+      return sources.every((source) => this._hasSsrCollectionSnapshot(source));
+    const record = this.collectionsById.get(collection.id);
+    return record?.collection === collection && (record.shouldDehydrate || record.hydrated);
+  }
+  /** @internal */
+  _setSsrStreamingEnabled(enabled) {
+    if (enabled && !this.ssrStreamingEnabled) {
+      this.ssrStreamFailure = void 0;
+      this.ssrQueryWaiters.clear();
+    } else if (!enabled && this.ssrStreamingEnabled && !this.ssrStreamFailure)
+      this.failSsrQueryWaiters(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `The DB stream ended before the server-rendered query snapshot arrived.` : codedMessage(253)
+        )
+      );
+    this.ssrStreamingEnabled = enabled;
+  }
+  /** @internal Wait for transport without claiming or starting a local source. */
+  _waitForSsrLiveQuery(queryHash, forHydration = false) {
+    let waiter = this.ssrQueryWaiters.get(queryHash);
+    if (waiter && `cause` in waiter) throw waiter.cause;
+    if (!forHydration || this.hydratedLiveQueries.has(queryHash)) return;
+    if (this.ssrStreamFailure) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure);
+      throw this.ssrStreamFailure.cause;
+    }
+    if (!this.ssrStreamingEnabled) return;
+    if (!waiter) {
+      waiter = createDeferred();
+      waiter.promise.catch(() => {
+      });
+      this.ssrQueryWaiters.set(queryHash, waiter);
+    }
+    return waiter.promise;
+  }
+  failSsrQueryWaiters(cause) {
+    this.ssrStreamFailure ??= { cause };
+    for (const [queryHash, waiter] of this.ssrQueryWaiters) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure);
+      if (`promise` in waiter) waiter.reject(this.ssrStreamFailure.cause);
+    }
+  }
+  /** @internal */
+  _isSsrStreamingEnabled() {
+    return this.ssrStreamingEnabled;
+  }
+  /** @internal */
+  _setSsrServerCleanupEnabled(enabled) {
+    this.ssrServerCleanupEnabled = enabled;
+  }
+  /** @internal */
+  _isSsrServerCleanupEnabled() {
+    return this.ssrServerCleanupEnabled;
+  }
+  /** @internal */
+  _getLiveQuery(queryHash, forServerSnapshot = false) {
+    return forServerSnapshot && this.hydratedLiveQueries.get(queryHash) || this.liveQueries.get(queryHash);
+  }
+  /** @internal Reject incompatible local sources or row behavior for a reusable stream. */
+  _assertLiveQuerySources(queryHash, sources, rowOptions) {
+    const record = this.liveQueries.get(queryHash);
+    if (!record || record.status === `error`) return;
+    const priorSources = record.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources;
+    if (priorSources && !sameSourcesAtEachPosition(priorSources, sources) || rowOptions && record.rowOptions && rowOptions.some(
+      (option, index) => option !== record.rowOptions[index]
+    )) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `DbClient cannot reuse live query "${queryHash}" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key.` : codedMessage(234, { queryHash })
+      );
+    }
+    record.rowOptions ??= rowOptions;
+    if (!record.sources) record.sources = [...sources];
+  }
+  /** @internal */
+  _consumeLiveQueryResult(queryHash, dehydratedAt) {
+    const record = this.liveQueries.get(queryHash);
+    if (record?.dehydratedAt === dehydratedAt) {
+      this.liveQueries.delete(queryHash);
+    }
+  }
+  /** @internal Capture the first server view without starting acquisition. */
+  _captureServerQuery(queryHash, snapshot, sources, rowOptions) {
+    const existing = this.liveQueries.get(queryHash);
+    if (existing) {
+      if (sources) this._assertLiveQuerySources(queryHash, sources, rowOptions);
+      if (existing.snapshot && (snapshot.status === void 0 || existing.initialSnapshot))
+        return;
+      if (snapshot.status !== void 0) existing.initialSnapshot ??= snapshot;
+      existing.snapshot ??= snapshot;
+      existing.dehydratedAt = this.nextLiveQueryTimestamp();
+      this.emit({ type: `liveQueryUpdated`, query: existing });
+      return;
+    }
+    const record = this.createLiveQueryRecord(
+      queryHash,
+      this.nextLiveQueryTimestamp()
+    );
+    record.rowOptions = rowOptions;
+    record.sources = sources;
+    if (snapshot.status !== void 0) record.initialSnapshot = snapshot;
+    this.liveQueries.set(queryHash, record);
+    this.emit({ type: `liveQueryAdded`, query: record });
+    record.succeed(snapshot);
+  }
+  /** @internal */
+  _registerLiveQuery(queryHash, promise, sources, rowOptions) {
+    void Promise.resolve(promise).catch(() => {
+    });
+    if (sources) this._assertLiveQuerySources(queryHash, sources, rowOptions);
+    const existing = this.liveQueries.get(queryHash);
+    if (existing && (existing.status === `pending` || existing.status === `success` && existing.snapshot?.status === void 0)) {
+      return existing.promise;
+    }
+    const record = this.createLiveQueryRecord(
+      queryHash,
+      this.nextLiveQueryTimestamp()
+    );
+    record.rowOptions = rowOptions;
+    record.sources = sources;
+    record.initialSnapshot = existing?.initialSnapshot;
+    this.liveQueries.set(queryHash, record);
+    this.emit({ type: `liveQueryAdded`, query: record });
+    Promise.resolve(promise).then(record.succeed, record.fail);
+    return record.promise;
+  }
+  /** @internal */
+  _registerLiveQueryResource(owner, cleanup) {
+    this.liveQueryResources.set(owner, cleanup);
+    return () => {
+      if (this.liveQueryResources.get(owner) === cleanup) {
+        this.liveQueryResources.delete(owner);
+      }
+    };
+  }
+  /** @internal */
+  _failPendingLiveQueries(error) {
+    this.failSsrQueryWaiters(error);
+    for (const record of this.liveQueries.values()) {
+      if (record.status === `pending`) record.fail(error);
+    }
+    this.emit({ type: `liveQueryStreamError`, error });
+  }
+  async cleanup() {
+    try {
+      const materializedCollections = Array.from(
+        this.collectionsById.values(),
+        ({ collection }) => collection
+      );
+      const preloadedQueries = Array.from(this.preloadedLiveQueries.values());
+      const liveQueryCollections = /* @__PURE__ */ new Set([
+        ...preloadedQueries.map(({ collection }) => collection),
+        ...materializedCollections.filter(
+          (collection) => getBuilderFromConfig(collection.config)
+        )
+      ]);
+      for (const { observer } of preloadedQueries) observer.dispose();
+      const cleanupResults = [
+        ...await Promise.allSettled(
+          Array.from(this.liveQueryResources.values(), (cleanup) => cleanup())
+        ),
+        ...await Promise.allSettled(
+          Array.from(
+            liveQueryCollections,
+            (collection) => collection.cleanup({ dependents: true })
+          )
+        ),
+        ...await Promise.allSettled(
+          materializedCollections.filter((collection) => !liveQueryCollections.has(collection)).map((collection) => collection.cleanup({ dependents: true }))
+        )
+      ];
+      const failure = cleanupResults.find(
+        (result) => result.status === `rejected`
+      );
+      if (failure) throw failure.reason;
+    } finally {
+      this._setSsrStreamingEnabled(false);
+      this.transactionScope.clear();
+      this.collectionsById.clear();
+      this.pendingHydration.clear();
+      this.liveQueries.clear();
+      this.hydratedLiveQueries.clear();
+      this.preloadedLiveQueries.clear();
+      this.liveQueryResources.clear();
+      this.listeners.clear();
+      this.ssrServerCleanupEnabled = false;
+      this.lastLiveQueryTimestamp = 0;
+    }
+  }
+  hydrateLiveQuery(dehydratedQuery) {
+    const existing = this.liveQueries.get(dehydratedQuery.queryHash);
+    if (existing && existing === this.hydratedLiveQueries.get(dehydratedQuery.queryHash) && existing.dehydratedAt >= dehydratedQuery.dehydratedAt) {
+      return;
+    }
+    const record = this.createLiveQueryRecord(
+      dehydratedQuery.queryHash,
+      dehydratedQuery.dehydratedAt
+    );
+    if (existing?.status === `error`) {
+      this.discardPreloadedLiveQuery(dehydratedQuery.queryHash);
+    } else {
+      record.sources = existing?.sources;
+      record.rowOptions = existing?.rowOptions;
+    }
+    this.liveQueries.set(record.queryHash, record);
+    if (existing?.status === `pending`) {
+      void record.resultPromise.then(existing.succeed, existing.fail);
+    }
+    record.initialSnapshot = dehydratedQuery.initialSnapshot ?? dehydratedQuery.snapshot;
+    this.hydratedLiveQueries.set(record.queryHash, record);
+    const waiter = this.ssrQueryWaiters.get(record.queryHash);
+    if (waiter && `promise` in waiter) waiter.resolve();
+    this.ssrQueryWaiters.delete(record.queryHash);
+    if (dehydratedQuery.promise) record.snapshot = dehydratedQuery.snapshot;
+    this.emit({ type: `liveQueryAdded`, query: record });
+    if (dehydratedQuery.snapshot && !dehydratedQuery.promise) {
+      record.succeed(dehydratedQuery.snapshot);
+    } else if (dehydratedQuery.promise) {
+      Promise.resolve(dehydratedQuery.promise).then(record.succeed, record.fail);
+    } else {
+      record.fail(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Dehydrated live query "${dehydratedQuery.queryHash}" has neither a snapshot nor a promise.` : codedMessage(93, { queryHash: dehydratedQuery.queryHash })
+        )
+      );
+    }
+  }
+  nextLiveQueryTimestamp() {
+    this.lastLiveQueryTimestamp = Math.max(
+      Date.now(),
+      this.lastLiveQueryTimestamp + 1
+    );
+    return this.lastLiveQueryTimestamp;
+  }
+  createLiveQueryRecord(queryHash, dehydratedAt) {
+    this.lastLiveQueryTimestamp = Math.max(
+      this.lastLiveQueryTimestamp,
+      dehydratedAt
+    );
+    let resolveResult;
+    let rejectResult;
+    let settled = false;
+    const resultPromise = new Promise(
+      (resolve, reject) => {
+        resolveResult = resolve;
+        rejectResult = reject;
+      }
+    );
+    const promise = resultPromise.then(() => void 0);
+    resultPromise.catch(() => {
+    });
+    promise.catch(() => {
+    });
+    const record = {
+      queryHash,
+      dehydratedAt,
+      status: `pending`,
+      promise,
+      resultPromise,
+      succeed: (snapshot) => {
+        if (settled) return;
+        settled = true;
+        record.status = `success`;
+        record.snapshot = snapshot;
+        resolveResult(snapshot);
+        if (this.liveQueries.get(queryHash) === record) {
+          this.emit({ type: `liveQueryUpdated`, query: record });
+        }
+      },
+      fail: (error) => {
+        if (settled) return;
+        settled = true;
+        record.status = `error`;
+        record.error = error;
+        rejectResult(error);
+        if (this.liveQueries.get(queryHash) === record) {
+          this.emit({ type: `liveQueryUpdated`, query: record });
+        }
+      }
+    };
+    return record;
+  }
+  emit(event) {
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+  applyRows(collection, chunk, seedKind) {
+    const hydrating = seedKind === `hydration`;
+    const authority = createAdapterAuthorityLookups(collection._state);
+    const seeds = chunk.rows.map((row) => {
+      const value = collection.validateData(row.value, `insert`);
+      return { ...row, key: collection.config.getKey(value), value };
+    });
+    const rows = seeds.filter((row) => !hydrating || !authority.rows(row.key));
+    const rowMetadataWrites = /* @__PURE__ */ new Map();
+    for (const row of seeds) {
+      if (hydrating && authority.metadata(row.key)) continue;
+      if (row.metadata !== void 0)
+        rowMetadataWrites.set(row.key, { type: `set`, value: row.metadata });
+      else if (hydrating) rowMetadataWrites.set(row.key, { type: `delete` });
+    }
+    if (seedKind) {
+      for (const row of rows) {
+        collection._state.hydrationSeedKeys.add(row.key);
+        if (seedKind === `hydration`) {
+          collection._state.hydratedKeys.add(row.key);
+        }
+      }
+    }
+    if (rows.length > 0 || rowMetadataWrites.size > 0) {
+      const applied = createDeferred();
+      void applied.promise.catch(() => void 0);
+      collection._state.acceptSyncTransaction({
+        committed: true,
+        applicationStarted: false,
+        layoutChanged: false,
+        // A seed replaces any earlier seed of its row whole.
+        operations: rows.map((row) => ({
+          type: `insert`,
+          key: row.key,
+          value: row.value
+        })),
+        rowMetadataWrites,
+        // An accepted transaction's metadata writes are never rebuilt.
+        explicitRowMetadataWrites: /* @__PURE__ */ new Map(),
+        collectionMetadataWrites: /* @__PURE__ */ new Map(),
+        applied,
+        // A seed chunk keeps its keys' seed status.
+        preserveHydrationSeedKeys: seedKind ? /* @__PURE__ */ new Set([
+          ...rows.map((row) => row.key),
+          ...rowMetadataWrites.keys()
+        ]) : void 0
+      });
+    }
+    if (chunk.syncMeta !== void 0) {
+      const currentMeta = collection.config.sync.exportSyncMeta?.();
+      const mergedMeta = currentMeta === void 0 ? chunk.syncMeta : collection.config.sync.mergeSyncMeta?.(
+        currentMeta,
+        chunk.syncMeta
+      ) ?? chunk.syncMeta;
+      collection.config.sync.importSyncMeta?.(mergedMeta);
+    }
+  }
+}

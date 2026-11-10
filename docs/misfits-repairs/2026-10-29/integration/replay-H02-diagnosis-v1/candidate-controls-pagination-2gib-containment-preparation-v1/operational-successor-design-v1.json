@@ -1,0 +1,50 @@
+{
+  "status": "SOURCE-ONLY OPERATIONAL ALLOWANCE; successor source/command binding PENDING author freeze; no runtime admitted",
+  "originalSupervisor": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-native-list-launcher-v1/launch.py",
+    "sha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2"
+  },
+  "additiveSupervisor": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-containment-preparation-v1/supervisor-2gib.py",
+    "sha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042"
+  },
+  "exactSubstitutions": [
+    {
+      "before": "1073741824",
+      "after": "2147483648",
+      "occurrences": 2
+    },
+    {
+      "before": "1 GiB sampled group RSS containment",
+      "after": "2 GiB sampled group RSS containment",
+      "occurrences": 1
+    }
+  ],
+  "futureRecipeDelta": {
+    "groupRssContainmentBytes": 2147483648,
+    "outerWallContainmentMs": 30000,
+    "sourceFreeze": "PENDING new shared full-child successor; cf550f first-run result remains immutable and must not rerun",
+    "actualCommand": "PENDING author exact successor proposal; ordinary installed config with coverage/typecheck/setup retained",
+    "binding": "PENDING exact new freeze, source counts, command, fresh output and wrapper hashes",
+    "dependencyIdentity": "Reuse prior finite supplemental map and declared limits. No broadened census.",
+    "wrapperChange": "Point hash-checked loader at additive supervisor, update exact recipe bound to2GiB; retain original run_one mechanism. Any other wrapper/source-map changes must be explicit successor bindings.",
+    "actualToolPermission": "require_escalated on actual launcher; no runtime/probe admitted now",
+    "resultPolicy": "Raw child nonzero remains outer nonzero; operational cutoffs give no product RED/GREEN; actual return separately captured"
+  },
+  "unchangedMechanisms": [
+    "30second monotonic/real-time supervised deadline",
+    "80ms sampling",
+    "1second process inventory timeout",
+    "3second leader reap and descendant cleanup bounds",
+    "new-session child with positively observed actual PGID",
+    "durable separate stdout/stderr/report and phase receipts",
+    "conditional known group signals and final inventory",
+    "ordinary coverage/typecheck/setup and all source assertions",
+    "seed/run budgets and selected campaigns remain author-owned"
+  ],
+  "pureChecks": "check-thresholds.py parses only source AST and evaluates exact integer predicate; never imports supervisor or process APIs",
+  "originalRun": "H/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/result-freeze-v1.json SHA6a3df64c714d54542e8c2cda8ea3b5def9b5c2ef8c35652d2e452ce5463c7d9d",
+  "nativeInvocations": 0,
+  "processProbes": 0,
+  "sourceOrOracleEdits": 0
+}

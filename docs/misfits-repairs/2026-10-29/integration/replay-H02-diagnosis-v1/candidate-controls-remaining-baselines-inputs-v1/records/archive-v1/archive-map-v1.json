@@ -1,0 +1,88 @@
+{
+  "kind": "exact-byte constructor emit evidence archive",
+  "at": "2026-10-30T09:26:40.743071+00:00",
+  "stage": "copy-only; original paths retained; root independently verifies and owns any later exact removal",
+  "historicalBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1",
+  "historicalFreezeRelativePath": "input-freeze-v1.json",
+  "historicalFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "historicalPacketRelativePath": "input-packet-sha256-v1.json",
+  "historicalPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "archiveBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1",
+  "mapping": [
+    {
+      "originalRelativePath": "materialization-source-v1/package.json",
+      "archiveRelativePath": "text/materialization-source-v1/package.json.txt",
+      "bytes": 19,
+      "sha256": "48e847860dd4f0907ce91e346dbb00a4a12213163ad3d80a953c343eb9a11979"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-config.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-config.js.txt",
+      "bytes": 27226,
+      "sha256": "43b444a2f6d45bebae305c02b6778b2cd2b6505543b21072d20fdd8c50cf56cf"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-declaration.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-declaration.js.txt",
+      "bytes": 964,
+      "sha256": "70af56378aa24746e78198bd3ad6ab7f71ed0d5983758db5867dfd041e67cf5b"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-reach.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-reach.js.txt",
+      "bytes": 2624,
+      "sha256": "68f783ceb46df7a4ad25f92c549ca3afa4311f335fac7c746b7ae8d056602eee"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-replay-witness.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-replay-witness.js.txt",
+      "bytes": 3645,
+      "sha256": "fffc2d35e7df584608f8a3ca4bffdcb9717204ff06117d7a8c7bdb7011796d2c"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js.txt",
+      "bytes": 16519,
+      "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js.txt",
+      "bytes": 26471,
+      "sha256": "76e9c6686fc06c98260d084ef8359e530a31d9611055fbe6ba6b313e70d45016"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "archiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js.txt",
+      "bytes": 47107,
+      "sha256": "8f758c24b37dbf0d5ebe2f8bc16a12b23e8ead4a75803aabf0516a99941f0cf4"
+    }
+  ],
+  "sourceMaterializationRecord": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialized-inputs-v1.json",
+    "sha256": "842b1da7998046df9c81d39b54ba7bd61c8e0fa590dbcb597003cdada47b2f20"
+  },
+  "sourceEmitAndConstructorCommandLog": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-static-log-v1.json",
+    "sha256": "9a289f8fd8f6999345bb6d1ce248be32335aa12012d5b87d73c600a31c0c76f8"
+  },
+  "actualHistoricalConstructorImport": {
+    "path": "/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+    "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d"
+  },
+  "failedNativeResultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/inline-park-root-result-freeze-v1.json",
+    "sha256": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c"
+  },
+  "diagnosisPacket": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-diagnosis-v1/packet-sha256-v1.json",
+    "sha256": "334eae5e13250b717fef06527c0f07fa32d4f86da9753ee18f1bf2ff21dfd94e"
+  },
+  "sourceAuthority": "Frozen typed source under combined-v2 and the exact emit command log; .txt copies preserve emitted bytes for inspection only. No text snapshot is an import target.",
+  "resolverPolicy": "Resolve mapped old keys to archiveRelativePath and require the historical expected SHA256. Resolve all other old keys at historicalBase unchanged. Preserve original manifests as historical bytes. After original removal, direct old-path resolution no longer succeeds; this explicit resolver supplies the archive binding.",
+  "originalRemovalsPerformed": 0,
+  "constructorCompilerNativeRuntimeExecutions": 0,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "runtimeAdmission": false
+}

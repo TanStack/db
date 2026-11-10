@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-30T09:41:37.807672+00:00",
+  "gateSha256": "5b5020c73e38f6bc8a5c457be7660a6188292f33bf50aa39bb022d1959a87661",
+  "checksSha256": "341a992347c699e1515d16a59d4cc3ff28ca0d4333342cdf9766a52a4f651ac8",
+  "ledger": {
+    "previousRows": 89,
+    "rows": 90,
+    "previousSha256": "6adef1b2cb018090b8a5b98004f39c7cb604912db1963334bbe956452155d412",
+    "sha256": "91569fad61e4b5b770752b8b056e0d950a9403290ca392a787836f8452b44951",
+    "appendOnlyPrefixVerified": true
+  },
+  "combinedAndExactOneInputAccepted": true,
+  "rootRuntimeAdmission": false,
+  "nativeRunsByReviewer": 0,
+  "pureRerunsByReviewer": 0
+}

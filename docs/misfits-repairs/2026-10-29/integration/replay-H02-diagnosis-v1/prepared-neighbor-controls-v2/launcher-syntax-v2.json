@@ -1,0 +1,32 @@
+[
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-nonempty-conflict-v2.zsh",
+    "sha256": "e8d8ae9a630f6d04bff8a9949c780b38d23187cb2933d0cdc1b07b7a5bdc25a9",
+    "syntaxExitCode": 0
+  },
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-nonempty-scope-v2.zsh",
+    "sha256": "cd7d4a3d68dcc5c67daf33060f0414ee75535b642ae8376c016df16e98b57ce5",
+    "syntaxExitCode": 0
+  },
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-empty-scope-v2.zsh",
+    "sha256": "fab108fc69eb953d19d08e93d6179502487033256bf3d1be369d0adac6d651af",
+    "syntaxExitCode": 0
+  },
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-sync-initial-v2.zsh",
+    "sha256": "f08ee4a8bd4bcfd0d1774514432833a48cd7e475a56657c8b6e570df9a147561",
+    "syntaxExitCode": 0
+  },
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-sync-mutation-v2.zsh",
+    "sha256": "68d00a7148d21580144679308cbd03a15c9a91de87333a3af3084300c363919c",
+    "syntaxExitCode": 0
+  },
+  {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-ownership-v2.zsh",
+    "sha256": "e08093ed03f0798c564c87f54f4ec752ac85fe01397d0479a077ca38efd4da6a",
+    "syntaxExitCode": 0
+  }
+]

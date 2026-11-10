@@ -1,0 +1,469 @@
+{
+  "at": "2026-10-30T10:03:53.040785+00:00",
+  "mode": "static immutable-result/source/hash/JSON read only; no product/JS/model/native or process probe",
+  "classification": "fixture premise/checkpoint failure; no product RED/GREEN",
+  "resultFreezeSha256": "029a8eb1cf46e59d84cdf6d52cb7f56837b962b829922672e76630df26b49957",
+  "resultFiles": 1975,
+  "currentSourceFiles": 584,
+  "payloadFiles": 2544,
+  "Node": 1,
+  "locks": 2,
+  "links": 4,
+  "v8CompiledBodies": 1626,
+  "inventoryFacts": {
+    "evaluated-pre-history.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "8fa02dd83c5aac0c12e6797759545f2c2040e7938df290202513e65c136ea0eb"
+    },
+    "evaluated-after-all.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "306d5bbcc289348152a6a342fc2b7d9d6954ce18c51ad42666ccc0b6afe90ffd"
+    }
+  },
+  "derivedBindingRows": 338,
+  "requiredPrehistoryModules": 20,
+  "rawReceipts": 298,
+  "boundaries": 282,
+  "phaseCounts": {
+    "worker-start": 1,
+    "completion-baseline-epoch-start": 2,
+    "completion-boundary": 282,
+    "completion-baseline-delivery": 4,
+    "completion-baseline-epoch-end": 2,
+    "completion-baseline-view": 1,
+    "completion-baseline-action": 3,
+    "completion-baseline-cut": 1,
+    "worker-cleaned": 1,
+    "worker-error": 1
+  },
+  "heldCut": {
+    "h02": true,
+    "sequence": 207,
+    "phase": "completion-baseline-cut",
+    "boundary": "held-window",
+    "run": "run-1",
+    "view": {
+      "roots": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        }
+      ],
+      "facades": [],
+      "downstream": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        }
+      ],
+      "window": {
+        "offset": 0,
+        "limit": 2
+      },
+      "status": "ready",
+      "requestErrors": []
+    },
+    "operations": [
+      {
+        "operation": "window",
+        "returned": "promise",
+        "outcome": {
+          "state": "pending"
+        }
+      }
+    ],
+    "operation": "window",
+    "pendingProviderAnswers": 0
+  },
+  "rootAnswerBeforeCut": {
+    "h02": true,
+    "sequence": 198,
+    "phase": "completion-boundary",
+    "boundaryEvent": {
+      "sequence": 186,
+      "boundary": "provider-answer-executed",
+      "detail": {
+        "source": "roots",
+        "request": 3,
+        "initiatingLoad": 3,
+        "rows": [
+          {
+            "id": 3,
+            "rank": 30
+          }
+        ],
+        "queryKey": [
+          "h02-completion-roots",
+          {
+            "requested": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "cursor": {
+              "whereFrom": {
+                "name": "gt",
+                "args": [
+                  {
+                    "path": [
+                      "rank"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": 20,
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              },
+              "whereCurrent": {
+                "name": "eq",
+                "args": [
+                  {
+                    "path": [
+                      "rank"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": 20,
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              }
+            },
+            "orderBy": [
+              {
+                "expression": {
+                  "path": [
+                    "rank"
+                  ],
+                  "type": "ref"
+                },
+                "compareOptions": {
+                  "stringSort": "locale",
+                  "direction": "asc",
+                  "nulls": "first"
+                }
+              },
+              {
+                "expression": {
+                  "path": [
+                    "id"
+                  ],
+                  "type": "ref"
+                },
+                "compareOptions": {
+                  "stringSort": "locale",
+                  "direction": "asc",
+                  "nulls": "first"
+                }
+              }
+            ],
+            "offset": 2,
+            "limit": 1
+          }
+        ]
+      }
+    }
+  },
+  "cleanupStart": {
+    "h02": true,
+    "sequence": 208,
+    "phase": "completion-boundary",
+    "boundaryEvent": {
+      "sequence": 194,
+      "boundary": "cleanup-start",
+      "detail": {
+        "run": "run-1"
+      }
+    }
+  },
+  "delayedHeldRequestsDuringTeardown": [
+    {
+      "h02": true,
+      "sequence": 216,
+      "phase": "completion-boundary",
+      "boundaryEvent": {
+        "sequence": 202,
+        "boundary": "provider-request",
+        "detail": {
+          "source": "marked",
+          "request": 2,
+          "queryKey": [
+            "h02-completion-marked",
+            {
+              "requested": [
+                3
+              ],
+              "where": {
+                "name": "in",
+                "args": [
+                  {
+                    "path": [
+                      "rowId"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": [
+                      3
+                    ],
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              }
+            }
+          ],
+          "requested": [
+            3
+          ],
+          "initiatingLoad": 2,
+          "options": {
+            "where": {
+              "name": "in",
+              "args": [
+                {
+                  "path": [
+                    "rowId"
+                  ],
+                  "type": "ref"
+                },
+                {
+                  "value": [
+                    3
+                  ],
+                  "type": "val"
+                }
+              ],
+              "type": "func"
+            },
+            "signalPresent": true
+          }
+        }
+      }
+    },
+    {
+      "h02": true,
+      "sequence": 244,
+      "phase": "completion-boundary",
+      "boundaryEvent": {
+        "sequence": 230,
+        "boundary": "provider-request",
+        "detail": {
+          "source": "children",
+          "request": 2,
+          "queryKey": [
+            "h02-completion-children",
+            {
+              "requested": [
+                3
+              ],
+              "where": {
+                "name": "in",
+                "args": [
+                  {
+                    "path": [
+                      "parent"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": [
+                      3
+                    ],
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              }
+            }
+          ],
+          "requested": [
+            3
+          ],
+          "initiatingLoad": 2,
+          "options": {
+            "where": {
+              "name": "in",
+              "args": [
+                {
+                  "path": [
+                    "parent"
+                  ],
+                  "type": "ref"
+                },
+                {
+                  "value": [
+                    3
+                  ],
+                  "type": "val"
+                }
+              ],
+              "type": "func"
+            },
+            "signalPresent": true
+          }
+        }
+      }
+    }
+  ],
+  "cleanupComplete": {
+    "h02": true,
+    "sequence": 296,
+    "phase": "completion-boundary",
+    "boundaryEvent": {
+      "sequence": 282,
+      "boundary": "cleanup-complete",
+      "detail": {
+        "run": "run-1"
+      }
+    }
+  },
+  "workerError": {
+    "h02": true,
+    "sequence": 298,
+    "phase": "worker-error",
+    "message": "Error: completion instrument: actual held provider answers is a positive recorder identity",
+    "stack": "Error: completion instrument: actual held provider answers is a positive recorder identity\n    at demand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:168:25)\n    at positive (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:832:3)\n    at checkCompletionBaselineObservation (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1402:7)\n    at observe (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:891:5)\n    at driveCompletionBaselineProgram (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:920:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:5\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+  },
+  "nativeSupervisorOutcome": {
+    "reason": "observation",
+    "exitCode": 1,
+    "signal": null,
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [
+      "Error: kill EPERM"
+    ],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-64500-7babee3e-9792-42f2-9516-bcd8ff75ef3e/receipts.jsonl",
+    "primaryObservationError": "Error: completion instrument: actual held provider answers is a positive recorder identity\n    at demand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:168:25)\n    at positive (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:832:3)\n    at checkCompletionBaselineObservation (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1402:7)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:292:9\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:400:7\n    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:171:9)\n    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:239:19)\n    at Timeout._onTimeout (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:437:14)\n    at listOnTimeout (node:internal/timers:635:17)\n    at processTimers (node:internal/timers:571:7)",
+    "bindingStatus": "bound"
+  },
+  "outerOutcome": {
+    "classification": "finite test command failed; inspect original assertion diagnostics",
+    "heap": false,
+    "identityMatched": true,
+    "remainingGroup": 0,
+    "cleanupErrors": 0,
+    "exitCode": 1,
+    "signal": null,
+    "cleanupDiagnostics": [],
+    "elapsedMonotonicMs": 3394.449083,
+    "maxSampledGroupRssBytes": 766967808,
+    "originalPgid": 64497,
+    "registeredReceivingGroups": [
+      {
+        "pid": 64503,
+        "pgid": 64503,
+        "parentPid": 64500,
+        "detached": true,
+        "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "--max-old-space-size=384",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "scripts/h02-progress/completion-receiving.config.ts",
+          "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+        ],
+        "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-64500-7babee3e-9792-42f2-9516-bcd8ff75ef3e"
+      }
+    ],
+    "stdoutSha256": "ff316acda7df4f9e4668828f8a1d27275dd0dc60760936b9effe42230a522af9",
+    "stderrSha256": "2e38dba598609bbc0b8cedd9c02f703744a0ee777e36dd2fb6c0543e9e57a581",
+    "limits": "Finite baseline assertions and reaches require review. Operational failures never supply product RED. RSS aggregates the original group and each synchronously registered receiving group without double-counting. Cleanup verifies these owned groups only. A supervisor interrupted between spawn and registration can leave an unknown group; no unregistered/escaped-group claim is made."
+  },
+  "actualToolCompletionChunk": "f6e194",
+  "savedProcessAbsence": {
+    "at": "2026-10-30T09:59:55.864884+00:00",
+    "psExitCode": 0,
+    "namedPids": [
+      64462,
+      64497,
+      64500,
+      64503
+    ],
+    "namedGroups": [
+      64497,
+      64503
+    ],
+    "remainingNamedGroupRows": [],
+    "zeroSignalProbes": [
+      {
+        "kind": "pid",
+        "value": 64462,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 64497,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 64500,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 64503,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pgid",
+        "value": 64497,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pgid",
+        "value": 64503,
+        "result": "ESRCH"
+      }
+    ],
+    "limits": "Named original identities and owned groups only; no escaped/unregistered descendant census or PID/PGID reuse proof."
+  },
+  "sourceRepairProposal": "source-failed-peer request-window path waits using existing hostTurn/waitFor until BOTH exact selected failure and peer requests exist with live original promise receipts; retain held/source-failed-peer/model/publication ownership assertions",
+  "legalCacheLimit": "an implementation can lawfully answer from cache or batch scopes differently; absent exact fixture requests remain unsupported/unreached, never an obligation to fetch",
+  "cleanupEPERMLimit": "secondary native supervisor group-kill denial is real, not erased by successful fixture cleanup or outer owned absence; OS cause and failure-path containment not established",
+  "errors": [],
+  "allAuditChecksPass": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "actualHelperNoActiveOperation": "required and UNREACHED",
+  "runtimeExecutions": 0
+}

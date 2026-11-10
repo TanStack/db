@@ -1,0 +1,26 @@
+__vite_ssr_exportName__("observeRootSetup", () => { try { return observeRootSetup } catch {} });
+const __vite_ssr_import_0__ = await __vite_ssr_import__("/@id/__vite-browser-external:node:path", {"importedNames":["default"]});
+const __vite_ssr_import_1__ = await __vite_ssr_import__("/@id/__vite-browser-external:node:url", {"importedNames":["default"]});
+ const dirname = __vite_ssr_import_0__.default["dirname"]; const resolve = __vite_ssr_import_0__.default["resolve"];
+ const NodeURL = __vite_ssr_import_1__.default["URL"]; const fileURLToPath = __vite_ssr_import_1__.default["fileURLToPath"];
+function observeRootSetup() {
+  const moduleUrl = __vite_ssr_import_meta__.url;
+  const relative = `../../../`;
+  const GlobalURL = globalThis.URL;
+  return {
+    moduleUrl,
+    moduleFilename: __vite_ssr_import_meta__.filename,
+    moduleDirname: __vite_ssr_import_meta__.dirname,
+    locationHref: globalThis.location.href,
+    globalIsNodeURL: GlobalURL === NodeURL,
+    literal: new URL("/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1", self.location  ).href,
+    indirectGlobal: new GlobalURL(relative, moduleUrl).href,
+    nodeLiteral: new NodeURL(`../../../`, __vite_ssr_import_meta__.url).href,
+    nodeIndirect: new NodeURL(relative, moduleUrl).href,
+    resolvedRoot: resolve(dirname(fileURLToPath(moduleUrl)), relative)
+  };
+}
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUEsQ0FBQTtBQUFBO0FBQ0E7QUFEaUM7QUFDYTtBQUd2QyxTQUFTLG1CQUFtQjtBQUNqQyxRQUFNLFlBQVkseUJBQVk7QUFDOUIsUUFBTSxXQUFXO0FBQ2pCLFFBQU0sWUFBWSxXQUFXO0FBQzdCLFNBQU87QUFBQSxJQUNMO0FBQUEsSUFDQSxnQkFBZ0IseUJBQVk7QUFBQSxJQUM1QixlQUFlLHlCQUFZO0FBQUEsSUFDM0IsY0FBYyxXQUFXLFNBQVM7QUFBQSxJQUNsQyxpQkFBaUIsY0FBYztBQUFBLElBQy9CLFNBQVMsSUFBSSxJQUFJLGdCQUFhLFNBQVksUUFBSztBQUFBLElBQy9DLGdCQUFnQixJQUFJLFVBQVUsVUFBVSxTQUFTLEVBQUU7QUFBQSxJQUNuRCxhQUFhLElBQUksUUFBUSxhQUFhLHlCQUFZLEdBQUcsRUFBRTtBQUFBLElBQ3ZELGNBQWMsSUFBSSxRQUFRLFVBQVUsU0FBUyxFQUFFO0FBQUEsSUFDL0MsY0FBYyxRQUFRLFFBQVEsY0FBYyxTQUFTLENBQUMsR0FBRyxRQUFRO0FBQUEsRUFDbkU7QUFDRiIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsicXVldWVkLWFuc3dlci1yb290LXNldHVwLXByb2JlLnRzIl0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IGRpcm5hbWUsIHJlc29sdmUgfSBmcm9tICdub2RlOnBhdGgnXG5pbXBvcnQgeyBVUkwgYXMgTm9kZVVSTCwgZmlsZVVSTFRvUGF0aCB9IGZyb20gJ25vZGU6dXJsJ1xuXG4vKiogUHVyZSBzZXR1cCBmaXh0dXJlOiBubyBwcm9kdWN0aW9uLCBRdWVyeSwgc3VwZXJ2aXNvciwgb3IgaGlzdG9yeSBpbXBvcnRzLiAqL1xuZXhwb3J0IGZ1bmN0aW9uIG9ic2VydmVSb290U2V0dXAoKSB7XG4gIGNvbnN0IG1vZHVsZVVybCA9IGltcG9ydC5tZXRhLnVybFxuICBjb25zdCByZWxhdGl2ZSA9IGAuLi8uLi8uLi9gXG4gIGNvbnN0IEdsb2JhbFVSTCA9IGdsb2JhbFRoaXMuVVJMXG4gIHJldHVybiB7XG4gICAgbW9kdWxlVXJsLFxuICAgIG1vZHVsZUZpbGVuYW1lOiBpbXBvcnQubWV0YS5maWxlbmFtZSxcbiAgICBtb2R1bGVEaXJuYW1lOiBpbXBvcnQubWV0YS5kaXJuYW1lLFxuICAgIGxvY2F0aW9uSHJlZjogZ2xvYmFsVGhpcy5sb2NhdGlvbi5ocmVmLFxuICAgIGdsb2JhbElzTm9kZVVSTDogR2xvYmFsVVJMID09PSBOb2RlVVJMLFxuICAgIGxpdGVyYWw6IG5ldyBVUkwoYC4uLy4uLy4uL2AsIGltcG9ydC5tZXRhLnVybCkuaHJlZixcbiAgICBpbmRpcmVjdEdsb2JhbDogbmV3IEdsb2JhbFVSTChyZWxhdGl2ZSwgbW9kdWxlVXJsKS5ocmVmLFxuICAgIG5vZGVMaXRlcmFsOiBuZXcgTm9kZVVSTChgLi4vLi4vLi4vYCwgaW1wb3J0Lm1ldGEudXJsKS5ocmVmLFxuICAgIG5vZGVJbmRpcmVjdDogbmV3IE5vZGVVUkwocmVsYXRpdmUsIG1vZHVsZVVybCkuaHJlZixcbiAgICByZXNvbHZlZFJvb3Q6IHJlc29sdmUoZGlybmFtZShmaWxlVVJMVG9QYXRoKG1vZHVsZVVybCkpLCByZWxhdGl2ZSksXG4gIH1cbn1cbiJdLCJmaWxlIjoiL3BhY2thZ2VzL3F1ZXJ5LWRiLWNvbGxlY3Rpb24vdGVzdHMvcXVldWVkLWFuc3dlci1yb290LXNldHVwLXByb2JlLnRzIn0=
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJ1cmwiOiIyIiwiaW1wb3J0ZWRVcmxzIjoiMyIsIm1hcHBpbmdzIjpmYWxzZX0sIi9Vc2Vycy9reWxlLm1hdGhld3MvcHJvZ3JhbXMvdGFuc3RhY2stZGIvLndvcmt0cmVlcy9jb2RleC1taXNmaXRzLWgwMi1wcm9ncmVzcy1tYWluLXYxL3BhY2thZ2VzL3F1ZXJ5LWRiLWNvbGxlY3Rpb24vdGVzdHMvcXVldWVkLWFuc3dlci1yb290LXNldHVwLXByb2JlLnRzIiwiL3BhY2thZ2VzL3F1ZXJ5LWRiLWNvbGxlY3Rpb24vdGVzdHMvcXVldWVkLWFuc3dlci1yb290LXNldHVwLXByb2JlLnRzIixbXV0=

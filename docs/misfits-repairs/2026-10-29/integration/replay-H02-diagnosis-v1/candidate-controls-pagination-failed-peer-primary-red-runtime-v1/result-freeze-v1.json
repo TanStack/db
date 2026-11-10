@@ -1,0 +1,73 @@
+{
+  "at": "2026-10-30T10:54:55.668067+00:00",
+  "status": "ACTUAL RESULT FROZEN; independent review/root classification required",
+  "classification": "operational RSS containment; no product verdict",
+  "runtimeDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1",
+  "files": {
+    "00-failure.receipt.json": {
+      "sha256": "a6e318823b65446d7dec6d5c65a2fcab4e65e8c78dfb93e82abe3aa90454659d",
+      "bytes": 2403
+    },
+    "00-final.receipt.json": {
+      "sha256": "22710bcdfb9d02afa28ba79937dae817a7bc3a6f6ba2ad23a5d28c0249efd76e",
+      "bytes": 2206
+    },
+    "00-group-verified.receipt.json": {
+      "sha256": "cfed29c807381886c85132972cc166beb53116c8b49c743eba7ecc39c25db294",
+      "bytes": 2014
+    },
+    "00-pre-spawn.receipt.json": {
+      "sha256": "91977626a5134e8f4dc1e94c8fb86e3f8df89abe7391fc3011b3318e1a98e7d5",
+      "bytes": 2008
+    },
+    "00-spawn.receipt.json": {
+      "sha256": "801693c4075c739766ec287773823ab05930b06ec2a5a7c58900df80beb43fc4",
+      "bytes": 2006
+    },
+    "actual-tool-return-v1.json": {
+      "sha256": "b32bda81c05b4b149eebb1f807e5cee441b76487d611eaf06561cb030d6618ed",
+      "bytes": 977
+    },
+    "executor-summary-v1.json": {
+      "sha256": "2a64e29d5573f98d9a6c893e7ea770e1c6019525b18c41ad042c719a665e78e4",
+      "bytes": 2765
+    },
+    "outer-final.receipt.json": {
+      "sha256": "0f0b090b8ee702472104da6e626decef954bec3728ba003131173476ba27d326",
+      "bytes": 8134
+    },
+    "outer-pre.receipt.json": {
+      "sha256": "647b1e01e4666c9e4c4122165a67d0d5e5395e6b8658dbf8d29daa5ab9edddfb",
+      "bytes": 5139
+    },
+    "post-return-process-absence-v1.json": {
+      "sha256": "9735d8e72fd0e64eed0bc22434c93fb116695f2280dc6a1408d2aab100783c99",
+      "bytes": 739
+    },
+    "post-return-source-tool-identity-v1.json": {
+      "sha256": "6df8274c4cdd5ab6b591fe8e170ec1de350a3eff071fee3345304a8babdf7339",
+      "bytes": 769
+    },
+    "stderr.log": {
+      "sha256": "d977231cd41e9aebcaa36274869e9790fa5dd138913cdd5201ee20beabaa73ac",
+      "bytes": 8529
+    },
+    "stdout.log": {
+      "sha256": "02e86618687b5bc85c14d0c33b7890cff40c6af6dc7add65b4e0223c01bef241",
+      "bytes": 157
+    }
+  },
+  "fileCount": 13,
+  "totalBytes": 37846,
+  "expectedAbsentFiles": [
+    "vitest-report.json"
+  ],
+  "preparationManifestSha256": "81ad3dffafeb7d9f2975d9e15ab1d01cfbef50ad9687cac5bfc0ba4c9f6e4cd3",
+  "preparationBindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "rootAdmissionPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/root-primary-red-admission-v1.json",
+  "rootAdmissionSha256": "bced374c51614dbd911257589df9bec8a2bc58bb3be7bd6928c46c5d04966a87",
+  "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+  "sourceEditBoundary": "Original cf550f before/after/post identity and complete actual assets frozen. Author may release original bound-source hold only within root-authorized successor extraction scope. No next runtime authorized.",
+  "actualInvocations": 1,
+  "retryOrProgression": false
+}

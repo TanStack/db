@@ -1,0 +1,10 @@
+{
+  "actualTool": "exec_command",
+  "sandbox_permissions": "require_escalated",
+  "chunk": "172375",
+  "exitCode": 0,
+  "wallTimeSeconds": 0.669533458,
+  "scope": "original named PID/PGID zero-signal postcheck and exact named PID inventory only",
+  "targetLaunchesAdded": 0,
+  "mutationSignalsSent": false
+}

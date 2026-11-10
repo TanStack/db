@@ -1,0 +1,87 @@
+{
+  "status": "TEMPLATE ONLY; no runtime admission; requires accepted ownership result and separate root admission",
+  "at": "2026-10-30T06:44:47.199174+00:00",
+  "admittedBy": null,
+  "admittedRuntime": false,
+  "slot": null,
+  "maxInvocations": 1,
+  "selectedPath": "nonempty scope-key publication",
+  "finiteHistories": 1,
+  "finiteRecipes": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/finite-recipes-v3.json",
+  "finiteRecipesSha256": "397c4ed0fb02671cf93903aae17851deb902b88483d1fa23b0a9bb15291feae8",
+  "recipeEntry": 1,
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/source-freeze-v3.json",
+  "sourceFreezeSha256": "cc2c1f0c8dee86e95506cfe6bcfd5c948c15c946fe640b86e75485cefba2daeb",
+  "packetManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/packet-sha256-v3.json",
+  "packetSha256": "9f7d9bb74a1a1906a39d7125af27be8927480ba84bc3a28fba8cf64bd61eac26",
+  "independentSourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3-independent-source-acceptance-v1.md",
+  "independentSourceReviewSha256": "c877ab3b7e063aa7287f89a9860594d22d109619b85c202e7edb7ed8e1d7c73c",
+  "independentVerification": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3-independent-verification-v1.json",
+  "independentVerificationSha256": "ca6ebd3ab92931f5eb50e735547118f3a1348624ad12b2d4c6d721a2cc8ccc54",
+  "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-nonempty-scope-v3.zsh",
+  "launcherSha256": "08f3f65174cd5f2e996b57c19006772f179dcae25ee5ec9c51ad749167c34dc2",
+  "runnerCommand": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-nonempty-scope-v3.zsh",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "exactOuterCommand": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+    "-t",
+    "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$"
+  ],
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS"
+  ],
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/source-freeze-v3.json"
+  },
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-scope-current-main-v3",
+  "outputPolicy": "Only after admission, create this fresh outputDirectory exclusively once for launcher process/outer log. Preserve actual unique child receipt/source-binding temp directory named by supervisor; freeze all original bytes. No overwrite/reuse/retry.",
+  "nativeSelector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$",
+  "nativeSelectionReceipt": {
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/bound-v1/native-selection-results.json",
+    "sha256": "bdd48b87e801e8a5aa64e6ea018120f2e7458711cb175732b097adcf409b2edf",
+    "entry": 1,
+    "selected": 1,
+    "skipped": 4
+  },
+  "receivingLimits": {
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "wallMs": 20000,
+    "postEnqueueWindowMs": 1000,
+    "samplingMs": 100
+  },
+  "outerTestTimeoutMs": 60000,
+  "receivingPostRunVerifier": {
+    "nodeHeapMiB": 384,
+    "timeoutMs": 20000
+  },
+  "expectedReach": [
+    "nonempty-prior",
+    "held-provider-read",
+    "completed-enqueue",
+    "answer-executed",
+    "root-change",
+    "downstream-change",
+    "final-publication",
+    "worker-cleaned"
+  ],
+  "requiredCapture": "Exactly one actual native selected test, one receiving history and complete raw child receipts/bindings; verify nonempty prior/root+downstream held reads, resolving answer enqueue/execution, reload root/downstream events before cleanup-start, final rows and cleanup through unchanged shared judgments. Console reach may be suppressed by unchanged default reporter; reconstruct declared path reach from complete original raw receipts at the same cuts if needed. Exit 0 alone is insufficient.",
+  "sourceBinding": "Require actual strict startup seal/reconciliation and later source inventories, required binding status bound; callback paths alone do not establish V8 byte identity. Retain all raw binding inputs and post-run verifier result.",
+  "conditionalGate": "After accepted V3 ownership result and separate exact root admission, execute only this frozen singleton once. Stop for result classification and independent original outer/child PID+PGID absence check. Timeout/resource/heap/RSS/setup/observation/identity/binding/cleanup failures do not establish product verdict. The source freeze/recipe progress verdict restrictions remain unchanged.",
+  "forbiddenByThisTemplate": "No other progress/ownership invocation, retry, candidate activation, source/production/model/grammar/budget edit, install, commit, push, PR or publication."
+}

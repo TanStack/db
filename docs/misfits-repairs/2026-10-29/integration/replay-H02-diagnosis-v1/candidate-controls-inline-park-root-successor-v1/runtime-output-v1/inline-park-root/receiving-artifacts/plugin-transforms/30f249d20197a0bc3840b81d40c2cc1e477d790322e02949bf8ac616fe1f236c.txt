@@ -1,0 +1,14 @@
+const temporalTypes = /* @__PURE__ */ new Set([
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`
+]);
+export function isTemporal(input) {
+  const tag = input[Symbol.toStringTag];
+  return typeof tag === `string` && temporalTypes.has(tag) && Object.getPrototypeOf(input)?.[Symbol.toStringTag] === tag;
+}

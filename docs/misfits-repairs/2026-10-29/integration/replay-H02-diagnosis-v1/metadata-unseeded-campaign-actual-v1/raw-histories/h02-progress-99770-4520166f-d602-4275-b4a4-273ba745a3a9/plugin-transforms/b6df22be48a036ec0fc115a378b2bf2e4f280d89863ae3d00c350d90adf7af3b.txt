@@ -1,0 +1,62 @@
+import { serializeValue } from "@tanstack/db-ivm";
+import { normalizeValue } from "../utils/comparison.js";
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity
+} from "./runtime-reference-identity.js";
+const PARENT_CONTEXT = /* @__PURE__ */ Symbol(`tanstack_db_parent_context`);
+export const PARENT_PROJECTION_NOT_FOUND = /* @__PURE__ */ Symbol(
+  `tanstack_db_parent_projection_not_found`
+);
+function equalityIdentity(value, referenceIdentity) {
+  const normalized = normalizeValue(value);
+  if (typeof normalized === `object` && normalized !== null || typeof normalized === `function` || typeof normalized === `symbol`) {
+    return referenceIdentity(normalized);
+  }
+  return normalized;
+}
+function exactIdentity(value, referenceIdentity) {
+  if (typeof value === `object` && value !== null || typeof value === `function` || typeof value === `symbol`) {
+    return referenceIdentity(value);
+  }
+  if (typeof value === `number`) {
+    if (Object.is(value, -0)) return [`number`, `-0`];
+    if (Number.isNaN(value)) return [`number`, `NaN`];
+  }
+  return value;
+}
+export function createValueIdentity() {
+  const referenceIdentity = createRuntimeReferenceIdentityFactory();
+  const equality = (value) => equalityIdentity(value, referenceIdentity);
+  return {
+    equality,
+    exact: (value) => exactIdentity(value, referenceIdentity),
+    serializeEquality: (value) => serializeValue(equality(value))
+  };
+}
+export function getEqualityValueIdentity(value) {
+  return equalityIdentity(value, getRuntimeReferenceIdentity);
+}
+export function createParentContext(value, identity, projectedBindings = {}) {
+  return { [PARENT_CONTEXT]: true, value, projectedBindings, identity };
+}
+export function getParentContextProjectedBindings(context) {
+  return isParentContext(context) ? context.projectedBindings : void 0;
+}
+export function getParentContextProjectedValue(context, bindingKey) {
+  const bindings = getParentContextProjectedBindings(context);
+  return bindings && Object.prototype.hasOwnProperty.call(bindings, bindingKey) ? bindings[bindingKey] : PARENT_PROJECTION_NOT_FOUND;
+}
+function isParentContext(context) {
+  return typeof context === `object` && context !== null && PARENT_CONTEXT in context;
+}
+export function getParentContextValue(context) {
+  if (isParentContext(context)) return context.value;
+  if (typeof context === `object` && context !== null) {
+    return context;
+  }
+  return void 0;
+}
+export function getParentContextIdentity(context) {
+  return isParentContext(context) ? context.identity : context;
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Actual write_stdin final response; separate from selected child",
+  "sessionId": 35271,
+  "response": {
+    "chunk_id": "12ec83",
+    "wall_time_seconds": 0.000008333,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  }
+}

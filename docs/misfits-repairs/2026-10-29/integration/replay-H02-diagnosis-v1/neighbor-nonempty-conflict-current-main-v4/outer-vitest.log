@@ -1,0 +1,41 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+stdout | packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+H02 finite neighbor reach {
+  name: 'nonempty conflicting replay',
+  counts: {
+    'nonempty-prior': 1,
+    'held-provider-read': 1,
+    'conflicting-cache-premise': 1,
+    'completed-enqueue': 1,
+    'answer-executed': 0,
+    'final-publication': 0,
+    'worker-cleaned': 0
+  }
+}
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts (5 tests | 1 failed | 4 skipped) 3538ms
+     × checks receiving neighbor 'nonempty conflicting replay' 3537ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+Error: bounded queued-answer progress failure after reached premise: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-11701-6f0e34c7-6dc3-45ba-b081-0ed38e8294fa/receipts.jsonl
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:374:13
+    372|   if (outcome.reason === `wall`) {
+    373|     if (queued && premise && !executed) {
+    374|       throw new Error(
+       |             ^
+    375|         `bounded queued-answer progress failure after reached premise:…
+    376|       )
+ ❯ packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts:182:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  01:09:50
+   Duration  3.89s (transform 47ms, setup 22ms, import 69ms, tests 3.54s, environment 185ms)
+

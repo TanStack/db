@@ -1,0 +1,71 @@
+{
+  "exactAnchoredRegex": "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$",
+  "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+  "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'default' checks the unseeded generated campaign or selected replay",
+  "fastCheckVitestContrast": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js",
+    "rule": "buildTestWithPropRunner called by .prop appends exact (with seed=...) suffix. This imported plain-it campaign does not call that wrapper. This explanatory read is not a new runtime dependency preimage.",
+    "sha256": "d5316907da518e2069b98184962610045845f22683a36b1264ca3cfabf5cbc8d"
+  },
+  "genericOptionalSuffixOrPrefixMatching": false,
+  "installedRunner": {
+    "lines": [
+      924,
+      964,
+      1006,
+      1475,
+      1492,
+      2166,
+      2193
+    ],
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js",
+    "rule": "formatTitle renders string lane values with single quotes; test matcher uses space-joined task ancestors, excluding file; display joins with >.",
+    "sha256": "bf6af6d2f4469911879a67e83b8f9e7b20332cf42795032c53457b10ccc1c617"
+  },
+  "oracleRegistrationHelper": {
+    "lines": [
+      604,
+      607,
+      660,
+      678,
+      735,
+      746,
+      774,
+      780
+    ],
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/db/tests/oracle-config.ts",
+    "rule": "With replay seed/path/property cleared, returns the original plain Vitest it. oraclePropertyOptions(8, property) returns numRuns8 with no seed/path. No title or seed suffix is added."
+  },
+  "preservedNames": {
+    "displayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+    "limit": "Earlier qualified v2 collection only; carried by unchanged v3 registration/config/driver/model/finalizer bytes. Fixed campaign later qualified separately. No prior filtered discovery or execution of this unseeded campaign is claimed.",
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/names.json",
+    "selectedOccurrences": 1,
+    "sha256": "bf1afb58132bd904e881b053c3129d8be403529cfe35056cb8960ae96c2a2999",
+    "totalNames": 20
+  },
+  "registration": {
+    "callSiteLines": [
+      2,
+      106,
+      141,
+      152,
+      156
+    ],
+    "imports": "plain describe and it from vitest; fc from fast-check",
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+    "sha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+    "suffix": "none; plain oracleReplayTest(it) registers title unchanged; fc.assert runs inside callback",
+    "suiteTemplate": "generated $cacheIdentity $metadataKeys",
+    "testTitle": "checks the unseeded generated campaign or selected replay"
+  },
+  "rejectUnexpectedSuffix": true,
+  "status": "SOURCE AND PRESERVED DISCOVERY ONLY; no fresh registration or native execution",
+  "unseededOptions": {
+    "call": "oraclePropertyOptions(8, property)",
+    "replayEnvironment": "seed/path/property all unset by exact command",
+    "runMultiplier": 1,
+    "seedEvidenceLimit": "Fast-check chooses the run seed internally. No successful run seed is precomputed, captured or promised by the authored logging. Failure output must preserve actual seed/shrink path if supplied; no seed is inferred from raw histories and no replay is automatically admitted.",
+    "sourceResult": "oracleRandomParameters returns {numRuns:8}, no supplied seed or path"
+  }
+}

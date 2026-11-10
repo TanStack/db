@@ -1,0 +1,124 @@
+import { createTransaction } from "./transactions";
+import { normalizeError } from "./utils/error";
+import {
+  DebounceCallDroppedError,
+  PacedTransactionManualCommitError,
+  QueueCapacityExceededError,
+  QueueDisposedError,
+  ThrottleCallDroppedError
+} from "./errors";
+import { codedMessage, devBuild } from "./error-message";
+export function createPacedMutations(config) {
+  const { onMutate, mutationFn, strategy, ...transactionConfig } = config;
+  let activeTransaction = null;
+  const strategyCommits = /* @__PURE__ */ new WeakMap();
+  let optimisticFrame;
+  function getTransaction(isolated = false) {
+    if (!isolated && activeTransaction?.state === `pending`)
+      return activeTransaction;
+    const transaction = createTransaction({
+      ...transactionConfig,
+      mutationFn,
+      autoCommit: false
+    });
+    strategyCommits.set(transaction, transaction.commit.bind(transaction));
+    transaction.commit = () => {
+      throw new PacedTransactionManualCommitError();
+    };
+    if (!isolated) activeTransaction = transaction;
+    return transaction;
+  }
+  function commit(transaction, onStarted) {
+    if (activeTransaction === transaction) activeTransaction = null;
+    if (transaction.state === `failed`) return transaction;
+    if (transaction.state !== `pending`) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".` : codedMessage(107, { state: transaction.state })
+      );
+    }
+    const strategyCommit = strategyCommits.get(transaction);
+    if (!strategyCommit)
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Paced transaction has no strategy-owned commit` : codedMessage(108)
+      );
+    const completion = strategyCommit();
+    onStarted?.(completion);
+    completion.catch(() => {
+    });
+    return transaction;
+  }
+  function applyOptimistic(transaction, variables, newlyCreated) {
+    const parent = optimisticFrame;
+    if (parent?.transaction === transaction) parent.admittedNestedCall = true;
+    const frame = { transaction, admittedNestedCall: false };
+    optimisticFrame = frame;
+    try {
+      transaction.mutate(() => onMutate(variables));
+    } catch (error) {
+      if (newlyCreated || frame.admittedNestedCall) {
+        transaction.rollback({
+          error: normalizeError(error),
+          isSecondaryRollback: !frame.admittedNestedCall
+        });
+        if (activeTransaction === transaction) activeTransaction = null;
+      }
+      throw error;
+    } finally {
+      optimisticFrame = parent;
+    }
+  }
+  function mutate(variables) {
+    if (strategy._type === `debounce` || strategy._type === `throttle`) {
+      let transaction2;
+      let completion;
+      const onAdmit = () => {
+        if (transaction2) return transaction2;
+        const previous2 = activeTransaction;
+        transaction2 = getTransaction();
+        applyOptimistic(transaction2, variables, transaction2 !== previous2);
+        return transaction2;
+      };
+      const admitted = strategy.execute(
+        () => {
+          return commit(onAdmit(), (started) => {
+            completion = started;
+          });
+        },
+        onAdmit,
+        () => completion
+      );
+      if (admitted !== false) return onAdmit();
+      const dropped = getTransaction(true);
+      applyOptimistic(dropped, variables, true);
+      dropped.rollback({
+        error: strategy._type === `debounce` ? new DebounceCallDroppedError() : new ThrottleCallDroppedError(),
+        isSecondaryRollback: true
+      });
+      return dropped;
+    }
+    const previous = activeTransaction;
+    const transaction = getTransaction(strategy._type === `queue`);
+    applyOptimistic(transaction, variables, transaction !== previous);
+    try {
+      let completion;
+      const admitted = strategy.execute(
+        () => commit(transaction, (started) => {
+          completion = started;
+        }),
+        void 0,
+        () => completion
+      );
+      if (strategy._type === `queue` && admitted === false) {
+        transaction.rollback({
+          error: new QueueCapacityExceededError(),
+          isSecondaryRollback: true
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof QueueDisposedError)) throw error;
+      transaction.rollback({ error, isSecondaryRollback: true });
+    }
+    return transaction;
+  }
+  return mutate;
+}

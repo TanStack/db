@@ -1,0 +1,72 @@
+{"calibration":"accepts exact approved production and instrument bindings","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"retains unevaluated optional instrument without execution credit","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"accepts required module evaluated at a later inventory cut","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects outside-root production","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /authored-outside/packages/db/src/index.ts","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects stale dist substitution","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-8igHMC/authored-source/packages/db/dist/index.js","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects an unapproved package helper","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-3qMOFw/authored-source/packages/db/tests/unapproved-helper.ts"]}
+{"calibration":"rejects changed frozen original bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["changed frozen source: packages/db/src/index.ts"]}
+{"calibration":"rejects wrong actual original-byte metadata","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong actual original bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects changed retained loader bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects V8 bytes without exact loader body","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects a required path that never evaluated","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects transform-only evidence without actual registry bindings","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving source missing: packages/db/src/index.ts","required evaluated receiving source missing: packages/db-ivm/src/index.ts","required evaluated receiving source missing: packages/query-db-collection/src/query.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/reference-expression-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/source-binding.setup.ts","required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs"]}
+{"calibration":"does not interpret stdout or stderr as raw receipts","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects raw receipt sequence gaps","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: invalid receipt envelope or sequence after 1","actual empty-options key callback missing","no actual key observations","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects truncated raw receipt tails","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: truncated final receipt: 299 bytes","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects a writer fault beside a complete raw prefix","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: receipt writer fault: {\"message\":\"authored fault\"}"]}
+{"calibration":"requires actual evaluation of the new receipt transport module","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs"]}
+✔ accepts exact approved production and instrument bindings (165.201042ms)
+✔ retains unevaluated optional instrument without execution credit (151.941125ms)
+✔ accepts required module evaluated at a later inventory cut (161.360666ms)
+✔ rejects outside-root production (159.540375ms)
+✔ rejects stale dist substitution (154.7685ms)
+✔ rejects an unapproved package helper (153.358708ms)
+✔ rejects changed frozen original bytes (160.445917ms)
+✔ rejects wrong actual original-byte metadata (159.498584ms)
+✔ rejects changed retained loader bytes (176.983625ms)
+✔ rejects V8 bytes without exact loader body (166.009459ms)
+✔ rejects a required path that never evaluated (166.090833ms)
+✔ rejects transform-only evidence without actual registry bindings (161.01225ms)
+✔ does not interpret stdout or stderr as raw receipts (168.097917ms)
+✔ rejects raw receipt sequence gaps (163.99325ms)
+✔ rejects truncated raw receipt tails (163.345292ms)
+✔ rejects a writer fault beside a complete raw prefix (161.857041ms)
+✔ requires actual evaluation of the new receipt transport module (151.206083ms)
+✔ writes exact ordered payloads through partial synchronous writes (5.772542ms)
+✔ binds the raw path to the existing supervisor directory (0.541209ms)
+✔ retains a large raw stream and a multibyte receipt larger than the read chunk (25.435208ms)
+✔ decodes UTF-8 across every byte boundary and consumes each receipt once (2.174125ms)
+✔ a live drain stops at its captured byte boundary (1.303333ms)
+✔ holds a live partial line until a later drain completes it (1.2995ms)
+✔ missing live file is pending but a missing final file fails (0.964166ms)
+✔ rejects gap (1.044667ms)
+✔ rejects duplicate (1.380125ms)
+✔ rejects reversed (1.427709ms)
+✔ rejects wrong envelope (1.289875ms)
+✔ rejects missing phase (1.074792ms)
+✔ rejects blank line (1.011917ms)
+✔ rejects malformed JSON (0.891834ms)
+✔ rejects invalid UTF-8 (1.548041ms)
+✔ rejects truncated final line (1.131959ms)
+✔ rejects empty final stream (0.7705ms)
+✔ rejects a file that shrinks after a completed drain (1.149292ms)
+✔ preserves the first read failure and never replays its prefix (0.989166ms)
+✔ rejects replacement of the raw file after a live drain (1.564417ms)
+✔ zero-progress reads cannot spin or silently omit the captured prefix (1.048375ms)
+✔ preserves a partial-write failure and forbids later appends (1.936042ms)
+✔ a failed new line is detected even when the raw prefix is well formed (1.84725ms)
+✔ writer failure survives failure of its own diagnostic write (0.980291ms)
+✔ close failure remains a recorded instrument failure (1.551541ms)
+✔ zero-progress writes cannot spin (1.296083ms)
+✔ worker error reporting and its diagnostic cannot replace the original error (0.111458ms)
+✔ driver and worker-error reporter use the same sink and sequence (1.816708ms)
+✔ missing writer metadata fails closed (0.956583ms)
+✔ pure decoder rejects a corrupt supplied receipt without a product judgment (0.060334ms)
+ℹ tests 47
+ℹ suites 0
+ℹ pass 47
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2809.612042

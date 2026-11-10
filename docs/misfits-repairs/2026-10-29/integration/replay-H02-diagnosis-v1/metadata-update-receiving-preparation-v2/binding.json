@@ -1,0 +1,27 @@
+{
+  "acceptedSelectorClassificationSha256": "4fd95de65589d512920a37f7ff92d90abdee1f54a9f265441bacc808ebb692d4",
+  "acceptedSelectorResultFreezeSha256": "7f797473ed69940fdca4f4506ef99a71997224fb3785aa99e7c9dc71006958b6",
+  "acceptedUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "dependencyReuseLinks": 4,
+  "files": {
+    "calibrate.py": "b37b2fa6f057e8c5fa6df0fc6d9604d37b7c5f12b2078726d3c77eca734b2509",
+    "launcher-scope-default-q2.zsh": "ee040380e7acd9a496042e16f1f195dd7ee66e31704d2570dffe2760f2bab7aa",
+    "recipes.json": "c74f1bcc3dd370c0cc8fbeb0889d69ecfce1a2f8e91da512ef158ea27e6e6cf3",
+    "verify.py": "e7d4fab7945dfe254f36c24792ddf56b7beef355275f048f725a53bef4c535ab"
+  },
+  "namedDependencyOwnPayloads": 2544,
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalSourceFiles": 573,
+  "passiveBaseline": "Candidate inventory only; actual artifact selection requires unique exact program/source/recorded identity agreement, ambiguity stops",
+  "productionFiles": 511,
+  "reusedSourceFiles": 588,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceRefreezes": 0,
+  "status": "SOURCE-ONLY exact scope/default positive quarter2 receiving preparation; independent runtime-suitability review and new root admission required",
+  "success": "Actual canonical history, applied source/acquisition receipts, both-output complete public previousValue/update comparisons, shared finalizer and normal cleanup; no interpretation from list/quiet turns alone"
+}

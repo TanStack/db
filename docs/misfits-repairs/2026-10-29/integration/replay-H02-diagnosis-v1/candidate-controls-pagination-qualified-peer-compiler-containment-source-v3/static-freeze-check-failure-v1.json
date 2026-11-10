@@ -1,0 +1,7 @@
+{
+  "actualChunkId": "008860",
+  "exitCode": 1,
+  "exception": "AssertionError at inline audit line31",
+  "scope": "Lightweight source freeze assertion failed; candidate not run, no compiler/probe/materialization or protected-byte mutation. Manifest not written.",
+  "diagnosis": "Preserved pending exact assertion diagnosis; this is an author audit result, separate from original compiler failure."
+}

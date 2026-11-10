@@ -1,0 +1,47 @@
+import { getLoadSubsetDemandKey } from "./ir-stable-identity.js";
+export class DeduplicatedLoadSubset {
+  constructor(options) {
+    this.options = options;
+    this.completed = /* @__PURE__ */ new Set();
+    this.inflight = /* @__PURE__ */ new Map();
+    this.generation = 0;
+    this.loadSubset = (options) => {
+      const key = getLoadSubsetDemandKey(options);
+      if (!options.refetch && this.completed.has(key)) {
+        this.options.onDeduplicate?.(options);
+        return true;
+      }
+      const existing = options.signal || options.refetch ? void 0 : this.inflight.get(key);
+      if (existing) {
+        void existing.then(() => this.options.onDeduplicate?.(options)).catch(() => {
+        });
+        return existing;
+      }
+      const generation = this.generation;
+      const result = this.options.loadSubset(options);
+      if (result === true) {
+        if (generation === this.generation && !options.signal?.aborted) {
+          this.completed.add(key);
+        }
+        return true;
+      }
+      const promise = result.then((value) => {
+        if (generation === this.generation && !options.signal?.aborted) {
+          this.completed.add(key);
+        }
+        return value;
+      }).finally(() => {
+        if (this.inflight.get(key) === promise) this.inflight.delete(key);
+      });
+      if (!options.signal && generation === this.generation) {
+        this.inflight.set(key, promise);
+      }
+      return promise;
+    };
+  }
+  reset() {
+    this.completed.clear();
+    this.inflight.clear();
+    this.generation++;
+  }
+}

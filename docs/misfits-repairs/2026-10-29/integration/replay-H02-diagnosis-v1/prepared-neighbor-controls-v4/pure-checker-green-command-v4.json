@@ -1,0 +1,13 @@
+{
+  "args": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/calibration.config.ts"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 0.3531382919754833,
+  "classification": "pure checker calibration GREEN only; no DB runtime"
+}

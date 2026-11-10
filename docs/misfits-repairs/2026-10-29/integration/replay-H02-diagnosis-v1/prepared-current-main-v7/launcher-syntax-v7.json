@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/bin/zsh",
+    "-n",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/launcher-v7.zsh"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "receivingExecuted": false
+}

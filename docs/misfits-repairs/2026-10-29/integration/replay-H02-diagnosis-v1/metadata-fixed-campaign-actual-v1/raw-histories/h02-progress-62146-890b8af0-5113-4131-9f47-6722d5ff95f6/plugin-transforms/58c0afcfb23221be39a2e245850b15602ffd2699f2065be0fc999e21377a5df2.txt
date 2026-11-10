@@ -1,0 +1,37 @@
+// @__NO_SIDE_EFFECTS__
+export function devBuild() {
+  try {
+    return process.env.NODE_ENV !== `production`;
+  } catch {
+    return false;
+  }
+}
+function show(value, inArray) {
+  if (Array.isArray(value))
+    return `[${value.map((item) => show(item, true) ?? `"[object]"`).join(`,`)}]`;
+  if (value instanceof Error)
+    return inArray ? void 0 : JSON.stringify(value.message);
+  if (typeof value === `symbol` || typeof value === `bigint` || inArray && (value === void 0 || typeof value === `number` && !Number.isFinite(value)))
+    return JSON.stringify(String(value));
+  if (value === void 0 || typeof value === `number` && !Number.isFinite(value))
+    return String(value);
+  return value === null || typeof value !== `object` ? JSON.stringify(value) : void 0;
+}
+export function codedMessage(code, values = {}, kind = `error`) {
+  const shown = Object.entries(values).flatMap(([name, value]) => {
+    try {
+      const text = show(value, false);
+      return text === void 0 ? [] : [`${name}=${text}`];
+    } catch {
+      return [];
+    }
+  });
+  const pairs = shown.join(`, `).replace(
+    /[\u2028\u2029]/g,
+    (separator) => `\\u${separator.charCodeAt(0).toString(16)}`
+  );
+  return `TanStack DB ${kind} ${code}${pairs && ` (${pairs})`}: https://tanstack.com/db/latest/docs/errors#${kind}-${code}`;
+}
+export function codedWarning(code, values) {
+  return codedMessage(code, values, `warning`);
+}

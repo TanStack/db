@@ -1,0 +1,10 @@
+{
+  "calibration-v1.log": "502f71a4953b8ef88ce56774c992a618d33ee02523c0555840ba7d34e15697c6",
+  "diagnosis-v1.json": "5362e1782fe66798f6e7eb3aac0e4981a6102c3b6faeea9ecdc0fd09682da2da",
+  "fixture-evaluated-code.txt": "5ed1dc8ea55dd64dc929f14e84f1baf13b03f4ceaf238f8a806aa8a31ea3460a",
+  "observations.json": "e80eab8fc8cd04da374731b5699cb0d314d4268c4f6a76a308042de623a509fa",
+  "source/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts": "7fc098f239803bbd02a17190e812c14c44b62784b6db7c9d85b535ba965a3a71",
+  "source/scripts/h02-progress/root-setup-calibration.config.ts": "5494383044455f6d9ae1e9b7a7224710caf405799223f0ab86ffedb57686c7fb",
+  "source/scripts/h02-progress/root-setup-calibration.test.ts": "f0cd49f4f54ae024c9758eabe5a2e78dd9b0aea8188b71818ab53d860ac252ef",
+  "vitest-normalize-url-source.txt": "4d1e7c2ea9d691e532fdb6f150c365b7e4cf1def7441225b776dee26576f7afb"
+}

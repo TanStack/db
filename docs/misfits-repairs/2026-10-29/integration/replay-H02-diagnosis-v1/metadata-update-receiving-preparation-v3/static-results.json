@@ -1,0 +1,30 @@
+{
+  "dependencyCensusesAdded": 0,
+  "discoveryReusedByExactByteEquivalence": true,
+  "freshOutputAbsent": true,
+  "launcherEquivalence": "byte exact after three epoch-path substitutions",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newDiscoveryEpochs": 0,
+  "pythonSyntax": "both modules parse",
+  "recipePure": {
+    "accepted": 1,
+    "exitCode": 0,
+    "log": "pure-results.json",
+    "rejected": 8
+  },
+  "sourceCopies": 0,
+  "sourceEdits": 0,
+  "sourceReadHashPreflight": {
+    "exitCode": 0,
+    "gate": "source",
+    "log": "source-preparation-preflight.json"
+  },
+  "sourceRefreezes": 0,
+  "toolchainRecoveryAcceptance": "pending root; no changed wrapper accepted",
+  "zshSyntax": {
+    "execution": false,
+    "exitCode": 0,
+    "log": "zsh-syntax.log"
+  }
+}

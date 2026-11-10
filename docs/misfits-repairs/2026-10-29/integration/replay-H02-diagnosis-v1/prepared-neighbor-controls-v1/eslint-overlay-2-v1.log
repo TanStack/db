@@ -1,0 +1,23 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
+  1453:26  warning  Async arrow function has no 'await' expression                     @typescript-eslint/require-await
+  1616:9   warning  'rows' is already declared in the upper scope on line 44 column 3  no-shadow
+  5276:7   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5347:7   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5464:3   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5465:3   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5466:3   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5467:3   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5468:3   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5518:15  error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5583:9   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5610:3   error    Expected space or tab after '/*' in comment                        @stylistic/spaced-comment
+  5645:3   error    Expected space or tab after '/*' in comment                        @stylistic/spaced-comment
+  5776:5   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5777:5   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5778:5   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+  5793:5   error    Expected space or tab after '//' in comment                        @stylistic/spaced-comment
+
+✖ 17 problems (15 errors, 2 warnings)
+  15 errors and 0 warnings potentially fixable with the `--fix` option.
+

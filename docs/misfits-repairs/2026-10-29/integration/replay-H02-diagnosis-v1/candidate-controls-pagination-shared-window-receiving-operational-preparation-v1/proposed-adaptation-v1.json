@@ -1,0 +1,181 @@
+{
+  "status": "DRAFT source-only adaptation; no runtime or heavy audit admitted; wait for Root slot2 before sealing",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "baseSourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+  "baseSourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "baseBindings": 596,
+  "baseCopiedSupportFiles": 85,
+  "productionBindings": 511,
+  "sourceHold": true,
+  "operationalFreezeTarget": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+  "schemaAdaptation": {
+    "completionInstrumentFiles": {
+      "derivation": "Preserve S17 selected subset keys, resolve every digest from Q instrumentFiles, then include already-bound nonregistering shared full-child helper. No new source identity.",
+      "inheritedSelectedPaths": [
+        "packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+        "scripts/h02-progress/completion-checker-controls.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+        "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+        "scripts/h02-progress/completion-tsconfig.json",
+        "scripts/h02-progress/completion-eslint.config.mjs",
+        "scripts/h02-progress/completion-receiving.config.ts",
+        "scripts/h02-progress/completion-parent.config.ts",
+        "scripts/h02-progress/completion-parent.mjs"
+      ],
+      "alreadyBoundHelper": "packages/db/tests/query/pagination-window-publication-oracle.ts",
+      "resultSubsetCount": 18
+    },
+    "receivingProductionFiles": {
+      "derivation": "Copy S161 exact receiving-production key/digest pairs only after proving every pair equals Q productionFiles and current disk; preserve this narrow receiving allowance.",
+      "inheritedCount": 161,
+      "baseManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/source-freeze-v1.json"
+    },
+    "unchangedMaps": [
+      "sourceBindings",
+      "sourceCopies",
+      "productionFiles",
+      "instrumentFiles",
+      "sharedInstrumentFiles",
+      "packages",
+      "node",
+      "lockfiles",
+      "dependencyReuseLinks"
+    ],
+    "profile": "completion-baseline-v1; additive operational metadata only; original f85 file remains unchanged"
+  },
+  "registrationBindings": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sourceSha256FromQ": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235",
+      "registrationLine": 54,
+      "registrationLiteral": "it(`checks a selected baseline constituent through the shared judgment`, async () => {",
+      "registrationKind": "plain vitest it imported from vitest; top-level registration",
+      "exactTitle": "checks a selected baseline constituent through the shared judgment",
+      "expectedAncestorTitles": [],
+      "suffixPolicy": "No FastCheck seed/path suffix is expected or accepted for this plain-it registration. Do not broaden a qualifier or infer execution from a base-title substring.",
+      "actualExecutionEvidence": "PENDING admitted run; bind exact recorded assertion/title when available and inspect raw original stdout/stderr/receipts; no discovery/import occurred"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sourceSha256FromQ": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "registrationLine": 13,
+      "registrationLiteral": "it(`records a source-bound completion receiving gate`, async () => {",
+      "registrationKind": "plain vitest it imported from vitest; top-level registration",
+      "exactTitle": "records a source-bound completion receiving gate",
+      "expectedAncestorTitles": [],
+      "suffixPolicy": "No FastCheck seed/path suffix is expected or accepted for this plain-it registration. Do not broaden a qualifier or infer execution from a base-title substring.",
+      "actualExecutionEvidence": "PENDING admitted run; bind exact recorded assertion/title when available and inspect raw original stdout/stderr/receipts; no discovery/import occurred"
+    }
+  ],
+  "configs": {
+    "parent": {
+      "path": "scripts/h02-progress/completion-parent.config.ts",
+      "sourceSha256FromQ": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+      "environment": "node",
+      "coverageEnabled": false,
+      "typecheckEnabled": false,
+      "meaning": "existing pure parent standalone config, inherited unchanged; no ordinary campaign/typecheck runtime credit"
+    },
+    "inner": {
+      "path": "scripts/h02-progress/completion-receiving.config.ts",
+      "sourceSha256FromQ": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+      "inherits": "scripts/h02-progress/vitest.config.ts",
+      "inheritedSourceSha256FromQ": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6",
+      "environment": "jsdom",
+      "coverageEnabled": false,
+      "typecheckEnabled": false,
+      "meaning": "existing reviewed S/f85 standalone receiving setup, inherited unchanged; no ordinary campaign/typecheck runtime credit"
+    },
+    "staticTypecheck": "Q final TS8 default-heap noEmit passed actual763ce9/session40160/final0e427a; not runtime typecheck credit; bind original evidence in sealed packet"
+  },
+  "budgets": {
+    "outerWallMs": 60000,
+    "outerNodeHeapMiB": 384,
+    "outerGroupRssBytes": 1073741824,
+    "outerSamplingMs": 100,
+    "innerWallMs": 20000,
+    "innerNodeHeapMiB": 384,
+    "innerGroupRssBytes": 1073741824,
+    "scope": "existing source-bound operational limits unchanged; no product deadline; separate2GiB primary allowance does not apply",
+    "parentSelectedTestTimeoutMs": 60000,
+    "innerInheritedTestTimeoutMs": 300000,
+    "innerContainmentPrecedence": "Existing supervisor20s wall limit bounds the child before its inherited300s test timeout; neither value is changed."
+  },
+  "stages": [
+    {
+      "schedule": "failure-first",
+      "admission": "SEPARATE ROOT ADMISSION REQUIRED; no automatic next stage",
+      "order": 1,
+      "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-failure-first.json",
+      "programSha256FromQRecipe": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "programBytes": "unchanged Q program; independently reviewed constructor equality",
+      "proposalRecipeTarget": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "recipeBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "recipeChangesOnly": [
+        "sourceFreeze and sourceFreezeSha256 to new additive receiving operational manifest",
+        "programFile to exact copied unchanged Q program if copied",
+        "outputDirectory to fresh schedule-specific path"
+      ],
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1/inline-window-failure-first",
+      "command": {
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+        ],
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+      },
+      "observationScope": "first exact handled-failure/pre-peer-release barrier then real cleanup; original error/receipt and measured pending or AbortError-retired peer; full root/downstream raw changes and previousValue; no later retry/settlement credit",
+      "prerequisites": "accepted primary RED review plus sealed operational map/config review and explicit exact failure admission"
+    },
+    {
+      "schedule": "success",
+      "admission": "SEPARATE ROOT ADMISSION REQUIRED; no automatic next stage",
+      "order": 2,
+      "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-success.json",
+      "programSha256FromQRecipe": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "programBytes": "unchanged Q program; independently reviewed constructor equality",
+      "proposalRecipeTarget": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json",
+      "recipeBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-success.json",
+      "recipeChangesOnly": [
+        "sourceFreeze and sourceFreezeSha256 to new additive receiving operational manifest",
+        "programFile to exact copied unchanged Q program if copied",
+        "outputDirectory to fresh schedule-specific path"
+      ],
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1/inline-window-success",
+      "command": {
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json"
+        ],
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+      },
+      "observationScope": "same frozen recorder/comparison real successful held-marker/child neighbor with complete child contents; calibration belongs only to this exact source epoch",
+      "prerequisites": "failure runtime frozen/reviewed, source identity unchanged, plus separate exact success admission"
+    }
+  ],
+  "sealingAuditPending": [
+    "Root grants free slot2",
+    "Rehash Q596/85/511 and original f85 with no source mutation",
+    "Rehash mapped historicalQ126/current133 packets and report erratum",
+    "Rehash S required metadata/maps and prior receiving source packet; derive exact18/161 subsets",
+    "Rehash all9 material packages/2544 payloads, selected Node, both lockfiles,4 links and root-accepted supplemental toolchain/recovery maps",
+    "Bind exact existing outer/inner config source and plain-it title literals; no broad suffix qualifier",
+    "Copy each existing Q program unchanged; form two separate exact recipes with fresh operational-freeze SHA and disjoint output directories",
+    "Seal preparation manifest and request independent operational map/config review; runtime remains separate Root decision"
+  ],
+  "primaryRun": {
+    "result": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/result-freeze-v1.json",
+    "sha256": "ec7775de91e14a892dbfe17360cd8d2b73fb2766a0919605c66ee71561a09669",
+    "status": "raw result pending independent product review; no product claim or admission inherited"
+  }
+}

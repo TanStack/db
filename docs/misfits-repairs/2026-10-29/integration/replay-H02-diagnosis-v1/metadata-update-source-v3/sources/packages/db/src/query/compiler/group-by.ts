@@ -1,0 +1,1110 @@
+import {
+  filter,
+  groupBy,
+  groupByOperators,
+  map,
+  serializeValue,
+} from '@tanstack/db-ivm'
+import {
+  ConditionalSelect,
+  Func,
+  PropRef,
+  getHavingExpression,
+  isExpressionLike,
+} from '../ir.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
+import { deepEquals, isTemporal } from '../../utils.js'
+import { normalizedKey } from '../../utils/comparison.js'
+import {
+  AggregateFunctionNotInSelectError,
+  NonAggregateExpressionNotInGroupByError,
+  UnknownHavingExpressionTypeError,
+  UnsupportedAggregateFunctionError,
+} from '../../errors.js'
+import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+  getParentContextValue,
+} from '../equality-value-identity.js'
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate,
+} from './evaluators.js'
+import {
+  INCLUDES_PUBLIC_KEY,
+  attachRouteMetadata,
+  getNamespacedRouteMetadata,
+  stripInternalCallbackMetadata,
+} from './route-metadata.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
+import type { RouteMetadata } from './route-metadata.js'
+import type {
+  Aggregate,
+  BasicExpression,
+  GroupBy,
+  Having,
+  Select,
+  SelectValueExpression,
+} from '../ir.js'
+import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
+import type { VirtualOrigin } from '../../virtual-props.js'
+
+const RAW_REPRESENTATIVE = Symbol(`raw_group_representative`)
+
+type InternalGroupFields = ReturnType<typeof createInternalGroupFields>
+
+function createInternalGroupFields(groupCount: number, selectClause?: Select) {
+  const aliases = Object.keys(selectClause ?? {})
+  let prefix = `__tanstack_group_`
+  while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`
+
+  return {
+    virtual: `${prefix}virtual`,
+    route: `${prefix}route`,
+    exactInputs: `${prefix}exact_inputs`,
+    correlationIdentity: `${prefix}correlation_identity`,
+    parentContextIdentity: `${prefix}parent_context_identity`,
+    singleGroup: `${prefix}single_group`,
+    aggregatePrefix: `${prefix}aggregate_`,
+    groupKeys: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_${i}`,
+    ),
+    groupValues: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}value_${i}`,
+    ),
+    groupKeyRefs: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_ref_${i}`,
+    ),
+  }
+}
+
+type RowVirtualMetadata = {
+  hasPendingWrites: boolean
+  hasLocal: boolean
+}
+
+type Representative<T> = {
+  key: string
+  [RAW_REPRESENTATIVE]: T
+}
+
+function createPublicGroupKey(values: Array<unknown>): unknown {
+  const identities = values.map(getEqualityValueIdentity)
+  if (identities.length === 1) {
+    const identity = identities[0]
+    if (typeof identity === `string` || typeof identity === `number`) {
+      return identity
+    }
+    // Collection keys are strings or numbers. Another primitive group value,
+    // such as `null`, `undefined`, or a boolean, keys its group in the
+    // namespace that `normalizeValue` reserves. No string group value
+    // occupies that namespace, so the key cannot collide with one.
+    if (
+      identity == null ||
+      (typeof identity !== `object` &&
+        typeof identity !== `function` &&
+        typeof identity !== `symbol`)
+    ) {
+      return normalizedKey(typeof identity, String(identity))
+    }
+  }
+  return serializeValue(identities)
+}
+
+function attachPublicGroupKey(
+  row: Record<string, any>,
+  publicKey: unknown,
+): void {
+  const keyedRow = row as Record<PropertyKey, unknown>
+  keyedRow[INCLUDES_PUBLIC_KEY] = publicKey
+}
+
+function createRepresentative<T>(
+  value: T,
+  identity: unknown,
+): Representative<T> {
+  // Encode once per contribution, not once per member on every group change.
+  // D2 consolidates contributions that hash equal (groupBy finds them by an
+  // identity string that is equal for exactly those). The identity must
+  // therefore separate every exactly different value, so a merged
+  // contribution never projects a value that no positive member holds.
+  const representative = {
+    key: serializeValue(identity),
+  } as Representative<T>
+  Object.defineProperty(representative, RAW_REPRESENTATIVE, { value })
+  return representative
+}
+
+/**
+ * Members equal under query equality supply the value with the smallest exact
+ * value: another primitive before -0, and every primitive before an object.
+ * Objects are ordered by an explicit type tag, so the order survives
+ * minification. Members of one tag are equal in content, so the smallest row
+ * key decides among them: the choice does not depend on arrival order, and
+ * the instance comes from a current member. Equal primitives share a key and
+ * consolidate.
+ *
+ * The key is compared as a serialized string. Its first two parts have a
+ * fixed format (a one-digit rank and a quoted tag), so the string order
+ * matches the order above; the last part only breaks ties.
+ */
+function exactValueKey(
+  value: unknown,
+  rowKey: string,
+  valueIdentity: ValueIdentity,
+): unknown {
+  if (Object.is(value, -0)) return [1, ``, ``]
+  if (value === null || typeof value !== `object`) {
+    return [0, ``, valueIdentity.exact(value)]
+  }
+  return [2, exactObjectTag(value), rowKey]
+}
+
+function exactObjectTag(value: object): string {
+  if (value instanceof Date) return `Date`
+  if (isTemporal(value)) return (value as any)[Symbol.toStringTag]
+  if (typeof Buffer !== `undefined` && value instanceof Buffer) return `Buffer`
+  return value instanceof Uint8Array ? `Uint8Array` : `Object`
+}
+
+function getRepresentative<T>(
+  values: Array<[Representative<T>, number]>,
+): Representative<T> | undefined {
+  let selected: Representative<T> | undefined
+  for (const [candidate, multiplicity] of values) {
+    if (multiplicity <= 0) continue
+    if (selected === undefined || candidate.key < selected.key) {
+      selected = candidate
+    }
+  }
+  return selected
+}
+
+function unwrapRepresentative<T>(
+  value: Representative<T> | undefined,
+): T | undefined {
+  return value?.[RAW_REPRESENTATIVE]
+}
+
+function addCorrelationRouteIdentityToGroupKey(
+  key: Record<string, unknown>,
+  row: NamespacedRow,
+  mainSource: string,
+  fields: InternalGroupFields,
+  valueIdentity: ValueIdentity,
+): void {
+  const route = getNamespacedRouteMetadata(row, mainSource)
+  key[fields.correlationIdentity] = valueIdentity.equality(
+    route?.correlationKey,
+  )
+  if (route?.parentContext != null) {
+    key[fields.parentContextIdentity] = getParentContextIdentity(
+      route.parentContext,
+    )
+  }
+}
+
+/** One representative carries the whole route so both parts come from one row. */
+function addCorrelationRouteAggregate(
+  aggregates: Record<string, any>,
+  mainSource: string,
+  fields: InternalGroupFields,
+  valueIdentity: ValueIdentity,
+): void {
+  aggregates[fields.route] = {
+    preMap: ([, row]: [string, NamespacedRow]) => {
+      const route = getNamespacedRouteMetadata(row, mainSource)
+      // Members of one route share its correlation key and parent context
+      // instances, so they consolidate into one contribution. A changed
+      // parent builds a new context, which stays separate.
+      return createRepresentative(route, [
+        valueIdentity.exact(route?.correlationKey),
+        valueIdentity.exact(route?.parentContext),
+      ])
+    },
+    reduce: getRepresentative,
+    postMap: unwrapRepresentative,
+  }
+}
+
+function getGroupRoute(
+  aggregatedRow: Record<string, unknown>,
+  fields: InternalGroupFields,
+): RouteMetadata | undefined {
+  return aggregatedRow[fields.route] as RouteMetadata | undefined
+}
+
+function getCorrelationRouteIdentity(
+  aggregatedRow: Record<string, unknown>,
+  fields: InternalGroupFields,
+): unknown {
+  return getGroupRoute(aggregatedRow, fields)?.parentContext == null
+    ? aggregatedRow[fields.correlationIdentity]
+    : [
+        aggregatedRow[fields.correlationIdentity],
+        aggregatedRow[fields.parentContextIdentity],
+      ]
+}
+
+function getGroupEvaluationRow(
+  row: Record<string, unknown>,
+  fields: InternalGroupFields,
+  selected = row.$selected as Record<string, unknown>,
+): NamespacedRow {
+  return {
+    ...getParentContextValue(getGroupRoute(row, fields)?.parentContext),
+    $selected: selected,
+  }
+}
+
+function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
+  let hasPendingWrites = false
+  let hasLocal = false
+
+  for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
+    if (alias === `$selected`) continue
+    if (value === null || typeof value !== `object`) continue
+    const asRecord = value as Record<string, unknown>
+    const hasPendingWritesProp = `$hasPendingWrites` in asRecord
+    const hasOriginProp = `$origin` in asRecord
+    if (!hasPendingWritesProp && !hasOriginProp) {
+      continue
+    }
+    if (asRecord.$hasPendingWrites === true) {
+      hasPendingWrites = true
+    }
+    if (asRecord.$origin === `local`) {
+      hasLocal = true
+    }
+  }
+
+  return {
+    hasPendingWrites,
+    hasLocal,
+  }
+}
+
+/**
+ * Processes the GROUP BY clause with optional HAVING and SELECT
+ * Works with the new $selected structure from early SELECT processing
+ */
+export function processGroupBy(
+  pipeline: NamespacedAndKeyedStream,
+  groupByClause: GroupBy,
+  valueIdentity: ValueIdentity,
+  /** Whether a ref reads a field of the query's own rows. */
+  isSourceRef: (ref: PropRef) => boolean,
+  havingClauses?: Array<Having>,
+  selectClause?: Select,
+  fnHavingClauses?: Array<(row: any) => any>,
+  aggregateCollectionId?: string,
+  mainSource?: string,
+  sanitizeCallbackRows = false,
+): NamespacedAndKeyedStream {
+  const fields = createInternalGroupFields(groupByClause.length, selectClause)
+  const virtualAggregates: Record<string, any> = {
+    [fields.virtual]: {
+      preMap: ([, row]: [string, NamespacedRow]) => getRowVirtualMetadata(row),
+      reduce: (values: Array<[RowVirtualMetadata, number]>) => {
+        const group: RowVirtualMetadata = {
+          hasPendingWrites: false,
+          hasLocal: false,
+        }
+        for (const [metadata, multiplicity] of values) {
+          if (multiplicity <= 0) continue
+          if (metadata.hasPendingWrites) group.hasPendingWrites = true
+          if (metadata.hasLocal) group.hasLocal = true
+        }
+        return group
+      },
+    },
+  }
+
+  if (mainSource) {
+    addCorrelationRouteAggregate(
+      virtualAggregates,
+      mainSource,
+      fields,
+      valueIdentity,
+    )
+  }
+
+  const singleGroup = groupByClause.length === 0
+  // Outside its aggregates, a select value has a value for the group only
+  // when it is constant within it: a literal, a group key, or a parent field,
+  // which the route fixes. A field of the query's own sources has none, and
+  // neither does a spread: a route's parent context holds only the parent
+  // fields the query names.
+  if (selectClause) {
+    for (const [alias, expr] of Object.entries(selectClause)) {
+      if (lacksGroupValue(alias, expr, isSourceRef, groupByClause))
+        throw new NonAggregateExpressionNotInGroupByError(
+          alias.startsWith(SPREAD_SENTINEL) ? `...${spreadPath(alias)}` : alias,
+        )
+    }
+  }
+
+  // Pre-compile groupBy expressions
+  const compiledGroupByExpressions = groupByClause.map((e) =>
+    compileExpression(e),
+  )
+
+  // Include the complete route so distinct parent inputs stay apart.
+  const keyExtractor = ([, row]: [
+    string,
+    NamespacedRow & { $selected?: any },
+  ]) => {
+    // Use the original namespaced row for GROUP BY expressions, not $selected
+    const namespacedRow = singleGroup ? row : { ...row }
+    if (!singleGroup) delete namespacedRow.$selected
+
+    const key: Record<string, unknown> = singleGroup
+      ? { [fields.singleGroup]: true }
+      : {}
+
+    // D2 must key groups by the same relation as the query evaluator. The raw
+    // representative is retained separately as an aggregate for projection.
+    for (let i = 0; i < groupByClause.length; i++) {
+      const compiledExpr = compiledGroupByExpressions[i]!
+      const value = compiledExpr(namespacedRow)
+      key[fields.groupKeys[i]!] = valueIdentity.equality(value)
+    }
+
+    if (mainSource) {
+      addCorrelationRouteIdentityToGroupKey(
+        key,
+        row,
+        mainSource,
+        fields,
+        valueIdentity,
+      )
+    }
+
+    return key
+  }
+
+  // Create aggregate functions for any aggregated columns in the SELECT clause
+  const aggregates: Record<string, any> = virtualAggregates
+  const wrappedAggExprs: Record<string, (data: any) => any> = {}
+  const aggCounter = { value: 0 }
+
+  for (let i = 0; i < compiledGroupByExpressions.length; i++) {
+    const compiledExpr = compiledGroupByExpressions[i]!
+    aggregates[fields.groupValues[i]!] = {
+      preMap: ([rowKey, row]: [string, NamespacedRow]) => {
+        const value = compiledExpr(row)
+        return createRepresentative(
+          value,
+          exactValueKey(value, rowKey, valueIdentity),
+        )
+      },
+      reduce: getRepresentative,
+      postMap: unwrapRepresentative,
+    }
+  }
+
+  // D2 consolidates contributions that hash equal, and the hash treats -0 as 0
+  // and equal Dates as one value. Today it keeps the instance it was last given;
+  // db-ivm's groupBy tests pin that as current behavior, not as a promise. A min
+  // or max returns one of its inputs, so each contribution carries the exact key
+  // of the value it compares, as a group value does. A primitive's key is its
+  // exact value, so equal primitives still consolidate. An object's key holds its
+  // row key, so a retraction cancels its insert even when the argument builds a
+  // new instance each time, and a merged contribution never keeps a deleted row's
+  // instance. A sum, avg, or count only adds its coerced numbers, so merging
+  // equal inputs cannot change its result.
+  const exactInputs: Array<(entry: [string, NamespacedRow]) => unknown> = []
+  const addAggregate = (alias: string, aggExpr: Aggregate) => {
+    aggregates[alias] = getAggregateFunction(aggExpr)
+    const name = aggExpr.name.toLowerCase()
+    if (name === `min` || name === `max`) {
+      exactInputs.push(minMaxInput(compileExpression(aggExpr.args[0]!)))
+    }
+  }
+
+  if (selectClause) {
+    // Scan the SELECT clause for aggregate functions
+    for (const [alias, expr] of Object.entries(selectClause)) {
+      if (expr.type === `agg`) {
+        addAggregate(alias, expr)
+      } else {
+        // Every other value reads the group's key values, the route's parent
+        // context, and the aggregates it wraps.
+        const { transformed, extracted } = extractAndReplaceAggregates(
+          expr as SelectValueExpression,
+          aggCounter,
+          fields.aggregatePrefix,
+        )
+        for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
+          addAggregate(syntheticAlias, aggExpr)
+        }
+        wrappedAggExprs[alias] = compileGroupedSelectValue(
+          replaceGroupByRefsInSelectValue(
+            transformed,
+            groupByClause,
+            fields.groupKeyRefs,
+          ),
+        )
+      }
+    }
+  }
+
+  if (exactInputs.length > 0) {
+    aggregates[fields.exactInputs] = {
+      preMap: (entry: [string, NamespacedRow]) =>
+        exactInputs.map((input) =>
+          exactValueKey(input(entry), entry[0], valueIdentity),
+        ),
+      reduce: () => undefined,
+    }
+  }
+
+  // Apply the groupBy operator
+  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates))
+
+  // Update $selected to handle GROUP BY results
+  pipeline = pipeline.pipe(
+    map(([, aggregatedRow]) => {
+      const finalResults: Record<string, any> = {}
+
+      if (selectClause) {
+        // Every field takes its place in select order. Plain aggregates are
+        // filled first; every other value reads them, the group keys, and
+        // the route's parent context.
+        for (const [alias, expr] of Object.entries(selectClause)) {
+          finalResults[alias] =
+            expr.type === `agg` ? aggregatedRow[alias] : undefined
+        }
+        evaluateWrappedAggregates(
+          finalResults,
+          aggregatedRow as Record<string, any>,
+          wrappedAggExprs,
+          fields,
+        )
+      } else {
+        // No SELECT clause - just use the group keys
+        for (let i = 0; i < groupByClause.length; i++) {
+          finalResults[`__key_${i}`] = aggregatedRow[fields.groupValues[i]!]
+        }
+      }
+
+      // Generate a simple key for the live collection using group values.
+      // In includes mode, add the complete route so correlated groups do not
+      // collide.
+      const route = mainSource
+        ? getGroupRoute(aggregatedRow, fields)
+        : undefined
+      const correlationKey = route?.correlationKey
+      const correlationRoute = mainSource
+        ? getCorrelationRouteIdentity(aggregatedRow, fields)
+        : undefined
+      const keyParts: Array<unknown> = []
+      const publicKeyParts: Array<unknown> = []
+      for (let i = 0; i < groupByClause.length; i++) {
+        keyParts.push(aggregatedRow[fields.groupKeys[i]!])
+        publicKeyParts.push(aggregatedRow[fields.groupValues[i]!])
+      }
+      if (correlationRoute !== undefined) {
+        keyParts.push(correlationRoute)
+      }
+      const finalKey = singleGroup
+        ? correlationRoute !== undefined
+          ? `single_group_${serializeValue(correlationRoute)}`
+          : `single_group`
+        : keyParts.length === 1
+          ? keyParts[0]
+          : serializeValue(keyParts)
+      const publicKey = singleGroup
+        ? `single_group`
+        : createPublicGroupKey(publicKeyParts)
+
+      // When in includes mode, restore route metadata for output routing.
+      const resultRow: Record<string, any> = {
+        ...(aggregatedRow as Record<string, any>),
+        $selected: finalResults,
+      }
+      const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
+        RowVirtualMetadata | undefined
+      resultRow.$hasPendingWrites = virtual?.hasPendingWrites ?? false
+      resultRow.$origin = (
+        virtual?.hasLocal ? `local` : `remote`
+      ) satisfies VirtualOrigin
+      resultRow.$key = publicKey
+      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
+      if (mainSource && correlationKey !== undefined) {
+        attachPublicGroupKey(resultRow, publicKey)
+        attachRouteMetadata(
+          resultRow,
+          correlationKey,
+          route?.parentContext ?? null,
+        )
+      }
+      return [mainSource ? finalKey : publicKey, resultRow] as [
+        unknown,
+        Record<string, any>,
+      ]
+    }),
+  )
+
+  // Apply HAVING clauses if present
+  if (havingClauses && havingClauses.length > 0) {
+    for (const havingClause of havingClauses) {
+      const havingExpression = getHavingExpression(havingClause)
+      // HAVING follows the select rule, and reads group keys the same way.
+      if (lacksGroupValue(``, havingExpression, isSourceRef, groupByClause))
+        throw new NonAggregateExpressionNotInGroupByError(`HAVING`)
+      const transformedHavingClause = replaceGroupByRefsInExpression(
+        replaceAggregatesByRefs(havingExpression, selectClause || {}),
+        groupByClause,
+        fields.groupKeyRefs,
+      )
+      const compiledHaving = compileExpression(transformedHavingClause)
+
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          let selected = row.$selected as Record<string, unknown>
+          if (fields.groupKeyRefs.length > 0) {
+            const withKeys: Record<string, unknown> = { ...selected }
+            fields.groupKeyRefs.forEach((ref, i) => {
+              withKeys[ref] = row[fields.groupValues[i]!]
+            })
+            selected = withKeys
+          }
+          const namespacedRow = getGroupEvaluationRow(row, fields, selected)
+          const result = compiledHaving(namespacedRow)
+          // Preserve each path's coercion for unchecked nonboolean IR values.
+          return singleGroup ? toBooleanPredicate(result) : result
+        }),
+      )
+    }
+  }
+
+  // Apply functional HAVING clauses if present
+  if (fnHavingClauses && fnHavingClauses.length > 0) {
+    for (const fnHaving of fnHavingClauses) {
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          const namespacedRow = getGroupEvaluationRow(row, fields)
+          const callbackRow = sanitizeCallbackRows
+            ? stripInternalCallbackMetadata(namespacedRow)
+            : namespacedRow
+          return toBooleanPredicate(fnHaving(callbackRow))
+        }),
+      )
+    }
+  }
+
+  return pipeline
+}
+
+const SPREAD_SENTINEL = `__SPREAD_SENTINEL__`
+
+/** The path a spread sentinel key names, as `__SPREAD_SENTINEL__<path>__<id>`. */
+function spreadPath(key: string): string {
+  const rest = key.slice(SPREAD_SENTINEL.length)
+  const idIndex = rest.lastIndexOf(`__`)
+  return idIndex >= 0 ? rest.slice(0, idIndex) : rest
+}
+
+/**
+ * Whether a select value has no single value for an aggregate's group: it
+ * spreads a row, or reads a field of one of `sources` outside an aggregate.
+ * It walks only select and expression nodes.
+ */
+function lacksGroupValue(
+  key: string,
+  value: unknown,
+  isSourceRef: (ref: PropRef) => boolean,
+  groupKeys: GroupBy,
+): boolean {
+  if (key.startsWith(SPREAD_SENTINEL)) return true
+  if (groupKeys.some((groupKey) => expressionsEqual(value, groupKey)))
+    return false
+  if (isConditionalSelect(value))
+    return (
+      value.branches.some(
+        (branch) =>
+          lacksGroupValue(``, branch.condition, isSourceRef, groupKeys) ||
+          lacksGroupValue(``, branch.value, isSourceRef, groupKeys),
+      ) || lacksGroupValue(``, value.defaultValue, isSourceRef, groupKeys)
+    )
+  if (isExpressionLike(value)) {
+    const node = value as BasicExpression
+    if (node.type === `ref`) return isSourceRef(node)
+    if (node.type === `func`)
+      return node.args.some((arg) =>
+        lacksGroupValue(``, arg, isSourceRef, groupKeys),
+      )
+    return false
+  }
+  if (!isNestedSelectObject(value)) return false
+  return Object.entries(value).some(([childKey, child]) =>
+    lacksGroupValue(childKey, child, isSourceRef, groupKeys),
+  )
+}
+
+/**
+ * Helper function to check if two expressions are equal
+ */
+function expressionsEqual(expr1: any, expr2: any): boolean {
+  if (!expr1 || !expr2) return false
+  if (expr1.type !== expr2.type) return false
+
+  switch (expr1.type) {
+    case `ref`:
+      // Identical paths in different lexical scopes name different values.
+      if (expr1.bindingId !== expr2.bindingId) return false
+      if (!expr1.path || !expr2.path) return false
+      if (expr1.path.length !== expr2.path.length) return false
+      return expr1.path.every(
+        (segment: string, i: number) => segment === expr2.path[i],
+      )
+    case `val`:
+      // Equal literals are separate objects; -0 and 0 can give different
+      // results.
+      return typeof expr1.value === `number`
+        ? Object.is(expr1.value, expr2.value)
+        : deepEquals(expr1.value, expr2.value)
+    case `func`:
+      return (
+        expr1.name === expr2.name &&
+        expr1.args?.length === expr2.args?.length &&
+        (expr1.args || []).every((arg: any, i: number) =>
+          expressionsEqual(arg, expr2.args[i]),
+        )
+      )
+    case `agg`:
+      return (
+        expr1.name === expr2.name &&
+        expr1.args?.length === expr2.args?.length &&
+        (expr1.args || []).every((arg: any, i: number) =>
+          expressionsEqual(arg, expr2.args[i]),
+        )
+      )
+    default:
+      return false
+  }
+}
+
+/** The value a min or max compares: strings, numbers, Dates, and bigints keep
+ * their type, and anything else becomes a number. */
+function minMaxInput(
+  compiledExpr: (row: NamespacedRow) => unknown,
+): (entry: [string, NamespacedRow]) => string | number | bigint | Date {
+  return ([, namespacedRow]) => {
+    const value = compiledExpr(namespacedRow)
+    if (
+      typeof value === `number` ||
+      typeof value === `string` ||
+      typeof value === `bigint` ||
+      value instanceof Date
+    ) {
+      return value
+    }
+    return value != null ? Number(value) : 0
+  }
+}
+
+/**
+ * Helper function to get an aggregate function based on the Agg expression
+ */
+function getAggregateFunction(aggExpr: Aggregate) {
+  // Pre-compile the value extractor expression
+  const compiledExpr = compileExpression(aggExpr.args[0]!)
+
+  // Create a value extractor function for the expression to aggregate
+  const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    const value = compiledExpr(namespacedRow)
+    // Ensure we return a number for numeric aggregate functions
+    if (typeof value === `number`) {
+      return value
+    }
+    return value != null ? Number(value) : 0
+  }
+
+  const valueExtractorForMinMax = minMaxInput(compiledExpr)
+
+  // Create a raw value extractor function for the expression to aggregate
+  const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    return compiledExpr(namespacedRow)
+  }
+
+  // Read the operators here: a top-level destructure counts as a side
+  // effect and would keep them in bundles that never aggregate.
+  const { sum, count, avg, min, max } = groupByOperators
+
+  // Return the appropriate aggregate function
+  switch (aggExpr.name.toLowerCase()) {
+    case `sum`:
+      return sum(valueExtractor)
+    case `count`:
+      return count(rawValueExtractor)
+    case `avg`:
+      return avg(valueExtractor)
+    case `min`:
+      return min(valueExtractorForMinMax)
+    case `max`:
+      return max(valueExtractorForMinMax)
+    default:
+      throw new UnsupportedAggregateFunctionError(aggExpr.name)
+  }
+}
+
+/**
+ * Transforms expressions to replace aggregate functions with references to computed values.
+ *
+ * For aggregate expressions, finds matching aggregates in the SELECT clause and replaces them
+ * with PropRef([resultAlias, alias]) to reference the computed aggregate value.
+ *
+ * Ref expressions (table columns and $selected fields) and value expressions are passed through unchanged.
+ * Function expressions are recursively transformed.
+ *
+ * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
+ * @param selectClause - The SELECT clause containing aliases and aggregate definitions
+ * @param resultAlias - The namespace alias for SELECT results (default: '$selected')
+ * @returns A transformed BasicExpression that references computed values instead of raw expressions
+ */
+export function replaceAggregatesByRefs(
+  havingExpr: BasicExpression | Aggregate,
+  selectClause: Select,
+  resultAlias: string = `$selected`,
+): BasicExpression {
+  switch (havingExpr.type) {
+    case `agg`: {
+      const aggExpr = havingExpr
+      // Find matching aggregate in SELECT clause
+      for (const [alias, selectExpr] of Object.entries(selectClause)) {
+        if (selectExpr.type === `agg` && aggregatesEqual(aggExpr, selectExpr)) {
+          // Replace with a reference to the computed aggregate
+          return new PropRef([resultAlias, alias], resultAlias)
+        }
+      }
+      // If no matching aggregate found in SELECT, throw error
+      throw new AggregateFunctionNotInSelectError(aggExpr.name)
+    }
+
+    case `func`: {
+      const funcExpr = havingExpr
+      // Transform function arguments recursively
+      const transformedArgs = funcExpr.args.map(
+        (arg: BasicExpression | Aggregate) =>
+          replaceAggregatesByRefs(arg, selectClause),
+      )
+      return new Func(funcExpr.name, transformedArgs)
+    }
+
+    case `ref`:
+      // Ref expressions are passed through unchanged - they reference either:
+      // - $selected fields (which are already in the correct namespace)
+      // - Table column references (which remain valid)
+      return havingExpr as BasicExpression
+
+    case `val`:
+      // Return as-is
+      return havingExpr as BasicExpression
+
+    default:
+      throw new UnknownHavingExpressionTypeError((havingExpr as any).type)
+  }
+}
+
+/**
+ * Evaluates wrapped-aggregate expressions against the aggregated row.
+ * Copies synthetic __agg_N values into finalResults so the compiled wrapper
+ * expressions can reference them, evaluates each wrapper, then removes the
+ * synthetic keys so they don't leak onto user-visible result rows.
+ */
+function evaluateWrappedAggregates(
+  finalResults: Record<string, any>,
+  aggregatedRow: Record<string, any>,
+  wrappedAggExprs: Record<string, (data: any) => any>,
+  fields: InternalGroupFields,
+): void {
+  for (const key of Object.keys(aggregatedRow)) {
+    if (key.startsWith(fields.aggregatePrefix)) {
+      finalResults[key] = aggregatedRow[key]
+    }
+  }
+  for (let i = 0; i < fields.groupKeyRefs.length; i++) {
+    finalResults[fields.groupKeyRefs[i]!] =
+      aggregatedRow[fields.groupValues[i]!]
+  }
+  // Every evaluator reads the same row; its `$selected` is `finalResults`.
+  const evaluationRow = getGroupEvaluationRow(
+    aggregatedRow,
+    fields,
+    finalResults,
+  )
+  for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
+    finalResults[alias] = evaluator(evaluationRow)
+  }
+  for (const key of Object.keys(finalResults)) {
+    if (
+      key.startsWith(fields.aggregatePrefix) ||
+      fields.groupKeyRefs.includes(key)
+    ) {
+      delete finalResults[key]
+    }
+  }
+}
+
+/**
+ * Walks an expression tree containing nested aggregates.
+ * Each Aggregate node is extracted, assigned a synthetic alias (__agg_N),
+ * and replaced with PropRef(["$selected", "__agg_N"]) so the wrapper
+ * expression can be compiled as a pure BasicExpression after groupBy
+ * populates the synthetic values.
+ */
+function extractAndReplaceAggregates(
+  expr: SelectValueExpression,
+  counter: { value: number },
+  aggregatePrefix: string,
+): {
+  transformed: SelectValueExpression
+  extracted: Record<string, Aggregate>
+} {
+  if (expr.type === `agg`) {
+    const alias = `${aggregatePrefix}${counter.value++}`
+    return {
+      transformed: new PropRef([`$selected`, alias], `$selected`),
+      extracted: { [alias]: expr },
+    }
+  }
+
+  if (expr.type === `func`) {
+    const allExtracted: Record<string, Aggregate> = {}
+    const newArgs = expr.args.map((arg: BasicExpression | Aggregate) => {
+      const result = extractAndReplaceAggregates(arg, counter, aggregatePrefix)
+      Object.assign(allExtracted, result.extracted)
+      return result.transformed as BasicExpression
+    })
+    return {
+      transformed: new Func(expr.name, newArgs),
+      extracted: allExtracted,
+    }
+  }
+
+  if (isConditionalSelect(expr)) {
+    const allExtracted: Record<string, Aggregate> = {}
+    const branches = expr.branches.map((branch) => {
+      const condition = extractAndReplaceAggregates(
+        branch.condition,
+        counter,
+        aggregatePrefix,
+      )
+      const value = extractAndReplaceAggregates(
+        branch.value,
+        counter,
+        aggregatePrefix,
+      )
+      Object.assign(allExtracted, condition.extracted, value.extracted)
+      return {
+        condition: condition.transformed as BasicExpression,
+        value: value.transformed,
+      }
+    })
+    const defaultValue =
+      expr.defaultValue === undefined
+        ? undefined
+        : extractAndReplaceAggregates(
+            expr.defaultValue,
+            counter,
+            aggregatePrefix,
+          )
+
+    if (defaultValue) {
+      Object.assign(allExtracted, defaultValue.extracted)
+    }
+
+    return {
+      transformed: new ConditionalSelect(branches, defaultValue?.transformed),
+      extracted: allExtracted,
+    }
+  }
+
+  if (isNestedSelectObject(expr)) {
+    const allExtracted: Record<string, Aggregate> = {}
+    const transformed: Select = {}
+
+    for (const [key, value] of Object.entries(expr)) {
+      const result = extractAndReplaceAggregates(
+        value as SelectValueExpression,
+        counter,
+        aggregatePrefix,
+      )
+      Object.assign(allExtracted, result.extracted)
+      transformed[key] = result.transformed
+    }
+
+    return { transformed, extracted: allExtracted }
+  }
+
+  // ref / val – pass through unchanged
+  return { transformed: expr, extracted: {} }
+}
+
+function replaceGroupByRefsInSelectValue(
+  value: SelectValueExpression,
+  groupByClause: GroupBy,
+  groupKeyRefs: Array<string>,
+): SelectValueExpression {
+  if (isConditionalSelect(value)) {
+    return new ConditionalSelect(
+      value.branches.map((branch) => ({
+        condition: replaceGroupByRefsInExpression(
+          branch.condition,
+          groupByClause,
+          groupKeyRefs,
+        ),
+        value: replaceGroupByRefsInSelectValue(
+          branch.value,
+          groupByClause,
+          groupKeyRefs,
+        ),
+      })),
+      value.defaultValue === undefined
+        ? undefined
+        : replaceGroupByRefsInSelectValue(
+            value.defaultValue,
+            groupByClause,
+            groupKeyRefs,
+          ),
+    )
+  }
+
+  if (isNestedSelectObject(value)) {
+    const transformed: Select = {}
+    for (const [key, entry] of Object.entries(value)) {
+      transformed[key] = replaceGroupByRefsInSelectValue(
+        entry as SelectValueExpression,
+        groupByClause,
+        groupKeyRefs,
+      )
+    }
+    return transformed
+  }
+
+  if (!isExpressionLike(value)) {
+    return value
+  }
+
+  if (value.type === `includesSubquery` || value.type === `agg`) {
+    return value
+  }
+
+  return replaceGroupByRefsInExpression(value, groupByClause, groupKeyRefs)
+}
+
+function replaceGroupByRefsInExpression(
+  expr: BasicExpression,
+  groupByClause: GroupBy,
+  groupKeyRefs: Array<string>,
+): BasicExpression {
+  // A group expression, a ref or a computed one, reads the group's value.
+  const groupIndex = groupByClause.findIndex((groupExpr) =>
+    expressionsEqual(expr, groupExpr),
+  )
+  if (groupIndex !== -1)
+    return new PropRef([`$selected`, groupKeyRefs[groupIndex]!], `$selected`)
+
+  if (expr.type === `func`) {
+    return new Func(
+      expr.name,
+      expr.args.map((arg) =>
+        replaceGroupByRefsInExpression(arg, groupByClause, groupKeyRefs),
+      ),
+    )
+  }
+
+  return expr
+}
+
+function compileGroupedSelectValue(
+  value: SelectValueExpression,
+): (row: NamespacedRow) => any {
+  if (isConditionalSelect(value)) {
+    return compileGroupedConditionalSelect(value)
+  }
+
+  if (isNestedSelectObject(value)) {
+    return compileGroupedSelectObject(value)
+  }
+
+  if (!isExpressionLike(value)) {
+    return () => value
+  }
+
+  return compileExpression(value as BasicExpression)
+}
+
+/** Spreads and nested includes were rejected before compilation. */
+function compileGroupedSelectObject(
+  obj: Select,
+): (row: NamespacedRow) => Record<string, any> {
+  const entries = Object.entries(obj).map(
+    ([key, value]) =>
+      [key, compileGroupedSelectValue(value as SelectValueExpression)] as const,
+  )
+  return (row) => {
+    const result: Record<string, any> = {}
+    for (const [key, value] of entries) result[key] = value(row)
+    return result
+  }
+}
+
+function compileGroupedConditionalSelect(
+  conditional: ConditionalSelect,
+): (row: NamespacedRow) => any {
+  const branches = conditional.branches.map((branch) => ({
+    condition: compileExpression(branch.condition),
+    value: compileGroupedSelectValue(branch.value),
+  }))
+  const defaultValue =
+    conditional.defaultValue === undefined
+      ? undefined
+      : compileGroupedSelectValue(conditional.defaultValue)
+
+  return (row) => {
+    for (const branch of branches) {
+      if (isCaseWhenConditionTrue(branch.condition(row))) {
+        return branch.value(row)
+      }
+    }
+
+    return defaultValue !== undefined ? defaultValue(row) : null
+  }
+}
+
+function isNestedSelectObject(value: unknown): value is Select {
+  return (
+    value != null &&
+    typeof value === `object` &&
+    !Array.isArray(value) &&
+    !isRefProxy(value) &&
+    !isExpressionLike(value)
+  )
+}
+
+function isConditionalSelect(value: unknown): value is ConditionalSelect {
+  return (
+    value instanceof ConditionalSelect ||
+    (value != null &&
+      typeof value === `object` &&
+      (value as { type?: string }).type === `conditionalSelect`)
+  )
+}
+
+/**
+ * Checks if two aggregate expressions are equal
+ */
+function aggregatesEqual(agg1: Aggregate, agg2: Aggregate): boolean {
+  return (
+    agg1.name === agg2.name &&
+    agg1.args.length === agg2.args.length &&
+    agg1.args.every((arg, i) => expressionsEqual(arg, agg2.args[i]))
+  )
+}

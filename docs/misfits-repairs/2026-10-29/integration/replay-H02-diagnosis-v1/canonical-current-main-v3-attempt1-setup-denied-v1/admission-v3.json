@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-30T04:16:49.705263+00:00",
+  "rootAdmission": "exactly one canonical fixed current-main history, conditional on independent exact static acceptance",
+  "acceptance": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v3-independent-static-acceptance-v1.md",
+  "acceptanceSha256": "1d54b8605f03eb4335a8fb795bb9f156d3fdd65b9129a1ab1cc3f0492efc7a64",
+  "preparedSourceChecks": {
+    "source-freeze-v3.json": "d2c221f64302dc0ad10d666d40e2308ffc0e8a3e4c953f73c106d98631ee78b3",
+    "recipes-v3.json": "3b12d4de033cddaadbb86ec39fce4952990acd0cb7b2eda84b1f5da03a19d84c",
+    "launcher-v3.zsh": "55e339e8ae598eee29bb066a34fcc1c5ffe64623954ca6b430dab82c6d8079c1",
+    "packet-sha256-v3.json": "ed6c78ed0bfc78d69136ee18bbd3470753f8145d10780300bf0afaad374427b8"
+  },
+  "selectedTest": "replays the finite five-root queued-answer history",
+  "maximumReceivingHistories": 1,
+  "noRerun": true
+}

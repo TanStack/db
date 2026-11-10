@@ -1,0 +1,66 @@
+{
+  "actualOuterExitCode": 1,
+  "auditKind": "Pinned Python read/hash/JSON and pure snapshot-phase explanation only",
+  "correctionOrRuntimeAdmitted": false,
+  "explicitMetadataFinishExecuted": false,
+  "firstMisclassifiedCallback": {
+    "actual": [
+      [
+        3,
+        35
+      ]
+    ],
+    "expected": [
+      [
+        3,
+        30
+      ]
+    ],
+    "sequence": 182
+  },
+  "inputPins": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-actual-v2/observation-summary.json": "94f40c67be0d699e27804a47c884bc7d4334c258b8f91f75c86c73ece99a610f",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-actual-v2/raw-manifest.json": "091d5b2cec5155f52003ee629758b2ce69e0bd20a6f56ea15eda012d15432803",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v2/binding.json": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v2/packet-manifest.json": "d019dfef5829b69817bcd8ae5c50c22aafc9ece643bac3ed816cb6169c82830a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v2/root-receiving-admission-v1.json": "f76e6494649de37b01543151c6621f516184594b4a7bd96a2da2ddd009def5e6",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-result-freeze-v2.json": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-inventory.json": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2"
+  },
+  "limits": [
+    "No native replay or actual TypeScript checker execution in this audit",
+    "Child binding does not establish parent checker compiled bytes/invocation",
+    "Captured original childPid-as-group convention lacks initial actual getpgid",
+    "Stable metadata and direct eager source-sync receiver only"
+  ],
+  "metadataReachCountersObserved": 31,
+  "nativeLaunches": 0,
+  "omittedPhaseSequences": {
+    "followup-publication": 185,
+    "followup-start": 162
+  },
+  "processProbes": 0,
+  "productRedGreenCredit": false,
+  "rawMembers": {
+    "inner": {
+      "bytes": 31372571,
+      "files": 1948,
+      "originalAndPreservedExact": true
+    },
+    "outer": {
+      "bytes": 15840,
+      "files": 3,
+      "originalAndPreservedExact": true
+    }
+  },
+  "rawReceipts": 206,
+  "receivingChildExitCode": 0,
+  "receivingGreenCredit": false,
+  "retainedOutcomeReceipts": 21,
+  "scriptSha256": "5545aff9abcddf0bd999d04802a7e1ffe1a864cab9c7bc0759c738cbd04bf122",
+  "sourceEdits": 0,
+  "sourceFilesRehashed": 588,
+  "status": "QUALIFIED ACTUAL OUTER1 / CHILD0; CONFIRMED RETAINED-TRACE PHASE GAP",
+  "workerCleanedComparedPublicationRuleObserved": true
+}

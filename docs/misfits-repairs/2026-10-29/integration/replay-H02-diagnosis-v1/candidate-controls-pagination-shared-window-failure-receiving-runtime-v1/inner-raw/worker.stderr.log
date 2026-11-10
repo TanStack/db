@@ -1,0 +1,24 @@
+stderr | packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts > records a source-bound completion receiving gate
+[QueryCollection] Error observing query h02-completion-marked,[object Object]: Error: baseline-source
+    at driveCompletionBaselineProgram (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:128:13)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:11
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts > records a source-bound completion receiving gate
+Error: completion instrument: original held peer binding changed before failure barrier
+ ❯ physicalAction packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:818:15
+    816|         })
+    817|       )
+    818|         throw new Error(
+       |               ^
+    819|           `completion instrument: original held peer binding changed b…
+    820|         )
+ ❯ driveCompletionBaselineProgram packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:1173:30
+ ❯ packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

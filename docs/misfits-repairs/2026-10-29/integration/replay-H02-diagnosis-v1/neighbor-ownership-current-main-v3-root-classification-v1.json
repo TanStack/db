@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-30T06:48:10.976643+00:00",
+  "rootClassified": true,
+  "classification": "accepted bounded V3 real Query ownership receiving GREEN",
+  "resultManifestSha256": "1caa4f74254e2423c4cf2a09afa44ba0f80d2aec1139bd6491bfe3ab31f2aa19",
+  "independentResultReviewSha256": "8fc6e5e75daa5e5030f1d0e0cd6b868c48dc66478bd6acdaf165f225a8f54412",
+  "independentVerificationSha256": "ea4b57211ef1aa70334a00d76593d9c91b4eb8b7a612d13bc26691f7a828c032",
+  "actualPassedHistories": 42,
+  "skipped": 220,
+  "fresh": 6,
+  "stale": 36,
+  "reachCounts": 252,
+  "rootRehashedResultMembers": 21,
+  "rootIndependentProcessAbsenceReceiptSha256": "45bb5f2cbe6198f102c0b03848868ad69d9b188e5ecc84d3204505eb68b28907",
+  "limits": "Existing finite neighbor; no progress/candidate or universal closure. rawOffset is UTF16 units, rawBytes UTF8 bytes; independent reviewer verified span conversion."
+}

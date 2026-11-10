@@ -1,0 +1,26 @@
+{
+  "sourceFreezeSha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d",
+  "sourceMapEntries": 563,
+  "namedPackagePayloadFiles": 2544,
+  "nodeLocksLinksMatched": true,
+  "allLiveSourceAndPackageHashesMatched": true,
+  "oldPacketsRehashedUnchanged": [
+    {
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4",
+      "manifestSha256": "5a3d1e13e8dc71e8ae48c36c3cd4a669e1fb93b5458a017050ac7b2f7ccf1b42"
+    },
+    {
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4",
+      "manifestSha256": "db576de10b07f8a9aa0bee621357ee739e8e9759a845b8b852492d2c75f6d25a"
+    },
+    {
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-conflict-current-main-v4",
+      "manifestSha256": "5c963f122c731a04c9a5e29e3a420d5a384089f5857866ada5bd8930122b5f46"
+    },
+    {
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-scope-current-main-v4",
+      "manifestSha256": "131e0b62f992152ac09781b268e3b11c53880c2937d55612b443acae85960068"
+    }
+  ],
+  "limits": "Read/hash/parse checks only; no runtime or receiving evidence."
+}

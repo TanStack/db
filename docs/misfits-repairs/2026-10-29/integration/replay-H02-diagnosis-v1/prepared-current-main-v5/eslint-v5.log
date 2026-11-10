@@ -1,0 +1,25 @@
+
+<--- Last few GCs --->
+
+[12222:0x83f40c000]     6435 ms: Mark-Compact 1511.8 (1548.5) -> 1505.3 (1548.5) MB, pooled: 6 MB, 132.12 / 0.00 ms  (average mu = 0.225, current mu = 0.181) task; scavenge might not succeed
+[12222:0x83f40c000]     6604 ms: Mark-Compact 1511.7 (1548.5) -> 1505.3 (1548.3) MB, pooled: 6 MB, 136.96 / 0.00 ms  (average mu = 0.207, current mu = 0.189) task; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x1041499f4 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/usr/local/bin/node]
+ 2: 0x1043c4000 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/usr/local/bin/node]
+ 3: 0x1046234b4 v8::internal::Heap::stack() [/usr/local/bin/node]
+ 4: 0x104626888 v8::internal::Heap::HasLowYoungGenerationAllocationRate() [/usr/local/bin/node]
+ 5: 0x104637a7c v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/usr/local/bin/node]
+ 6: 0x104637350 void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/usr/local/bin/node]
+ 7: 0x104febbe0 PushAllRegistersAndIterateStack [/usr/local/bin/node]
+ 8: 0x1046211b8 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/usr/local/bin/node]
+ 9: 0x10468308c v8::internal::MinorGCJob::Task::RunInternal() [/usr/local/bin/node]
+10: 0x1041e6bc0 node::PerIsolatePlatformData::RunForegroundTask(std::__1::unique_ptr<v8::Task, std::__1::default_delete<v8::Task>>) [/usr/local/bin/node]
+11: 0x1041e59dc node::PerIsolatePlatformData::FlushForegroundTasksInternal() [/usr/local/bin/node]
+12: 0x1041e6e6c node::NodePlatform::DrainTasks(v8::Isolate*) [/usr/local/bin/node]
+13: 0x1040286c4 node::SpinEventLoopInternal(node::Environment*) [/usr/local/bin/node]
+14: 0x1041a47d8 node::NodeMainInstance::Run() [/usr/local/bin/node]
+15: 0x1040f67e0 node::Start(int, char**) [/usr/local/bin/node]
+16: 0x18fdd44e4 start [/usr/lib/dyld]

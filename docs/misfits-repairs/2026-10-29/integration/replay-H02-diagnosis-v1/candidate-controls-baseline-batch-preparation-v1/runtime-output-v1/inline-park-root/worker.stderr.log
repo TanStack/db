@@ -1,0 +1,31 @@
+file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306
+if (failures.length) throw new Error(failures.join(`\n`))
+                           ^
+
+Error: actual evaluated-module startup inventory missing
+required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
+required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts
+required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts
+required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306:28
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.19.0
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: baseline receiving instrumentation failed; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/receipts.jsonl
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:316:11
+    314|     outcome.bindingError !== undefined
+    315|   )
+    316|     throw new Error(
+       |           ^
+    317|       `baseline receiving instrumentation failed; inspect ${outcome.lo…
+    318|     )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

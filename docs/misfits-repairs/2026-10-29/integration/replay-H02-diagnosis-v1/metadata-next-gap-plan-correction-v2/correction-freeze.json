@@ -1,0 +1,30 @@
+{
+  "kind": "Immutable additive F01 source-plan/classifier correction",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "predecessorPlanFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-v1/plan-freeze.json",
+    "sha256": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc"
+  },
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-next-gap-independent-review-v1.md",
+    "sha256": "3c553b4b95871e18d8f7117eae1c82a2087f9c25fc1130c2beb70609be479c5d"
+  },
+  "rootClassification": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-root-classification-v1.json",
+    "sha256": "304bafc5b0d1c89eae88faf10299db760bd973752db576392ba6d66140a376e3"
+  },
+  "members": {
+    "correction.md": "47b3832485fde8fabc0d8048cfef2bb57c54d3d555192d3dfe58711ac44bab30",
+    "mutant-classifier.json": "0dbd5dcd9bab00ad7329704b61075f66cf8c03c0d44c25167eba41d05e76baa1",
+    "finding-ledger.json": "233487ff4e859f554eddca9303d3d7be8291f63c619b9a5e06bbb59c1e8d1ca7"
+  },
+  "correctedFullCurrentSpecs": 4,
+  "omissionSpecs": 4,
+  "sourceEdits": 0,
+  "actualMutants": 0,
+  "runtimeAdmission": false,
+  "metadataComparatorInvocationCredit": false,
+  "bugClassClosureCredit": false,
+  "rootOwnsLint": true,
+  "independentReviewStatus": "Pending"
+}

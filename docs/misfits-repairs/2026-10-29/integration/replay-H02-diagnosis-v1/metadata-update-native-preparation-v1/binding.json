@@ -1,0 +1,35 @@
+{
+  "admission": "Every universe, selector and receiving command requires separate root one-shot admission; classifications provide no new runtime admission.",
+  "externalInputs": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-native-list-display-correction-v2/calibrate.py": "ff3fb0d763da1ac0fccb93ad308e09ff1acb3ef39907aeee81e698f77b402d10",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-native-list-launcher-v1/calibrate.py": "cd5c407c7647fc54e78cca05eb6fc8a9690e78aa7b7fbfa55c2cbe8077828a13",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-source-read-audit-v2.json": "56900282e9be51e7780332a083c03d1ef2221433de4521dc002ec7abdd3c3531",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-source-review-v1.md": "56a6c4b774dd2987e86278701c57f2a1eb62b0c1006057eab5fa739c7a991895",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v1/source-freeze.json": "048170249ec3e679d289bf69c9358fc7b0ac1074d9384b06b19caa868b3ec1c0"
+  },
+  "files": {
+    "calibrate.py": "af907eb837bcf54016ad3c72b073ec1c81bb007d3f601ccc21fb2cc84bf35ead",
+    "gate-schema.json": "340e3394c8dcb4a3f80663469981822cb4233518f1ee4487ee4e346ed7cc1337",
+    "launch.py": "a291dcf7db86b35033e9b05aafacf24866537d1b72e0966fd751d7512ecbb9c1",
+    "launcher-scope-default-q2.zsh": "011a8d27a49df210c295c966acf5cbb413c8138d02d0e6e59ab458a33025a1be",
+    "program.json": "987b3443ec258b12d24e24969efbf0a201ce851c6e5bf00fdfe5a392f03e2966",
+    "recipes.json": "5347e895f55ebec7c689898bb14072e0015f99c51772ec6d64c2edf5a58ac8b9",
+    "verify.py": "f4f21f922243a779dbbc2754f550c76c01971aa587f5eba96c22812d36d167a6"
+  },
+  "nativeEpoch": {
+    "dependencyReuseLinks": 4,
+    "namedDependencyOwnPayloads": 2544,
+    "originalSourceFiles": 573,
+    "productionFiles": 511,
+    "sourceFiles": 588,
+    "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2"
+  },
+  "programSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "python": {
+    "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+  },
+  "status": "SOURCE-ONLY PREPARATION; no native command admitted or executed",
+  "supervisor": "Unchanged frozen run_one, exclusive one-command outputs; no old execute or old 573-only input gate called"
+}

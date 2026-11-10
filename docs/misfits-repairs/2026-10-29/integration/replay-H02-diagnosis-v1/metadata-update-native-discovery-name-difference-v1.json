@@ -1,0 +1,20 @@
+{
+  "expectedCount": 20,
+  "actualCount": 20,
+  "missing": [
+    "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 0",
+    "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 0",
+    "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 0",
+    "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 0"
+  ],
+  "unexpected": [
+    "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0",
+    "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0",
+    "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0",
+    "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0"
+  ],
+  "sameOrder": false,
+  "qualifierUsesSortedNameSets": true,
+  "qualifierSourceSha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+  "scope": "Actual native DISPLAY result only; no match-filter/test pass/product/receiving credit"
+}

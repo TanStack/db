@@ -1,0 +1,27 @@
+{
+  "extends": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "noEmit": true,
+    "typeRoots": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/node_modules/@types"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-window-publication-oracle.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "status": "Finite control normal complete GREEN qualified; independent and root result acceptance pending",
+  "selectedPath": "literal true initial cut",
+  "nativePassed": 1,
+  "nativeSkipped": 4,
+  "finiteHistories": 1,
+  "actualHistory": {
+    "kind": "sync-initial",
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "rawReceiptCount": 5,
+  "finiteReachCounts": {
+    "literal-true-establishing-receipt": 1,
+    "subscriber-return-before-preload": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "liveSharedComparisonsPassed": true,
+  "rawMetadataPreserved": true,
+  "binding": {
+    "status": "bound",
+    "bindings": 486,
+    "failures": [],
+    "startupSealed": true,
+    "inspectorDisconnectedBeforeHistory": true,
+    "inventories": [
+      "evaluated-after-all.json",
+      "evaluated-driver-start.json",
+      "evaluated-pre-history.json"
+    ],
+    "limits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+  },
+  "operational": {
+    "outerExitCode": 0,
+    "childExitCode": 0,
+    "signal": null,
+    "reason": "exited",
+    "killAttempted": false,
+    "heap": false,
+    "observationError": null,
+    "cleanupErrors": [],
+    "remainingGroupRows": [],
+    "elapsedMs": 2213,
+    "maxSampledGroupRssBytes": 469778432,
+    "outerPid": 59447,
+    "outerPgid": 59447,
+    "childPid": 59451,
+    "childOriginalPgid": 59451,
+    "rootAbsenceReceiptSha256": null,
+    "executionSandboxPermissions": "require_escalated"
+  },
+  "sourceIdentityAfter": {
+    "sourceMapEntries": 563,
+    "namedPackagePayloadFiles": 2544,
+    "nodeLocksAndReuseLinksMatched": true
+  },
+  "limits": "One finite baseline control, not generated closure, temporal virtual-metadata coherence or candidate reach. Sync mutation makes no literal-true source receipt claim. Original failed setup preserved. No retry or new recipe admitted; subsequent controls require their own already-issued exact admissions and no-surprise batch condition."
+}

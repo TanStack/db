@@ -1,0 +1,76 @@
+import { createSerialPacer } from "./serial-pacer";
+import { runWithCommitCompletion } from "./commit-completion";
+export function debounceStrategy(options) {
+  const leading = options.leading ?? false;
+  const trailing = options.trailing ?? true;
+  const serial = createSerialPacer(0);
+  let canLead = true;
+  let leadingPending = false;
+  let leadingOwner;
+  let timeout;
+  const trailingRuns = /* @__PURE__ */ new Map();
+  return {
+    _type: `debounce`,
+    options,
+    execute: (fn, onAdmit, onCommit) => {
+      const run = () => runWithCommitCompletion(fn, onCommit);
+      const leadingCall = leading && canLead;
+      const admitted = leadingCall || trailing;
+      const wasLeadAvailable = canLead;
+      canLead = false;
+      let owner = fn;
+      let transaction;
+      try {
+        if (admitted) {
+          const admittedOwner = onAdmit?.();
+          if (admittedOwner) {
+            transaction = admittedOwner;
+            owner = admittedOwner;
+          }
+        }
+      } catch (error) {
+        if (timeout === void 0) canLead = wasLeadAvailable;
+        throw error;
+      }
+      const joinsPendingLeading = leadingPending && !leadingCall && owner === leadingOwner;
+      if (timeout !== void 0) clearTimeout(timeout);
+      if (trailing)
+        for (const pendingOwner of trailingRuns.keys())
+          serial.cancel(pendingOwner);
+      if (trailing && admitted && !leadingCall && !joinsPendingLeading) {
+        trailingRuns.set(owner, {
+          run,
+          isCanceled: () => transaction?.state === `failed`
+        });
+      }
+      timeout = setTimeout(() => {
+        timeout = void 0;
+        canLead = true;
+        for (const [pendingOwner, pending] of trailingRuns) {
+          if (pending.isCanceled()) {
+            trailingRuns.delete(pendingOwner);
+            continue;
+          }
+          serial.schedule(() => {
+            trailingRuns.delete(pendingOwner);
+            return pending.run();
+          }, pendingOwner);
+        }
+      }, options.wait);
+      if (leadingCall) {
+        trailingRuns.delete(owner);
+        leadingPending = true;
+        leadingOwner = owner;
+        serial.schedule(() => {
+          leadingPending = false;
+          leadingOwner = void 0;
+          return run();
+        }, owner);
+      }
+      if (!admitted) return false;
+      return;
+    },
+    cleanup: () => {
+    }
+  };
+}

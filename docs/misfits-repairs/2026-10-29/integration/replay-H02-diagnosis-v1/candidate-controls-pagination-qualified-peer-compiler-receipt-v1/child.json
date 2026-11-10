@@ -1,0 +1,20 @@
+{
+  "pid": 16757,
+  "originalPgid": 16757,
+  "newSession": true,
+  "command": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+      "--project",
+      "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+      "--noEmit",
+      "--incremental",
+      "false",
+      "--pretty",
+      "false",
+      "--listFiles"
+    ],
+    "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "at": "2026-10-30T12:54:25.048273+00:00",
+  "verdict": "bounded ACCEPT of exact copy-only materializer source and tool proposal; zero blocking source findings",
+  "candidateManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/packet-manifest-v1.json",
+    "sha256": "9abbc7da757afc7ce98b60f1b07a3ed70f851875efff27e729efdd1b0b2bb298"
+  },
+  "materializer": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt",
+    "sha256": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09"
+  },
+  "contract": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json",
+    "sha256": "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed"
+  },
+  "geometry": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/explicit-copy-geometry-v1.json",
+    "sha256": "1c738e4ecd4d9677ad4cd1127bca5c8699711d3433cc5d298b318638f164589c"
+  },
+  "exactToolProposal": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/proposed-exact-copy-only-tool-invocation-v1.json",
+    "sha256": "2df5c78a10bbcb0b82b3cec7bf139bbd85603a775cbd8021fa91f4eac2e68b4f"
+  },
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/copy-materializer-source-independent-review-v1.md",
+    "sha256": "4c7fa8c0fc6079f63fb9eeae6f5fad0cb8ada6a50536388da5d94f44b62ec313"
+  },
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/copy-materializer-source-independent-facts-v2.json",
+    "sha256": "9d45098f1db7dfbcc94df5e1ec1e7f1d592982f14ad4036e7fa94aa30365eb14"
+  },
+  "staticAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-copy-materializer-source-v2.py",
+      "sha256": "71637b231a9479b41f324f1f632e5e14e78a2b3dd44b3672ae334bd33d5f5212"
+    },
+    "actual": "8e32fb",
+    "exit": 0,
+    "errors": []
+  },
+  "initialAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-copy-materializer-source-v1.py",
+      "sha256": "dc1579badcf3c810b3e3a9ae9bdfd686a00d87a96707cf3c80733cd1446ba356"
+    },
+    "facts": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/copy-materializer-source-independent-facts-v1.json",
+      "sha256": "01ca20b85f73ceba337e45f424381ce140584dd74336146d8e4f3784d963d06c"
+    },
+    "actual": "ed5703",
+    "exit": 1,
+    "reviewerErrors": [
+      "forbidden-name regex inspected docstring",
+      "call count included function declaration",
+      "expected coordinator ancestor index off by one"
+    ],
+    "preserved": true
+  },
+  "exactMinimumNextProposal": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": "exec /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -I -S -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+      "shell": "/bin/sh",
+      "login": false,
+      "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+      "sandbox_permissions": "use_default",
+      "yield_time_ms": 1000,
+      "max_output_tokens": 10000
+    },
+    "maxInvocations": 1,
+    "requiresSeparateROOTMaterializationOnlyAdmission": true,
+    "currentlyAdmitted": false
+  },
+  "geometryCounts": {
+    "regularCodeAndLockFiles": 597,
+    "regularControlFiles": 6,
+    "reuseLinks": 4,
+    "uniqueDestinations": 607,
+    "directoriesIncludingRoot": 227
+  },
+  "sourceGuarantee": "descriptor-relative exclusive root/directories/files/links; no-follow walks and file opens; complete regular/hash/link/directory closure checked twice; no removal, rollback, retry or child process",
+  "candidateInputVerification": "rehashes declared603 origins/U-V packets/contract-source-review-geometry/locks/finite tools before and after copy",
+  "requiredIndependentActualReview": "rehash protected W596/Q85/sealed ancestors plus copied source596/597regular-code-lock6controls4links227dirs and named tool/lock identities; retain complete receipts/actualtool chunks/exit",
+  "failureLimit": "partial tree/receipts preserved; no unconditional receipt or terminal error fidelity; exit0 alone or missing final event/tail is not accepted copy",
+  "rootReceiptAndReceivingOutputsAbsentAtReview": true,
+  "namedToolClosure": {
+    "roots": 255,
+    "ownRegularPayloads": 11974,
+    "resolutionEdges": 405,
+    "absentOptionalPeer": 112,
+    "universalCensusExpansion": false
+  },
+  "candidateSyntaxCompile": 0,
+  "candidateImports": 0,
+  "candidateExecution": 0,
+  "copy": 0,
+  "compile": 0,
+  "nativeReceiving": 0,
+  "discovery": 0,
+  "processProbes": 0,
+  "runtimeAdmission": false,
+  "compilerContainment": "still unselected; after accepted actual copy separately select/admit and review compile result",
+  "failureSuccessGates": "distinct later admissions; actual failure classification before considering success",
+  "sourceHold": "active",
+  "productionAuthority": false,
+  "canonicalImport": false,
+  "bugClassClosure": false,
+  "allCandidateStates": "UNREACHED",
+  "actualHelperNoActiveOperation": "UNREACHED",
+  "state14": "proposed/unadopted",
+  "artifactLint": "PENDING ROOT",
+  "slot2": "returned",
+  "ledgerPrefix": {
+    "rows": 127,
+    "sha256": "8402b1eaa4f725b565fd8d0112b39c64f4de6f63beed837e2f4868b15eceb53c"
+  }
+}

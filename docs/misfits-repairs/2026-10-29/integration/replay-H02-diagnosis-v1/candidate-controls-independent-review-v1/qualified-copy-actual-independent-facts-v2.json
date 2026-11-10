@@ -1,0 +1,134 @@
+{
+  "DOriginalRuntimeFilesVerified": 13,
+  "DPostFreezeKnownAdditions": 14,
+  "actualCopyRoot": "/private/tmp/h02-qualified-peer-receiving-v1",
+  "actualDirectories": 227,
+  "actualFinal": {
+    "chunk_id": "97749a",
+    "exit_code": 0,
+    "original_token_count": 17781,
+    "wall_time_seconds": 1.8917e-05
+  },
+  "actualInitial": {
+    "chunk_id": "e63808",
+    "original_token_count": 25558,
+    "session_id": 46686,
+    "wall_time_seconds": 1.000230708
+  },
+  "actualLinks": 4,
+  "actualRegulars": 603,
+  "admissionSha256": "b57fdf26f2268604beed0def6fe4bf6984da5fb6e4e8ae8522c67f80bc9539c7",
+  "allAuditChecksPass": true,
+  "apiOutputsTruncated": true,
+  "artifactLint": "PENDING ROOT",
+  "at": "2026-10-30T13:00:59.523749+00:00",
+  "beforeAfterLimit": "Prior independent source audit bound pre-copy named maps; pinned actual source declares preflight and final input checks. This independent audit rehashes current-after protected W596/Q85 and sealed ancestors, origins, actual copies and finite tool inputs. No continuous monitoring or universal process census.",
+  "boundSourceEdits": 0,
+  "candidateImports": 0,
+  "candidateManifestSha256": "9abbc7da757afc7ce98b60f1b07a3ed70f851875efff27e729efdd1b0b2bb298",
+  "candidateReruns": 0,
+  "candidateSyntaxCompiles": 0,
+  "canonicalImport": false,
+  "checks": 40375,
+  "compilerInvocationsByReviewer": 0,
+  "compilerOrNativeAdmission": false,
+  "directoryModes": [
+    "0o700"
+  ],
+  "errors": [],
+  "evidenceSnapshots": [
+    {
+      "bytes": 2233,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-evidence-snapshot-v1/root-admission.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-root-admission-v1.json",
+      "sha256": "b57fdf26f2268604beed0def6fe4bf6984da5fb6e4e8ae8522c67f80bc9539c7"
+    },
+    {
+      "bytes": 43084,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-evidence-snapshot-v1/actual-initial-tool.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-actual-initial-tool-v1.json",
+      "sha256": "4675ad5768f398e2583b72419f00dbd209d62d4e9c4b92c9840e8586514700a0"
+    },
+    {
+      "bytes": 4625,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-evidence-snapshot-v1/actual-final-tool.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-actual-final-tool-v1.json",
+      "sha256": "8c99f2b82789bae6114847158f21dfd1899a4c43e1c30cc729cfd516621a020e"
+    },
+    {
+      "bytes": 173354,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-evidence-snapshot-v1/persistent-stdout.jsonl",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1/stdout.jsonl",
+      "sha256": "a448255c72105bc6b8d26918f036e0731d7150f7127a077ff2e93e0a2666f4b1"
+    },
+    {
+      "bytes": 0,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-evidence-snapshot-v1/persistent-stderr.log",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "inputProvenanceLimit": "Saved API records are responses and do not independently echo all input argv. Exact-input provenance is ROOT admission/dispatch plus pinned source-bound persistent receipt and independently matching physical copies.",
+  "inventory": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-physical-inventory-v1.json",
+    "sha256": "f352c1a0edf1c9ad20f026a698d8a61470f4c4fdeb3b643058ba5a5d2c61eaf7"
+  },
+  "ledgerPrefixRows": 130,
+  "ledgerPrefixSha256": "c711b61b10c0e27161b41aeccf42effd3ebcb8ca2c76afe90f61ef2ae8f4d04f",
+  "mode": "Independent actual-copy audit: named reads, hashes, strict JSON and physical tree inspection only.",
+  "namedOptionalPeerAbsences": 112,
+  "namedOwnPayloads": 11974,
+  "namedPackageRoots": 255,
+  "namedResolutionEdges": 405,
+  "nativeReceivingByReviewer": 0,
+  "persistentStderrBytes": 0,
+  "persistentStdoutBytes": 173354,
+  "persistentStdoutSha256": "a448255c72105bc6b8d26918f036e0731d7150f7127a077ff2e93e0a2666f4b1",
+  "preservedLimits": [
+    "all20 candidate states UNREACHED",
+    "state14 proposed/unadopted",
+    "actual-helper/no-active-public-operation UNREACHED",
+    "metadata separate",
+    "real failure/success receiving pair and settlement/retry open",
+    "historical E raw302/315 UNCLASSIFIED; raw322 positive cleanup retained",
+    "no unconditional receipt/terminal fidelity for broken sinks"
+  ],
+  "priorSourceFactsSha256": "9d45098f1db7dfbcc94df5e1ec1e7f1d592982f14ad4036e7fa94aa30365eb14",
+  "priorSourceReviewSha256": "4c7fa8c0fc6079f63fb9eeae6f5fad0cb8ada6a50536388da5d94f44b62ec313",
+  "processProbesByReviewer": 0,
+  "productRedGreenCredit": false,
+  "productionBindings": 511,
+  "protectedQCopies": 85,
+  "protectedWBindings": 596,
+  "receiptCounts": {
+    "copied-regular": 603,
+    "copy-verified": 1,
+    "created-directory": 227,
+    "created-link": 4,
+    "preflight-passed": 1,
+    "start": 1
+  },
+  "receiptExactOrderedPlanMatch": true,
+  "receiptFileModes": {
+    "stderr.log": "0o644",
+    "stdout.jsonl": "0o644"
+  },
+  "receiptRecords": 837,
+  "regularModes": [
+    "0o600"
+  ],
+  "sealedMembers": {
+    "C": 7,
+    "D": 21,
+    "E": 1996,
+    "QHistoricalRelocated": 126,
+    "QLiteral": 133,
+    "S": 120,
+    "U": 90,
+    "V": 14
+  },
+  "symlinkModes": [
+    "0o755"
+  ],
+  "verdict": "Actual copy accepted for separate compiler-containment preparation and review only"
+}

@@ -1,0 +1,56 @@
+{
+  "scope": "direct installed serial static tools only; no tests/runtime/install; required exact report-WT pnpm lint gate pending root",
+  "prettierFinal": {
+    "actual": "1eb218",
+    "exit": 0,
+    "files": 8,
+    "log": "prettier-check-v1.log"
+  },
+  "eslintFinal": {
+    "initial": "45429e",
+    "session": 75184,
+    "final": "a68b1a",
+    "exit": 0,
+    "files": 8,
+    "defaultHeap": true,
+    "log": "eslint-v2.log"
+  },
+  "typecheckFinal": {
+    "initial": "763ce9",
+    "session": 40160,
+    "final": "0e427a",
+    "exit": 0,
+    "files": 8,
+    "defaultHeap": true,
+    "log": "typecheck-v2.log",
+    "config": "typecheck-config-v2.json"
+  },
+  "sourceOracleFeedback": {
+    "initial": "8ee055",
+    "session": 11198,
+    "final": "c7dc6f",
+    "exit": 0,
+    "log": "source-oracle-feedback-v1.log"
+  },
+  "supplementalReportWorktreeDirectFeedback": {
+    "initial": "b1280c",
+    "session": 13737,
+    "final": "f87c80",
+    "exit": 1,
+    "log": "report-worktree-direct-feedback-v1.log",
+    "classification": "git ls-files --others --exclude-standard ENOBUFS before lint at existing8MiB buffer; no scope narrowing or retry"
+  },
+  "requiredExactReportWorktreePnpmLint": "PENDING ROOT; supplemental direct invocation does not substitute",
+  "sourceFreezeAssembly": {
+    "initial": "81af79",
+    "exit": 1,
+    "classification": "inventory assertion before freeze; coverage already bound in595",
+    "corrected": "069e2a",
+    "correctedExit": 0,
+    "finalBindingCount": 596
+  },
+  "runtime": 0,
+  "productionEdits": 0,
+  "nativeReceiving": 0,
+  "installation": 0
+}

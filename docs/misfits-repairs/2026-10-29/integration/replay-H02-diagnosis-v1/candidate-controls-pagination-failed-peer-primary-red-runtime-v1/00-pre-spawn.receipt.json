@@ -1,0 +1,53 @@
+{
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vite.config.ts",
+    "tests/query/pagination-oracle.property.test.ts",
+    "-t",
+    "retains complete windows across joined failure histories for a fixed seed",
+    "--maxWorkers=1",
+    "--no-file-parallelism",
+    "--reporter=default",
+    "--reporter=json",
+    "--outputFile.json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/vitest-report.json"
+  ],
+  "bindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+  "elapsedMs": 0,
+  "envSet": {
+    "CI": "1",
+    "NO_COLOR": "1"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS",
+    "H02_PROGRESS_SOURCE_FREEZE",
+    "H02_COMPLETION_PARENT_PROGRAM",
+    "H02_COMPLETION_PARENT_PROGRAM_SHA256",
+    "H02_COMPLETION_WORKER_MODE",
+    "H02_COMPLETION_GROUP_REGISTRY"
+  ],
+  "killAttempts": [],
+  "maxSampledGroupRssBytes": 0,
+  "pgid": null,
+  "pgidVerified": false,
+  "phase": "pre-spawn",
+  "pid": null,
+  "primaryFailure": null,
+  "recipeId": "primary-pagination-joined-window-failure-fixed-red-v1",
+  "remainingGroupRows": null,
+  "samples": 0,
+  "secondaryFailures": []
+}

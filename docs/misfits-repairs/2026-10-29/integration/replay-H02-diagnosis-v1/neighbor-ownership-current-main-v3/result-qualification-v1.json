@@ -1,0 +1,33 @@
+{
+  "status": "Finite ownership neighbor passed with all42 actual names/sourceModule/testName/history/reach records; root acceptance pending",
+  "finiteHistories": 42,
+  "nativePassed": 42,
+  "nativeSkipped": 220,
+  "actualPayloads": 42,
+  "actualFreshNoRefetch": 6,
+  "actualStaleRefetch": 36,
+  "actualReachPerHistory": 6,
+  "unchangedModelComparisonAndPremiseChecksPassed": true,
+  "identities": {
+    "diskSourcesMatched": 562,
+    "payloadFilesMatched": 2544,
+    "nodeAndLocksAndLinksMatched": true
+  },
+  "operational": {
+    "exitCode": 0,
+    "heap": false,
+    "identityMatched": true,
+    "remainingGroup": 0,
+    "cleanupErrors": 0,
+    "elapsedMonotonicMs": 2747.7982079999997,
+    "maxSampledGroupRssBytes": 442662912,
+    "outerPid": 34351,
+    "outerPgid": 34351,
+    "childPid": 34421,
+    "childOriginalPgid": 34421,
+    "rootAbsenceReceiptSha256": "45bb5f2cbe6198f102c0b03848868ad69d9b188e5ecc84d3204505eb68b28907"
+  },
+  "stderr": "12 expected intentionally rejected refetch diagnostics; full content classified separately",
+  "provenance": "Actual finally payload supplies bounded positive instrumentation/task/source-path observations for each history, backed by on-disk identity before/after. No ownership V8/compiled-byte source identity claim.",
+  "limits": "Finite existing ownership neighbor only; no generated new coverage, progress/nonempty-scope result, candidate reach, universal closure or future execution admission. Prior V2 qualifications unchanged."
+}

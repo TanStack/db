@@ -1,0 +1,17 @@
+{
+  "eslint.config.js": "76c22c3fb0225bde82d7f14dcd6277985c2ff2092d4b38efc55d218abb03d1fc",
+  "packages/db/tests/query/includes-collection-driver-oracle.ts": "87070e40fd6bf4ff35427de912ea5bf1ccf57ba129c1dd59699bf6c7ef9bf452",
+  "packages/db/tests/query/includes-collection-support.ts": "4a033bdd6dee6eee2e19f8160cabff3a3b7977ee47027f6c6b40e29cec41a902",
+  "packages/db/tests/query/includes-oracle-helpers.ts": "340602dacf50aadfe23f3e60e9ceb89b44f42a139a65b2a0d73138cf338d86e7",
+  "packages/db/tests/trace-runner.ts": "07cac56121e12e986bfb22b3a526ff6d4aa2a7c11315738c75d905d75c945550",
+  "pnpm-lock.yaml": "554050977c82b1254ccb63fff05dad33b214555c341551ed8a76d74144a22d08",
+  "scripts/eslint-plugin-oracle/index.js": "d59b5d3288f17ebc78c2340862a763c67b88f3abbbf20ea0749a5a182c639a6c",
+  "scripts/eslint-plugin-oracle/no-disabled.test.js": "0d63af40c0ea62ce7e36389414d400e2b50fbf22bb7e74df625b25090a779f0c",
+  "scripts/eslint-plugin-oracle/no-unit-test.test.js": "25d2efba3120a239f378d462dacd21ceef57cee4b29d85a298b41cea3e9ffc64",
+  "scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js": "24399339c207bfacacc562299f5ae6e21c184fdfed44dd795651a034b9206048",
+  "scripts/eslint-plugin-oracle/registration.js": "87b868c0791f85d914bf54a1a44cfba67692732388e4375df51bf34983ea665c",
+  "scripts/eslint-plugin-oracle/replay-observation-oracle.test.js": "9ca81f33205e865914d93b6e418c09ca77700b65a9307f9e5cb7b59b88d8ec18",
+  "scripts/eslint-plugin-oracle/rules/no-disabled.js": "3d89c5073b0a3eba5847357fdd0b34ae76d3af217aeb095210a79dc85aad10fa",
+  "scripts/eslint-plugin-oracle/rules/no-unit-test.js": "3f113fa82bfd39c397073dd32f8b9a991f6175c1ed6b7f1b2d9079f52275ceb0",
+  "scripts/eslint-plugin-oracle/vitest.config.mjs": "752eb0cd8bdb46abd2801e5b747e6f8243eb8196b7dce06ad22dd0a0c6dea787"
+}

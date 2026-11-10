@@ -1,0 +1,18 @@
+{
+  "kind": "Independent SOURCE ONLY authored-q2 and F01 review freeze",
+  "members": {
+    "metadata-authored-q2-and-F01-independent-ledger-v1.json": "ae514ef5587945063f0280cdeba1f79bf0e2af8d03bd3edb19f8fca69de2f997",
+    "metadata-authored-q2-and-F01-independent-audit-v1.py": "76887c7fb387406999d4d377dd70e31f58a96deec9b3c8e4acf10269e9d3e381",
+    "metadata-authored-q2-and-F01-independent-audit-v1.json": "161cf345837e7279ef55a93da163157ba7059fef73d27dd6d8566db251b10f87",
+    "metadata-authored-q2-and-F01-independent-audit-correction-v2.json": "d0f06deb9faebceda504d4b98dc4d326de0b3637de3e2993ae88e454e0a5a70b",
+    "metadata-authored-q2-and-F01-independent-audit-v2.py": "9c532156ef9d26e4f2651405e9271b95959d25105bb72a51f1316f6c68c463b9",
+    "metadata-authored-q2-and-F01-independent-audit-v2.json": "107c4579fdd2d1b3767e1a5bf3f9184f4c20f6fdb01d4f7211bc3d44acda4805",
+    "metadata-authored-q2-independent-one-shot-proposal-v1.json": "48236d40af44cd77f4bc7b6948015b7ef58e498d51bb42f0c6703d544b00a056",
+    "metadata-authored-q2-and-F01-independent-review-v1.md": "1873346d04543d631086c875433c8987fc9850b0d0575ffaeae4035d7b94ed3c"
+  },
+  "subjectManifestSha256": "7e06d8eff512e65a546d49c70c5b2b2524a19034c1606258e889eabf1cabaa58",
+  "subjectCorrectionFreezeSha256": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4",
+  "runtimeAdmission": false,
+  "slot4Returned": "idle",
+  "rootOwnsLint": true
+}

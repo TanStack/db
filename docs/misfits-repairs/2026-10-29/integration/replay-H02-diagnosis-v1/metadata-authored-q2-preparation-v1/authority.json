@@ -1,0 +1,10 @@
+{
+  "assignedBy": "/root",
+  "phase": "SOURCE-ONLY exact existing-v3 followup-scope-authored-q2 outer preparation",
+  "allowed": "Additive inert exact outer packet and bounded read/hash/string/JSON source audit. Independent review then separate exact root one-shot admission.",
+  "forbidden": "No application source/driver/oracle/config edit; no M01 ID change, actual mutant, no-op generator edit, imports/compiler/discovery/native/probes/install/Git/PR/canonical action. No launcher or preflight execution now.",
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "rootClassificationSha256": "304bafc5b0d1c89eae88faf10299db760bd973752db576392ba6d66140a376e3",
+  "reviewedOutput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q2",
+  "rootOwnsLint": true
+}

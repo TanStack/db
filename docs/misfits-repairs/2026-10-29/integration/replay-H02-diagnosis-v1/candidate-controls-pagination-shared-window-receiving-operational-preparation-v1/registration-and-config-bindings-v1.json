@@ -1,0 +1,63 @@
+{
+  "registrations": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sourceSha256FromQ": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235",
+      "registrationLine": 54,
+      "registrationLiteral": "it(`checks a selected baseline constituent through the shared judgment`, async () => {",
+      "registrationKind": "plain vitest it imported from vitest; top-level registration",
+      "exactTitle": "checks a selected baseline constituent through the shared judgment",
+      "expectedAncestorTitles": [],
+      "suffixPolicy": "No FastCheck seed/path suffix is expected or accepted for this plain-it registration. Do not broaden a qualifier or infer execution from a base-title substring.",
+      "actualExecutionEvidence": "PENDING admitted run; bind exact recorded assertion/title when available and inspect raw original stdout/stderr/receipts; no discovery/import occurred"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sourceSha256FromQ": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "registrationLine": 13,
+      "registrationLiteral": "it(`records a source-bound completion receiving gate`, async () => {",
+      "registrationKind": "plain vitest it imported from vitest; top-level registration",
+      "exactTitle": "records a source-bound completion receiving gate",
+      "expectedAncestorTitles": [],
+      "suffixPolicy": "No FastCheck seed/path suffix is expected or accepted for this plain-it registration. Do not broaden a qualifier or infer execution from a base-title substring.",
+      "actualExecutionEvidence": "PENDING admitted run; bind exact recorded assertion/title when available and inspect raw original stdout/stderr/receipts; no discovery/import occurred"
+    }
+  ],
+  "sourceSelection": "one exact parent file/title and one exact included inner plain-it file; no FastCheck-generated title suffix, broad qualifier, test discovery or config import",
+  "configs": {
+    "parent": {
+      "path": "scripts/h02-progress/completion-parent.config.ts",
+      "sourceSha256FromQ": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+      "environment": "node",
+      "coverageEnabled": false,
+      "typecheckEnabled": false,
+      "meaning": "existing pure parent standalone config, inherited unchanged; no ordinary campaign/typecheck runtime credit"
+    },
+    "inner": {
+      "path": "scripts/h02-progress/completion-receiving.config.ts",
+      "sourceSha256FromQ": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+      "inherits": "scripts/h02-progress/vitest.config.ts",
+      "inheritedSourceSha256FromQ": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6",
+      "environment": "jsdom",
+      "coverageEnabled": false,
+      "typecheckEnabled": false,
+      "meaning": "existing reviewed S/f85 standalone receiving setup, inherited unchanged; no ordinary campaign/typecheck runtime credit"
+    },
+    "staticTypecheck": "Q final TS8 default-heap noEmit passed actual763ce9/session40160/final0e427a; not runtime typecheck credit; bind original evidence in sealed packet"
+  },
+  "budgets": {
+    "outerWallMs": 60000,
+    "outerNodeHeapMiB": 384,
+    "outerGroupRssBytes": 1073741824,
+    "outerSamplingMs": 100,
+    "innerWallMs": 20000,
+    "innerNodeHeapMiB": 384,
+    "innerGroupRssBytes": 1073741824,
+    "scope": "existing source-bound operational limits unchanged; no product deadline; separate2GiB primary allowance does not apply",
+    "parentSelectedTestTimeoutMs": 60000,
+    "innerInheritedTestTimeoutMs": 300000,
+    "innerContainmentPrecedence": "Existing supervisor20s wall limit bounds the child before its inherited300s test timeout; neither value is changed."
+  },
+  "runtimeTitleEvidence": "UNREACHED; a later actual qualifier must identify these exact plain titles and source files without seed/ancestry fallback",
+  "staticOnly": true
+}

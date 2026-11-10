@@ -1,0 +1,38 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/native_shutdown_receiving",
+  "reservedHeavySlot": 2,
+  "admittedRuntime": true,
+  "maxInvocations": 1,
+  "packetManifestSha256": "81ad3dffafeb7d9f2975d9e15ab1d01cfbef50ad9687cac5bfc0ba4c9f6e4cd3",
+  "bindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "launcherSha256": "8cae808cd8b045c45e78c10ca492ce0f8f712a6ea2d64a61ada28ee0aae7d4b0",
+  "recipeSha256": "6a290c3a8e4a03382e026c39b09b71196bcc39aa9d7a2003253709ea3b2d8dc3",
+  "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+  "independentOracleSourceReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/pagination-failed-peer-source-independent-review-v1.md",
+    "sha256": "fa564e2739de52a397e8cea07aa7edc12ac8125c2869673b8a341ab5fd273e07"
+  },
+  "runtimeReview": "Root self-review of complete launch.py, exact run-recipe.json and reused run_one source. No independent runtime review or mocked parser calibration claimed.",
+  "executionRequirement": "Exact pinned Python -I -B launch.py --execute-exact-one binding; actual exec_command sandbox_permissions=require_escalated",
+  "environmentPreflight": {
+    "ESBUILD_BINARY_PATH": "absent at root admission; executor recheck before launch",
+    "ESBUILD_WORKER_THREADS": "absent at root admission; executor recheck before launch",
+    "ESBUILD_MAX_BUFFER": "absent at root admission; executor recheck before launch"
+  },
+  "purpose": "Initial fixed generated primary pagination diagnostic on unchanged production, seed1665/eight runs/three schedules/oneworker, ordinary package config plus raw default+JSONreporters",
+  "containment": "Unchanged supervisor30s wall/1GiB sampled RSS/known actual initialPGID; cutoff is operational failure and gives no product RED",
+  "after": "Stop on every outcome; retain complete stdout/stderr/JSON/receipts, actual launch/session/final outer exit separately, original PID/PGID absence and source/tool recheck. Preserve child1 and outer1. Independent actual result review/root classification before next runtime or production changes.",
+  "limits": [
+    "Report parser/native config selection and containment not calibrated by this preparation; actual missing premise/setup/report/resource/cleanup failure gives no product RED",
+    "Primary projection id/rank only; rich full-child shared QueryClient receiving required before production",
+    "Peerpending/unaborted afterfailure is this experimental premise, not authority to forbid lawful peer retirement",
+    "All existing budgets unchanged; directreplay requires explicit random-family-t selector"
+  ],
+  "sourceEditBoundary": "Do not change cf550f active sources until this actual result is frozen; then authorized successor extraction may proceed",
+  "retryAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false
+}

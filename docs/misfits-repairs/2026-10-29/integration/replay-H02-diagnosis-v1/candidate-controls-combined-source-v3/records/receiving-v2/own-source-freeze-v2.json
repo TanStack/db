@@ -1,0 +1,112 @@
+{
+  "at": "2026-10-30T08:54:05.404749+00:00",
+  "status": "own12 immutable successor; combined review pending; no runtime admission",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "base": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "previousFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v1/own-source-freeze-v1.json",
+  "previousFreezeSha256": "4c78cd81eb238cbb2655ef9a35a872c8ba77e4212d8257bf74f71f7b540c7cee",
+  "modelOwnV3FreezeSha256": "ac3dd9a3f35e6e6118f4daefc32b496a199edea121cafa6ffc11b327f6d04705",
+  "sourceCount": 12,
+  "sources": {
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts": "82c6dd8e724fc5cc0ab54d855e9e6fd3335d8f912b00161966018d38793027b8",
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts": "aa28853ab3b9f64696d12bf63c675dcb30544dac8dee135551281e426265acc6",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+    "packages/query-db-collection/tests/queued-answer-completion-driver.ts": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts": "be0be0fe5eadc55a97b769b5495b3435160db971bacaf50e5f0ee4fdfe62deb4",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+    "scripts/h02-progress/completion-tsconfig.json": "1767c6ce1c2a4411549d8debc6501835aadd95c3600ae96710b6f738ebb3f89f",
+    "scripts/h02-progress/completion-eslint.config.mjs": "a4837103c5a8a5d203c031003eecbd20ecd7724c547f7f09394badf1336ab5b4",
+    "scripts/h02-progress/completion-receiving.config.ts": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+    "scripts/h02-progress/completion-parent.config.ts": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+    "scripts/h02-progress/completion-parent.mjs": "e3b77f882eb26897e2660e6969a65f8868067d4c6e6ad8329f53107bfd2c962a"
+  },
+  "records": {
+    "type.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "own-source-list.json": "d00a6f1f1351d4744ff50217de2c02b107246cd17b6ff5bc34642a5018167682",
+    "lint-changed2.json": "c276cd28ae207a45ef096f838160bce565b2f8ffbd720dbde49f8d96d66c78c7",
+    "source-report-v2.md": "4f631fc2413ccfc436001c2ea320a05b2419bdf8c3182d1d56587f7a3a9eb58d",
+    "source-identity-v2.json": "bab1873ee6dec682363db9dad4e47782b7fa088db12503ab40591041d048ab3c",
+    "format2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dispatch-original.mjs": "3394d7aec08103f2c0cb1693c8cf5388a7fc6e20c4863c34e1dd75d01255fafc",
+    "action-callback-cut-table-v2.md": "d7239f7729616a2abbe5fa0cf0a1b19c260525bf9015d5818709c7e297ffff0d",
+    "type2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dispatch-driver.mjs": "bd2255b748d39a6e98dc60c896b60a656fd047fbe88b64e06663b870708a44b4",
+    "launcher-syntax2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pure-source-controls.json": "edf5a511744b9ca00c74a69aed0a84ff36f2b8a2d922064bb573d6163336cd7a",
+    "format.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "domain-helper.mjs": "9584330e744ec920da9f2d45b9a321dfb6c4c31636f3682b8c6005f7c02a0f29",
+    "run-pure-source-controls.mjs": "074e0ae2017a5b1da0933778c0908c1efb6e1b9977b036bfcefbf857a3968d06",
+    "lint-changed2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint2.json": "97181cdefe4b72034f744ae6754c89f3c7b47548592d0405c35cbe9ebdb08963",
+    "format2.stdout.log": "273bfbd6df472054ba281adde6f1bc076b60cf927695892ccbe733eeecf0fe47",
+    "type.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.json": "977d1cf1477464982db922eb7251e98fe967abcbb4e0a21898ca9ab9532f0b96",
+    "lint2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.stdout.log": "095d6e5647ff112dd027f4b0ddb9898683a24f0cdd54a36650eb0227e3fb6e1f",
+    "preliminary-type-failure.json": "bb0df0d8896c803ab70faf1a47a73a54496e9090d05be523e3b1a9722a0f2651",
+    "type2.json": "b633a65b055d099f3e59f010c07ac80bbd60a1a1c570b3dd864d797ac963a63f",
+    "launcher-syntax2.json": "d1757b2cb68600d470f500239f9d8ed25d1ae11d5dbb45cebdb22a5a08bd74a4",
+    "pure-source-controls-run.json": "c0a3860e3ef7212cc38a2491f6c050d8522322778a9d84f905caeed749726f53",
+    "type2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format.stdout.log": "309c368fb429900e9a89e8665f5b774e3969457d53b15b9431366994588db669",
+    "launcher-syntax2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "type.json": "0765840781d7bf4e78df5754be2858c6902908abd81092da19d698328a2e4b9c",
+    "oracle-declaration.mjs": "70af56378aa24746e78198bd3ad6ab7f71ed0d5983758db5867dfd041e67cf5b",
+    "format.json": "a7354f96cdf5e48876bd3551e2bf7b4d8ef0221c246ac4276cf9ff7d2ef5be54",
+    "reference-expression.mjs": "6b648b9fe4dde849a868866053750642acce726bed1c166a3f8e49ad8acd8cc2",
+    "format2.json": "621f15d9bc6a24a0638932515d3cfbade928f76dd8c0c901f5cea44929511c57",
+    "lint-changed2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "frozenSourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v2/frozen-own-source-v2/sources",
+  "frozenRecordRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v2/frozen-own-source-v2/records",
+  "production": {
+    "total": 511,
+    "unchanged": 511,
+    "changed": []
+  },
+  "shared": {
+    "total": 18,
+    "unchanged": 18,
+    "changed": []
+  },
+  "originalInstruments": {
+    "total": 34,
+    "unchanged": 33,
+    "changed": [
+      {
+        "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+        "original": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+        "current": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e"
+      }
+    ]
+  },
+  "slot": 2,
+  "workers": 1,
+  "finalStaticGates": [
+    "format2",
+    "type2",
+    "lint2",
+    "launcher-syntax2",
+    "lint-changed2"
+  ],
+  "pureInstrumentControls": {
+    "domain": 13,
+    "lawfulAccepted": 3,
+    "hostileRejected": 10,
+    "sourceSequence": 12,
+    "frozenV1SequenceRejections": 8
+  },
+  "runtime": {
+    "receiving": 0,
+    "generatedHistories": 0,
+    "campaigns": 0,
+    "productMutants": 0,
+    "testCollection": 0,
+    "productionEdits": 0,
+    "installCommitPush": false
+  },
+  "candidateRaw20": "all UNREACHED"
+}

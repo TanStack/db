@@ -1,0 +1,346 @@
+import {
+  clone,
+  ensureNotFalsy,
+  getFromMapOrCreate,
+  lastOfArray,
+  prepareQuery,
+  rxStorageWriteErrorToRxError,
+} from 'rxdb/plugins/core'
+import DebugModule from 'debug'
+import { withCollectionConfigFactory } from '@tanstack/db'
+import { stripRxdbFields } from './helper'
+import type {
+  FilledMangoQuery,
+  RxCollection,
+  RxDocumentData,
+} from 'rxdb/plugins/core'
+import type { Subscription } from 'rxjs'
+
+import type {
+  BaseCollectionConfig,
+  CollectionConfig,
+  InferSchemaOutput,
+  SyncConfig,
+} from '@tanstack/db'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+
+const debug = DebugModule.debug(`ts/db:rxdb`)
+
+/**
+ * Used in tests to ensure proper cleanup
+ */
+export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<
+  RxCollection,
+  Set<Subscription>
+>()
+
+/**
+ * Configuration interface for RxDB collection options
+ * @template T - The explicit type of items in the collection (highest priority). Use the document type of your RxCollection here.
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ *
+ * @remarks
+ * Type resolution follows a priority order:
+ * 1. If you provide an explicit type via generic parameter, it will be used
+ * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
+ *
+ * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * Notice that primary keys in RxDB must always be a string.
+ */
+export type RxDBCollectionConfig<
+  T extends object = Record<string, unknown>,
+  TSchema extends StandardSchemaV1 = never,
+> = Omit<
+  BaseCollectionConfig<T, string, TSchema>,
+  `onInsert` | `onUpdate` | `onDelete` | `getKey`
+> & {
+  /**
+   * The RxCollection from a RxDB Database instance.
+   */
+  rxCollection: RxCollection<T, unknown, unknown, unknown>
+
+  /**
+   * The maximum number of documents to read from the RxDB collection
+   * in a single batch during the initial sync between RxDB and the
+   * in-memory TanStack DB collection.
+   *
+   * @remarks
+   * - Defaults to `1000` if not specified.
+   * - Larger values reduce the number of round trips to the storage
+   *   engine but increase memory usage per batch.
+   * - Smaller values may lower memory usage and allow earlier
+   *   streaming of initial results, at the cost of more query calls.
+   *
+   * Adjust this depending on your expected collection size and
+   * performance characteristics of the chosen RxDB storage adapter.
+   */
+  syncBatchSize?: number
+}
+
+/**
+ * Creates RxDB collection options for use with a standard Collection
+ *
+ * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @param config - Configuration options for the RxDB collection
+ * @returns Collection options with utilities
+ */
+
+// Overload for when schema is provided
+export function rxdbCollectionOptions<T extends StandardSchemaV1>(
+  config: RxDBCollectionConfig<InferSchemaOutput<T>, T>,
+): CollectionConfig<InferSchemaOutput<T>, string, T> & {
+  schema: T
+}
+
+// Overload for when no schema is provided
+export function rxdbCollectionOptions<T extends object>(
+  config: RxDBCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  },
+): CollectionConfig<T, string> & {
+  schema?: never // no schema in the result
+}
+
+export function rxdbCollectionOptions(
+  config: RxDBCollectionConfig<any, any>,
+): CollectionConfig<any, string, any> {
+  type Row = Record<string, unknown>
+  type Key = string // because RxDB primary keys must be strings
+
+  const { rxCollection, syncBatchSize: _syncBatchSize, ...restConfig } = config
+
+  // "getKey"
+  const primaryPath = rxCollection.schema.primaryPath
+  function getKey(item: Record<string, unknown>): string {
+    const key: string = item[primaryPath] as string
+    return key
+  }
+
+  /**
+   * "sync"
+   * Notice that this describes the Sync between the local RxDB collection
+   * and the in-memory tanstack-db collection.
+   * It is not about sync between a client and a server!
+   */
+  type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
+  const sync: SyncConfig<Row, Key> = {
+    sync: (params: SyncParams) => {
+      const { begin, write, commit, markReady, fail, collection } = params
+
+      let initialFetchComplete = false
+      async function initialFetch() {
+        /**
+         * RxDB stores a last-write-time
+         * which can be used to "sort" document writes,
+         * so for initial sync we iterate over that.
+         */
+        let cursor: RxDocumentData<Row> | undefined = undefined
+        const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
+        // The initial fetch reads every document. When the Collection holds
+        // rows, such as a reload's kept rows, it is a snapshot that replaces
+        // them, so a row RxDB no longer has goes.
+        begin({
+          snapshot: !collection._state.acceptedSyncedEntries().next().done,
+        })
+
+        while (!initialFetchComplete) {
+          let query: FilledMangoQuery<Row>
+          if (cursor) {
+            query = {
+              selector: {
+                $or: [
+                  { '_meta.lwt': { $gt: cursor._meta.lwt } },
+                  {
+                    '_meta.lwt': cursor._meta.lwt,
+                    [primaryPath]: {
+                      $gt: getKey(cursor),
+                    },
+                  },
+                ],
+                _deleted: false,
+              },
+              sort: [{ '_meta.lwt': `asc` }, { [primaryPath]: `asc` }],
+              limit: syncBatchSize,
+              skip: 0,
+            }
+          } else {
+            query = {
+              selector: { _deleted: false },
+              sort: [{ '_meta.lwt': `asc` }, { [primaryPath]: `asc` }],
+              limit: syncBatchSize,
+              skip: 0,
+            }
+          }
+
+          /**
+           * Instead of doing a RxCollection.query(),
+           * we directly query the storage engine of the RxCollection so we do not use the
+           * RxCollection document cache because it likely wont be used anyway
+           * since most queries will run directly on the tanstack-db side.
+           */
+          const preparedQuery = prepareQuery<Row>(
+            rxCollection.storageInstance.schema,
+            query,
+          )
+          const result = await rxCollection.storageInstance.query(preparedQuery)
+          const docs = result.documents
+
+          cursor = lastOfArray(docs)
+          if (docs.length === 0) {
+            initialFetchComplete = true
+            break
+          }
+
+          docs.forEach((d) => {
+            write({
+              type: `insert`,
+              value: stripRxdbFields(clone(d)),
+            })
+          })
+        }
+        await commit()
+      }
+
+      type WriteMessage = Parameters<typeof write>[0]
+      const buffer: Array<WriteMessage> = []
+      let buffering = true
+      const queue = (msg: WriteMessage) => {
+        if (buffering) {
+          buffer.push(msg)
+          return
+        }
+        begin()
+        write(msg)
+        commit()
+      }
+
+      let sub: Subscription | undefined
+      function stopOngoingFetch() {
+        buffer.length = 0
+        if (!sub) return
+        getFromMapOrCreate(
+          OPEN_RXDB_SUBSCRIPTIONS,
+          rxCollection,
+          () => new Set(),
+        ).delete(sub)
+        sub.unsubscribe()
+        sub = undefined
+      }
+
+      function startOngoingFetch() {
+        // Subscribe early and buffer live changes during initial load and ongoing
+        sub = rxCollection.$.subscribe({
+          next: (ev) => {
+            const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
+            switch (ev.operation) {
+              case `INSERT`:
+                queue({ type: `insert`, value: cur })
+                break
+              case `UPDATE`:
+                queue({ type: `update`, value: cur })
+                break
+              case `DELETE`:
+                queue({ type: `delete`, value: cur })
+                break
+            }
+          },
+          // An errored stream ends, so later writes would never arrive.
+          error: stop,
+        })
+
+        const subs = getFromMapOrCreate(
+          OPEN_RXDB_SUBSCRIPTIONS,
+          rxCollection,
+          () => new Set(),
+        )
+        subs.add(sub)
+      }
+
+      async function start() {
+        const isCleanedUp = () => collection.status === `cleaned-up`
+
+        startOngoingFetch()
+        await initialFetch()
+        if (isCleanedUp()) {
+          return
+        }
+
+        // Take one finite snapshot of changes observed during the initial
+        // fetch, then route newer events through the normal live path. The
+        // core transaction queue preserves their order without letting a
+        // continuous event stream postpone readiness forever.
+        const pending = buffer.splice(0)
+        buffering = false
+        if (pending.length > 0) {
+          begin()
+          for (const msg of pending) write(msg)
+          await commit()
+          if (isCleanedUp()) {
+            return
+          }
+        }
+
+        // After this run's fail(), markReady() does nothing.
+        markReady()
+      }
+
+      // Core ignores a later fail() in the same run.
+      function stop(error: unknown) {
+        stopOngoingFetch()
+        fail(error)
+      }
+      void start().catch(stop)
+
+      return stopOngoingFetch
+    },
+    // Expose the getSyncMetadata function
+    getSyncMetadata: undefined,
+  }
+
+  const collectionConfig: CollectionConfig<Row, string> = {
+    ...restConfig,
+    getKey,
+    sync,
+    onInsert: async (params) => {
+      debug(`insert`, params)
+      const newItems = params.transaction.mutations.map((m) => m.modified)
+      const result = await rxCollection.bulkUpsert(newItems)
+      if (result.error.length > 0) {
+        throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
+      }
+    },
+    onUpdate: async (params) => {
+      debug(`update`, params)
+      const mutations = params.transaction.mutations.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        (m) => m.type === `update`,
+      )
+
+      for (const mutation of mutations) {
+        const newValue = stripRxdbFields(mutation.modified)
+        const id = getKey(newValue)
+        const doc = await rxCollection.findOne(id).exec()
+        if (!doc) {
+          continue
+        }
+        await doc.incrementalPatch(newValue)
+      }
+    },
+    onDelete: async (params) => {
+      debug(`delete`, params)
+      const mutations = params.transaction.mutations.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        (m) => m.type === `delete`,
+      )
+      const ids = mutations.map((mutation) => getKey(mutation.original))
+      const result = await rxCollection.bulkRemove(ids)
+      if (result.error.length > 0) {
+        throw result.error
+      }
+    },
+  }
+  return withCollectionConfigFactory(collectionConfig, () =>
+    rxdbCollectionOptions(config),
+  )
+}

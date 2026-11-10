@@ -1,0 +1,33 @@
+{
+  "status": "pure same-runner setup diagnosis; no production or receiving invocation",
+  "moduleUrl": "file:",
+  "globalLocation": "http://localhost:3000/",
+  "globalURLdiffersFromNode": true,
+  "decidingObservation": "actual evaluated fixture code replaces the exact literal new URL(..., import.meta.url) expression base with self.location; indirect global and node URL variants remain file and derive same root",
+  "inference": "client URL normalization explains the non-file result; jsdom global URL alone is not sufficient cause, since indirect global constructor remains file with actual module base",
+  "limit": "failed original supervisor body was not captured; this preserves exact syntax/same-directory same-runner fixture evidence and installed plugin source, not a retrospective original loaded-code receipt",
+  "fixtureSources": {
+    "packages/query-db-collection/tests/queued-answer-root-setup-probe.ts": "7fc098f239803bbd02a17190e812c14c44b62784b6db7c9d85b535ba965a3a71",
+    "scripts/h02-progress/root-setup-calibration.config.ts": "5494383044455f6d9ae1e9b7a7224710caf405799223f0ab86ffedb57686c7fb",
+    "scripts/h02-progress/root-setup-calibration.test.ts": "f0cd49f4f54ae024c9758eabe5a2e78dd9b0aea8188b71818ab53d860ac252ef"
+  },
+  "installedNormalizePlugin": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js",
+    "sha256": "222aa60f8555aea9311703c68edaaa8eba0888ea29bfb4a49b37f98e0811ee2d",
+    "lines": [
+      10052,
+      10084
+    ]
+  },
+  "acceptedFreezeReference": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v3/source-freeze-v3.json",
+    "sha256": "d2c221f64302dc0ad10d666d40e2308ffc0e8a3e4c953f73c106d98631ee78b3"
+  },
+  "rootIndependentProcessObservation": {
+    "source": "root agent message before this diagnostic task",
+    "pgid": 59927,
+    "members": 0,
+    "method": "approved ps",
+    "authorRanThisCheck": false
+  }
+}

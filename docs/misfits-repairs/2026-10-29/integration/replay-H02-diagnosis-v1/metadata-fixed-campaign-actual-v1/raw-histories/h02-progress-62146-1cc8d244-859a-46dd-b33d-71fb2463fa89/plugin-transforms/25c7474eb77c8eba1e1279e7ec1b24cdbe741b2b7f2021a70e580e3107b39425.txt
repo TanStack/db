@@ -1,0 +1,356 @@
+import { normalizeExpressionPaths } from "../compiler/expressions.js";
+import { LoadSubsetOperationAbortedError } from "../../errors.js";
+import { OrderedSourceLoader } from "./ordered-source-loader.js";
+import {
+  computeSubscriptionOrderByHints,
+  reconcileChangesForD2,
+  sendChangesToInput,
+  splitUpdates
+} from "./utils.js";
+import { SubsetDemandController } from "./subset-demand-controller.js";
+export class CollectionSubscriber {
+  constructor(sourceId, alias, collection, collectionConfigBuilder) {
+    this.sourceId = sourceId;
+    this.alias = alias;
+    this.collection = collection;
+    this.collectionConfigBuilder = collectionConfigBuilder;
+    // Root loads in start order: a request error clears only when a load
+    // started after the failure succeeds, since a load already in flight
+    // cannot cover the data whose request failed.
+    this.rootLoadsStarted = 0;
+    this.rootLoadsBeforeFailure = 0;
+    // Track deferred promises for subscription loading states
+    this.subscriptionLoadingPromises = /* @__PURE__ */ new Map();
+    // Exact row last contributed to D2 for each source key.
+    this.sentToD2Rows = /* @__PURE__ */ new Map();
+    // Each needed key's failed request is a request error until a later load
+    // of the key succeeds or the query no longer needs it.
+    this.demand = new SubsetDemandController((planId, key, error) => {
+      const request = `${planId}:${key}`;
+      if (error)
+        this.collectionConfigBuilder.reportFailedRequest(request, [error]);
+      else this.collectionConfigBuilder.clearFailedRequest(request);
+    });
+  }
+  /** The live query this subscription reads for, as `subscribers` lists it. */
+  owner() {
+    return this.collectionConfigBuilder.dependent();
+  }
+  subscribe() {
+    const whereClause = this.collectionConfigBuilder.sourceWhereClausesCache?.get(this.sourceId);
+    return this.subscribeToChanges(
+      whereClause ? normalizeExpressionPaths(whereClause, this.alias) : void 0
+    );
+  }
+  // A live-query Collection starts no provider work on its own: it defers
+  // acquisition until it has a subscriber or a preload.
+  defersAcquisition() {
+    return !this.collectionConfigBuilder.hasSubscriberOrPreload();
+  }
+  subscribeToChanges(whereExpression) {
+    const orderByInfo = this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId];
+    const trackLoadResult = (result, options) => {
+      const order = ++this.rootLoadsStarted;
+      const decides = () => !options?.signal?.aborted && !options?.subscription?.pendingTruncateReplacement;
+      void Promise.resolve(result).then(
+        () => {
+          if (order > this.rootLoadsBeforeFailure && decides())
+            this.collectionConfigBuilder.settleRootLoad(this.sourceId);
+        },
+        () => {
+          if (decides()) this.rootLoadsBeforeFailure = this.rootLoadsStarted;
+        }
+      );
+      if (result instanceof Promise) {
+        const trackedResult = result.catch(async (error) => {
+          await Promise.resolve();
+          throw error;
+        });
+        this.collectionConfigBuilder.trackSubsetLoadPromise(trackedResult);
+      }
+    };
+    const onStatusChange = (event) => {
+      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+        if (event.status === `ready`) {
+          this.collectionConfigBuilder.scheduleGraphRun();
+        }
+        return;
+      }
+      const subscription2 = event.subscription;
+      if (event.status === `loadingSubset`) {
+        this.ensureLoadingPromise(subscription2);
+      } else {
+        const deferred = this.subscriptionLoadingPromises.get(subscription2);
+        if (deferred) {
+          this.subscriptionLoadingPromises.delete(subscription2);
+          deferred.resolve();
+        }
+      }
+    };
+    const onLoadSubsetError = (event) => {
+      const error = this.collectionConfigBuilder.recordSubsetError(
+        event.error,
+        // Lazy demand owns its fatal-error path. For eager sources, one
+        // successful page does not finish initial ordered refinement.
+        !this.collectionConfigBuilder.isLazySource(this.sourceId) && this.collectionConfigBuilder.liveQueryCollection?._lifecycle.inFirstLoad === true
+      );
+      if (!this.collectionConfigBuilder.isLazySource(this.sourceId) && !event.subscription.pendingTruncateReplacement) {
+        this.collectionConfigBuilder.failRootLoad(this.sourceId, error);
+      }
+    };
+    let subscription;
+    if (orderByInfo) {
+      subscription = this.subscribeToOrderedChanges(
+        whereExpression,
+        orderByInfo,
+        onStatusChange,
+        trackLoadResult,
+        onLoadSubsetError
+      );
+    } else {
+      const includeInitialState = (this.collection.config.syncMode !== `on-demand` || this.collectionConfigBuilder.query.limit !== 0) && !this.collectionConfigBuilder.isLazySource(this.sourceId);
+      subscription = this.subscribeToMatchingChanges(
+        whereExpression,
+        includeInitialState,
+        onStatusChange,
+        trackLoadResult,
+        onLoadSubsetError
+      );
+      this.registerSubscriptionCleanup(subscription);
+    }
+    if (!this.collectionConfigBuilder.isLazySource(this.sourceId) && subscription.status === `loadingSubset`) {
+      this.ensureLoadingPromise(subscription);
+    }
+    return subscription;
+  }
+  registerSubscriptionCleanup(subscription) {
+    const unsubscribe = () => {
+      const deferred = this.subscriptionLoadingPromises.get(subscription);
+      if (deferred) {
+        this.subscriptionLoadingPromises.delete(subscription);
+        deferred.resolve();
+      }
+      try {
+        this.demand.clear();
+      } finally {
+        subscription.unsubscribe();
+      }
+    };
+    this.collectionConfigBuilder.currentSyncState.unsubscribeCallbacks.add(
+      unsubscribe
+    );
+  }
+  setDemand(subscription, plan, keys) {
+    const update = this.demand.setDemand(subscription, plan, keys);
+    if (!update.changed) return;
+    if (update.empty) {
+      this.collectionConfigBuilder.retireDemand(plan.id);
+      return;
+    }
+    const generation = this.collectionConfigBuilder.beginDemand(
+      plan.id,
+      update.ready instanceof Promise
+    );
+    const settle = () => this.collectionConfigBuilder.settleDemand(plan.id, generation);
+    if (update.ready instanceof Promise) {
+      void update.ready.then(
+        settle,
+        (error) => this.collectionConfigBuilder.failDemand(
+          subscription,
+          this.collection,
+          plan.id,
+          generation,
+          error
+        )
+      );
+    } else {
+      settle();
+    }
+  }
+  sendChangesToPipeline(changes) {
+    const changesArray = Array.isArray(changes) ? changes : [...changes];
+    const reconciledChanges = reconcileChangesForD2(
+      changesArray,
+      this.sentToD2Rows
+    );
+    const input = this.collectionConfigBuilder.currentSyncState.inputs[this.sourceId];
+    if (sendChangesToInput(input, reconciledChanges) > 0) {
+      this.collectionConfigBuilder.advanceGraphInputRevision();
+    }
+    this.collectionConfigBuilder.scheduleGraphRun();
+  }
+  subscribeToMatchingChanges(whereExpression, includeInitialState, onStatusChange, onLoadSubsetResult, onLoadSubsetError) {
+    const sendChanges = (changes) => {
+      this.sendChangesToPipeline(changes);
+    };
+    const hints = computeSubscriptionOrderByHints(
+      this.collectionConfigBuilder.query,
+      this.alias,
+      this.collectionConfigBuilder.queryCompareOptions
+    );
+    const subscription = this.collection.subscribeChanges(sendChanges, {
+      ...includeInitialState && { includeInitialState },
+      whereExpression,
+      onStatusChange,
+      onLoadSubsetError,
+      deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
+      truncateReplayPublication: this.truncateReplayPublicationControl(),
+      orderBy: hints.orderBy,
+      limit: hints.limit,
+      onLoadSubsetResult: includeInitialState ? onLoadSubsetResult : void 0
+    });
+    return subscription;
+  }
+  subscribeToOrderedChanges(whereExpression, orderByInfo, onStatusChange, onLoadSubsetResult, onLoadSubsetError) {
+    const subscriptionHolder = {};
+    const sendChangesInRange = (changes) => {
+      const subscription2 = subscriptionHolder.current;
+      if (!subscription2) return;
+      const changesArray = Array.isArray(changes) ? changes : [...changes];
+      this.orderedLoader?.onSourceChanges(
+        changesArray,
+        this.sentToD2Rows,
+        (key) => this.collection._hasOptimisticOverlay(key)
+      );
+      const splittedChanges = splitUpdates(changesArray);
+      this.sendChangesToPipeline(splittedChanges);
+    };
+    const subscription = this.collection.subscribeChanges(sendChangesInRange, {
+      whereExpression,
+      onStatusChange,
+      onLoadSubsetError,
+      deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
+      truncateReplayPublication: this.truncateReplayPublicationControl(
+        (retired) => {
+          const loader = this.orderedLoader;
+          if (retired) loader?.resetCursor();
+          const replay = subscriptionHolder.current?.pendingTruncateReplacement;
+          if (replay) {
+            const decided = replay.catch((error) => {
+              if (!(error instanceof LoadSubsetOperationAbortedError))
+                throw error;
+            });
+            void decided.catch(() => void 0);
+            this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
+              decided
+            );
+          }
+          this.collectionConfigBuilder.trackOrderedLoadPromise(
+            Promise.resolve().then(() => loader?.loadFullSource()),
+            true
+          );
+        }
+      )
+    });
+    subscriptionHolder.current = subscription;
+    this.registerSubscriptionCleanup(subscription);
+    const truncateUnsubscribe = this.collection.on(`truncate`, () => {
+      this.orderedLoader?.resetCursor();
+    });
+    const revalidationUnsubscribe = this.collection.on(
+      `loadedSubsets:invalidated`,
+      () => {
+        const loader = this.orderedLoader;
+        if (!loader) return;
+        loader.revalidateLoadedCoverage();
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          this.collectionConfigBuilder.getSyncRunGeneration()
+        );
+      }
+    );
+    subscription.on(`unsubscribed`, () => {
+      truncateUnsubscribe();
+      revalidationUnsubscribe();
+      subscriptionHolder.current = void 0;
+      this.orderedLoader?.dispose();
+      this.orderedLoader = void 0;
+    });
+    this.orderedLoader = new OrderedSourceLoader(
+      orderByInfo,
+      subscription,
+      this.alias,
+      (result, holdPublication, settlesAsync, options) => {
+        if (result instanceof Promise) {
+          this.collectionConfigBuilder.trackOrderedLoadPromise(
+            result,
+            holdPublication && settlesAsync && !subscription.hasPendingTruncateReplacement
+          );
+        }
+        onLoadSubsetResult(result, options);
+      },
+      () => this.collectionConfigBuilder.liveQueryCollection?.status === `ready` && !this.collectionConfigBuilder.hasActiveWindowOperation(),
+      () => this.collectionConfigBuilder.getGraphInputRevision(),
+      () => orderByInfo.joinedFilterSourceId !== void 0 && this.collectionConfigBuilder.hasPendingJoinedWork(
+        orderByInfo.joinedFilterSourceId
+      )
+    );
+    this.orderedLoader.start();
+    return subscription;
+  }
+  truncateReplayPublicationControl(onStart) {
+    const syncRunGeneration = this.collectionConfigBuilder.getSyncRunGeneration();
+    const isCurrent = () => syncRunGeneration === this.collectionConfigBuilder.getSyncRunGeneration();
+    const decide = (errors = []) => {
+      if (errors.length > 0)
+        this.collectionConfigBuilder.failReplay(this.sourceId, errors);
+      else this.collectionConfigBuilder.settleReplayedRequests(this.sourceId);
+      this.collectionConfigBuilder.settleRootLoad(this.sourceId);
+      this.demand.clearRequestErrors();
+    };
+    return {
+      start: (retired) => onStart?.(retired),
+      siblingReplays: () => this.collectionConfigBuilder.siblingReplays(
+        this.collection,
+        this.sourceId
+      ),
+      succeed: () => {
+        if (!isCurrent()) return;
+        this.orderedLoader?.settleFullSourceReplay();
+        decide();
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          syncRunGeneration
+        );
+      },
+      fail: (errors) => {
+        if (isCurrent()) decide(errors);
+      }
+    };
+  }
+  // This function is called by maybeRunGraph
+  // after each iteration of the query pipeline
+  // to ensure that the orderBy operator has enough data to work with
+  loadMoreIfNeeded(subscription) {
+    if (subscription.hasPendingTruncateReplacement && !this.collectionConfigBuilder.hasActiveWindowOperation()) {
+      return;
+    }
+    const orderByInfo = this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId];
+    if (!orderByInfo) {
+      return;
+    }
+    try {
+      const pending = this.orderedLoader?.loadMore(
+        this.collectionConfigBuilder.getActiveWindowOperationGeneration()
+      );
+      if (pending) {
+        this.collectionConfigBuilder.trackSubsetLoadOperationPromise(pending);
+      }
+    } catch (error) {
+      if (!Object.is(subscription.lastError, error)) throw error;
+    }
+  }
+  ensureLoadingPromise(subscription) {
+    if (this.subscriptionLoadingPromises.has(subscription)) {
+      return;
+    }
+    let resolve;
+    const promise = new Promise((res) => {
+      resolve = res;
+    });
+    this.subscriptionLoadingPromises.set(subscription, {
+      resolve
+    });
+    this.collectionConfigBuilder.trackSubsetLoadPromise(promise);
+  }
+}

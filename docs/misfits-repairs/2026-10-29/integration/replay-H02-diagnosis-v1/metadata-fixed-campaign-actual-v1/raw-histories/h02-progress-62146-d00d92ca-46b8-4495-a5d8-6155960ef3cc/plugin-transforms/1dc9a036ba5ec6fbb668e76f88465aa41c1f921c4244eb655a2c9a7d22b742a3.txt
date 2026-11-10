@@ -1,0 +1,6 @@
+export const collectionOptionsBrand = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionOptions`
+);
+export function hasCollectionOptionsBrandValue(value) {
+  return typeof value === `object` && value !== null && value[collectionOptionsBrand] === true;
+}

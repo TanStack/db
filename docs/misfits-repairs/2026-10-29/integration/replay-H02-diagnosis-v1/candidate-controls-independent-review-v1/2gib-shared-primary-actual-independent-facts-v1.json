@@ -1,0 +1,210 @@
+{
+  "at": "2026-10-30T11:36:27.688131+00:00",
+  "mode": "Static read/hash/JSON/source reasoning only; no new native/test/model execution, bound import or process probe.",
+  "resultFreezeSha256": "ec7775de91e14a892dbfe17360cd8d2b73fb2766a0919605c66ee71561a09669",
+  "assetCount": 16,
+  "assetBytes": 3499565,
+  "rawReportSha256": "1fc0f3b2588d3a09cb0101f8995a3180bbecf6ba3be44a345780f49a98d65646",
+  "rawReportBytes": 3413917,
+  "admissionSha256": "0182ee6c9441fc3adcba427c221b101575ae7bdc5c162a9f12e51b87857771d7",
+  "actualTool": {
+    "actualTool": "exec_command",
+    "sandbox_permissions": "require_escalated",
+    "initialChunk": "e84e86",
+    "sessionId": 26998,
+    "finalChunk": "4a9657",
+    "actualOuterExitCode": 1,
+    "initialWallTimeSeconds": 1.00364275,
+    "finalPollWallTimeSeconds": 3.806045666,
+    "initialOutput": "",
+    "finalOutput": "",
+    "normalizationApplied": false,
+    "launchAttempts": 1,
+    "preflightToolChunks": [
+      "38dfa5",
+      "84c03b"
+    ],
+    "productVerdict": "UNCLASSIFIED; independent review required"
+  },
+  "outerExit": 1,
+  "childExit": 1,
+  "wrapperQualifier": {
+    "baseTitleMatches": 0,
+    "seedSuffixedExactAncestryMatches": 1,
+    "nonSkippedExecuted": 1,
+    "secondaryPreserved": [
+      {
+        "error": "report does not identify exactly the selected executed fixed campaign",
+        "phase": "report-capture"
+      }
+    ],
+    "reportField": null,
+    "classifierChanged": false
+  },
+  "assertion": {
+    "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts",
+    "title": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+    "ancestorTitles": [
+      "pagination recomputation oracle",
+      "joined window failure for a fixed seed"
+    ],
+    "status": "failed",
+    "seed": 1665,
+    "path": "0:0:0:0:0",
+    "generatedFailureIndex": 1,
+    "shrinks": 4,
+    "reducedInput": {
+      "rankOffset": 0,
+      "rankStep": 1,
+      "direction": "asc",
+      "initialLimit": 1,
+      "pivotMarked": false,
+      "tailCount": 2,
+      "tailMarked": false
+    },
+    "expectedRows": [
+      {
+        "id": 1,
+        "rank": 0,
+        "children": [
+          101,
+          102
+        ]
+      }
+    ],
+    "actualRows": [
+      {
+        "id": 1,
+        "rank": 0,
+        "children": [
+          101,
+          102
+        ]
+      },
+      {
+        "id": 2,
+        "rank": 1,
+        "children": []
+      }
+    ],
+    "cut": "captured first post-failure public callback, replayed at handled-failure barrier before peer release",
+    "sourceLine": 2719,
+    "checkerLine": 98
+  },
+  "diagnostics": {
+    "callbackCuts": 5,
+    "finalFailedAndPeerScope": [
+      2
+    ],
+    "schedule": "failure-first",
+    "peerPending": true,
+    "peerAborted": false,
+    "sourceFailureApplied": true,
+    "afterFailureRequest": true,
+    "firstCallbackWindow": {
+      "offset": 0,
+      "limit": 1
+    },
+    "reachCountersAfterInitialAndShrinks": [
+      [
+        1,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        2,
+        0,
+        0,
+        0
+      ],
+      [
+        3,
+        3,
+        0,
+        0,
+        0
+      ],
+      [
+        4,
+        4,
+        0,
+        0,
+        0
+      ],
+      [
+        5,
+        5,
+        0,
+        0,
+        0
+      ]
+    ],
+    "normalEightRunReachCredit": false,
+    "laterReachFailurePreserved": true
+  },
+  "sourceIdentity": {
+    "freeze": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+    "active": 596,
+    "copies": 85,
+    "production": 511,
+    "roots": 255,
+    "payloads": 11974,
+    "edges": 405,
+    "absentOptionalPeer": 112,
+    "locks": 2,
+    "links": 4,
+    "currentHashChecksPass": true,
+    "beforeAfterSavedEqual": true,
+    "postSavedPass": "PASS independent filesystem-only postcheck of existing expected identities"
+  },
+  "cleanup": {
+    "outerPidPgid": 41290,
+    "childPidPgid": 41300,
+    "positivePgid": true,
+    "elapsedMs": 6002,
+    "samples": 43,
+    "peakSampledGroupRssBytes": 1891565568,
+    "thresholdBytes": 2147483648,
+    "killAttempts": [
+      {
+        "result": "already absent",
+        "signal": "SIGKILL",
+        "targetPgid": 41300
+      }
+    ],
+    "remainingGroupRows": [],
+    "allFourSavedNamedIdChecks": "ESRCH",
+    "nativeProbesByReviewer": 0,
+    "limits": "Named original IDs/groups only; no escaped daemon census or per-resource exact-once proof"
+  },
+  "classification": "BOUNDED PRODUCT RED at intended controlled primary callback observation; independent of preserved wrapper report-capture defect",
+  "openInstrumentFinding": {
+    "id": "H02-N-SEED-SUFFIX-REPORT-QUALIFIER",
+    "status": "confirmed-open",
+    "cause": "Bound installed @fast-check/vitest appends seed suffix; prepared exact base title matches zero actual assertions.",
+    "repairScope": "Future separately reviewed operational successor must derive exact seeded identity and calibrate positive/negative report shapes; no current classifier/source/result changed."
+  },
+  "limits": [
+    "One first generated case plus four shrink attempts; not all eight runs",
+    "No peer-first/success/retry/settlement result",
+    "No random campaign or checked replay executed",
+    "No new real QueryClient receiving/full-child success witness",
+    "No hostile mutant/closure/production edit authority",
+    "Initial unshrunk input not retained as full verbose trace",
+    "First callback row mismatch only; later cuts and separate settled-window assertion get no independent failure credit",
+    "Finite expected source/tool identity is not runtime evaluated-source proof",
+    "All20 candidate states and actual-helper/no-active-operation remain UNREACHED;state14 unadopted;metadata separate"
+  ],
+  "allAuditChecksPass": true,
+  "errors": [],
+  "newProductExecutions": 0,
+  "newModelExecutions": 0,
+  "newTestExecutions": 0,
+  "newNativeRunInvocations": 0,
+  "newBoundProgramImports": 0,
+  "newProcessProbes": 0,
+  "slot2": "return after report"
+}

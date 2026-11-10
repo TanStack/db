@@ -1,0 +1,89 @@
+import { devBuild } from "../error-message";
+let devModeConfig = {
+  enabled: true,
+  collectionSizeThreshold: 1e3,
+  slowQueryThresholdMs: 10,
+  onSuggestion: null
+};
+const queryPatterns = /* @__PURE__ */ new Map();
+export function configureIndexDevMode(config) {
+  devModeConfig = { ...devModeConfig, ...config };
+}
+export function getIndexDevModeConfig() {
+  return devModeConfig;
+}
+export function isDevModeEnabled() {
+  return devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled;
+}
+export function emitIndexSuggestion(details) {
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled))
+    return;
+  const field = details.fieldPath.join(`.`);
+  const { type, collectionId, fieldPath, ...stats } = details;
+  const suggestion = {
+    type,
+    collectionId,
+    fieldPath,
+    message: type === `slow-query` ? `Queries on "${field}" are slow (avg ${(stats.queryTimeMs ?? 0).toFixed(1)}ms). Consider adding an index.` : `Collection has ${stats.collectionSize} items. Queries on "${field}" may benefit from an index.`,
+    ...stats
+  };
+  if (devModeConfig.onSuggestion) {
+    try {
+      devModeConfig.onSuggestion(suggestion);
+    } catch {
+    }
+  } else {
+    console.warn(
+      `[TanStack DB] Index suggestion for "${suggestion.collectionId}":
+  ${suggestion.message}
+  Field: ${suggestion.fieldPath.join(`.`)}
+  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`
+    );
+  }
+}
+export function trackQuery(collectionId, fieldPath, executionTimeMs) {
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled))
+    return;
+  const key = `${collectionId}:${fieldPath.join(`.`)}`;
+  const existing = queryPatterns.get(key);
+  if (existing) {
+    existing.queryCount++;
+    existing.totalTimeMs += executionTimeMs;
+    existing.avgTimeMs = existing.totalTimeMs / existing.queryCount;
+  } else {
+    queryPatterns.set(key, {
+      fieldPath,
+      queryCount: 1,
+      totalTimeMs: executionTimeMs,
+      avgTimeMs: executionTimeMs
+    });
+  }
+  const pattern = queryPatterns.get(key);
+  if (pattern.avgTimeMs > devModeConfig.slowQueryThresholdMs) {
+    emitIndexSuggestion({
+      type: `slow-query`,
+      collectionId,
+      fieldPath,
+      queryTimeMs: pattern.avgTimeMs,
+      queryCount: pattern.queryCount
+    });
+  }
+}
+export function checkCollectionSizeForIndex(collectionId, collectionSize, fieldPath) {
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled))
+    return;
+  if (collectionSize > devModeConfig.collectionSizeThreshold) {
+    emitIndexSuggestion({
+      type: `collection-size`,
+      collectionId,
+      fieldPath,
+      collectionSize
+    });
+  }
+}
+export function clearQueryPatterns() {
+  queryPatterns.clear();
+}
+export function getQueryPatterns() {
+  return new Map(queryPatterns);
+}

@@ -1,0 +1,160 @@
+{
+  "scope": "offline exact driver-source extraction; no product or native execution",
+  "sourcePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+  "sourceSha256": "9237bde4da2d85ba933d3eee1ad11929c747196c7d3d5580a3b2cd2bad08cc3c",
+  "beforePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/before/baseline-driver.ts.txt",
+  "beforeSha256": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+  "helperSourceHashesUnchanged": true,
+  "sourceSnippetHashes": [
+    "0d8b9877790786cba8875c1f9f646decc55cf2d73c7d2a504d98f3e8515ccea4",
+    "1d2a2d46415294bd5869b623b39f75a99a79b40dded98de97b31e1150532a595",
+    "0febad0c74a0518444e084aca0f467590fe5e8a174fc5ad8d72164202537e100",
+    "4ffdb71cf543517ed8f6d90fc412bb8250a3030a2ada3539e03745ed3d4fac7e",
+    "e67b5e02d81d7dbf936316311a78138b9b08e105ddf20e6fcbda3b2aa7182573"
+  ],
+  "accepted": 5,
+  "rejected": 18,
+  "cases": [
+    {
+      "name": "both exact pending original receipts",
+      "admitted": true,
+      "hostTurns": 0
+    },
+    {
+      "name": "both exact requests arrive on separate host turns",
+      "admitted": true,
+      "hostTurns": 2
+    },
+    {
+      "name": "missing failed request",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "missing peer request",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "wrong failed scope",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "wrong peer scope",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "answered request",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "cancelled original load",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "missing original load",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "before original receipt returned",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "literal true original receipt",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "already fulfilled original receipt",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "already rejected original receipt",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "recorded settlement without outcome",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "wrong original source",
+      "admitted": false,
+      "hostTurns": 0,
+      "rejection": "provider answer does not bind its original source acquisition"
+    },
+    {
+      "name": "wrong original query key",
+      "admitted": false,
+      "hostTurns": 0,
+      "rejection": "provider answer does not bind its original source acquisition"
+    },
+    {
+      "name": "original absent from acquisitions",
+      "admitted": false,
+      "hostTurns": 0,
+      "rejection": "source answer lost its initiating acquisition"
+    },
+    {
+      "name": "associated receipt already fulfilled",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "associated receipt already rejected",
+      "admitted": false,
+      "hostTurns": 4,
+      "rejection": "pending-premise"
+    },
+    {
+      "name": "associated original receipt aborted",
+      "admitted": false,
+      "hostTurns": 0,
+      "rejection": "source answer lacks a live original acquisition receipt"
+    },
+    {
+      "name": "later associated pending original receipt",
+      "admitted": true,
+      "hostTurns": 0
+    },
+    {
+      "name": "unrelated generation does not broaden acquisition binding",
+      "admitted": true,
+      "hostTurns": 0
+    },
+    {
+      "name": "other gate keeps immediate request-window cut",
+      "admitted": true,
+      "hostTurns": 0
+    }
+  ],
+  "preservedOriginalPrematureCutRejected": true,
+  "productImports": 0,
+  "fixtureConstructions": 0,
+  "testCollection": 0,
+  "productRED": false,
+  "productGREEN": false,
+  "receiving": 0,
+  "limit": "Synthetic records exercise the exact helper predicate and host-turn loop only. Native reach remains unrun and unsupported premises remain unreached."
+}

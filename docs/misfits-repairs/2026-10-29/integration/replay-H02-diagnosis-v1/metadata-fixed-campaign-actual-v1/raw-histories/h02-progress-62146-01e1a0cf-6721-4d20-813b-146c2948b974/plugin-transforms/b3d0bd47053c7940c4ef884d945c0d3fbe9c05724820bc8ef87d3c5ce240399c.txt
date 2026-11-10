@@ -1,0 +1,18 @@
+import { includesRuntime } from "../live/includes-runtime.js";
+import {
+  IncludeWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper
+} from "./functions.js";
+export function toArray(query) {
+  return new ToArrayWrapper(query, includesRuntime);
+}
+export function materialize(query) {
+  return new MaterializeWrapper(query, includesRuntime);
+}
+export function include(query) {
+  return new IncludeWrapper(
+    query,
+    includesRuntime
+  );
+}

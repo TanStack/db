@@ -1,0 +1,14 @@
+{
+  "gate": "lint-changed2",
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "scripts/agent-lint-feedback.mjs"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "slot": 2,
+  "workers": 1,
+  "exitCode": 0,
+  "elapsedSeconds": 12.405273250013124,
+  "at": "2026-10-30T08:51:28.329414+00:00",
+  "runtime": "static only; no receiving/testCollection/production imports"
+}

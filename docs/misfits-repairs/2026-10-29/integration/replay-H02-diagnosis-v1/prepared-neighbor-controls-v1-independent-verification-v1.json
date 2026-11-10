@@ -1,0 +1,72 @@
+{
+  "method": "Read-only Python parse/hash/diff and source inspection; report writing only. No project verifier, tests, builds, receiving worker, installation, live overlay application, process checks or production edits.",
+  "packet": {
+    "sha256": "b206eb8be463f293bd530977c039fdf830894aba157077f198d2f5bffd834b98",
+    "members": 31,
+    "bytes": 304852,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "v7Preparation": {
+    "sha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+    "members": 62,
+    "bytes": 707085,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "v7Result": {
+    "sha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+    "members": 1951,
+    "bytes": 43192185,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "protectedSourceMaps": {
+    "productionFiles": {
+      "entries": 511,
+      "mismatches": []
+    },
+    "instrumentFiles": {
+      "entries": 26,
+      "mismatches": []
+    },
+    "sharedInstrumentFiles": {
+      "entries": 11,
+      "mismatches": []
+    }
+  },
+  "sourceAnchors": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "beforeMatches": true,
+      "proposedMatches": true
+    },
+    {
+      "path": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "beforeMatches": true,
+      "proposedMatches": true
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "beforeMatches": true,
+      "proposedMatches": true
+    },
+    {
+      "path": "scripts/h02-progress/ownership-neighbor.config.ts",
+      "beforeMatches": true,
+      "proposedMatches": true
+    }
+  ],
+  "exactPatchMatchesSources": true,
+  "hashes": {
+    "neighbor-contracts-v1.md": "39f0eddf77f42240351cb521d9c21601d0be550c4933d228c714f9ea6e072e76",
+    "instrument-overlay-v1.patch": "59942b0a318523795654a3b0c218a3b6da3a72304b41445c6fab1f841c40d20f",
+    "finite-recipes-v1.json": "e00b320f78b3cfb1edebd42bec58ce39a23f47e66e0d9f95ba4bfc8b1c548305",
+    "declared-reaches-v1.json": "3e2d351a9657adfe4f1bdc2eca034d811cd8521ea1572750695e2358d203b374",
+    "source-changes-v1.json": "695907f1bd2e9089c3c91b2c855a4e0e36753ac119e06ef06700b9e0668412f7"
+  },
+  "scope": "SOURCE ONLY. All newly declared measured reaches remain zero; no execution/admission/production repair credit. Exact v2 corrected sources and concrete containment recipes need independent acceptance before runtime."
+}

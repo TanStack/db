@@ -1,0 +1,10 @@
+{
+  "kind": "Actual exec_command initial response; not child completion",
+  "response": {
+    "chunk_id": "e143cb",
+    "wall_time_seconds": 1.002757709,
+    "session_id": 35271,
+    "original_token_count": 0,
+    "output": ""
+  }
+}

@@ -1,0 +1,24 @@
+✔ selects only the original group and preserves child RSS (0.649292ms)
+✔ rejects invalid original groups and malformed matching rows (0.107292ms)
+✔ keeps exact 60-second and sampled RSS boundaries (0.052333ms)
+✔ admits only the exact finite frozen command (0.088583ms)
+✔ rejects broadened command and resource recipes (0.115709ms)
+✔ distinguishes normal assertion exits from operational failure (0.080667ms)
+✔ preserves operational failure: first wall trigger (0.038042ms)
+✔ preserves operational failure: late heap diagnostic after first wall trigger (0.031167ms)
+✔ preserves operational failure: RSS trigger (0.033083ms)
+✔ preserves operational failure: observation failure (0.059333ms)
+✔ preserves operational failure: identity mismatch (0.03225ms)
+✔ preserves operational failure: remaining group (0.026083ms)
+✔ preserves operational failure: leader exit with descendants even after cleanup (0.021083ms)
+✔ preserves operational failure: signal (0.017083ms)
+✔ preserves operational failure: missing exit (0.027958ms)
+✔ hashes exact bytes and verifies source, payload, locks, Node and reuse links (5.728375ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 64.468375

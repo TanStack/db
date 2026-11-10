@@ -1,0 +1,20 @@
+{
+  "capturedBy": "/root",
+  "capturedBeforeCloseout": true,
+  "initialToolReturn": {
+    "chunk_id": "e199be",
+    "wall_time_seconds": 1.003482791,
+    "session_id": 76991,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "actualCompletionToolReturn": {
+    "chunk_id": "714eb7",
+    "wall_time_seconds": 0.000017042,
+    "exit_code": 1,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "actualOuterExitCode": 1,
+  "classificationPending": true
+}

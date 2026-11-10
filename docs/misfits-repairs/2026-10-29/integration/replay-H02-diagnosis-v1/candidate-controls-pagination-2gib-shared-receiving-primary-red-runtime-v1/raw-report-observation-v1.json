@@ -1,0 +1,25 @@
+{
+  "scope": "Read-only raw JSON observation only; does not replace or repair the prepared report qualifier",
+  "rawReportSha256": "1fc0f3b2588d3a09cb0101f8995a3180bbecf6ba3be44a345780f49a98d65646",
+  "preparedExactBaseTitleMatches": 0,
+  "preparedAncestorAndSeedSuffixedMatches": 1,
+  "nonSkippedExecutedAssertionCount": 1,
+  "executedAssertions": [
+    {
+      "moduleName": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts",
+      "title": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+      "fullName": "pagination recomputation oracle joined window failure for a fixed seed retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+      "ancestorTitles": [
+        "pagination recomputation oracle",
+        "joined window failure for a fixed seed"
+      ],
+      "status": "failed",
+      "failureMessages": [
+        "Error: Property failed after 1 tests\n{ seed: 1665, path: \"0:0:0:0:0\", endOnFailure: true }\nCounterexample: [{\"rankOffset\":0,\"rankStep\":1,\"direction\":\"asc\",\"initialLimit\":1,\"pivotMarked\":false,\"tailCount\":2,\"tailMarked\":false}]\nShrunk 4 time(s)\nGot error: atomic window publication at primary callback: expected rows [{\"id\":1,\"rank\":0,\"children\":[101,102]}], got [{\"id\":1,\"rank\":0,\"children\":[101,102]},{\"id\":2,\"rank\":1,\"children\":[]}]\n    at checkRetainedWindowSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-window-publication-oracle.ts:98:11)\n    at checkRetained (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts:2600:7)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts:2719:9\n    at withHistoryCleanup (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/optimistic-history-oracle.ts:622:14)\n    at runJoinedWindowFailureFamily (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts:2777:5)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts:5590:13\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n\nHint: Enable verbose mode in order to have the list of all failing values encountered during the run\n    at buildError (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)\n    at asyncThrowIfFailed (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)"
+      ]
+    }
+  ],
+  "reportSuccess": false,
+  "productVerdict": "UNCLASSIFIED; independent review required",
+  "wrapperQualifierPreservedUnchanged": true
+}

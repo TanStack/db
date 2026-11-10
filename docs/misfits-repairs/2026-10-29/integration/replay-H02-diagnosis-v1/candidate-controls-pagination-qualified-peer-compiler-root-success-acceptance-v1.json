@@ -1,0 +1,27 @@
+{
+  "kind": "Root acceptance of successful strict compiler-only gate",
+  "actualApi": {
+    "initial": "a64e48",
+    "session": 78242,
+    "final": "af83ec",
+    "outerExitCode": 0
+  },
+  "child": {
+    "pid": 30153,
+    "originalPgid": 30153,
+    "exitCode": 0,
+    "finalOwnedRows": [],
+    "trigger": [],
+    "stopErrors": []
+  },
+  "independentReviewSha256": "14f67a518a832cfdafcac8d1bcfacef0bfa82eca2675c771cb42ca56344505fa",
+  "independentFreezeSha256": "922a5489be7b637371269c36e84d0c7afa097b636ec31bff696f39a85f179669",
+  "checks": 54397,
+  "listedInputCount": 653,
+  "staticFiniteInputCount": 12586,
+  "disposition": "Accept strict compiler gate only; all resolved records and raw paths bound before/after, no diagnostics or stderr, copied834 entries unchanged.",
+  "priorFailedGate": "Preserved and remains failed; this is a fresh invocation with the fixed named supplement.",
+  "next": "Prepare/read exact first failure receiving recipe; no native receiving run is admitted by this artifact.",
+  "productRedGreen": false,
+  "canonicalImport": false
+}

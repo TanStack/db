@@ -1,0 +1,91 @@
+
+<--- Last few GCs --->
+
+[75057:0x91340c000]     5308 ms: Scavenge (interleaved) 378.6 (385.4) -> 377.0 (385.4) MB, pooled: 0 MB, 0.62 / 0.00 ms  (average mu = 0.294, current mu = 0.260) allocation failure; 
+[75057:0x91340c000]     5360 ms: Mark-Compact (reduce) 379.4 (386.1) -> 375.2 (382.6) MB, pooled: 0 MB, 50.17 / 0.00 ms  (+ 0.0 ms in 21 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 52 ms) (average mu = 0.264, current
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x1028119f4 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Users/kyle.mathews/.n/bin/node]
+ 2: 0x102a8c000 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Users/kyle.mathews/.n/bin/node]
+ 3: 0x102ceb4b4 v8::internal::Heap::stack() [/Users/kyle.mathews/.n/bin/node]
+ 4: 0x102cee888 v8::internal::Heap::HasLowYoungGenerationAllocationRate() [/Users/kyle.mathews/.n/bin/node]
+ 5: 0x102cffa7c v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/Users/kyle.mathews/.n/bin/node]
+ 6: 0x102cff350 void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/Users/kyle.mathews/.n/bin/node]
+ 7: 0x1036b3be0 PushAllRegistersAndIterateStack [/Users/kyle.mathews/.n/bin/node]
+ 8: 0x102ce91b8 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/Users/kyle.mathews/.n/bin/node]
+ 9: 0x102cddec4 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/Users/kyle.mathews/.n/bin/node]
+10: 0x102ca952c v8::internal::FactoryBase<v8::internal::Factory>::NewFixedArray(int, v8::internal::AllocationType) [/Users/kyle.mathews/.n/bin/node]
+11: 0x102ea30a8 v8::internal::(anonymous namespace)::ElementsAccessorBase<v8::internal::(anonymous namespace)::FastPackedObjectElementsAccessor, v8::internal::(anonymous namespace)::ElementsKindTraits<(v8::internal::ElementsKind)2>>::ConvertElementsWithCapacity(v8::internal::DirectHandle<v8::internal::JSObject>, v8::internal::DirectHandle<v8::internal::FixedArrayBase>, v8::internal::ElementsKind, unsigned int, unsigned int, unsigned int) [/Users/kyle.mathews/.n/bin/node]
+12: 0x102ea32c0 v8::internal::(anonymous namespace)::FastElementsAccessor<v8::internal::(anonymous namespace)::FastPackedObjectElementsAccessor, v8::internal::(anonymous namespace)::ElementsKindTraits<(v8::internal::ElementsKind)2>>::AddArguments(v8::internal::DirectHandle<v8::internal::JSArray>, v8::internal::DirectHandle<v8::internal::FixedArrayBase>, v8::internal::BuiltinArguments*, unsigned int, v8::internal::(anonymous namespace)::Where) [/Users/kyle.mathews/.n/bin/node]
+13: 0x102ae74d0 v8::internal::Builtin_ArrayUnshift(int, unsigned long*, v8::internal::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+14: 0x1037a6154 Builtins_CEntry_Return1_ArgvOnStack_BuiltinExit [/Users/kyle.mathews/.n/bin/node]
+15: 0x126aa3958 
+16: 0x126a94590 
+17: 0x126693afc 
+18: 0x12696b3b8 
+19: 0x12681cd84 
+20: 0x126a91374 
+21: 0x126abe7cc 
+22: 0x126807a64 
+23: 0x126a9eeb8 
+24: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+25: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+26: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+27: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+28: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+29: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+30: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+31: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+32: 0x1266bee64 
+33: 0x10378a05c Builtins_SetPrototypeForEach [/Users/kyle.mathews/.n/bin/node]
+34: 0x1266a1964 
+35: 0x1267995b8 
+36: 0x1266a1c44 
+37: 0x1266a215c 
+38: 0x1267d594c 
+39: 0x1267d5a6c 
+40: 0x1037c1e70 Builtins_ArrayForEach [/Users/kyle.mathews/.n/bin/node]
+41: 0x1266bf874 
+42: 0x1267995b8 
+43: 0x1266bfba4 
+44: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+45: 0x103708bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+46: 0x1037477e8 Builtins_AsyncFunctionAwaitResolveClosure [/Users/kyle.mathews/.n/bin/node]
+47: 0x10381ce58 Builtins_PromiseFulfillReactionJob [/Users/kyle.mathews/.n/bin/node]
+48: 0x103736bd0 Builtins_RunMicrotasks [/Users/kyle.mathews/.n/bin/node]
+49: 0x1037067b0 Builtins_JSRunMicrotasksEntry [/Users/kyle.mathews/.n/bin/node]
+50: 0x102c2f690 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/kyle.mathews/.n/bin/node]
+51: 0x102c2ff04 v8::internal::(anonymous namespace)::InvokeWithTryCatch(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/kyle.mathews/.n/bin/node]
+52: 0x102c30040 v8::internal::Execution::TryRunMicrotasks(v8::internal::Isolate*, v8::internal::MicrotaskQueue*) [/Users/kyle.mathews/.n/bin/node]
+53: 0x102c5ede4 v8::internal::MicrotaskQueue::RunMicrotasks(v8::internal::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+54: 0x102c5f744 v8::internal::MicrotaskQueue::PerformCheckpoint(v8::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+55: 0x1026ef0b8 node::InternalCallbackScope::Close() [/Users/kyle.mathews/.n/bin/node]
+56: 0x1026eea90 node::InternalCallbackScope::~InternalCallbackScope() [/Users/kyle.mathews/.n/bin/node]
+57: 0x10278a2b0 node::Environment::RunTimers(uv_timer_s*) [/Users/kyle.mathews/.n/bin/node]
+58: 0x1036e06d0 uv__run_timers [/Users/kyle.mathews/.n/bin/node]
+59: 0x1036e3fd8 uv_run [/Users/kyle.mathews/.n/bin/node]
+60: 0x1026f06a8 node::SpinEventLoopInternal(node::Environment*) [/Users/kyle.mathews/.n/bin/node]
+61: 0x10286c7d8 node::NodeMainInstance::Run() [/Users/kyle.mathews/.n/bin/node]
+62: 0x1027be7e0 node::Start(int, char**) [/Users/kyle.mathews/.n/bin/node]
+63: 0x18fdd44e4 start [/usr/lib/dyld]
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Worker forks emitted error.
+ ❯ EventEmitter.onTaskError ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3526:21
+ ❯ EventEmitter.emit node:events:509:28
+ ❯ ChildProcess.emitUnexpectedExit ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3092:22
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+Caused by: Error: Worker exited unexpectedly
+ ❯ ChildProcess.emitUnexpectedExit ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3090:33
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+

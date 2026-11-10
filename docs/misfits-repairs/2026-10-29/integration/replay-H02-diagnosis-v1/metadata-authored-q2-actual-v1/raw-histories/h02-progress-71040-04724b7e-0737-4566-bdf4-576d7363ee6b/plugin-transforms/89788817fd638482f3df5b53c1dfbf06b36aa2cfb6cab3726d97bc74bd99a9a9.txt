@@ -1,0 +1,6 @@
+import { materializeCompilation } from "./materialized-pipeline.js";
+import { BucketFacadeAdapter } from "./bucket-facade-adapter.js";
+export const includesRuntime = {
+  materializeCompilation,
+  createBucketFacades: (...args) => new BucketFacadeAdapter(...args)
+};

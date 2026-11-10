@@ -1,0 +1,12 @@
+{
+  "actualRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "module": {
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+    "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+    "url": "/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+    "evaluated": true
+  },
+  "originalSha256": "a1a2762148b16db893bb0793796fbea0c55da58d1a045324de9bb625ef770446",
+  "codeSha256": "874713e96ef5bc13c1964d614cbc6cbaaa7adf8a2d5344a931b9d6703d41184c",
+  "limits": "pure root guard only; no receiveProgressHistory or receiving process invoked"
+}

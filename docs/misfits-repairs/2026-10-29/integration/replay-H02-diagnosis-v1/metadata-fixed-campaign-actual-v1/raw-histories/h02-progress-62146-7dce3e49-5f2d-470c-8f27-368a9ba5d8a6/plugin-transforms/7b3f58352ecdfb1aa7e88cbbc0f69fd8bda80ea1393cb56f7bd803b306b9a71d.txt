@@ -1,0 +1,138 @@
+import { codedMessage, devBuild } from "./error-message";
+export class Scheduler {
+  constructor() {
+    this.contexts = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Get or create the state bucket for a context.
+   */
+  getOrCreateContext(contextId) {
+    let context = this.contexts.get(contextId);
+    if (!context) {
+      context = {
+        queue: [],
+        jobs: /* @__PURE__ */ new Map(),
+        dependencies: /* @__PURE__ */ new Map()
+      };
+      this.contexts.set(contextId, context);
+    }
+    return context;
+  }
+  /**
+   * Schedule work. Without a context id, executes immediately.
+   * Otherwise queues the job to be flushed once dependencies are satisfied.
+   * Scheduling the same jobId again replaces the previous run function.
+   */
+  schedule({ contextId, jobId, dependencies, run }) {
+    if (typeof contextId === `undefined`) {
+      run();
+      return;
+    }
+    const context = this.getOrCreateContext(contextId);
+    if (!context.jobs.has(jobId)) {
+      context.queue.push(jobId);
+    }
+    context.jobs.set(jobId, run);
+    if (dependencies) {
+      const depSet = new Set(dependencies);
+      depSet.delete(jobId);
+      context.dependencies.set(jobId, depSet);
+    } else if (!context.dependencies.has(jobId)) {
+      context.dependencies.set(jobId, /* @__PURE__ */ new Set());
+    }
+  }
+  /**
+   * Flush all queued work for a context. Jobs with unmet dependencies are retried.
+   * Throws if a pass completes without running any job (dependency cycle).
+   */
+  flush(contextId) {
+    const context = this.contexts.get(contextId);
+    if (!context) return;
+    const { queue, jobs, dependencies } = context;
+    while (queue.length > 0) {
+      let ranThisPass = false;
+      const jobsThisPass = queue.length;
+      for (let i = 0; i < jobsThisPass; i++) {
+        const jobId = queue.shift();
+        const run = jobs.get(jobId);
+        if (!run) {
+          dependencies.delete(jobId);
+          continue;
+        }
+        const deps = dependencies.get(jobId);
+        let ready = !deps;
+        if (deps) {
+          ready = true;
+          for (const dep of deps) {
+            if (dep === jobId) continue;
+            if (jobs.has(dep)) {
+              ready = false;
+              break;
+            }
+          }
+        }
+        if (ready) {
+          jobs.delete(jobId);
+          dependencies.delete(jobId);
+          run();
+          ranThisPass = true;
+        } else {
+          queue.push(jobId);
+        }
+      }
+      if (!ranThisPass) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Scheduler detected unresolved dependencies for context ${String(
+            contextId
+          )}.` : codedMessage(161, { contextId })
+        );
+      }
+    }
+    this.contexts.delete(contextId);
+  }
+  /** Clear all scheduled jobs for a context. */
+  clear(contextId) {
+    this.contexts.delete(contextId);
+  }
+}
+export const transactionScopedScheduler = new Scheduler();
+let activePublicationContext;
+let activePublicationFailure;
+function getActivePublicationFailure() {
+  return activePublicationFailure;
+}
+export function getActivePublicationContext() {
+  return activePublicationContext;
+}
+export function recordPublicationError(error) {
+  if (activePublicationContext === void 0) throw error;
+  activePublicationFailure ??= { error };
+}
+export function withPublicationContext(publish) {
+  if (activePublicationContext !== void 0) return publish();
+  const contextId = /* @__PURE__ */ Symbol(`collection-publication`);
+  activePublicationContext = contextId;
+  activePublicationFailure = void 0;
+  let result;
+  let listenerFailure;
+  try {
+    result = publish();
+    transactionScopedScheduler.flush(contextId);
+    listenerFailure = getActivePublicationFailure();
+  } catch (error) {
+    try {
+      transactionScopedScheduler.clear(contextId);
+    } catch {
+    }
+    const publicationFailure = getActivePublicationFailure();
+    if (publicationFailure) {
+      throw publicationFailure.error;
+    }
+    throw error;
+  } finally {
+    activePublicationContext = void 0;
+    activePublicationFailure = void 0;
+  }
+  if (listenerFailure) throw listenerFailure.error;
+  return result;
+}

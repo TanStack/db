@@ -1,0 +1,28 @@
+{
+  "recordedBy": "/root/evaluate_metadata_external",
+  "status": "ACTUAL FINAL TOOL COMPLETION; fresh outer exit independently preserved",
+  "actualOuterExitCode": 0,
+  "initialToolReturn": {
+    "chunk_id": "f7d70a",
+    "wall_time_seconds": 1.001133667,
+    "session_id": 48331,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "completionToolReturn": {
+    "chunk_id": "8c1ee9",
+    "wall_time_seconds": 0.000009583,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "outerPid": 97300,
+  "outerPgid": 97300,
+  "originalChildPid": 97310,
+  "originalChildPgid": 97310,
+  "rootAdmissionSha256": "60f68a02314a105f317a35f750997bc200ca56cd316a474bfe08a96ee91fc4ea",
+  "nativeInvocationsThisAdmission": 1,
+  "retry": false,
+  "selectorAdmitted": false,
+  "receivingAdmitted": false
+}

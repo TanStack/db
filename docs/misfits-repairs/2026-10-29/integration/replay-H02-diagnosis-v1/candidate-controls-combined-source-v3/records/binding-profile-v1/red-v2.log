@@ -1,0 +1,1000 @@
+{"calibration":"accepts exact approved production and instrument bindings","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"retains unevaluated optional instrument without execution credit","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"accepts required module evaluated at a later inventory cut","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects outside-root production","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /authored-outside/packages/db/src/index.ts","outside/stale or unapproved package module: /authored-outside/packages/db/src/index.ts","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects stale dist substitution","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-Zc8oik/authored-source/packages/db/dist/index.js","outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-Zc8oik/authored-source/packages/db/dist/index.js","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects an unapproved package helper","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-4RE8UJ/authored-source/packages/db/tests/unapproved-helper.ts","outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-4RE8UJ/authored-source/packages/db/tests/unapproved-helper.ts"]}
+{"calibration":"rejects changed frozen original bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["changed frozen source: packages/db/src/index.ts"]}
+{"calibration":"rejects wrong actual original-byte metadata","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong actual original bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","wrong actual original bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects changed retained loader bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects V8 bytes without exact loader body","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects a required path that never evaluated","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects transform-only evidence without actual registry bindings","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving source missing: packages/db/src/index.ts","required evaluated receiving source missing: packages/db-ivm/src/index.ts","required evaluated receiving source missing: packages/query-db-collection/src/query.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/reference-expression-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/source-binding.setup.ts","required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs","required evaluated receiving instrument missing: scripts/h02-progress/startup-inspector.mjs","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"does not interpret stdout or stderr as raw receipts","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects raw receipt sequence gaps","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: invalid receipt envelope or sequence after 1","actual empty-options key callback missing","no actual key observations","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects truncated raw receipt tails","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: truncated final receipt: 299 bytes","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects a writer fault beside a complete raw prefix","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: receipt writer fault: {\"message\":\"authored fault\"}"]}
+{"calibration":"requires actual evaluation of the new receipt transport module","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs"]}
+{"calibration":"requires the startup source seal","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal missing or unreadable: Error: ENOENT: no such file or directory, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-MtxjyK/authored-run/binding-seal.json'","receiving module lacks sealed startup binding: packages/db/src/index.ts","receiving module lacks sealed startup binding: packages/db-ivm/src/index.ts","receiving module lacks sealed startup binding: packages/query-db-collection/src/query.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-driver.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/query/load-subset-retained-publication-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/reference-expression-oracle.ts","receiving module lacks sealed startup binding: scripts/h02-progress/source-binding.setup.ts","receiving module lacks sealed startup binding: scripts/h02-progress/receipt-transport.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/startup-inspector.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts","receiving module lacks sealed startup binding: packages/db/src/index.ts","receiving module lacks sealed startup binding: packages/db-ivm/src/index.ts","receiving module lacks sealed startup binding: packages/query-db-collection/src/query.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-driver.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/query/load-subset-retained-publication-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/reference-expression-oracle.ts","receiving module lacks sealed startup binding: scripts/h02-progress/source-binding.setup.ts","receiving module lacks sealed startup binding: scripts/h02-progress/receipt-transport.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/startup-inspector.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts"]}
+{"calibration":"rejects a false inspector disconnection claim","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"requires the skip-all-pauses acknowledgement","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"requires exact pre-history registry bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"rejects a module absent from the sealed source binding","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects an otherwise bound module first observed after startup sealing","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts"]}
+{"calibration":"rejects corrupted completion original metadata","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["actual evaluated-module startup inventory missing","wrong actual original bytes: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects corrupted completion transformed bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["actual evaluated-module startup inventory missing","wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects completion V8 body without exact transformed source","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["actual evaluated-module startup inventory missing","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects completion module absent from sealed bindings","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["actual evaluated-module startup inventory missing","receiving module lacks sealed startup binding: packages/db/src/index.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects completion module first seen after startup seal","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["actual evaluated-module startup inventory missing","receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+✔ accepts exact approved production and instrument bindings (154.961041ms)
+✔ retains unevaluated optional instrument without execution credit (159.791667ms)
+✔ accepts required module evaluated at a later inventory cut (169.442417ms)
+✔ rejects outside-root production (168.492208ms)
+✔ rejects stale dist substitution (167.052208ms)
+✔ rejects an unapproved package helper (162.163417ms)
+✔ rejects changed frozen original bytes (165.046583ms)
+✔ rejects wrong actual original-byte metadata (166.501125ms)
+✔ rejects changed retained loader bytes (163.3025ms)
+✔ rejects V8 bytes without exact loader body (169.860125ms)
+✔ rejects a required path that never evaluated (166.848666ms)
+✔ rejects transform-only evidence without actual registry bindings (161.290084ms)
+✔ does not interpret stdout or stderr as raw receipts (154.683542ms)
+✔ rejects raw receipt sequence gaps (159.87875ms)
+✔ rejects truncated raw receipt tails (164.979042ms)
+✔ rejects a writer fault beside a complete raw prefix (170.536458ms)
+✔ requires actual evaluation of the new receipt transport module (165.7395ms)
+✔ requires the startup source seal (160.062542ms)
+✔ rejects a false inspector disconnection claim (161.976417ms)
+✔ requires the skip-all-pauses acknowledgement (195.3135ms)
+✔ requires exact pre-history registry bytes (161.085958ms)
+✔ rejects a module absent from the sealed source binding (164.733792ms)
+✔ rejects an otherwise bound module first observed after startup sealing (153.801791ms)
+✖ accepts exact sealed completion startup closure (169.227584ms)
+✖ rejects completion startup without packages/db/src/index.ts (157.849583ms)
+✖ rejects completion startup unevaluated packages/db/src/index.ts despite later evaluation (156.158458ms)
+✖ rejects completion startup without packages/db-ivm/src/index.ts (167.10225ms)
+✖ rejects completion startup unevaluated packages/db-ivm/src/index.ts despite later evaluation (175.8095ms)
+✖ rejects completion startup without packages/query-db-collection/src/query.ts (165.758833ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/src/query.ts despite later evaluation (173.852833ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts (169.24075ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts despite later evaluation (171.219542ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-driver.ts (169.49075ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-driver.ts despite later evaluation (176.267375ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts (170.833ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts despite later evaluation (157.736042ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-attachments.ts (185.843917ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-attachments.ts despite later evaluation (153.029709ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-fixture.ts (156.233916ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-fixture.ts despite later evaluation (172.091ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts (171.072041ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts despite later evaluation (172.333458ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts (170.80975ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts despite later evaluation (178.384792ms)
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-oracle.ts (170.794333ms)
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-oracle.ts despite later evaluation (174.736458ms)
+✖ rejects completion startup without scripts/h02-progress/candidate-controls.ts (167.218541ms)
+✖ rejects completion startup unevaluated scripts/h02-progress/candidate-controls.ts despite later evaluation (173.010333ms)
+✖ rejects completion startup without packages/db/tests/oracle-reach.ts (169.638666ms)
+✖ rejects completion startup unevaluated packages/db/tests/oracle-reach.ts despite later evaluation (173.060417ms)
+✖ rejects completion startup without packages/db/tests/oracle-config.ts (168.821042ms)
+✖ rejects completion startup unevaluated packages/db/tests/oracle-config.ts despite later evaluation (171.119042ms)
+✖ rejects completion startup without packages/db/tests/oracle-replay-witness.ts (153.759125ms)
+✖ rejects completion startup unevaluated packages/db/tests/oracle-replay-witness.ts despite later evaluation (160.716083ms)
+✖ rejects completion startup without packages/db/tests/oracle-declaration.ts (165.495375ms)
+✖ rejects completion startup unevaluated packages/db/tests/oracle-declaration.ts despite later evaluation (171.453667ms)
+✖ rejects completion startup without packages/db/tests/reference-expression-oracle.ts (167.043084ms)
+✖ rejects completion startup unevaluated packages/db/tests/reference-expression-oracle.ts despite later evaluation (176.534916ms)
+✖ rejects completion startup without scripts/h02-progress/source-binding.setup.ts (169.256125ms)
+✖ rejects completion startup unevaluated scripts/h02-progress/source-binding.setup.ts despite later evaluation (171.099708ms)
+✖ rejects completion startup without scripts/h02-progress/receipt-transport.mjs (168.989833ms)
+✖ rejects completion startup unevaluated scripts/h02-progress/receipt-transport.mjs despite later evaluation (172.007375ms)
+✖ rejects completion startup without scripts/h02-progress/startup-inspector.mjs (166.866375ms)
+✖ rejects completion startup unevaluated scripts/h02-progress/startup-inspector.mjs despite later evaluation (173.624583ms)
+✖ rejects an unknown explicit binding profile (168.5185ms)
+✖ rejects completion evidence selected as progress (159.7095ms)
+✖ rejects progress evidence selected as completion (144.8315ms)
+✖ rejects completion candidate mode without admitted implementation (57.703458ms)
+✖ rejects absent completion worker-start identity (57.3685ms)
+✖ rejects duplicate completion worker-start identities (59.407375ms)
+✖ requires the actual completion pre-history inventory (159.703708ms)
+✔ rejects corrupted completion original metadata (170.05625ms)
+✔ rejects corrupted completion transformed bytes (175.210333ms)
+✔ rejects completion V8 body without exact transformed source (191.747583ms)
+✔ rejects completion module absent from sealed bindings (175.209667ms)
+✔ rejects completion module first seen after startup seal (154.367834ms)
+ℹ tests 76
+ℹ suites 0
+ℹ pass 28
+ℹ fail 48
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12452.887917
+
+✖ failing tests:
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ accepts exact sealed completion startup closure (169.227584ms)
+  AssertionError [ERR_ASSERTION]: file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306
+  if (failures.length) throw new Error(failures.join(`\n`))
+                             ^
+  
+  Error: actual evaluated-module startup inventory missing
+  required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
+  required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts
+  required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+  required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts
+  required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts
+      at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306:28
+      at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+      at async node:internal/modules/esm/loader:643:26
+      at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+  
+  Node.js v24.19.0
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:206:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/src/index.ts (157.849583ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving source missing: packages/db/src/index.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/src/index.ts despite later evaluation (156.158458ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db-ivm/src/index.ts (167.10225ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving source missing: packages/db-ivm/src/index.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db-ivm/src/index.ts despite later evaluation (175.8095ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/src/query.ts (165.758833ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving source missing: packages/query-db-collection/src/query.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/src/query.ts despite later evaluation (173.852833ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts (169.24075ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts despite later evaluation (171.219542ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-driver.ts (169.49075ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-driver.ts despite later evaluation (176.267375ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts (170.833ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts despite later evaluation (157.736042ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-attachments.ts (185.843917ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-attachments.ts despite later evaluation (153.029709ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-fixture.ts (156.233916ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-fixture.ts despite later evaluation (172.091ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts (171.072041ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts despite later evaluation (172.333458ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts (170.80975ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts despite later evaluation (178.384792ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/query-db-collection/tests/queued-answer-completion-oracle.ts (170.794333ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/query-db-collection/tests/queued-answer-completion-oracle.ts despite later evaluation (174.736458ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without scripts/h02-progress/candidate-controls.ts (167.218541ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated scripts/h02-progress/candidate-controls.ts despite later evaluation (173.010333ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/tests/oracle-reach.ts (169.638666ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/tests/oracle-reach.ts despite later evaluation (173.060417ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/tests/oracle-config.ts (168.821042ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/tests/oracle-config.ts despite later evaluation (171.119042ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/tests/oracle-replay-witness.ts (153.759125ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/tests/oracle-replay-witness.ts despite later evaluation (160.716083ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/tests/oracle-declaration.ts (165.495375ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/tests/oracle-declaration.ts despite later evaluation (171.453667ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without packages/db/tests/reference-expression-oracle.ts (167.043084ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/reference-expression-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated packages/db/tests/reference-expression-oracle.ts despite later evaluation (176.534916ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without scripts/h02-progress/source-binding.setup.ts (169.256125ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/source-binding.setup.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated scripts/h02-progress/source-binding.setup.ts despite later evaluation (171.099708ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without scripts/h02-progress/receipt-transport.mjs (168.989833ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated scripts/h02-progress/receipt-transport.mjs despite later evaluation (172.007375ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup without scripts/h02-progress/startup-inspector.mjs (166.866375ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/startup-inspector.mjs","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion startup unevaluated scripts/h02-progress/startup-inspector.mjs despite later evaluation (173.624583ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects an unknown explicit binding profile (168.5185ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion evidence selected as progress (159.7095ms)
+  AssertionError [ERR_ASSERTION]: ["required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects progress evidence selected as completion (144.8315ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects completion candidate mode without admitted implementation (57.703458ms)
+  Error: EEXIST: file already exists, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-qsLj5X/authored-run/receipts.jsonl.writer.json'
+      at Object.openSync (node:fs:622:18)
+      at writeFileSync (node:fs:2497:35)
+      at createReceiptWriter (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:68:5)
+      at replaceStart (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:495:18)
+      at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:501:14
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:203:21)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'open',
+    path: '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-qsLj5X/authored-run/receipts.jsonl.writer.json'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects absent completion worker-start identity (57.3685ms)
+  Error: EEXIST: file already exists, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-3xM2pc/authored-run/receipts.jsonl.writer.json'
+      at Object.openSync (node:fs:622:18)
+      at writeFileSync (node:fs:2497:35)
+      at createReceiptWriter (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:68:5)
+      at replaceStart (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:495:18)
+      at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:506:14
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:203:21)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'open',
+    path: '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-3xM2pc/authored-run/receipts.jsonl.writer.json'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ rejects duplicate completion worker-start identities (59.407375ms)
+  Error: EEXIST: file already exists, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-AtPZ67/authored-run/receipts.jsonl.writer.json'
+      at Object.openSync (node:fs:622:18)
+      at writeFileSync (node:fs:2497:35)
+      at createReceiptWriter (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:68:5)
+      at replaceStart (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:495:18)
+      at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:511:14
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:203:21)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'open',
+    path: '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-AtPZ67/authored-run/receipts.jsonl.writer.json'
+  }
+
+test at scripts/h02-progress/bindings-calibration.test.mjs:200:3
+✖ requires the actual completion pre-history inventory (159.703708ms)
+  AssertionError [ERR_ASSERTION]: ["actual evaluated-module startup inventory missing","startup source seal missing or unreadable: Error: ENOENT: no such file or directory, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-ZpW2vo/authored-run/evaluated-pre-history.json'","required evaluated receiving source missing: packages/db/src/index.ts","required evaluated receiving source missing: packages/db-ivm/src/index.ts","required evaluated receiving source missing: packages/query-db-collection/src/query.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/reference-expression-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/source-binding.setup.ts","required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs","required evaluated receiving instrument missing: scripts/h02-progress/startup-inspector.mjs","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]
+      at TestContext.<anonymous> (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/bindings-calibration.test.mjs:211:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

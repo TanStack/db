@@ -1,0 +1,49 @@
+{
+  "status": "PROPOSED ONLY; requires root static-review acceptance and separate runtime admission",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v1/source-freeze-v1.json",
+  "sourceFreezeSha256": "9be9bc3846ebdcf3bfb2b5c82b0bc6a5eaaaa4601d6f230d82a098c263b71781",
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+    "-t",
+    "replays the finite five-root queued-answer history"
+  ],
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v1/source-freeze-v1.json"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT"
+  ],
+  "receivingLimits": {
+    "nodeHeapMiB": 384,
+    "sampledGroupRssBytes": 1073741824,
+    "wallMs": 20000
+  },
+  "postRunVerifier": {
+    "timeoutMs": 20000,
+    "nodeHeapMiB": 384,
+    "phase": "only after receiving group exits; separate provenance gate"
+  },
+  "futureCampaigns": {
+    "blockedUntilRootPropertyRegistration": "query.queued-answer-progress",
+    "fixedSeed": 20261029,
+    "baseFamiliesPerCampaign": 8,
+    "scaling": "oracleRuns / oraclePropertyOptions",
+    "sameFamilyDriverAndComparison": true
+  },
+  "afterRun": "Root performs independent process-group check; no production edit is authorized by this recipe."
+}

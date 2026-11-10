@@ -1,0 +1,13 @@
+{"event": "compiler-preflight", "command": {"executable": "/Users/kyle.mathews/.n/bin/node", "args": ["/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js", "--project", "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json", "--noEmit", "--incremental", "false", "--pretty", "false", "--listFiles"], "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code"}, "wrapperPid": 16710, "limits": {"compilerWallMs": 45000, "groupRssBytes": 2147483648, "samplingMs": 100, "psInvocationTimeoutMs": 1000, "cleanupMs": 2000}}
+{"event": "owned-resource", "elapsedMs": 49.22275000717491, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 32768, "raw": "16757 16757     32"}]}
+{"event": "owned-resource", "elapsedMs": 194.6026660152711, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 67534848, "raw": "16757 16757  65952"}]}
+{"event": "owned-resource", "elapsedMs": 350.14350002165884, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 188268544, "raw": "16757 16757 183856"}]}
+{"event": "owned-resource", "elapsedMs": 505.3042500221636, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 331268096, "raw": "16757 16757 323504"}]}
+{"event": "owned-resource", "elapsedMs": 671.717041026568, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 395575296, "raw": "16757 16757 386304"}]}
+{"event": "owned-resource", "elapsedMs": 837.1402080229018, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 477560832, "raw": "16757 16757 466368"}]}
+{"event": "owned-resource", "elapsedMs": 1003.1237500079442, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 522321920, "raw": "16757 16757 510080"}]}
+{"event": "owned-resource", "elapsedMs": 1163.5226250218693, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 545226752, "raw": "16757 16757 532448"}]}
+{"event": "owned-resource", "elapsedMs": 1329.087291000178, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 579551232, "raw": "16757 16757 565968"}]}
+{"event": "owned-resource", "elapsedMs": 1493.0132500012405, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 605634560, "raw": "16757 16757 591440"}]}
+{"event": "owned-resource", "elapsedMs": 1648.7542079994455, "rows": [{"pid": 16757, "pgid": 16757, "rssBytes": 635568128, "raw": "16757 16757 620672"}]}
+{"event": "compiler-operational-failure", "compilerCode": 0, "nativeAuthority": false}

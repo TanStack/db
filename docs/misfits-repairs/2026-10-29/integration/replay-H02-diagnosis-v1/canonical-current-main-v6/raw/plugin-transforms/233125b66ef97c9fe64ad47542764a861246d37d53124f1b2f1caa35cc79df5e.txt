@@ -1,0 +1,606 @@
+import {
+  LiveQueryWindowControllerDisposedError,
+  SetWindowRequiresOrderByError
+} from "./errors.js";
+import {
+  isCollection,
+  isSingleResultCollection
+} from "./live-query-primitives.js";
+import { createLiveQueryObserver } from "./live-query-observer.js";
+import { BaseQueryBuilder } from "./query/builder/index.js";
+import { deepEquals } from "./utils.js";
+import { codedMessage, devBuild } from "./error-message.js";
+const DEFAULT_PAGE_SIZE = 20;
+export function getLiveQueryWindowInputKind(input) {
+  if (isCollection(input)) return `collection`;
+  if (typeof input === `function`) return `query`;
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}` : codedMessage(103, { type: typeof input })
+  );
+}
+export function resolveLiveQueryWindowInput(input) {
+  if (getLiveQueryWindowInputKind(input) === `collection`) {
+    return {
+      kind: `collection`,
+      collection: input
+    };
+  }
+  const value = input(new BaseQueryBuilder());
+  if (isCollection(value)) {
+    return { kind: `collection`, collection: value };
+  }
+  if (typeof value !== `object` || value === null || typeof value.limit !== `function` || typeof value.offset !== `function`) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Query function must return a query builder. Disabled null or undefined queries are not supported.` : codedMessage(104)
+    );
+  }
+  return { kind: `query`, query: value };
+}
+export function liveQueryWindowMatches(collection, requiredLimit) {
+  const window = collection.utils?.getWindow?.();
+  return window !== void 0 && window.offset === 0 && (window.limit === requiredLimit || window.limit === Infinity);
+}
+export function normalizeLiveQueryWindowPageSize(pageSize) {
+  if (pageSize === void 0 || !Number.isSafeInteger(pageSize) || pageSize <= 0 || pageSize >= Number.MAX_SAFE_INTEGER) {
+    return DEFAULT_PAGE_SIZE;
+  }
+  return pageSize;
+}
+class WindowCoordinator {
+  constructor(target) {
+    this.target = target;
+    this.leases = /* @__PURE__ */ new Map();
+    this.leaseVersions = /* @__PURE__ */ new Map();
+    this.shouldCaptureBaseline = true;
+    this.generation = 0;
+    this.leaseVersion = 0;
+  }
+  request(lease, limit) {
+    if (this.leases.size === 0) {
+      const currentWindow = this.target.utils?.getWindow?.();
+      const retainedWindowChanged = this.retainedWindow !== void 0 && (currentWindow?.offset !== this.retainedWindow.offset || currentWindow.limit !== this.retainedWindow.limit);
+      if (this.shouldCaptureBaseline || retainedWindowChanged) {
+        this.baselineWindow = currentWindow;
+        this.shouldCaptureBaseline = false;
+      }
+      this.retainedWindow = void 0;
+    }
+    const previousLimit = this.leases.get(lease);
+    const previousVersion = this.leaseVersions.get(lease);
+    const version = ++this.leaseVersion;
+    this.leases.set(lease, limit);
+    this.leaseVersions.set(lease, version);
+    let result;
+    try {
+      result = this.applyDesiredWindow();
+    } catch (error) {
+      this.rollbackLease(lease, version, previousLimit, previousVersion);
+      this.appliedLimit = void 0;
+      if (this.leases.size === 0) this.shouldCaptureBaseline = true;
+      throw error;
+    }
+    if (result === true) return true;
+    return result.catch(async (error) => {
+      if (this.rollbackLease(lease, version, previousLimit, previousVersion)) {
+        this.generation++;
+        this.pending = void 0;
+        this.appliedLimit = void 0;
+        try {
+          if (this.leases.size === 0) {
+            this.restoreInitialWindow();
+          } else {
+            const rollback = this.applyDesiredWindow();
+            if (rollback !== true) await rollback;
+          }
+        } catch {
+        }
+      }
+      throw error;
+    });
+  }
+  getLeaseResult(lease, minimumLimit) {
+    const limit = this.leases.get(lease);
+    if (limit === void 0 || limit < minimumLimit) return false;
+    const desiredLimit = this.getDesiredLimit();
+    if (this.pending && this.pending.limit === desiredLimit)
+      return this.pending.promise;
+    const currentWindow = this.target.utils?.getWindow?.();
+    return currentWindow === void 0 || currentWindow.offset === 0 && currentWindow.limit === desiredLimit;
+  }
+  hasLeases() {
+    return this.leases.size > 0;
+  }
+  release(lease, restoreWhenEmpty) {
+    if (!this.leases.delete(lease)) return;
+    this.leaseVersions.delete(lease);
+    this.generation++;
+    this.pending = void 0;
+    this.appliedLimit = void 0;
+    if (this.leases.size === 0) {
+      if (restoreWhenEmpty) {
+        this.restoreInitialWindow();
+      } else {
+        this.retainedWindow = this.target.utils?.getWindow?.();
+      }
+      return;
+    }
+    try {
+      const result = this.applyDesiredWindow();
+      if (result !== true) {
+        void result.catch(() => {
+          this.appliedLimit = void 0;
+        });
+      }
+    } catch {
+      this.appliedLimit = void 0;
+    }
+  }
+  getDesiredLimit() {
+    let desired;
+    for (const limit of this.leases.values()) {
+      desired = desired === void 0 ? limit : Math.max(desired, limit);
+    }
+    return desired;
+  }
+  rollbackLease(lease, version, previousLimit, previousVersion) {
+    if (this.leaseVersions.get(lease) !== version) return false;
+    if (previousLimit === void 0) {
+      this.leases.delete(lease);
+      this.leaseVersions.delete(lease);
+    } else {
+      this.leases.set(lease, previousLimit);
+      if (previousVersion === void 0) {
+        this.leaseVersions.delete(lease);
+      } else {
+        this.leaseVersions.set(lease, previousVersion);
+      }
+    }
+    return true;
+  }
+  restoreInitialWindow() {
+    const setWindow = this.target.utils?.setWindow;
+    const baselineWindow = this.baselineWindow;
+    this.retainedWindow = void 0;
+    this.shouldCaptureBaseline = false;
+    if (!baselineWindow || typeof setWindow !== `function`) {
+      this.shouldCaptureBaseline = true;
+      return;
+    }
+    const generation = this.generation;
+    const markRestored = () => {
+      if (generation === this.generation && this.leases.size === 0) {
+        this.shouldCaptureBaseline = true;
+      }
+    };
+    try {
+      const result = setWindow.call(this.target.utils, baselineWindow);
+      if (result === true) {
+        markRestored();
+      } else {
+        void result.then(markRestored, () => {
+        });
+      }
+    } catch {
+    }
+  }
+  applyDesiredWindow() {
+    const limit = this.getDesiredLimit();
+    if (limit === void 0) return true;
+    if (this.pending?.limit === limit) return this.pending.promise;
+    if (this.pending) {
+      this.generation++;
+      this.pending = void 0;
+      this.appliedLimit = void 0;
+    }
+    const currentWindow = this.target.utils?.getWindow?.();
+    if (limit === this.appliedLimit && currentWindow?.offset === 0 && currentWindow.limit === limit) {
+      return true;
+    }
+    const setWindow = this.target.utils?.setWindow;
+    if (typeof setWindow !== `function`) {
+      throw new SetWindowRequiresOrderByError();
+    }
+    const generation = ++this.generation;
+    const result = setWindow.call(this.target.utils, { offset: 0, limit });
+    if (result === true) {
+      if (generation === this.generation && this.getDesiredLimit() === limit) {
+        this.appliedLimit = limit;
+      }
+      return true;
+    }
+    const promise = result.then(
+      () => {
+        if (generation === this.generation && this.getDesiredLimit() === limit) {
+          this.appliedLimit = limit;
+        }
+        if (this.pending?.generation === generation) {
+          this.pending = void 0;
+        }
+      },
+      (error) => {
+        if (this.pending?.generation === generation) {
+          this.pending = void 0;
+        }
+        throw error;
+      }
+    );
+    this.pending = { generation, limit, promise };
+    return promise;
+  }
+}
+const windowCoordinators = /* @__PURE__ */ new WeakMap();
+function getWindowCoordinator(target) {
+  let coordinator = windowCoordinators.get(target);
+  if (!coordinator) {
+    coordinator = new WindowCoordinator(target);
+    windowCoordinators.set(target, coordinator);
+  }
+  return coordinator;
+}
+export function hasLiveQueryWindowLeases(target) {
+  return windowCoordinators.get(target)?.hasLeases() ?? false;
+}
+export function assertLiveQueryWindowManyResult(collection) {
+  if (isSingleResultCollection(collection)) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().` : codedMessage(105)
+    );
+  }
+}
+export function isLiveQueryWindowCollection(collection) {
+  return typeof collection.utils?.setWindow === `function` && collection.utils.getWindow?.() !== void 0;
+}
+export function getLiveQueryWindowCollectionWarning(collection, expectedLimit) {
+  assertLiveQueryWindowManyResult(collection);
+  if (!isLiveQueryWindowCollection(collection)) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. Please add .orderBy() to your createLiveQueryCollection query.` : codedMessage(106)
+    );
+  }
+  const currentWindow = collection.utils.getWindow();
+  if (!currentWindow || hasLiveQueryWindowLeases(collection) || currentWindow.offset === 0 && currentWindow.limit === expectedLimit) {
+    return void 0;
+  }
+  if (!(devBuild() && process.env.NODE_ENV !== `production`)) return void 0;
+  return `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`;
+}
+export function compareLiveQueryWindowDependencies(previous, current) {
+  const changed = previous === null || previous === void 0 || previous.length !== current.length || previous.some((dependency, index) => dependency !== current[index]);
+  return {
+    changed,
+    structurallyEqual: previous !== null && previous !== void 0 && deepEquals(previous, current)
+  };
+}
+export function shouldPreserveLiveQueryWindowPageCount(options) {
+  if (!options.hasPreviousController || options.previousInputKind !== options.inputKind) {
+    return false;
+  }
+  if (options.inputKind === `collection`) return options.sameCollection;
+  return options.dependenciesChanged ? options.dependenciesStructurallyEqual : options.pageShapeChanged;
+}
+export function fetchNextLiveQueryWindowPage(controller) {
+  return controller.fetchNextPage().catch(() => {
+  });
+}
+class LiveQueryWindowControllerImpl {
+  constructor(collection, options) {
+    this.lease = /* @__PURE__ */ Symbol(`liveQueryWindowLease`);
+    this.isFetchingNextPage = false;
+    this.activeFetchPromise = null;
+    this.windowGeneration = 0;
+    this.leaseActive = false;
+    this.leaseGeneration = 0;
+    this.inFlightLeaseHolders = 0;
+    this.restoreInitialWindowOnRelease = false;
+    this.subscriptions = /* @__PURE__ */ new Set();
+    this.publicationQueue = [];
+    this.dispatching = false;
+    this.blockDelivery = false;
+    this.transitionDepth = 0;
+    this.transitionNeedsNotify = false;
+    this.observerUnsub = null;
+    this.cachedSnapshot = null;
+    this.cachedFrom = null;
+    this.disposed = false;
+    this.collection = collection;
+    this.coordinator = collection ? getWindowCoordinator(collection) : null;
+    this.pageSize = normalizeLiveQueryWindowPageSize(options.pageSize);
+    this.initialPageParam = options.initialPageParam ?? 0;
+    const initialPageCount = Math.floor(options.initialPageCount ?? 1);
+    this.committedPageCount = Number.isFinite(initialPageCount) ? Math.max(1, initialPageCount) : 1;
+    this.observer = createLiveQueryObserver(collection, {
+      mode: `wholesale`,
+      client: options.client,
+      queryHash: options.queryHash
+    });
+  }
+  getSnapshot() {
+    return this.snapshotFrom(this.observer.getSnapshot());
+  }
+  getServerSnapshot() {
+    return this.snapshotFrom(this.observer.getServerSnapshot());
+  }
+  snapshotFrom(observerSnapshot) {
+    const cached = this.cachedSnapshot;
+    if (cached && this.cachedFrom && this.cachedFrom.observerSnapshot === observerSnapshot && this.cachedFrom.committedPageCount === this.committedPageCount && this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage) {
+      return cached;
+    }
+    const enabled = observerSnapshot.isEnabled;
+    const rows = enabled && Array.isArray(observerSnapshot.data) ? observerSnapshot.data : [];
+    const totalRequested = this.committedPageCount * this.pageSize;
+    const hasNextPage = enabled && rows.length > totalRequested;
+    const pageCount = enabled ? this.committedPageCount : 0;
+    const pages = [];
+    const pageParams = [];
+    for (let i = 0; i < pageCount; i++) {
+      pages.push(rows.slice(i * this.pageSize, (i + 1) * this.pageSize));
+      pageParams.push(this.initialPageParam + i);
+    }
+    this.cachedSnapshot = {
+      data: rows.slice(0, totalRequested),
+      pages,
+      pageParams,
+      hasNextPage,
+      isFetchingNextPage: this.isFetchingNextPage,
+      get state() {
+        return observerSnapshot.state;
+      },
+      collection: observerSnapshot.collection,
+      status: observerSnapshot.status,
+      isLoading: observerSnapshot.isLoading,
+      isReady: observerSnapshot.isReady,
+      isIdle: observerSnapshot.isIdle,
+      isLoadingError: observerSnapshot.isLoadingError,
+      isCrashed: observerSnapshot.isCrashed,
+      isCleanedUp: observerSnapshot.isCleanedUp,
+      isEnabled: observerSnapshot.isEnabled,
+      isSyncError: observerSnapshot.isSyncError,
+      health: observerSnapshot.health
+    };
+    this.cachedFrom = {
+      observerSnapshot,
+      committedPageCount: this.committedPageCount,
+      isFetchingNextPage: this.isFetchingNextPage
+    };
+    return this.cachedSnapshot;
+  }
+  subscribe(listener) {
+    if (this.disposed) throw new LiveQueryWindowControllerDisposedError();
+    const record = { listener, active: true };
+    this.subscriptions.add(record);
+    if (this.subscriptions.size === 1) {
+      this.restoreInitialWindowOnRelease = false;
+      this.blockDelivery = true;
+      let observerUnsub = null;
+      try {
+        const windowResult = this.ensureLeaseActive(this.committedPageCount);
+        observerUnsub = this.observer.subscribe(() => this.notify());
+        this.observerUnsub = observerUnsub;
+        if (windowResult !== true) void windowResult.catch(() => void 0);
+      } catch (error) {
+        observerUnsub?.();
+        this.observerUnsub = null;
+        this.deactivateLease(true);
+        record.active = false;
+        this.subscriptions.delete(record);
+        throw error;
+      } finally {
+        this.blockDelivery = false;
+      }
+    }
+    return () => {
+      if (!record.active) return;
+      record.active = false;
+      this.subscriptions.delete(record);
+      if (this.subscriptions.size === 0) {
+        this.restoreInitialWindowOnRelease = true;
+        this.observerUnsub?.();
+        this.observerUnsub = null;
+        if (this.inFlightLeaseHolders === 0) this.deactivateLease(true);
+      }
+    };
+  }
+  fetchNextPage() {
+    if (this.disposed) return Promise.resolve();
+    if (this.activeFetchPromise) {
+      return this.activeFetchPromise;
+    }
+    const snapshot = this.getSnapshot();
+    const awaitingInitialLoad = snapshot.isLoading || snapshot.isIdle;
+    if (!snapshot.hasNextPage && !awaitingInitialLoad) return Promise.resolve();
+    let resolveFetch;
+    let rejectFetch;
+    const activeFetchPromise = new Promise((resolve, reject) => {
+      resolveFetch = resolve;
+      rejectFetch = reject;
+    });
+    this.activeFetchPromise = activeFetchPromise;
+    let request;
+    try {
+      const generation = this.windowGeneration;
+      request = awaitingInitialLoad ? this.preload().then(() => {
+        if (this.disposed || generation !== this.windowGeneration || !this.getSnapshot().hasNextPage) {
+          return;
+        }
+        return this.requestPageCount(this.committedPageCount + 1, true);
+      }) : this.requestPageCount(this.committedPageCount + 1, true);
+    } catch (error) {
+      this.activeFetchPromise = null;
+      rejectFetch(error);
+      return activeFetchPromise;
+    }
+    void request.then(
+      () => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null;
+        }
+        resolveFetch();
+      },
+      (error) => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null;
+        }
+        rejectFetch(error);
+      }
+    );
+    return activeFetchPromise;
+  }
+  reset() {
+    if (this.disposed) return Promise.resolve();
+    if (this.committedPageCount === 1 && !this.isFetchingNextPage && !this.activeFetchPromise && this.pendingWindowGeneration === void 0) {
+      return Promise.resolve();
+    }
+    this.activeFetchPromise = null;
+    return this.requestPageCount(1, false);
+  }
+  async preload() {
+    if (this.disposed) throw new LiveQueryWindowControllerDisposedError();
+    this.acquireInFlightLease();
+    try {
+      const result = this.ensureLeaseActive(this.committedPageCount);
+      if (result !== true) await result;
+      await this.observer.preload();
+    } finally {
+      this.releaseInFlightLease();
+    }
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.windowGeneration++;
+    this.pendingWindowGeneration = void 0;
+    this.observerUnsub?.();
+    this.observerUnsub = null;
+    this.deactivateLease(true);
+    this.observer.dispose();
+    for (const record of this.subscriptions) record.active = false;
+    this.subscriptions.clear();
+    this.publicationQueue.length = 0;
+  }
+  requestPageCount(requestedPageCount, fetchingNextPage) {
+    const generation = ++this.windowGeneration;
+    this.pendingWindowGeneration = void 0;
+    this.acquireInFlightLease();
+    this.beginTransition();
+    this.isFetchingNextPage = fetchingNextPage;
+    if (fetchingNextPage) this.notify();
+    let result;
+    try {
+      result = this.activateLease(requestedPageCount);
+    } catch (error) {
+      this.isFetchingNextPage = false;
+      this.notify();
+      this.endTransition();
+      this.releaseInFlightLease();
+      return Promise.reject(error);
+    }
+    if (result === true) {
+      if (!this.disposed && generation === this.windowGeneration) {
+        this.committedPageCount = requestedPageCount;
+        this.isFetchingNextPage = false;
+        this.notify();
+      }
+      this.endTransition();
+      this.releaseInFlightLease();
+      return Promise.resolve();
+    }
+    this.pendingWindowGeneration = generation;
+    this.endTransition();
+    return result.then(
+      () => {
+        if (this.disposed || generation !== this.windowGeneration) return;
+        this.beginTransition();
+        this.pendingWindowGeneration = void 0;
+        this.committedPageCount = requestedPageCount;
+        this.isFetchingNextPage = false;
+        this.notify();
+        this.endTransition();
+      },
+      (error) => {
+        if (!this.disposed && generation === this.windowGeneration) {
+          this.beginTransition();
+          this.pendingWindowGeneration = void 0;
+          this.isFetchingNextPage = false;
+          this.notify();
+          this.endTransition();
+        }
+        throw error;
+      }
+    ).finally(() => {
+      this.releaseInFlightLease();
+    });
+  }
+  acquireInFlightLease() {
+    this.inFlightLeaseHolders++;
+  }
+  releaseInFlightLease() {
+    this.inFlightLeaseHolders--;
+    if (this.inFlightLeaseHolders === 0 && this.subscriptions.size === 0) {
+      this.deactivateLease(this.restoreInitialWindowOnRelease);
+    }
+  }
+  activateLease(pageCount) {
+    this.leaseGeneration++;
+    if (!this.coordinator || !this.collection) return true;
+    this.leaseActive = true;
+    return this.coordinator.request(this.lease, pageCount * this.pageSize + 1);
+  }
+  ensureLeaseActive(pageCount) {
+    const minimumLimit = pageCount * this.pageSize + 1;
+    if (this.leaseActive) {
+      const result = this.coordinator?.getLeaseResult(this.lease, minimumLimit);
+      if (result) return result;
+    }
+    return this.activateLease(pageCount);
+  }
+  deactivateLease(restoreWhenEmpty = false) {
+    if (!this.leaseActive || !this.coordinator) return;
+    this.leaseGeneration++;
+    this.leaseActive = false;
+    this.restoreInitialWindowOnRelease = false;
+    this.coordinator.release(this.lease, restoreWhenEmpty);
+  }
+  beginTransition() {
+    this.transitionDepth++;
+  }
+  endTransition() {
+    this.transitionDepth--;
+    if (this.transitionDepth === 0 && this.transitionNeedsNotify) {
+      this.transitionNeedsNotify = false;
+      this.publish();
+    }
+  }
+  notify() {
+    if (this.transitionDepth > 0) {
+      this.transitionNeedsNotify = true;
+      return;
+    }
+    this.publish();
+  }
+  publish() {
+    if (this.disposed || this.blockDelivery || this.subscriptions.size === 0) {
+      return;
+    }
+    this.publicationQueue.push({ targets: [...this.subscriptions] });
+    if (this.dispatching) return;
+    this.dispatching = true;
+    try {
+      while (this.publicationQueue.length > 0) {
+        const publication = this.publicationQueue.shift();
+        for (const record of publication.targets) {
+          if (this.hasBeenDisposed()) return;
+          if (!record.active) continue;
+          record.listener();
+        }
+      }
+    } finally {
+      this.dispatching = false;
+    }
+  }
+  hasBeenDisposed() {
+    return this.disposed;
+  }
+}
+export function createLiveQueryWindowController(collection, options = {}) {
+  return new LiveQueryWindowControllerImpl(collection ?? null, options);
+}

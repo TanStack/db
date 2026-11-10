@@ -1,0 +1,16 @@
+import { defineConfig } from 'vitest/config'
+
+// One pure checker calibration. No receiving setup or production aliases.
+export default defineConfig({
+  cacheDir: `.vite`,
+  test: {
+    include: [`metadata-previous-value-calibration-oracle.test.ts`],
+    environment: `node`,
+    pool: `forks`,
+    maxWorkers: 1,
+    fileParallelism: false,
+    execArgv: [`--max-old-space-size=384`],
+    coverage: { enabled: false },
+    typecheck: { enabled: false },
+  },
+})

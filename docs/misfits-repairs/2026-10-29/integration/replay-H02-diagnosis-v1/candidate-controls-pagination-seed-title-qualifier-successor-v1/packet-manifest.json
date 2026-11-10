@@ -1,0 +1,50 @@
+{
+  "status": "SEALED SOURCE-ONLY TITLE COMPONENT AND PURE CALIBRATION; independent review pending; no native admission",
+  "files": {
+    "actual-pure-tool-record-v1.json": {
+      "sha256": "6dc6d5db195faaac9bcdb221830ca4261b175efd1a223922a756abb29f9cc2e4",
+      "bytes": 1087
+    },
+    "calibrate-title-capture.py": {
+      "sha256": "e243cd1a43ac4c78658cac8a5b7c7d7feb1d8c51d952624294399b4b48018463",
+      "bytes": 13759
+    },
+    "input-bindings-v1.json": {
+      "sha256": "17bd31e2ddb94c57066b66410f4994a8dedc425eaf58488f2d027bdba6cec1f3",
+      "bytes": 4399
+    },
+    "proposed-run-recipe-title-only-v1.json": {
+      "sha256": "d2752f3931549522d77db3ee3516e0bf3a930c4e624e57da77c026a4cdd8d223",
+      "bytes": 4333
+    },
+    "pure-calibration-results-v1.json": {
+      "sha256": "8ae767fcdf8e55419903cc17e4ad9b73e23fc43c13e5044e0d62fd315ebee2d9",
+      "bytes": 2635
+    },
+    "recipe-title-only-v1.patch": {
+      "sha256": "d0963d443c622c3d3563ae12f78809316d7241d75b9d09f70cb869290e3fa2c7",
+      "bytes": 946
+    },
+    "report-v1.md": {
+      "sha256": "652e2dbfb330b68f4d87c0634d772a50b94c7886ad68d60826ce51911ccc5232",
+      "bytes": 5938
+    },
+    "title-derivation-v1.json": {
+      "sha256": "3c957dc7c8e8e5e542b6d4a0a11b63b82770e88cae123c6b423f3c97fbe36348",
+      "bytes": 1896
+    }
+  },
+  "manifestExcludesItself": true,
+  "inputBindingsSha256": "17bd31e2ddb94c57066b66410f4994a8dedc425eaf58488f2d027bdba6cec1f3",
+  "onlyOperationalRecipeFieldChanged": "expectedOutput.title",
+  "wrapperChanges": 0,
+  "cliSelectorChanged": false,
+  "targetExecutions": 0,
+  "nativeAdmission": false,
+  "readyToLaunch": false,
+  "futureRuntimeRequirement": "Explicit fresh-output/source operational rebind, independent review and separate ROOT admission. This one-field recipe component retains the already-consumed historical path.",
+  "preservation": "Original N10 and frozen actual16 members unchanged; raw failure/qualifier secondary/null report/outer1/child1 retained.",
+  "limits": "Instrument-only fixed-seed pinned-runner identity correction; no product GREEN, schema hardening, receiving, campaign, reach, replay, closure or PR credit.",
+  "members": 8,
+  "memberBytes": 34993
+}

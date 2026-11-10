@@ -1,0 +1,373 @@
+import {
+  withArrayChangeTracking,
+  withChangeTracking,
+  withFlatChangeTracking
+} from "../proxy";
+import { assertCollectionKey } from "../utils";
+import { normalizeError } from "../utils/error.js";
+import { safeRandomUUID } from "../utils/uuid";
+import { createTransaction, getActiveTransaction } from "../transactions";
+import {
+  DeleteKeyNotFoundError,
+  DuplicateKeyError,
+  InvalidSchemaError,
+  KeyUpdateNotAllowedError,
+  MissingDeleteHandlerError,
+  MissingInsertHandlerError,
+  MissingUpdateArgumentError,
+  MissingUpdateHandlerError,
+  NoKeysPassedToDeleteError,
+  NoKeysPassedToUpdateError,
+  SchemaMustBeSynchronousError,
+  SchemaValidationError,
+  UpdateKeyNotFoundError
+} from "../errors";
+let mutationIdPrefix;
+let mutationCount = 0;
+function createMutationId() {
+  mutationIdPrefix ??= safeRandomUUID();
+  return `${mutationIdPrefix}-${++mutationCount}`;
+}
+export class CollectionMutationsManager {
+  constructor(config, id) {
+    /**
+     * Inserts one or more items into the collection
+     */
+    this.insert = (data, config) => {
+      this.lifecycle.validateCollectionUsable(`insert`);
+      const state = this.state;
+      const ambientTransaction = this.getActiveTransaction();
+      if (!ambientTransaction && !this.config.onInsert) {
+        throw new MissingInsertHandlerError();
+      }
+      const items = Array.isArray(data) ? data : [data];
+      const now = /* @__PURE__ */ new Date();
+      const mutations = [];
+      const keysInCurrentBatch = /* @__PURE__ */ new Set();
+      items.forEach((item) => {
+        const validatedData = this.validateData(item, `insert`);
+        const key = this.config.getKey(validatedData);
+        if (keysInCurrentBatch.has(key)) {
+          throw new DuplicateKeyError(key);
+        }
+        keysInCurrentBatch.add(key);
+        const globalKey = this.generateGlobalKey(key, item);
+        const mutation = {
+          mutationId: createMutationId(),
+          original: {},
+          modified: validatedData,
+          // Pick the values from validatedData based on what's passed in - this is for cases
+          // where a schema has default values. The validated data has the extra default
+          // values but for changes, we just want to show the data that was actually passed in.
+          changes: Object.fromEntries(
+            Object.keys(item).map((k) => [
+              k,
+              validatedData[k]
+            ])
+          ),
+          globalKey,
+          key,
+          metadata: config?.metadata,
+          syncMetadata: this.config.sync.getSyncMetadata?.() || {},
+          optimistic: config?.optimistic ?? true,
+          type: `insert`,
+          createdAt: now,
+          updatedAt: now,
+          collection: this.collection
+        };
+        mutations.push(mutation);
+      });
+      let duplicate = mutations.find(({ key }) => state.has(key));
+      if (duplicate) throw new DuplicateKeyError(duplicate.key);
+      this.collection._sync.startSync();
+      duplicate = mutations.find(({ key }) => state.has(key));
+      if (duplicate) throw new DuplicateKeyError(duplicate.key);
+      if (ambientTransaction) {
+        this.applyOwnedMutations(ambientTransaction, mutations);
+        return ambientTransaction;
+      }
+      return this.commitDirect(
+        `insert`,
+        (params) => this.config.onInsert(params),
+        mutations
+      );
+    };
+    /**
+     * Deletes one or more items from the collection
+     */
+    this.delete = (keys, config) => {
+      const state = this.state;
+      this.lifecycle.validateCollectionUsable(`delete`);
+      const ambientTransaction = this.getActiveTransaction();
+      if (!ambientTransaction && !this.config.onDelete) {
+        throw new MissingDeleteHandlerError();
+      }
+      if (Array.isArray(keys) && keys.length === 0) {
+        throw new NoKeysPassedToDeleteError();
+      }
+      const keysArray = Array.isArray(keys) ? keys : [keys];
+      this.collection._sync.startSync();
+      const now = /* @__PURE__ */ new Date();
+      const mutations = [];
+      for (const key of keysArray) {
+        if (!this.state.has(key)) {
+          throw new DeleteKeyNotFoundError(key);
+        }
+        const globalKey = this.generateGlobalKey(key, this.state.get(key));
+        const mutation = {
+          mutationId: createMutationId(),
+          original: this.state.get(key),
+          modified: this.state.get(key),
+          changes: this.state.get(key),
+          globalKey,
+          key,
+          metadata: config?.metadata,
+          syncMetadata: state.syncedMetadata.get(key) || {},
+          optimistic: config?.optimistic ?? true,
+          type: `delete`,
+          createdAt: now,
+          updatedAt: now,
+          collection: this.collection
+        };
+        mutations.push(mutation);
+      }
+      if (ambientTransaction) {
+        this.applyOwnedMutations(ambientTransaction, mutations);
+        return ambientTransaction;
+      }
+      return this.commitDirect(
+        `delete`,
+        (params) => this.config.onDelete(params),
+        mutations
+      );
+    };
+    this.id = id;
+    this.config = config;
+  }
+  setDeps(deps) {
+    this.lifecycle = deps.lifecycle;
+    this.state = deps.state;
+    this.collection = deps.collection;
+  }
+  setTransactionScope(transactionScope) {
+    this.transactionScope = transactionScope;
+  }
+  getActiveTransaction() {
+    return this.transactionScope ? this.transactionScope.getActiveTransactionForCollection() : getActiveTransaction();
+  }
+  createTransaction(config) {
+    return this.transactionScope ? this.transactionScope.createTransaction(config) : createTransaction(config);
+  }
+  ensureStandardSchema(schema) {
+    if (schema && `~standard` in schema) {
+      return schema;
+    }
+    throw new InvalidSchemaError();
+  }
+  validateData(data, type, key) {
+    if (!this.config.schema) return data;
+    const standardSchema = this.ensureStandardSchema(this.config.schema);
+    if (type === `update` && key) {
+      const existingData = this.state.get(key);
+      if (existingData && data && typeof data === `object` && typeof existingData === `object`) {
+        const mergedData = { ...existingData, ...data };
+        const result2 = standardSchema[`~standard`].validate(mergedData);
+        if (result2 instanceof Promise) {
+          throw new SchemaMustBeSynchronousError();
+        }
+        if (`issues` in result2 && result2.issues) {
+          const typedIssues = result2.issues.map((issue) => ({
+            message: issue.message,
+            path: issue.path?.map((p) => String(p))
+          }));
+          throw new SchemaValidationError(type, typedIssues);
+        }
+        const validatedMergedData = result2.value;
+        const modifiedKeys = Object.keys(data);
+        const extractedChanges = Object.fromEntries(
+          modifiedKeys.map((k) => [k, validatedMergedData[k]])
+        );
+        return extractedChanges;
+      }
+    }
+    const result = standardSchema[`~standard`].validate(data);
+    if (result instanceof Promise) {
+      throw new SchemaMustBeSynchronousError();
+    }
+    if (`issues` in result && result.issues) {
+      const typedIssues = result.issues.map((issue) => ({
+        message: issue.message,
+        path: issue.path?.map((p) => String(p))
+      }));
+      throw new SchemaValidationError(type, typedIssues);
+    }
+    return result.value;
+  }
+  generateGlobalKey(key, item) {
+    assertCollectionKey(key, item);
+    return `KEY::${JSON.stringify([this.id, typeof key, String(key)])}`;
+  }
+  /**
+   * A local-only Collection confirms its own writes. Without a user handler
+   * for this operation type, and with no other transaction unsettled, write
+   * the mutations as synced rows and return a completed transaction instead
+   * of publishing an optimistic overlay and confirming it a tick later.
+   */
+  commitLocalOnlyDirect(mutations, type) {
+    const direct = this.state.localOnlyDirectWrite;
+    if (!direct?.types.has(type)) return void 0;
+    for (const transaction2 of this.state.transactions.values()) {
+      if (transaction2.state === `pending` || transaction2.state === `persisting`) {
+        return void 0;
+      }
+    }
+    const transaction = this.createTransaction({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve()
+    });
+    transaction.applyMutations(mutations);
+    try {
+      direct.write(mutations);
+    } finally {
+      transaction.completeWithoutCommit();
+    }
+    return transaction;
+  }
+  /** Own a transaction's new mutations and show them optimistically. */
+  applyOwnedMutations(transaction, mutations) {
+    this.state.trackTransaction(transaction);
+    transaction.applyMutations(mutations);
+    this.state.recomputeOptimisticState(true);
+  }
+  /** Commit mutations in a new transaction that calls the operation's handler. */
+  commitDirect(type, handler, mutations) {
+    const localOnly = this.commitLocalOnlyDirect(mutations, type);
+    if (localOnly) return localOnly;
+    const transaction = this.createTransaction({
+      mutationFn: async (params) => await handler({
+        transaction: params.transaction,
+        collection: this.collection
+      })
+    });
+    try {
+      this.applyOwnedMutations(transaction, mutations);
+    } catch (error) {
+      try {
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: normalizeError(error)
+        });
+      } catch {
+      }
+      throw error;
+    }
+    transaction.commit().catch(() => void 0);
+    return transaction;
+  }
+  /**
+   * Updates one or more items in the collection using a callback function
+   */
+  update(keys, configOrCallback, maybeCallback) {
+    if (typeof keys === `undefined`) {
+      throw new MissingUpdateArgumentError();
+    }
+    const state = this.state;
+    this.lifecycle.validateCollectionUsable(`update`);
+    const ambientTransaction = this.getActiveTransaction();
+    if (!ambientTransaction && !this.config.onUpdate) {
+      throw new MissingUpdateHandlerError();
+    }
+    const isArray = Array.isArray(keys);
+    const keysArray = isArray ? keys : [keys];
+    if (isArray && keysArray.length === 0) {
+      throw new NoKeysPassedToUpdateError();
+    }
+    const callback = typeof configOrCallback === `function` ? configOrCallback : maybeCallback;
+    if (typeof callback !== `function`) throw new TypeError();
+    const config = typeof configOrCallback === `function` ? {} : configOrCallback;
+    this.collection._sync.startSync();
+    const currentObjects = keysArray.map((key) => {
+      const item = this.state.get(key);
+      if (!item) {
+        throw new UpdateKeyNotFoundError(key);
+      }
+      return item;
+    });
+    const changesArray = withFlatChangeTracking(
+      currentObjects,
+      callback,
+      isArray
+    ) ?? (isArray ? withArrayChangeTracking(
+      currentObjects,
+      callback
+    ) : [
+      withChangeTracking(
+        currentObjects[0],
+        callback
+      )
+    ]);
+    const now = /* @__PURE__ */ new Date();
+    const mutations = keysArray.map((key, index) => {
+      const itemChanges = changesArray[index];
+      if (!itemChanges || Object.keys(itemChanges).length === 0) {
+        return null;
+      }
+      const originalItem = currentObjects[index];
+      const validatedUpdatePayload = this.validateData(
+        itemChanges,
+        `update`,
+        key
+      );
+      const modifiedItem = { ...originalItem, ...validatedUpdatePayload };
+      const originalItemId = this.config.getKey(originalItem);
+      const modifiedItemId = this.config.getKey(modifiedItem);
+      if (originalItemId !== modifiedItemId) {
+        throw new KeyUpdateNotAllowedError(originalItemId, modifiedItemId);
+      }
+      const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem);
+      return {
+        mutationId: createMutationId(),
+        original: originalItem,
+        modified: modifiedItem,
+        // Pick the values from modifiedItem based on what's passed in - this is for cases
+        // where a schema has default values or transforms. The modified data has the extra
+        // default or transformed values but for changes, we just want to show the data that
+        // was actually passed in.
+        // Without a schema, validation returns the tracker's fresh change
+        // object, which already holds exactly these values.
+        changes: validatedUpdatePayload === itemChanges ? itemChanges : Object.fromEntries(
+          Object.keys(itemChanges).map((k) => [
+            k,
+            modifiedItem[k]
+          ])
+        ),
+        globalKey,
+        key,
+        metadata: config.metadata,
+        syncMetadata: state.syncedMetadata.get(key) || {},
+        optimistic: config.optimistic ?? true,
+        type: `update`,
+        createdAt: now,
+        updatedAt: now,
+        collection: this.collection
+      };
+    }).filter(Boolean);
+    if (mutations.length === 0) {
+      const emptyTransaction = this.createTransaction({
+        mutationFn: async () => {
+        }
+      });
+      emptyTransaction.commit().catch(() => void 0);
+      return emptyTransaction;
+    }
+    if (ambientTransaction) {
+      this.applyOwnedMutations(ambientTransaction, mutations);
+      return ambientTransaction;
+    }
+    return this.commitDirect(
+      `update`,
+      (params) => this.config.onUpdate(params),
+      mutations
+    );
+  }
+}

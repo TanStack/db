@@ -1,0 +1,55 @@
+{
+  "status": "ACTUAL EXACT-ONE COMPLETED NONZERO; unclassified raw result submitted for independent review",
+  "admissionSha256": "0182ee6c9441fc3adcba427c221b101575ae7bdc5c162a9f12e51b87857771d7",
+  "preparedManifestSha256": "439cdcb6df9125142fece28cf55f834b60d071d57fb8b6498c2d4d1f7feca2f1",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "actualTool": {
+    "initialChunk": "e84e86",
+    "sessionId": 26998,
+    "finalChunk": "4a9657",
+    "actualOuterExitCode": 1,
+    "sandbox_permissions": "require_escalated",
+    "normalizationApplied": false
+  },
+  "childExitCode": 1,
+  "outerPid": 41290,
+  "outerPgid": 41290,
+  "childPid": 41300,
+  "childPgid": 41300,
+  "childPgidVerified": true,
+  "supervisedElapsedMs": 6002,
+  "maxSampledGroupRssBytes": 1891565568,
+  "sampledRssCeilingBytes": 2147483648,
+  "samples": 43,
+  "childPrimaryFailure": {
+    "error": "native list abnormal/nonzero exit",
+    "phase": "native-list"
+  },
+  "childSecondaryFailures": [],
+  "remainingGroupRows": [],
+  "outerPrimaryFailure": {
+    "error": "{'phase': 'native-list', 'error': 'native list abnormal/nonzero exit'}",
+    "phase": "unchanged-supervisor-child-result"
+  },
+  "outerSecondaryFailures": [
+    {
+      "error": "report does not identify exactly the selected executed fixed campaign",
+      "phase": "report-capture"
+    }
+  ],
+  "outerReportField": null,
+  "rawJsonReportPreserved": true,
+  "sourceToolPostcheck": "PASS",
+  "originalNamedPidAndPgidPostcheck": "all four ESRCH; named PID inventory empty",
+  "launchAttempts": 1,
+  "automaticRetry": false,
+  "productVerdict": "UNCLASSIFIED; independent reviewer owns assertion/path/reach/suitability classification",
+  "limits": [
+    "Prepared exact title qualifier failed and remains unchanged; raw JSON is retained separately.",
+    "No claim that all eight generated runs or three schedules completed, no reach total or closure credit claimed.",
+    "Actual outer and child nonzero are preserved; no expected-failure normalization.",
+    "No receiving, random, candidate, production, Git, PR, install or canonical progression occurred.",
+    "Finite source/tool identities and original groups do not prove runtime evaluated-source or universal escaped-process equivalence."
+  ]
+}

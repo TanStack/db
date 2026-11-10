@@ -1,0 +1,26 @@
+{
+  "checkedBy": "/root",
+  "at": "2026-10-30T07:29:15.255186+00:00",
+  "checks": [
+    {
+      "id": 55971,
+      "kind": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "id": 55971,
+      "kind": "pgid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "id": 55979,
+      "kind": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "id": 55979,
+      "kind": "pgid",
+      "result": "absent-ESRCH"
+    }
+  ]
+}

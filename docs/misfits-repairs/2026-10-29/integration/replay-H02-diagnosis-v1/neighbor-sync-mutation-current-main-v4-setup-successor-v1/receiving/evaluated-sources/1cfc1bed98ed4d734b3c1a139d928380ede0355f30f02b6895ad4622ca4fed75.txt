@@ -1,0 +1,84 @@
+__vite_ssr_exportName__("CollectionRequiresGetKeyError", () => { try { return CollectionRequiresGetKeyError } catch {} });
+__vite_ssr_exportName__("InvalidGetKeyError", () => { try { return InvalidGetKeyError } catch {} });
+__vite_ssr_exportName__("InvalidSyncConfigError", () => { try { return InvalidSyncConfigError } catch {} });
+__vite_ssr_exportName__("InvalidSyncFunctionError", () => { try { return InvalidSyncFunctionError } catch {} });
+__vite_ssr_exportName__("InvalidCallbackOptionError", () => { try { return InvalidCallbackOptionError } catch {} });
+__vite_ssr_exportName__("InvalidOptionTypeError", () => { try { return InvalidOptionTypeError } catch {} });
+const __vite_ssr_import_0__ = await __vite_ssr_import__("/packages/db/src/errors.ts", {"importedNames":["CollectionConfigurationError"]});
+
+const CollectionConfigurationError = __vite_ssr_import_0__.CollectionConfigurationError;
+class CollectionRequiresGetKeyError extends CollectionConfigurationError {
+  constructor() {
+    super(
+      `Collection requires a "getKey" function in the config.
+
+The getKey function extracts a unique identifier from each item.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })`
+    );
+  }
+};
+class InvalidGetKeyError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"getKey" must be a function, but received ${actualType}.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })`
+    );
+  }
+};
+class InvalidSyncConfigError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"sync" must be an object with a "sync" function, but received ${actualType}.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        // your sync logic
+      },
+    },
+  })`
+    );
+  }
+};
+class InvalidSyncFunctionError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"sync.sync" must be a function, but received ${actualType}.
+
+The sync property should be an object containing a sync function:
+  sync: {
+    sync: ({ begin, write, commit, markReady }) => {
+      // your sync logic
+    },
+  }`
+    );
+  }
+};
+class InvalidCallbackOptionError extends CollectionConfigurationError {
+  constructor(optionName, actualType) {
+    super(`"${optionName}" must be a function, but received ${actualType}.`);
+  }
+};
+class InvalidOptionTypeError extends CollectionConfigurationError {
+  constructor(optionName, expectedType, actualType) {
+    super(
+      `"${optionName}" must be ${expectedType}, but received ${actualType}.`
+    );
+  }
+}
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUEsQ0FBQTs7Ozs7O0FBQ0E7OztBQUVPLE1BQU0sc0NBQXNDLDZCQUE2QjtBQUFBLEVBQzlFLGNBQWM7QUFDWjtBQUFBLE1BQ0U7O0FBQUE7O0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLElBT0Y7QUFBQSxFQUNGO0FBQ0Y7QUFFTyxNQUFNLDJCQUEyQiw2QkFBNkI7QUFBQSxFQUNuRSxZQUFZLFlBQW9CO0FBQzlCO0FBQUEsTUFDRSw2Q0FBNkMsVUFBVTs7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsSUFNekQ7QUFBQSxFQUNGO0FBQ0Y7QUFFTyxNQUFNLCtCQUErQiw2QkFBNkI7QUFBQSxFQUN2RSxZQUFZLFlBQW9CO0FBQzlCO0FBQUEsTUFDRSxpRUFBaUUsVUFBVTs7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxJQVU3RTtBQUFBLEVBQ0Y7QUFDRjtBQUVPLE1BQU0saUNBQWlDLDZCQUE2QjtBQUFBLEVBQ3pFLFlBQVksWUFBb0I7QUFDOUI7QUFBQSxNQUNFLGdEQUFnRCxVQUFVOztBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLElBTzVEO0FBQUEsRUFDRjtBQUNGO0FBRU8sTUFBTSxtQ0FBbUMsNkJBQTZCO0FBQUEsRUFDM0UsWUFBWSxZQUFvQixZQUFvQjtBQUNsRCxVQUFNLElBQUksVUFBVSxzQ0FBc0MsVUFBVSxHQUFHO0FBQUEsRUFDekU7QUFDRjtBQUVPLE1BQU0sK0JBQStCLDZCQUE2QjtBQUFBLEVBQ3ZFLFlBQVksWUFBb0IsY0FBc0IsWUFBb0I7QUFDeEU7QUFBQSxNQUNFLElBQUksVUFBVSxhQUFhLFlBQVksa0JBQWtCLFVBQVU7QUFBQSxJQUNyRTtBQUFBLEVBQ0Y7QUFDRiIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiY29uZmlnLWVycm9ycy50cyJdLCJzb3VyY2VzQ29udGVudCI6WyIvLyBJbnRlcm5hbCBkZXZlbG9wbWVudCBkaWFnbm9zdGljczsga2VlcCB0aGVzZSBvdXQgb2YgdGhlIHB1YmxpYyBleHBvcnRzLlxuaW1wb3J0IHsgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB9IGZyb20gJy4uL2Vycm9ycydcblxuZXhwb3J0IGNsYXNzIENvbGxlY3Rpb25SZXF1aXJlc0dldEtleUVycm9yIGV4dGVuZHMgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB7XG4gIGNvbnN0cnVjdG9yKCkge1xuICAgIHN1cGVyKFxuICAgICAgYENvbGxlY3Rpb24gcmVxdWlyZXMgYSBcImdldEtleVwiIGZ1bmN0aW9uIGluIHRoZSBjb25maWcuXFxuXFxuYCArXG4gICAgICAgIGBUaGUgZ2V0S2V5IGZ1bmN0aW9uIGV4dHJhY3RzIGEgdW5pcXVlIGlkZW50aWZpZXIgZnJvbSBlYWNoIGl0ZW0uXFxuXFxuYCArXG4gICAgICAgIGBFeGFtcGxlOlxcbmAgK1xuICAgICAgICBgICBjcmVhdGVDb2xsZWN0aW9uKHtcXG5gICtcbiAgICAgICAgYCAgICBnZXRLZXk6IChpdGVtKSA9PiBpdGVtLmlkLFxcbmAgK1xuICAgICAgICBgICAgIHN5bmM6IHsgc3luYzogKCkgPT4ge30gfSxcXG5gICtcbiAgICAgICAgYCAgfSlgLFxuICAgIClcbiAgfVxufVxuXG5leHBvcnQgY2xhc3MgSW52YWxpZEdldEtleUVycm9yIGV4dGVuZHMgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB7XG4gIGNvbnN0cnVjdG9yKGFjdHVhbFR5cGU6IHN0cmluZykge1xuICAgIHN1cGVyKFxuICAgICAgYFwiZ2V0S2V5XCIgbXVzdCBiZSBhIGZ1bmN0aW9uLCBidXQgcmVjZWl2ZWQgJHthY3R1YWxUeXBlfS5cXG5cXG5gICtcbiAgICAgICAgYEV4YW1wbGU6XFxuYCArXG4gICAgICAgIGAgIGNyZWF0ZUNvbGxlY3Rpb24oe1xcbmAgK1xuICAgICAgICBgICAgIGdldEtleTogKGl0ZW0pID0+IGl0ZW0uaWQsXFxuYCArXG4gICAgICAgIGAgICAgc3luYzogeyBzeW5jOiAoKSA9PiB7fSB9LFxcbmAgK1xuICAgICAgICBgICB9KWAsXG4gICAgKVxuICB9XG59XG5cbmV4cG9ydCBjbGFzcyBJbnZhbGlkU3luY0NvbmZpZ0Vycm9yIGV4dGVuZHMgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB7XG4gIGNvbnN0cnVjdG9yKGFjdHVhbFR5cGU6IHN0cmluZykge1xuICAgIHN1cGVyKFxuICAgICAgYFwic3luY1wiIG11c3QgYmUgYW4gb2JqZWN0IHdpdGggYSBcInN5bmNcIiBmdW5jdGlvbiwgYnV0IHJlY2VpdmVkICR7YWN0dWFsVHlwZX0uXFxuXFxuYCArXG4gICAgICAgIGBFeGFtcGxlOlxcbmAgK1xuICAgICAgICBgICBjcmVhdGVDb2xsZWN0aW9uKHtcXG5gICtcbiAgICAgICAgYCAgICBnZXRLZXk6IChpdGVtKSA9PiBpdGVtLmlkLFxcbmAgK1xuICAgICAgICBgICAgIHN5bmM6IHtcXG5gICtcbiAgICAgICAgYCAgICAgIHN5bmM6ICh7IGJlZ2luLCB3cml0ZSwgY29tbWl0LCBtYXJrUmVhZHkgfSkgPT4ge1xcbmAgK1xuICAgICAgICBgICAgICAgICAvLyB5b3VyIHN5bmMgbG9naWNcXG5gICtcbiAgICAgICAgYCAgICAgIH0sXFxuYCArXG4gICAgICAgIGAgICAgfSxcXG5gICtcbiAgICAgICAgYCAgfSlgLFxuICAgIClcbiAgfVxufVxuXG5leHBvcnQgY2xhc3MgSW52YWxpZFN5bmNGdW5jdGlvbkVycm9yIGV4dGVuZHMgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB7XG4gIGNvbnN0cnVjdG9yKGFjdHVhbFR5cGU6IHN0cmluZykge1xuICAgIHN1cGVyKFxuICAgICAgYFwic3luYy5zeW5jXCIgbXVzdCBiZSBhIGZ1bmN0aW9uLCBidXQgcmVjZWl2ZWQgJHthY3R1YWxUeXBlfS5cXG5cXG5gICtcbiAgICAgICAgYFRoZSBzeW5jIHByb3BlcnR5IHNob3VsZCBiZSBhbiBvYmplY3QgY29udGFpbmluZyBhIHN5bmMgZnVuY3Rpb246XFxuYCArXG4gICAgICAgIGAgIHN5bmM6IHtcXG5gICtcbiAgICAgICAgYCAgICBzeW5jOiAoeyBiZWdpbiwgd3JpdGUsIGNvbW1pdCwgbWFya1JlYWR5IH0pID0+IHtcXG5gICtcbiAgICAgICAgYCAgICAgIC8vIHlvdXIgc3luYyBsb2dpY1xcbmAgK1xuICAgICAgICBgICAgIH0sXFxuYCArXG4gICAgICAgIGAgIH1gLFxuICAgIClcbiAgfVxufVxuXG5leHBvcnQgY2xhc3MgSW52YWxpZENhbGxiYWNrT3B0aW9uRXJyb3IgZXh0ZW5kcyBDb2xsZWN0aW9uQ29uZmlndXJhdGlvbkVycm9yIHtcbiAgY29uc3RydWN0b3Iob3B0aW9uTmFtZTogc3RyaW5nLCBhY3R1YWxUeXBlOiBzdHJpbmcpIHtcbiAgICBzdXBlcihgXCIke29wdGlvbk5hbWV9XCIgbXVzdCBiZSBhIGZ1bmN0aW9uLCBidXQgcmVjZWl2ZWQgJHthY3R1YWxUeXBlfS5gKVxuICB9XG59XG5cbmV4cG9ydCBjbGFzcyBJbnZhbGlkT3B0aW9uVHlwZUVycm9yIGV4dGVuZHMgQ29sbGVjdGlvbkNvbmZpZ3VyYXRpb25FcnJvciB7XG4gIGNvbnN0cnVjdG9yKG9wdGlvbk5hbWU6IHN0cmluZywgZXhwZWN0ZWRUeXBlOiBzdHJpbmcsIGFjdHVhbFR5cGU6IHN0cmluZykge1xuICAgIHN1cGVyKFxuICAgICAgYFwiJHtvcHRpb25OYW1lfVwiIG11c3QgYmUgJHtleHBlY3RlZFR5cGV9LCBidXQgcmVjZWl2ZWQgJHthY3R1YWxUeXBlfS5gLFxuICAgIClcbiAgfVxufVxuIl0sImZpbGUiOiIvcGFja2FnZXMvZGIvc3JjL2NvbGxlY3Rpb24vY29uZmlnLWVycm9ycy50cyJ9
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJ1cmwiOiIyIiwiaW1wb3J0ZWRVcmxzIjoiMyIsIm1hcHBpbmdzIjpmYWxzZX0sIi9Vc2Vycy9reWxlLm1hdGhld3MvcHJvZ3JhbXMvdGFuc3RhY2stZGIvLndvcmt0cmVlcy9jb2RleC1taXNmaXRzLWgwMi1wcm9ncmVzcy1tYWluLXYxL3BhY2thZ2VzL2RiL3NyYy9jb2xsZWN0aW9uL2NvbmZpZy1lcnJvcnMudHMiLCIvcGFja2FnZXMvZGIvc3JjL2NvbGxlY3Rpb24vY29uZmlnLWVycm9ycy50cyIsW11d

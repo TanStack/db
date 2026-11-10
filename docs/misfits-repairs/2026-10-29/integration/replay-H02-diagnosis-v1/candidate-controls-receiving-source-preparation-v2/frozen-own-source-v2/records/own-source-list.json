@@ -1,0 +1,14 @@
+[
+  "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+  "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+  "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+  "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+  "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+  "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+  "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+  "scripts/h02-progress/completion-tsconfig.json",
+  "scripts/h02-progress/completion-eslint.config.mjs",
+  "scripts/h02-progress/completion-receiving.config.ts",
+  "scripts/h02-progress/completion-parent.config.ts",
+  "scripts/h02-progress/completion-parent.mjs"
+]

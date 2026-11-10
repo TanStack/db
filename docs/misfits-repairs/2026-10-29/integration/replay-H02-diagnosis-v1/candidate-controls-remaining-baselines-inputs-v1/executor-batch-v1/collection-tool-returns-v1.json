@@ -1,0 +1,42 @@
+{
+  "processVisibilityPreflight": {
+    "chunk_id": "f4438c",
+    "wall_time_seconds": 0.0000085,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "heldWindowCollection": {
+    "initial": {
+      "chunk_id": "1f2d4b",
+      "wall_time_seconds": 1.001912625,
+      "session_id": 85554,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualCompletion": {
+      "chunk_id": "68d047",
+      "wall_time_seconds": 0.000018458,
+      "exit_code": 0,
+      "original_token_count": 321,
+      "output": "{\n  \"cellId\": \"inline-held-window\",\n  \"resultFreeze\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-held-window-result-freeze-v1.json\",\n  \"resultFreezeSha256\": \"578b8ca87c283a0767fa3783f2d46f3e67dac59786d30ef642dad36c26b4d485\",\n  \"assetCount\": 1975,\n  \"operationalAndTestChecksPassed\": true,\n  \"actualOuterExitCode\": 0,\n  \"parentTestChildExitCode\": 0,\n  \"receivers\": [\n    {\n      \"originalDirectory\": \"/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3\",\n      \"copiedDirectory\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window/receiving-artifacts\",\n      \"nativeFiles\": 1957,\n      \"allCopiedBytesReadBack\": true,\n      \"receiptCount\": 444,\n      \"epochs\": 3,\n      \"cuts\": 2,\n      \"semanticActions\": 4,\n      \"workerCleaned\": 1,\n      \"nativeExitCode\": 0,\n      \"bindingStatus\": \"bound\",\n      \"bindingProfile\": \"completion-baseline-v1\"\n    }\n  ],\n  \"failures\": []\n}\n"
+    }
+  },
+  "sourceFailedPeerCollection": {
+    "initial": {
+      "chunk_id": "cda77c",
+      "wall_time_seconds": 1.003435166,
+      "session_id": 48828,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualCompletion": {
+      "chunk_id": "bd2f0b",
+      "wall_time_seconds": 0.000008625,
+      "exit_code": 1,
+      "original_token_count": 419,
+      "output": "{\n  \"cellId\": \"inline-source-failed-peer\",\n  \"resultFreeze\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-source-failed-peer-result-freeze-v1.json\",\n  \"resultFreezeSha256\": \"029a8eb1cf46e59d84cdf6d52cb7f56837b962b829922672e76630df26b49957\",\n  \"assetCount\": 1975,\n  \"operationalAndTestChecksPassed\": false,\n  \"actualOuterExitCode\": 1,\n  \"parentTestChildExitCode\": 1,\n  \"receivers\": [\n    {\n      \"originalDirectory\": \"/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-64500-7babee3e-9792-42f2-9516-bcd8ff75ef3e\",\n      \"copiedDirectory\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-source-failed-peer/receiving-artifacts\",\n      \"nativeFiles\": 1957,\n      \"allCopiedBytesReadBack\": true,\n      \"receiptCount\": 298,\n      \"epochs\": 4,\n      \"cuts\": 3,\n      \"semanticActions\": 5,\n      \"workerCleaned\": 1,\n      \"nativeExitCode\": 1,\n      \"bindingStatus\": \"bound\",\n      \"bindingProfile\": \"completion-baseline-v1\"\n    }\n  ],\n  \"failures\": [\n    \"actual outer tool exit is not zero\",\n    \"outer outcome exitCode differs\",\n    \"native receiving did not exit normally with zero\",\n    \"native cleanup failure or remaining rows\",\n    \"worker error present\",\n    \"authored epoch starts differ\",\n    \"authored epoch ends differ\",\n    \"authored observation cuts differ\",\n    \"authored semantic action count differs\"\n  ]\n}\n"
+    }
+  },
+  "note": "Collector exits reflect operational/test completeness after preserving artifacts; no native test rerun. Native initial/final actual returns are preserved inside each frozen output leaf."
+}

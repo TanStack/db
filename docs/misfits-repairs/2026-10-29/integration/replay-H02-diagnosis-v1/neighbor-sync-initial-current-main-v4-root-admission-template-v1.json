@@ -1,0 +1,97 @@
+{
+  "status": "TEMPLATE ONLY; no runtime admitted; separate exact singleton root admission required",
+  "at": "2026-10-30T07:14:02.392862+00:00",
+  "admittedBy": null,
+  "admittedRuntime": false,
+  "slot": null,
+  "maxInvocations": 1,
+  "selectedPath": "literal true initial cut",
+  "finiteHistories": 1,
+  "finiteRecipes": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/finite-recipes-v4.json",
+  "finiteRecipesSha256": "34725da611e1cc2eae78d0ad5511f12f7d48dc6138861639d1716863fd85bd63",
+  "recipeEntry": 3,
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/source-freeze-v4.json",
+  "sourceFreezeSha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d",
+  "packetManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/packet-sha256-v4.json",
+  "packetSha256": "5a3d1e13e8dc71e8ae48c36c3cd4a669e1fb93b5458a017050ac7b2f7ccf1b42",
+  "independentSourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-independent-source-acceptance-v1.md",
+  "independentSourceReviewSha256": "e7e05f479573ebfa204eb601b48fd27a8550d507d83024710445602ef260f6d2",
+  "independentVerification": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-independent-verification-v1.json",
+  "independentVerificationSha256": "d5abb81d2f574902b9b339b7e70126df5ce50d18bd2963a69eae76d83407dbf7",
+  "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-sync-initial-v4.zsh",
+  "launcherSha256": "b150e131e44c9bba6469be3b65e38fca1ec32909b7dc07865203a23735e7a9e9",
+  "runnerCommand": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-sync-initial-v4.zsh",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "exactOuterCommand": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+    "-t",
+    "^queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'$"
+  ],
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS"
+  ],
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/source-freeze-v4.json"
+  },
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4",
+  "outputPolicy": "Only after admission, create this fresh outputDirectory exclusively once for launcher process/outer log. Preserve actual unique child receipt/source-binding temp directory named by supervisor; freeze all original bytes. No overwrite/reuse/retry.",
+  "nativeSelector": "^queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'$",
+  "nativeSelectionReceipt": {
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/bound-v1/native-selection-results.json",
+    "sha256": "bdd48b87e801e8a5aa64e6ea018120f2e7458711cb175732b097adcf409b2edf",
+    "entry": 3,
+    "selected": 1,
+    "skipped": 4
+  },
+  "receivingLimits": {
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "wallMs": 20000,
+    "postEnqueueWindowMs": 1000,
+    "samplingMs": 100
+  },
+  "outerTestTimeoutMs": 60000,
+  "receivingPostRunVerifier": {
+    "nodeHeapMiB": 384,
+    "timeoutMs": 20000
+  },
+  "expectedReach": [
+    "literal-true-establishing-receipt",
+    "subscriber-return-before-preload",
+    "final-publication",
+    "worker-cleaned"
+  ],
+  "requiredCapture": "Exactly one native selected test (four skipped) and one matching actual worker history; full contiguous raw child receipts and effective-source binding. Apply unchanged V4 authored-payload comparisons at every reached cut, preserve full raw public metadata and event payloads, and require every declared finite reach for normal complete success. Successful console may be suppressed; reconstruct exact source predicates from raw cuts when needed. Exit status alone gives no verdict.",
+  "sourceBinding": "Require actual strict startup seal/reconciliation and later source inventories, required binding status bound; callback paths alone do not establish V8 byte identity. Retain all raw binding inputs and post-run verifier result.",
+  "conditionalGate": "Only after root separately admits this exact frozen singleton once, create its fresh outputDirectory exclusively and invoke the unchanged launcher once. Stop after preservation and send original outer/child PID+PGIDs for independent absence checks. No retry, automatic next recipe, candidate activation or source edit is admitted by this template.",
+  "forbiddenByThisTemplate": "No other progress/ownership invocation, retry, candidate activation, source/production/model/grammar/budget edit, install, commit, push, PR or publication.",
+  "payloadObservationScope": "The shared unchanged model judges authored id/rank/markers, with one validating projection preserving every selected payload value/occurrence/position at all original cuts. Full raw snapshots/change payloads keep public VirtualRowProps. Temporal virtual-metadata coherence through real QueryClient reload/events remains explicitly open under virtual-row-fields owner; no metadata closure claim.",
+  "actualHistoryRequired": {
+    "kind": "sync-initial",
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "controlVerdictGate": {
+    "normalSuccess": "All declared finite reaches plus unchanged shared comparison, bound effective sources, no observation/resource/identity/setup/recording/cleanup errors and absent original process groups.",
+    "assertionFailure": "Preserve original diagnostic and all raw observations; root independently classifies any law violation at its intended cut.",
+    "containmentFailure": "Timeout, heap/RSS/resource termination, observation or identity/binding/setup/recording/cleanup failure gives no normal-success or product-progress verdict. These paths do not establish the strict conflicting-cache premise, so the post-enqueue containment gate cannot itself supply conflicting-progress RED.",
+    "forcedTermination": "Does not establish final publication or direct adapter cleanup."
+  },
+  "sourcePreparationAcceptanceOnly": "Exact V4 prepared source/recipe acceptance is already linked; it grants neither runtime admission nor product evidence.",
+  "freshOutputDirectoryCurrentlyAbsent": true
+}

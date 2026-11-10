@@ -1,0 +1,54 @@
+{
+  "actualCopyFreezeSha256": "1b491a76140b0994bd48c2e0b59385602ee016cc2418ff317fcbedbbb0b0f55e",
+  "allMetadataAndPhysicalChecksPass": true,
+  "artifactLint": "PENDING ROOT",
+  "at": "2026-10-30T13:05:46.781501+00:00",
+  "blockingFindings": [
+    {
+      "authority": "Contract/report require owned-group stop for wall/resource/operational/outer-signal faults; this is containment mechanics, not a product law.",
+      "id": "H02-COMPILER-STOP-SIGNAL-REENTRANCY",
+      "lines": [
+        108,
+        110,
+        115,
+        158
+      ],
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v1/contain-compiler-v1.py.txt",
+      "priority": 1,
+      "smallestRepair": "Make stop reentrant (for example threading.RLock) or avoid acquiring that lock from the signal handler; preserve the same stop scope and limits.",
+      "status": "Confirmed by static control-flow; unexecuted",
+      "witness": "After handlers are installed, main enters stop and owns non-reentrant stop_lock; SIGINT/SIGTERM arrives before killpg; handler reenters stop on that same thread and blocks acquiring its own lock; main cannot finish stop and timer blocks on that lock too."
+    }
+  ],
+  "boundSourceEdits": 0,
+  "candidateExecutions": 0,
+  "candidateImports": 0,
+  "candidateManifestSha256": "77ecb1a906d4712663622962fcf3db3dee522484118c536a308ec6f046ff4ba0",
+  "candidateSyntaxCompiles": 0,
+  "checks": 26071,
+  "compilerInvocations": 0,
+  "contractSha256": "43dc71093bccfcd8981dec5be06b594d0015ae02d11b5823c5f10b6e56b3e505",
+  "copiedPhysicalInventoryRechecked": 834,
+  "copiedRegularHashesRechecked": 603,
+  "errors": [],
+  "existingFiniteToolMetadata": [
+    255,
+    11974,
+    405,
+    112
+  ],
+  "finiteInputs": 12580,
+  "finiteResolvedInputs": 12580,
+  "heavyToolRehashRepeated": false,
+  "lexicalTokens": 2660,
+  "mode": "Independent lightweight compiler-wrapper source and metadata audit; no candidate execution or syntax compilation.",
+  "nativeReceiving": 0,
+  "processProbes": 0,
+  "productRedGreenCredit": false,
+  "runtimeAdmission": false,
+  "toolProposalSha256": "5fa2a3a45ff2feaf31ea76a6787a021fce6017a5f952082e0e362d81ca4e27d9",
+  "unchangedVChildCommand": true,
+  "verdict": "HOLD exact compiler v1 source for one contained signal-reentrancy correction",
+  "wrapperLines": 236,
+  "wrapperSha256": "424612a8f21c68feebe4920cd859da5800c818eede4ca6b3fd2e9c0ac9fa08e9"
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "h02-post-run-source-and-tool-audit-v1",
+  "at": "2026-10-30T11:58:08.668693+00:00",
+  "allChecksPassed": true,
+  "scope": "Filesystem-only post-run audit; same strict own-file-set algorithm as D exact-closure helper, not package imports or test execution",
+  "admission": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/root-admission-v1.json",
+    "sha256": "61d6c5fee04057a468647bc392127d43f5f092708e287aa3b43cd932be439769"
+  },
+  "fivePins": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+      "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-receiving-operational-preparation-independent-review-v1.md",
+      "sha256": "80dbfac42d70033ff958ad60d6bc8dbf9e19f3a3a8da859b39eb9253809ee940"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-followups-v1/validation-account-v1.json",
+      "sha256": "ea0627d641fe84ccb1aa1e9683ffd09715812cca11bba7f8e8fd5d0b6b8d1874"
+    }
+  ],
+  "allFivePinsMatched": true,
+  "sourceBindingsMatched": 596,
+  "sourceCopiesMatched": 85,
+  "productionUnchanged": 511,
+  "uniquePackageRootsMatched": 255,
+  "ownPayloadsMatched": 11974,
+  "ownPayloadSetsExact": true,
+  "resolutionEdgesMatched": 405,
+  "absentOptionalPeersMatched": 112,
+  "nodeLocksLinksMatched": true,
+  "allRawOriginalAndCopiesRehashedEqual": 1972,
+  "newTestInvocations": 0,
+  "imports": 0,
+  "testDiscovery": 0,
+  "productionOrInstrumentEdits": 0,
+  "auditAttempt1Failure": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/post-run-audit-attempt1-failure-v1.json",
+    "sha256": "9380cb3c20cfab2ab7d9dce91294f91dbea133d40a0f4045b2db3c7d28fc8cb3"
+  },
+  "limits": "Finite frozen source/tool closure only. Does not grant product or oracle reach credit, and does not replace preserved historical recovery qualifications."
+}

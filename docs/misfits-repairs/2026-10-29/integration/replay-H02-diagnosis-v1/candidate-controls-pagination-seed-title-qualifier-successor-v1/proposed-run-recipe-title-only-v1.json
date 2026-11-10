@@ -1,0 +1,86 @@
+{
+  "id": "primary-pagination-joined-window-failure-fixed-red-shared-receiving-2gib-v1",
+  "order": 0,
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "argv": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vite.config.ts",
+    "tests/query/pagination-oracle.property.test.ts",
+    "-t",
+    "retains complete windows across joined failure histories for a fixed seed",
+    "--maxWorkers=1",
+    "--no-file-parallelism",
+    "--reporter=default",
+    "--reporter=json",
+    "--outputFile.json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/vitest-report.json"
+  ],
+  "presentationArgs": [
+    "--reporter=default",
+    "--reporter=json",
+    "--outputFile.json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/vitest-report.json"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+  "environment": {
+    "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1",
+    "CI": "1",
+    "NO_COLOR": "1"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS",
+    "H02_PROGRESS_SOURCE_FREEZE",
+    "H02_COMPLETION_PARENT_PROGRAM",
+    "H02_COMPLETION_PARENT_PROGRAM_SHA256",
+    "H02_COMPLETION_WORKER_MODE",
+    "H02_COMPLETION_GROUP_REGISTRY"
+  ],
+  "additionalClearedPrefixes": [
+    "H02_",
+    "VITEST_",
+    "TANSTACK_DB_ORACLE_"
+  ],
+  "maxWorkers": 1,
+  "fileParallelism": false,
+  "nodeHeap": "installed Node default; NODE_OPTIONS cleared; no test/config timeout override",
+  "outerWallContainmentMs": 30000,
+  "groupRssContainmentBytes": 2147483648,
+  "samplingIntervalMs": 80,
+  "inventoryTimeoutMs": 1000,
+  "leaderReapTimeoutMs": 3000,
+  "descendantCleanupWindowMs": 3000,
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1",
+  "stdoutPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/stdout.log",
+  "stderrPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/stderr.log",
+  "expectedOutput": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/vitest-report.json",
+    "title": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+    "ancestorTitles": [
+      "pagination recomputation oracle",
+      "joined window failure for a fixed seed"
+    ]
+  },
+  "campaign": {
+    "seed": 1665,
+    "runs": 8,
+    "familySchedules": [
+      "failure-first",
+      "peer-first",
+      "success"
+    ],
+    "noOtherCampaignAdmitted": true
+  },
+  "productVerdict": "UNCLASSIFIED; child assertion1 stays child1 and outer1; resource/setup/cleanup failures give no product RED",
+  "actualToolPermission": "require_escalated on actual launcher invocation; separate elevated preflight is insufficient",
+  "runtimeAdmission": "NOT ADMITTED; source-only preparation"
+}

@@ -1,0 +1,122 @@
+--- combined-source-v2/scripts/h02-progress/verify-bindings.mjs
++++ source-successor/scripts/h02-progress/verify-bindings.mjs
+@@ -12,9 +12,9 @@
+  * never an oracle RED. It reads actual runner registry metadata, runtime V8
+  * sources and all raw key callbacks; plugin transforms alone cannot pass it.
+  */
+-const [directory, freezePath] = process.argv.slice(2)
++const [directory, freezePath, bindingProfile = `progress-v1`] = process.argv.slice(2)
+ if (!directory || !freezePath)
+-  throw new Error(`usage: verify-bindings.mjs RUN_DIR SOURCE_FREEZE`)
++  throw new Error(`usage: verify-bindings.mjs RUN_DIR SOURCE_FREEZE [progress-v1|completion-baseline-v1]`)
+ const hash = (bytes) => createHash(`sha256`).update(bytes).digest(`hex`)
+ const freeze = JSON.parse(readFileSync(freezePath, `utf8`))
+ const root = freeze.worktree
+@@ -49,6 +49,22 @@
+     failures.push(`receipt transport close: ${String(error)}`)
+   }
+ }
++// The frozen caller selects the receiving profile. Receipt identity must agree;
++// an unrecognized selector cannot waive either profile's provenance boundary.
++const completionProfile = bindingProfile === `completion-baseline-v1`
++if (![`progress-v1`, `completion-baseline-v1`].includes(bindingProfile))
++  failures.push(`unknown binding profile: ${bindingProfile}`)
++const starts = raw.filter((event) => event.phase === `worker-start`)
++if (starts.length !== 1)
++  failures.push(`binding profile requires exactly one worker-start`)
++const start = starts[0]
++if (
++  completionProfile
++    ? start?.mode !== `baseline-constituent` || start?.history !== undefined
++    : start?.mode !== undefined ||
++      ![`query`, `sync-initial`, `sync-mutation`].includes(start?.history?.kind)
++)
++  failures.push(`binding profile does not match worker-start: ${bindingProfile}`)
+ const emptyCalls = raw.filter(
+   (event) => event.phase === `query-key-callback` && event.emptyOptions,
+ )
+@@ -97,8 +113,11 @@
+ const inventories = readdirSync(directory).filter((name) =>
+   /^evaluated-.*\.json$/.test(name),
+ )
+-if (!inventories.includes(`evaluated-driver-start.json`))
+-  failures.push(`actual evaluated-module startup inventory missing`)
++const startupInventory = completionProfile
++  ? `evaluated-pre-history.json`
++  : `evaluated-driver-start.json`
++if (!inventories.includes(startupInventory))
++  failures.push(`actual evaluated-module startup inventory missing: ${startupInventory}`)
+ const v8 = jsonLines(`v8-binding.jsonl`)
+ const scripts = v8.filter((entry) => entry.phase === `v8-compiled-script`)
+ let seal
+@@ -254,7 +273,29 @@
+   )
+     failures.push(`required evaluated receiving source missing: ${required}`)
+ }
+-for (const required of [
++// The completion receiver awaits its dynamic driver import before sealing.
++// This exact receiver's operational premise is therefore evaluated startup
++// closure. It does not impose a product rule on general module scheduling.
++const completionInstruments = [
++  `packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-driver.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-attachments.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-fixture.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts`,
++  `packages/query-db-collection/tests/queued-answer-completion-oracle.ts`,
++  `scripts/h02-progress/candidate-controls.ts`,
++  `packages/db/tests/oracle-reach.ts`,
++  `packages/db/tests/oracle-config.ts`,
++  `packages/db/tests/oracle-replay-witness.ts`,
++  `packages/db/tests/oracle-declaration.ts`,
++  `packages/db/tests/reference-expression-oracle.ts`,
++  `scripts/h02-progress/source-binding.setup.ts`,
++  `scripts/h02-progress/receipt-transport.mjs`,
++  `scripts/h02-progress/startup-inspector.mjs`,
++]
++const progressInstruments = [
+   `packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts`,
+   `packages/query-db-collection/tests/queued-answer-progress-driver.ts`,
+   `packages/query-db-collection/tests/queued-answer-progress-oracle.ts`,
+@@ -264,7 +305,8 @@
+   `scripts/h02-progress/receipt-transport.mjs`,
+   `scripts/h02-progress/startup-inspector.mjs`,
+   `scripts/h02-progress/witness-premise.ts`,
+-]) {
++]
++for (const required of completionProfile ? [] : progressInstruments) {
+   if (
+     !bindings.some(
+       ({ relative, evaluated }) => relative === required && evaluated,
+@@ -273,6 +315,21 @@
+     failures.push(
+       `required evaluated receiving instrument missing: ${required}`,
+     )
++}
++if (completionProfile) {
++  for (const required of [
++    `packages/db/src/index.ts`,
++    `packages/db-ivm/src/index.ts`,
++    `packages/query-db-collection/src/query.ts`,
++    ...completionInstruments,
++  ]) {
++    if (!bindings.some(
++      ({ inventory, relative, evaluated }) =>
++        inventory === `evaluated-pre-history.json` &&
++        relative === required && evaluated,
++    ))
++      failures.push(`required evaluated completion startup module missing: ${required}`)
++  }
+ }
+ const stacks = raw
+   .filter((event) => event.phase === `source-stack`)
+@@ -288,6 +345,7 @@
+   failures.push(`positive current DB/db-ivm source stack missing`)
+ const result = {
+   status: failures.length ? `binding-unresolved` : `bound`,
++  bindingProfile,
+   actualKeyCount,
+   receiptTransport: {
+     path: receiptPath,

@@ -1,0 +1,83 @@
+{
+  "schema": "h02-qualified-inert-operational-preparation-packet-v1",
+  "status": "FROZEN SOURCE-ONLY INERT proposals for independent operational source review; no materialization, compile or native authority",
+  "qualifiedSourcePacket": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/packet-manifest-v1.json",
+    "sha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0"
+  },
+  "reportSha256": "4405bc415a1afe38577f76355a9433a280643363bad2538ab9dff5062670c724",
+  "inactiveBindingSha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca",
+  "materializationPlanSha256": "0f81439c660770d62b2a96fdebcf8de70c51258501d29c77fd836db9755a1b26",
+  "minimumCompileProposalSha256": "5804ede864ce3adfd596453fc8bba1b5f7ec03d8d1bb672f30ef1ed7980ac6da",
+  "staticPreparationAuditSha256": "e602fdb73c7c8cc41e201e56b85a66d11681f5c132b608befc3dbe004ee68c6a",
+  "finalStaticFreezeAuditSha256": "43d1cae15680c445d1b1252fe3a1e82b7d231e65f52a32207d29035a8784ae4a",
+  "fileCount": 14,
+  "files": {
+    "final-static-freeze-audit-v1.json": {
+      "sha256": "43d1cae15680c445d1b1252fe3a1e82b7d231e65f52a32207d29035a8784ae4a",
+      "bytes": 2185
+    },
+    "inert-control-v1/programs/inline-window-failure-first.json.txt": {
+      "sha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "bytes": 4974
+    },
+    "inert-control-v1/programs/inline-window-success.json.txt": {
+      "sha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "bytes": 7269
+    },
+    "inert-control-v1/recipes/inline-window-failure-first.json.txt": {
+      "sha256": "03297e00e2683be4d22c9add73770ef5503bb639fefcb8f5645948a3758a365f",
+      "bytes": 1630
+    },
+    "inert-control-v1/recipes/inline-window-success.json.txt": {
+      "sha256": "007a4fce14be078b4903f3f367615725603144fd50d74331fd8dd45332ccb234",
+      "bytes": 1617
+    },
+    "inert-control-v1/source-freeze-v1.json.txt": {
+      "sha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca",
+      "bytes": 535019
+    },
+    "inert-control-v1/typecheck.tsconfig.json.txt": {
+      "sha256": "b9a6658265fc6864b059b9be47d4e52c0ea7203d641ccce0bd26a51d3a7763bb",
+      "bytes": 1262
+    },
+    "inert-materialization-plan-v1.json": {
+      "sha256": "0f81439c660770d62b2a96fdebcf8de70c51258501d29c77fd836db9755a1b26",
+      "bytes": 341912
+    },
+    "preparation-read-error-v1.json": {
+      "sha256": "e1f3afdb6ed4e1331103ce50cf27625798c86a981afec67513c018a8a56c630a",
+      "bytes": 355
+    },
+    "proposed-exact-inline-window-failure-first-command-v1.json": {
+      "sha256": "156c553a128f7ec9bde4b1c148b3162ec9b63d2aab1939eccbe989179f7cd19f",
+      "bytes": 4849
+    },
+    "proposed-exact-inline-window-success-command-v1.json": {
+      "sha256": "4a11f5cd609f55fd19381abe2b9b4fbf90b90464f0ad0284896668f59d268b77",
+      "bytes": 4801
+    },
+    "proposed-minimum-compile-gate-v1.json": {
+      "sha256": "5804ede864ce3adfd596453fc8bba1b5f7ec03d8d1bb672f30ef1ed7980ac6da",
+      "bytes": 5008
+    },
+    "report-v1.md": {
+      "sha256": "4405bc415a1afe38577f76355a9433a280643363bad2538ab9dff5062670c724",
+      "bytes": 10610
+    },
+    "static-preparation-audit-v1.json": {
+      "sha256": "e602fdb73c7c8cc41e201e56b85a66d11681f5c132b608befc3dbe004ee68c6a",
+      "bytes": 2464
+    }
+  },
+  "selfExcluded": true,
+  "laterArtifactLint": "PENDING ROOT",
+  "materialization": 0,
+  "compile": 0,
+  "dynamicImports": 0,
+  "discovery": 0,
+  "nativeInvocations": 0,
+  "probes": 0,
+  "runtimeAdmission": false,
+  "slot2": "returned after freeze; stop pending ROOT review assignment"
+}

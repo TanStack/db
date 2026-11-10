@@ -1,0 +1,1347 @@
+--- v4/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ v5/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -1,4 +1,3 @@
+-import { writeSync } from 'node:fs'
+ import { QueryClient, hashKey } from '@tanstack/query-core'
+ import {
+   BTreeIndex,
+@@ -9,6 +8,7 @@
+   toArray,
+ } from '@tanstack/db'
+ import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle.js'
++import { emitProgressReceipt as emit } from '../../../scripts/h02-progress/receipt-transport.mjs'
+ import { queryCollectionOptions } from '../src/query.js'
+ import { progressFacts } from './queued-answer-progress-oracle.js'
+ import type { LoadSubsetOptions } from '@tanstack/db'
+@@ -37,14 +37,6 @@
+  * They never serialize subscriptions or supply expected public row values.
+  */
+ export async function driveQueuedAnswerHistory(history: ProgressHistory) {
+-  let sequence = 0
+-  const emit = (phase: string, details: Record<string, unknown> = {}) => {
+-    writeSync(
+-      1,
+-      JSON.stringify({ h02: true, sequence: ++sequence, phase, ...details }) +
+-        `\n`,
+-    )
+-  }
+   emit(`worker-start`, {
+     history,
+     cwd: process.cwd(),
+--- v4/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
++++ v5/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
+@@ -1,15 +1,22 @@
+ import { execFileSync, spawn } from 'node:child_process'
+ import { randomUUID } from 'node:crypto'
+ import {
+-  createWriteStream,
++  closeSync,
+   mkdirSync,
++  openSync,
+   readFileSync,
+   realpathSync,
+   writeFileSync,
++  writeSync,
+ } from 'node:fs'
+ import { tmpdir } from 'node:os'
+ import { dirname, resolve } from 'node:path'
+ import { fileURLToPath } from 'node:url'
++import {
++  checkReceiptFault,
++  checkReceiptWriter,
++  createReceiptReader,
++} from '../../../scripts/h02-progress/receipt-transport.mjs'
+ import type {
+   ProgressHistory,
+   ProgressOutcome,
+@@ -64,9 +71,11 @@
+     tmpdir(),
+     `h02-progress-${process.pid}-${randomUUID()}`,
+   )
+-  mkdirSync(directory)
++  mkdirSync(directory, { mode: 0o700 })
+   const historyPath = resolve(directory, `history.json`)
+-  const logPath = resolve(directory, `worker.log`)
++  const logPath = resolve(directory, `receipts.jsonl`)
++  const stdoutPath = resolve(directory, `worker.stdout.log`)
++  const stderrPath = resolve(directory, `worker.stderr.log`)
+   writeFileSync(historyPath, JSON.stringify(history, null, 2))
+   const args = [
+     `--max-old-space-size=384`,
+@@ -82,13 +91,31 @@
+     cwd: root,
+     historyPath,
+     directory,
++    receiptTransport: {
++      path: logPath,
++      flags: `wx`,
++      mode: 0o600,
++      stdoutPath,
++      stderrPath,
++    },
+     limits: { wallMs: 20_000, groupRssBytes: 1024 ** 3, nodeHeapMiB: 384 },
+   }
+   writeFileSync(
+     resolve(directory, `prepared.json`),
+     JSON.stringify(command, null, 2),
+   )
+-  const log = createWriteStream(logPath)
++  const stdoutFd = openSync(stdoutPath, `wx`, 0o600)
++  let stderrFd: number
++  try {
++    stderrFd = openSync(stderrPath, `wx`, 0o600)
++  } catch (error) {
++    try {
++      closeSync(stdoutFd)
++    } catch {
++      // Preserve the primary diagnostic setup failure.
++    }
++    throw error
++  }
+   const child = spawn(process.execPath, args, {
+     cwd: root,
+     detached: true,
+@@ -97,6 +124,7 @@
+       ...process.env,
+       H02_PROGRESS_WORKER_HISTORY: historyPath,
+       H02_PROGRESS_BINDING_DIR: directory,
++      H02_PROGRESS_RECEIPTS: logPath,
+       H02_PROGRESS_SELECTED_ROOT: root.replace(/\/$/, ``),
+     },
+   })
+@@ -114,9 +142,9 @@
+   const start = Date.now()
+   let maxSampledGroupRssBytes = 0
+   let latestGroupRows: Array<string> = []
+-  let buffer = ``
+   let stderrTail = ``
+   let killAttempted = false
++  let receivingExited = false
+   const save = (phase: string) =>
+     writeFileSync(
+       resolve(directory, `supervisor.json`),
+@@ -161,57 +189,64 @@
+         outcome.cleanupErrors.push(String(error))
+     }
+   }
+-  const consume = (data: Buffer) => {
+-    log.write(data)
+-    buffer += data.toString(`utf8`)
+-    for (;;) {
+-      const newline = buffer.indexOf(`\n`)
+-      if (newline < 0) break
+-      const line = buffer.slice(0, newline)
+-      buffer = buffer.slice(newline + 1)
+-      if (!line.startsWith(`{"h02":true,`)) continue
+-      try {
+-        const receipt = JSON.parse(line) as ProgressReceipt
+-        if (receipt.phase === `query-key-callback`) outcome.keyCallbacks++
+-        if (receipt.phase === `actual-key-prefix` && receipt.valid !== true)
+-          outcome.prefixViolations++
+-        if (receipt.phase === `warning`) outcome.warnings++
+-        // Keep the raw complete callback/key/lease trace on disk. These few
+-        // semantic receipts suffice for the independent parent judgment.
+-        if (
+-          [
+-            `worker-start`,
+-            `conflicting-cache-premise`,
+-            `answer-queued`,
+-            `answer-executed`,
+-            `reload-start`,
+-            `public-change`,
+-            `cleanup-start`,
+-            `retained-publication`,
+-            `initial-publication`,
+-            `immediate-publication`,
+-            `final-publication`,
+-            `source-stack`,
+-            `worker-error`,
+-            `worker-cleaned`,
+-            `source-establishing-receipt`,
+-          ].includes(receipt.phase)
+-        ) {
+-          outcome.receipts.push(receipt)
+-        }
+-        observe(receipt)
+-      } catch (error) {
+-        outcome.primaryObservationError ??=
+-          error instanceof Error
+-            ? (error.stack ?? error.message)
+-            : String(error)
+-        kill(`observation`)
++  const reader = createReceiptReader(logPath, (receipt) => {
++    try {
++      if (receipt.phase === `query-key-callback`) outcome.keyCallbacks++
++      if (receipt.phase === `actual-key-prefix` && receipt.valid !== true)
++        outcome.prefixViolations++
++      if (receipt.phase === `warning`) outcome.warnings++
++      // Keep the raw complete callback/key/lease trace on disk. These few
++      // semantic receipts suffice for the independent parent judgment.
++      if (
++        [
++          `worker-start`,
++          `conflicting-cache-premise`,
++          `answer-queued`,
++          `answer-executed`,
++          `reload-start`,
++          `public-change`,
++          `cleanup-start`,
++          `retained-publication`,
++          `initial-publication`,
++          `immediate-publication`,
++          `final-publication`,
++          `source-stack`,
++          `worker-error`,
++          `worker-cleaned`,
++          `source-establishing-receipt`,
++        ].includes(receipt.phase)
++      ) {
++        outcome.receipts.push(receipt)
+       }
+-    }
+-  }
+-  child.stdout.on(`data`, consume)
++      observe(receipt)
++    } catch (error) {
++      outcome.primaryObservationError ??=
++        error instanceof Error ? (error.stack ?? error.message) : String(error)
++      if (!receivingExited) kill(`observation`)
++    }
++  })
++  const instrumentFailure = (where: string, error: unknown) => {
++    const message = `instrument receipt transport ${where}: ${String(error)}`
++    if (outcome.primaryObservationError) outcome.cleanupErrors.push(message)
++    else outcome.primaryObservationError = message
++    if (!receivingExited) kill(`observation`)
++  }
++  const diagnostic = (fd: number, data: Buffer) => {
++    try {
++      let offset = 0
++      while (offset < data.length) {
++        const count = writeSync(fd, data, offset, data.length - offset)
++        if (count <= 0)
++          throw new Error(`diagnostic file write made no progress`)
++        offset += count
++      }
++    } catch (error) {
++      instrumentFailure(`diagnostic write`, error)
++    }
++  }
++  child.stdout.on(`data`, (data: Buffer) => diagnostic(stdoutFd, data))
+   child.stderr.on(`data`, (data: Buffer) => {
+-    log.write(data)
++    diagnostic(stderrFd, data)
+     stderrTail = (stderrTail + data.toString(`utf8`)).slice(-4000)
+     if (
+       /FATAL ERROR:.*heap|Allocation failed - JavaScript heap out of memory/.test(
+@@ -221,6 +256,12 @@
+       outcome.reason = `heap`
+   })
+   const interval = setInterval(() => {
++    try {
++      reader.drain()
++      checkReceiptFault(logPath)
++    } catch (error) {
++      instrumentFailure(`live read`, error)
++    }
+     try {
+       latestGroupRows = groupRows()
+       const rss = latestGroupRows.reduce(
+@@ -239,10 +280,12 @@
+   try {
+     await new Promise<void>((done) => {
+       child.once(`error`, (error) => {
++        receivingExited = true
+         outcome.cleanupErrors.push(`spawn: ${String(error)}`)
+         done()
+       })
+       child.once(`close`, (code, signal) => {
++        receivingExited = true
+         outcome.exitCode = code
+         outcome.signal = signal
+         done()
+@@ -266,7 +309,34 @@
+     } catch (error) {
+       outcome.cleanupErrors.push(`final group check: ${String(error)}`)
+     }
+-    await new Promise<void>((done) => log.end(done))
++    try {
++      reader.drain(true)
++      checkReceiptWriter(logPath)
++    } catch (error) {
++      instrumentFailure(`final read/setup`, error)
++    }
++    try {
++      reader.close()
++    } catch (error) {
++      instrumentFailure(`reader close`, error)
++    }
++    for (const fd of [stdoutFd, stderrFd]) {
++      try {
++        closeSync(fd)
++      } catch (error) {
++        instrumentFailure(`diagnostic close`, error)
++      }
++    }
++    if (
++      outcome.reason === `exited` &&
++      outcome.exitCode !== 0 &&
++      !outcome.receipts.some(({ phase }) => phase === `worker-error`)
++    ) {
++      instrumentFailure(
++        `worker exit`,
++        `nonzero exit without a worker-error receipt; inspect separate diagnostics`,
++      )
++    }
+     save(`final`)
+   }
+   try {
+--- v4/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
++++ v5/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
+@@ -1,5 +1,9 @@
+-import { readFileSync, writeSync } from 'node:fs'
++import { readFileSync } from 'node:fs'
+ import { it } from 'vitest'
++import {
++  closeProgressReceipts,
++  recordWorkerError,
++} from '../../../scripts/h02-progress/receipt-transport.mjs'
+ import type { ProgressHistory } from './queued-answer-progress-oracle.js'
+ 
+ // This ordinary runner registers the production driver. It contains no
+@@ -7,6 +11,8 @@
+ it(`receives a finite queued backend answer`, async () => {
+   const path = process.env.H02_PROGRESS_WORKER_HISTORY
+   if (!path) throw new Error(`H02_PROGRESS_WORKER_HISTORY is required`)
++  let failed = false
++  let failure: unknown
+   try {
+     const history = JSON.parse(readFileSync(path, `utf8`)) as ProgressHistory
+     const { driveQueuedAnswerHistory } = await import(
+@@ -14,15 +20,24 @@
+     )
+     await driveQueuedAnswerHistory(history)
+   } catch (error) {
+-    writeSync(
+-      1,
+-      JSON.stringify({
+-        h02: true,
+-        phase: `worker-error`,
+-        message: String(error),
+-        stack: error instanceof Error ? error.stack : undefined,
+-      }) + `\n`,
+-    )
+-    throw error
++    failed = true
++    failure = recordWorkerError(error)
+   }
++  try {
++    closeProgressReceipts()
++  } catch (error) {
++    // A close failure is secondary when the driver already failed. Keep it
++    // in stderr diagnostics without replacing that original error.
++    if (!failed) {
++      failed = true
++      failure = error
++    } else {
++      try {
++        console.error({ receiptCloseFailure: String(error) })
++      } catch {
++        // The original driver error remains primary if stderr also fails.
++      }
++    }
++  }
++  if (failed) throw failure
+ })
+--- v4/scripts/h02-progress/bindings-calibration.test.mjs
++++ v5/scripts/h02-progress/bindings-calibration.test.mjs
+@@ -12,6 +12,7 @@
+ import { dirname, resolve } from 'node:path'
+ import { test } from 'node:test'
+ import { fileURLToPath } from 'node:url'
++import { createReceiptWriter } from './receipt-transport.mjs'
+ 
+ /**
+  * Authored provenance records exercise only the offline verifier. Fake source
+@@ -34,6 +35,7 @@
+   `packages/db/tests/query/load-subset-retained-publication-oracle.ts`,
+   `packages/db/tests/reference-expression-oracle.ts`,
+   `scripts/h02-progress/source-binding.setup.ts`,
++  `scripts/h02-progress/receipt-transport.mjs`,
+   `packages/db/tests/optional-calibration-helper.ts`,
+ ]
+ function fixture() {
+@@ -99,10 +101,9 @@
+       stack: `${root}/packages/db/src/a.ts\n${root}/packages/db-ivm/src/b.ts`,
+     },
+   ]
+-  writeFileSync(
+-    resolve(run, `worker.log`),
+-    raw.map((event) => JSON.stringify({ h02: true, ...event })).join(`\n`),
+-  )
++  const writer = createReceiptWriter(resolve(run, `receipts.jsonl`))
++  for (const { phase, ...details } of raw) writer.emit(phase, details)
++  writer.close()
+   return { directory, root, run, freeze, inventory, scripts }
+ }
+ function verify(input, extraInventory) {
+@@ -273,3 +274,51 @@
+   },
+   `required evaluated receiving source missing`,
+ )
++calibration(
++  `does not interpret stdout or stderr as raw receipts`,
++  ({ run }) => {
++    writeFileSync(resolve(run, `worker.stdout.log`), `not JSON\n`)
++    writeFileSync(
++      resolve(run, `worker.stderr.log`),
++      `{"h02":true,"phase":"warning"}\n`,
++    )
++  },
++)
++calibration(
++  `rejects raw receipt sequence gaps`,
++  ({ run }) => {
++    const path = resolve(run, `receipts.jsonl`)
++    writeFileSync(
++      path,
++      readFileSync(path, `utf8`).replace(`"sequence":2`, `"sequence":7`),
++    )
++  },
++  `receipt transport:`,
++)
++calibration(
++  `rejects truncated raw receipt tails`,
++  ({ run }) => {
++    const path = resolve(run, `receipts.jsonl`)
++    writeFileSync(path, readFileSync(path).subarray(0, -1))
++  },
++  `truncated final receipt`,
++)
++calibration(
++  `rejects a writer fault beside a complete raw prefix`,
++  ({ run }) => {
++    writeFileSync(
++      resolve(run, `receipts.jsonl.fault.json`),
++      JSON.stringify({ message: `authored fault` }),
++    )
++  },
++  `receipt writer fault`,
++)
++calibration(
++  `requires actual evaluation of the new receipt transport module`,
++  ({ inventory }) => {
++    inventory.find(({ file }) =>
++      file.endsWith(`/receipt-transport.mjs`),
++    ).evaluated = false
++  },
++  `required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs`,
++)
+--- v4/scripts/h02-progress/verify-bindings.mjs
++++ v5/scripts/h02-progress/verify-bindings.mjs
+@@ -1,6 +1,10 @@
+ import { createHash } from 'node:crypto'
+ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+ import { resolve } from 'node:path'
++import {
++  checkReceiptWriter,
++  createReceiptReader,
++} from './receipt-transport.mjs'
+ 
+ /**
+  * Run only after a root-admitted witness. This is a provenance gate, separate
+@@ -24,11 +28,27 @@
+     .split(`\n`)
+     .filter(Boolean)
+     .map((line) => JSON.parse(line))
+-const raw = readFileSync(resolve(directory, `worker.log`), `utf8`)
+-  .split(`\n`)
+-  .flatMap((line) =>
+-    line.startsWith(`{"h02":true,`) ? [JSON.parse(line)] : [],
+-  )
++const receiptPath = resolve(directory, `receipts.jsonl`)
++/** @type {Array<import('./receipt-transport.mjs').Receipt>} */
++const raw = []
++const receiptReader = createReceiptReader(receiptPath, (receipt) =>
++  raw.push(receipt),
++)
++let receiptTransportError
++try {
++  receiptReader.drain(true)
++  checkReceiptWriter(receiptPath)
++} catch (error) {
++  receiptTransportError = String(error)
++  failures.push(`receipt transport: ${String(error)}`)
++} finally {
++  try {
++    receiptReader.close()
++  } catch (error) {
++    receiptTransportError ??= String(error)
++    failures.push(`receipt transport close: ${String(error)}`)
++  }
++}
+ const emptyCalls = raw.filter(
+   (event) => event.phase === `query-key-callback` && event.emptyOptions,
+ )
+@@ -176,6 +196,7 @@
+   `packages/db/tests/query/load-subset-retained-publication-oracle.ts`,
+   `packages/db/tests/reference-expression-oracle.ts`,
+   `scripts/h02-progress/source-binding.setup.ts`,
++  `scripts/h02-progress/receipt-transport.mjs`,
+ ]) {
+   if (
+     !bindings.some(
+@@ -201,6 +222,11 @@
+ const result = {
+   status: failures.length ? `binding-unresolved` : `bound`,
+   actualKeyCount,
++  receiptTransport: {
++    path: receiptPath,
++    count: raw.length,
++    error: receiptTransportError,
++  },
+   emptyCallbacks: emptyCalls.length,
+   bindings,
+   failures,
+--- v4/scripts/h02-progress/receipt-transport.mjs
++++ v5/scripts/h02-progress/receipt-transport.mjs
+@@ -0,0 +1,351 @@
++import {
++  closeSync,
++  fstatSync,
++  lstatSync,
++  openSync,
++  readFileSync,
++  readSync,
++  writeFileSync,
++  writeSync,
++} from 'node:fs'
++import { resolve } from 'node:path'
++import { TextDecoder } from 'node:util'
++
++/** @typedef {Record<string, unknown> & { h02: true, sequence: number, phase: string }} Receipt */
++
++/**
++ * Receipt bytes have one synchronous writer and one independent file reader.
++ * The writer never uses a pipe, yields, drops a receipt, or changes its payload.
++ * Newlines delimit complete UTF-8 JSON receipts. A killed worker may leave a
++ * complete prefix; a nonempty final fragment is an instrument failure.
++ * These are recording rules, not provider, cache, or product progress rules.
++ *
++ * @param {string} path
++ * @param {{ write?: (fd: number, bytes: Buffer, offset: number, length: number) => number, close?: (fd: number) => void, reportFault?: (value: unknown) => void }} [io]
++ */
++export function createReceiptWriter(path, io = {}) {
++  const write = io.write ?? writeSync
++  const close = io.close ?? closeSync
++  const reportFault =
++    io.reportFault ??
++    ((value) =>
++      writeFileSync(`${path}.fault.json`, JSON.stringify(value, null, 2), {
++        flag: `wx`,
++        mode: 0o600,
++      }))
++  let sequence = 0
++  let writtenBytes = 0
++  /** @type {number | undefined} */
++  let fd
++  let closed = false
++  let failed = false
++  /** @type {unknown} */
++  let firstError
++  /** @param {unknown} error @returns {never} */
++  const fail = (error) => {
++    if (!failed) {
++      failed = true
++      firstError = error
++      try {
++        reportFault({
++          path,
++          pid: process.pid,
++          sequence,
++          writtenBytes,
++          message: String(error),
++          stack: error instanceof Error ? error.stack : undefined,
++        })
++      } catch {
++        // Failure reporting must not replace the write/open/close failure.
++        // The receiving runner still rejects with the original error.
++      }
++    }
++    throw firstError
++  }
++  try {
++    fd = openSync(path, `wx`, 0o600)
++    if (!fstatSync(fd).isFile()) throw new Error(`receipt sink is not a file`)
++    writeFileSync(
++      `${path}.writer.json`,
++      JSON.stringify({
++        path,
++        pid: process.pid,
++        flags: `wx`,
++        mode: 0o600,
++        regularFile: true,
++      }),
++      { flag: `wx`, mode: 0o600 },
++    )
++  } catch (error) {
++    if (fd !== undefined) {
++      try {
++        closeSync(fd)
++      } catch {
++        // Preserve the original setup failure.
++      }
++    }
++    fail(error)
++  }
++  if (fd === undefined) throw new Error(`receipt writer did not open`)
++  const writerFd = fd
++  return {
++    /** @param {string} phase @param {Record<string, unknown>} [details] */
++    emit(phase, details = {}) {
++      if (failed) throw firstError
++      if (closed) return fail(new Error(`receipt writer is closed`))
++      try {
++        // Preserve the original envelope and payload encoding. The shared
++        // sequence includes the receiving runner's worker-error receipt.
++        const bytes = Buffer.from(
++          JSON.stringify({
++            h02: true,
++            sequence: ++sequence,
++            phase,
++            ...details,
++          }) + `\n`,
++          `utf8`,
++        )
++        let offset = 0
++        while (offset < bytes.length) {
++          const count = write(writerFd, bytes, offset, bytes.length - offset)
++          if (
++            !Number.isInteger(count) ||
++            count <= 0 ||
++            count > bytes.length - offset
++          )
++            throw new Error(`invalid receipt write count: ${count}`)
++          offset += count
++          writtenBytes += count
++        }
++      } catch (error) {
++        fail(error)
++      }
++    },
++    close() {
++      if (!closed) {
++        closed = true
++        try {
++          close(writerFd)
++        } catch (error) {
++          fail(error)
++        }
++      }
++      if (failed) throw firstError
++    },
++  }
++}
++
++/** @param {(receipt: Receipt) => void} accept */
++export function createReceiptDecoder(accept) {
++  /** @type {Buffer} */
++  let fragment = Buffer.alloc(0)
++  let sequence = 0
++  const utf8 = new TextDecoder(`utf-8`, { fatal: true, ignoreBOM: true })
++  return {
++    /** @param {Buffer} chunk */
++    push(chunk) {
++      const bytes = fragment.length ? Buffer.concat([fragment, chunk]) : chunk
++      let offset = 0
++      for (;;) {
++        const end = bytes.indexOf(0x0a, offset)
++        if (end < 0) break
++        const value = /** @type {unknown} */ (
++          JSON.parse(utf8.decode(bytes.subarray(offset, end)))
++        )
++        if (
++          typeof value !== `object` ||
++          value === null ||
++          !(`h02` in value) ||
++          value.h02 !== true ||
++          !(`phase` in value) ||
++          typeof value.phase !== `string` ||
++          !value.phase ||
++          !(`sequence` in value) ||
++          !Number.isSafeInteger(value.sequence) ||
++          value.sequence !== sequence + 1
++        )
++          throw new Error(
++            `invalid receipt envelope or sequence after ${sequence}`,
++          )
++        sequence++
++        accept(/** @type {Receipt} */ (value))
++        offset = end + 1
++      }
++      fragment = Buffer.from(bytes.subarray(offset))
++    },
++    finish() {
++      if (fragment.length)
++        throw new Error(`truncated final receipt: ${fragment.length} bytes`)
++      if (sequence === 0) throw new Error(`receipt stream is empty`)
++      return sequence
++    },
++  }
++}
++
++/**
++ * A live drain reads only the size captured at its start, so an unbounded
++ * producer cannot prevent the parent's next containment sample. The next
++ * drain resumes at the exact byte offset. No complete receipt is replayed.
++ *
++ * @param {string} path
++ * @param {(receipt: Receipt) => void} accept
++ * @param {{ read?: (fd: number, bytes: Buffer, offset: number, length: number, position: number) => number }} [io]
++ */
++export function createReceiptReader(path, accept, io = {}) {
++  const decoder = createReceiptDecoder(accept)
++  const read = io.read ?? readSync
++  /** @type {number | undefined} */
++  let fd
++  let offset = 0
++  let failed = false
++  /** @type {unknown} */
++  let firstError
++  return {
++    drain(final = false) {
++      if (failed) throw firstError
++      try {
++        if (fd === undefined) {
++          try {
++            fd = openSync(path, `r`)
++          } catch (error) {
++            if (
++              !final &&
++              error instanceof Error &&
++              `code` in error &&
++              error.code === `ENOENT`
++            )
++              return
++            throw error
++          }
++        }
++        const stat = fstatSync(fd)
++        const named = lstatSync(path)
++        if (
++          !stat.isFile() ||
++          !named.isFile() ||
++          named.dev !== stat.dev ||
++          named.ino !== stat.ino
++        )
++          throw new Error(`receipt file changed identity or is not regular`)
++        const end = stat.size
++        if (end < offset) throw new Error(`receipt file shrank`)
++        const bytes = Buffer.alloc(64 * 1024)
++        while (offset < end) {
++          const length = Math.min(bytes.length, end - offset)
++          const count = read(fd, bytes, 0, length, offset)
++          if (!Number.isInteger(count) || count <= 0 || count > length)
++            throw new Error(`invalid receipt read count: ${count}`)
++          offset += count
++          decoder.push(bytes.subarray(0, count))
++        }
++        if (final) return decoder.finish()
++        return undefined
++      } catch (error) {
++        failed = true
++        firstError = error
++        throw error
++      }
++    },
++    close() {
++      if (fd !== undefined) {
++        const closing = fd
++        fd = undefined
++        closeSync(closing)
++      }
++    },
++  }
++}
++
++/** @param {string} directory @param {string} path */
++export function requireReceiptPath(directory, path) {
++  if (path !== resolve(directory, `receipts.jsonl`))
++    throw new Error(`receipt path differs from binding directory`)
++  return path
++}
++
++/** @type {ReturnType<typeof createReceiptWriter> | undefined} */
++let progressWriter
++let progressWriterFailed = false
++/** @type {unknown} */
++let progressWriterError
++function getProgressWriter() {
++  if (progressWriterFailed) throw progressWriterError
++  if (!progressWriter) {
++    try {
++      const directory = process.env.H02_PROGRESS_BINDING_DIR
++      const path = process.env.H02_PROGRESS_RECEIPTS
++      if (!directory || !path)
++        throw new Error(`receipt directory and path are required`)
++      progressWriter = createReceiptWriter(requireReceiptPath(directory, path))
++    } catch (error) {
++      progressWriterFailed = true
++      progressWriterError = error
++      throw error
++    }
++  }
++  return progressWriter
++}
++/** @param {string} phase @param {Record<string, unknown>} [details] */
++export function emitProgressReceipt(phase, details = {}) {
++  getProgressWriter().emit(phase, details)
++}
++export function closeProgressReceipts() {
++  progressWriter?.close()
++}
++
++/**
++ * The original driver error survives a failure while recording that error.
++ * stderr is diagnostic only; it can never supply a missing raw receipt.
++ * @param {unknown} error
++ * @param {(phase: string, details: Record<string, unknown>) => void} [emit]
++ * @param {(error: unknown) => void} [diagnose]
++ */
++export function recordWorkerError(
++  error,
++  emit = emitProgressReceipt,
++  diagnose = console.error,
++) {
++  try {
++    emit(`worker-error`, {
++      message: String(error),
++      stack: error instanceof Error ? error.stack : undefined,
++    })
++  } catch (secondary) {
++    try {
++      diagnose({
++        receiptTransportFailure: String(secondary),
++        originalError: String(error),
++      })
++    } catch {
++      /* Preserve the original error. */
++    }
++  }
++  return error
++}
++
++/** @param {string} path */
++export function checkReceiptWriter(path) {
++  const metadata = JSON.parse(readFileSync(`${path}.writer.json`, `utf8`))
++  if (
++    metadata.path !== path ||
++    metadata.flags !== `wx` ||
++    metadata.mode !== 0o600 ||
++    metadata.regularFile !== true ||
++    !Number.isSafeInteger(metadata.pid) ||
++    metadata.pid <= 0
++  )
++    throw new Error(`invalid receipt writer setup metadata`)
++  checkReceiptFault(path)
++}
++
++/** @param {string} path */
++export function checkReceiptFault(path) {
++  try {
++    const fault = readFileSync(`${path}.fault.json`, `utf8`)
++    throw new Error(`receipt writer fault: ${fault}`)
++  } catch (error) {
++    if (error instanceof Error && `code` in error && error.code === `ENOENT`)
++      return
++    throw error
++  }
++}
+--- v4/scripts/h02-progress/receipt-transport.test.mjs
++++ v5/scripts/h02-progress/receipt-transport.test.mjs
+@@ -0,0 +1,485 @@
++import { strict as assert } from 'node:assert'
++import {
++  appendFileSync,
++  closeSync,
++  mkdtempSync,
++  readFileSync,
++  readSync,
++  rmSync,
++  renameSync,
++  statSync,
++  writeFileSync,
++  writeSync,
++} from 'node:fs'
++import { tmpdir } from 'node:os'
++import { resolve } from 'node:path'
++import { test } from 'node:test'
++import {
++  checkReceiptFault,
++  checkReceiptWriter,
++  createReceiptDecoder,
++  createReceiptReader,
++  createReceiptWriter,
++  requireReceiptPath,
++  recordWorkerError,
++} from './receipt-transport.mjs'
++
++// Pure logging fixtures only. No production driver, provider, query, history
++// grammar, oracle comparison, process-group sampler, or receiving run executes.
++function fixture(run) {
++  const directory = mkdtempSync(resolve(tmpdir(), `h02-transport-calibration-`))
++  try {
++    return run(resolve(directory, `receipts.jsonl`), directory)
++  } finally {
++    rmSync(directory, { recursive: true, force: true })
++  }
++}
++const line = (sequence, details = {}) =>
++  Buffer.from(
++    JSON.stringify({ h02: true, sequence, phase: `authored`, ...details }) +
++      `\n`,
++  )
++
++test(`writes exact ordered payloads through partial synchronous writes`, () =>
++  fixture((path) => {
++    const writer = createReceiptWriter(path, {
++      write: (fd, bytes, offset, length) =>
++        writeSync(fd, bytes, offset, Math.min(3, length)),
++    })
++    writer.emit(`authored`, {
++      value: `é🙂`,
++      keys: [null, 1, `1`],
++      nested: { raw: true },
++    })
++    writer.emit(`worker-error`, { message: `original` })
++    writer.close()
++    assert.deepEqual(
++      readFileSync(path),
++      Buffer.concat([
++        line(1, { value: `é🙂`, keys: [null, 1, `1`], nested: { raw: true } }),
++        line(2, { phase: `worker-error`, message: `original` }),
++      ]),
++    )
++    assert.equal(statSync(path).isFile(), true)
++    assert.equal(statSync(path).mode & 0o777, 0o600)
++    checkReceiptWriter(path)
++    assert.throws(() => createReceiptWriter(path), { code: `EEXIST` })
++    assert.deepEqual(
++      readFileSync(path),
++      Buffer.concat([
++        line(1, { value: `é🙂`, keys: [null, 1, `1`], nested: { raw: true } }),
++        line(2, { phase: `worker-error`, message: `original` }),
++      ]),
++    )
++  }))
++
++test(`binds the raw path to the existing supervisor directory`, () =>
++  fixture((path, directory) => {
++    assert.equal(requireReceiptPath(directory, path), path)
++    for (const wrong of [
++      `receipts.jsonl`,
++      `${path}.other`,
++      resolve(directory, `..`, `receipts.jsonl`),
++    ])
++      assert.throws(
++        () => requireReceiptPath(directory, wrong),
++        /differs from binding directory/,
++      )
++  }))
++
++test(`retains a large raw stream and a multibyte receipt larger than the read chunk`, () =>
++  fixture((path) => {
++    const writer = createReceiptWriter(path)
++    const expected = []
++    const seen = []
++    const reader = createReceiptReader(path, (receipt) => seen.push(receipt))
++    try {
++      for (let index = 0; index < 4096; index++) {
++        const details = { index, value: `é🙂`.repeat(40) }
++        writer.emit(`authored`, details)
++        expected.push({
++          h02: true,
++          sequence: expected.length + 1,
++          phase: `authored`,
++          ...details,
++        })
++      }
++      assert.ok(statSync(path).size > 1024 * 1024)
++      reader.drain()
++      assert.deepEqual(seen, expected)
++      const details = { value: `漢🙂`.repeat(40_000) }
++      writer.emit(`authored`, details)
++      expected.push({
++        h02: true,
++        sequence: expected.length + 1,
++        phase: `authored`,
++        ...details,
++      })
++      reader.drain()
++      writer.emit(`worker-error`, { message: `authored final receipt` })
++      expected.push({
++        h02: true,
++        sequence: expected.length + 1,
++        phase: `worker-error`,
++        message: `authored final receipt`,
++      })
++      writer.close()
++      assert.equal(reader.drain(true), expected.length)
++      assert.deepEqual(seen, expected)
++      assert.deepEqual(
++        readFileSync(path),
++        Buffer.from(
++          expected.map((receipt) => JSON.stringify(receipt) + `\n`).join(``),
++        ),
++      )
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`decodes UTF-8 across every byte boundary and consumes each receipt once`, () =>
++  fixture((path) => {
++    const seen = []
++    const writer = createReceiptWriter(path)
++    const reader = createReceiptReader(path, (receipt) => seen.push(receipt), {
++      read: (fd, bytes, offset, length, position) =>
++        readSync(fd, bytes, offset, Math.min(1, length), position),
++    })
++    try {
++      writer.emit(`authored`, { value: `é🙂漢字` })
++      reader.drain()
++      reader.drain()
++      writer.emit(`authored`, { value: `β` })
++      writer.close()
++      assert.equal(reader.drain(true), 2)
++      assert.equal(reader.drain(true), 2)
++      assert.deepEqual(
++        seen.map(({ sequence, value }) => [sequence, value]),
++        [
++          [1, `é🙂漢字`],
++          [2, `β`],
++        ],
++      )
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`a live drain stops at its captured byte boundary`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    const seen = []
++    let appended = false
++    const reader = createReceiptReader(
++      path,
++      (receipt) => seen.push(receipt.sequence),
++      {
++        read(fd, bytes, offset, length, position) {
++          if (!appended) {
++            appended = true
++            appendFileSync(path, line(2))
++          }
++          return readSync(fd, bytes, offset, length, position)
++        },
++      },
++    )
++    try {
++      reader.drain()
++      assert.deepEqual(seen, [1])
++      assert.equal(reader.drain(true), 2)
++      assert.deepEqual(seen, [1, 2])
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`holds a live partial line until a later drain completes it`, () =>
++  fixture((path) => {
++    const bytes = line(1, { value: `🙂` })
++    const split = bytes.indexOf(Buffer.from(`🙂`)) + 1
++    writeFileSync(path, bytes.subarray(0, split))
++    const seen = []
++    const reader = createReceiptReader(path, (receipt) => seen.push(receipt))
++    try {
++      reader.drain()
++      assert.equal(seen.length, 0)
++      appendFileSync(path, bytes.subarray(split))
++      assert.equal(reader.drain(true), 1)
++      assert.equal(seen[0].value, `🙂`)
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`missing live file is pending but a missing final file fails`, () =>
++  fixture((path) => {
++    const reader = createReceiptReader(path, () => assert.fail(`no receipt`))
++    try {
++      reader.drain()
++      assert.throws(() => reader.drain(true), { code: `ENOENT` })
++    } finally {
++      reader.close()
++    }
++  }))
++
++for (const [name, bytes, message] of [
++  [`gap`, Buffer.concat([line(1), line(3)]), /sequence/],
++  [`duplicate`, Buffer.concat([line(1), line(1)]), /sequence/],
++  [`reversed`, Buffer.concat([line(2), line(1)]), /sequence/],
++  [`wrong envelope`, line(1, { h02: false }), /envelope/],
++  [`missing phase`, line(1, { phase: null }), /envelope/],
++  [`blank line`, Buffer.from(`\n`), /JSON/],
++  [`malformed JSON`, Buffer.from(`{broken}\n`), /JSON/],
++  [`invalid UTF-8`, Buffer.from([0xff, 0x0a]), /encoded data/],
++  [`truncated final line`, line(1).subarray(0, -1), /truncated/],
++  [`empty final stream`, Buffer.alloc(0), /empty/],
++])
++  test(`rejects ${name}`, () =>
++    fixture((path) => {
++      writeFileSync(path, bytes)
++      const reader = createReceiptReader(path, () => {})
++      try {
++        assert.throws(() => reader.drain(true), message)
++      } finally {
++        reader.close()
++      }
++    }))
++
++test(`rejects a file that shrinks after a completed drain`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    const reader = createReceiptReader(path, () => {})
++    try {
++      reader.drain()
++      writeFileSync(path, ``)
++      assert.throws(() => reader.drain(true), /shrank/)
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`preserves the first read failure and never replays its prefix`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    const original = new Error(`authored read failure`)
++    let reads = 0
++    const reader = createReceiptReader(path, () => assert.fail(`no receipt`), {
++      read() {
++        reads++
++        throw original
++      },
++    })
++    try {
++      assert.throws(
++        () => reader.drain(),
++        (error) => error === original,
++      )
++      assert.throws(
++        () => reader.drain(true),
++        (error) => error === original,
++      )
++      assert.equal(reads, 1)
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`rejects replacement of the raw file after a live drain`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    const reader = createReceiptReader(path, () => {})
++    try {
++      reader.drain()
++      renameSync(path, `${path}.original`)
++      writeFileSync(path, line(1))
++      assert.throws(() => reader.drain(true), /changed identity/)
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`zero-progress reads cannot spin or silently omit the captured prefix`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    const reader = createReceiptReader(path, () => {}, { read: () => 0 })
++    try {
++      assert.throws(() => reader.drain(true), /invalid receipt read count/)
++    } finally {
++      reader.close()
++    }
++  }))
++
++test(`preserves a partial-write failure and forbids later appends`, () =>
++  fixture((path) => {
++    const original = new Error(`authored disk failure`)
++    let writes = 0
++    const writer = createReceiptWriter(path, {
++      write(fd, bytes, offset, length) {
++        if (writes++ === 0)
++          return writeSync(fd, bytes, offset, Math.min(7, length))
++        throw original
++      },
++    })
++    assert.throws(
++      () => writer.emit(`authored`),
++      (error) => error === original,
++    )
++    assert.throws(
++      () => writer.emit(`worker-error`),
++      (error) => error === original,
++    )
++    assert.throws(
++      () => writer.close(),
++      (error) => error === original,
++    )
++    assert.equal(writes, 2)
++    assert.equal(readFileSync(path).length, 7)
++    assert.throws(() => checkReceiptFault(path), /authored disk failure/)
++  }))
++
++test(`a failed new line is detected even when the raw prefix is well formed`, () =>
++  fixture((path) => {
++    const original = new Error(`authored zero-byte failure`)
++    let writes = 0
++    const writer = createReceiptWriter(path, {
++      write(fd, bytes, offset, length) {
++        if (writes++ === 0) return writeSync(fd, bytes, offset, length)
++        throw original
++      },
++    })
++    writer.emit(`authored`)
++    assert.throws(
++      () => writer.emit(`worker-error`),
++      (error) => error === original,
++    )
++    assert.throws(
++      () => writer.close(),
++      (error) => error === original,
++    )
++    const seen = []
++    const reader = createReceiptReader(path, (receipt) => seen.push(receipt))
++    try {
++      assert.equal(reader.drain(true), 1)
++    } finally {
++      reader.close()
++    }
++    assert.equal(seen.length, 1)
++    assert.throws(() => checkReceiptWriter(path), /authored zero-byte failure/)
++  }))
++
++test(`writer failure survives failure of its own diagnostic write`, () =>
++  fixture((path) => {
++    const original = new Error(`authored primary write failure`)
++    const writer = createReceiptWriter(path, {
++      write() {
++        throw original
++      },
++      reportFault() {
++        throw new Error(`authored diagnostic failure`)
++      },
++    })
++    assert.throws(
++      () => writer.emit(`authored`),
++      (error) => error === original,
++    )
++    assert.throws(
++      () => writer.close(),
++      (error) => error === original,
++    )
++  }))
++
++test(`close failure remains a recorded instrument failure`, () =>
++  fixture((path) => {
++    const original = new Error(`authored close failure`)
++    const writer = createReceiptWriter(path, {
++      close(fd) {
++        closeSync(fd)
++        throw original
++      },
++    })
++    writer.emit(`authored`)
++    assert.throws(
++      () => writer.close(),
++      (error) => error === original,
++    )
++    assert.throws(() => checkReceiptWriter(path), /authored close failure/)
++  }))
++
++test(`zero-progress writes cannot spin`, () =>
++  fixture((path) => {
++    const writer = createReceiptWriter(path, { write: () => 0 })
++    assert.throws(() => writer.emit(`authored`), /invalid receipt write count/)
++    assert.throws(() => writer.close(), /invalid receipt write count/)
++  }))
++
++test(`worker error reporting and its diagnostic cannot replace the original error`, () => {
++  const original = new Error(`authored original driver error`)
++  let diagnosed = false
++  assert.equal(
++    recordWorkerError(
++      original,
++      () => {
++        throw new Error(`receipt failed`)
++      },
++      () => {
++        diagnosed = true
++        throw new Error(`stderr failed`)
++      },
++    ),
++    original,
++  )
++  assert.equal(diagnosed, true)
++})
++
++test(`driver and worker-error reporter use the same sink and sequence`, async () => {
++  const directory = mkdtempSync(
++    resolve(tmpdir(), `h02-shared-sink-calibration-`),
++  )
++  const path = resolve(directory, `receipts.jsonl`)
++  const previousDirectory = process.env.H02_PROGRESS_BINDING_DIR
++  const previousPath = process.env.H02_PROGRESS_RECEIPTS
++  try {
++    process.env.H02_PROGRESS_BINDING_DIR = directory
++    process.env.H02_PROGRESS_RECEIPTS = path
++    const shared = await import(
++      `./receipt-transport.mjs?shared-sink-calibration`
++    )
++    shared.emitProgressReceipt(`worker-start`)
++    const original = new Error(`authored driver error`)
++    assert.equal(shared.recordWorkerError(original), original)
++    shared.closeProgressReceipts()
++    const seen = []
++    const reader = createReceiptReader(path, (receipt) =>
++      seen.push([receipt.sequence, receipt.phase]),
++    )
++    try {
++      assert.equal(reader.drain(true), 2)
++    } finally {
++      reader.close()
++    }
++    assert.deepEqual(seen, [
++      [1, `worker-start`],
++      [2, `worker-error`],
++    ])
++  } finally {
++    if (previousDirectory === undefined)
++      delete process.env.H02_PROGRESS_BINDING_DIR
++    else process.env.H02_PROGRESS_BINDING_DIR = previousDirectory
++    if (previousPath === undefined) delete process.env.H02_PROGRESS_RECEIPTS
++    else process.env.H02_PROGRESS_RECEIPTS = previousPath
++    rmSync(directory, { recursive: true, force: true })
++  }
++})
++
++test(`missing writer metadata fails closed`, () =>
++  fixture((path) => {
++    writeFileSync(path, line(1))
++    assert.throws(() => checkReceiptWriter(path), { code: `ENOENT` })
++  }))
++
++test(`pure decoder rejects a corrupt supplied receipt without a product judgment`, () => {
++  const decoder = createReceiptDecoder(() =>
++    assert.fail(`corrupt receipt cannot dispatch`),
++  )
++  assert.throws(() => decoder.push(line(5)), /sequence/)
++})

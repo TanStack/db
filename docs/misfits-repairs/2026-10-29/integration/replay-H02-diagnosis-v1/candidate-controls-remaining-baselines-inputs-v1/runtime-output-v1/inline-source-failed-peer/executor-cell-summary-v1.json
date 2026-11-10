@@ -1,0 +1,42 @@
+{
+  "cellId": "inline-source-failed-peer",
+  "ordinal": 3,
+  "rootBatchAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "actualOuterExitCode": 1,
+  "actualToolCompletionChunk": "f6e194",
+  "parentTestChildExitCode": 1,
+  "receivers": [
+    {
+      "originalDirectory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-64500-7babee3e-9792-42f2-9516-bcd8ff75ef3e",
+      "copiedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-source-failed-peer/receiving-artifacts",
+      "nativeFiles": 1957,
+      "allCopiedBytesReadBack": true,
+      "receiptCount": 298,
+      "epochs": 4,
+      "cuts": 3,
+      "semanticActions": 5,
+      "workerCleaned": 1,
+      "nativeExitCode": 1,
+      "bindingStatus": "bound",
+      "bindingProfile": "completion-baseline-v1"
+    }
+  ],
+  "operationalAndTestChecksPassed": false,
+  "failures": [
+    "actual outer tool exit is not zero",
+    "outer outcome exitCode differs",
+    "native receiving did not exit normally with zero",
+    "native cleanup failure or remaining rows",
+    "worker error present",
+    "authored epoch starts differ",
+    "authored epoch ends differ",
+    "authored observation cuts differ",
+    "authored semantic action count differs"
+  ],
+  "independentActualReviewRequired": true,
+  "classification": "pending independent actual-result review; no product verdict by collector",
+  "noAutomaticRerun": true,
+  "noCanonicalImport": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted"
+}

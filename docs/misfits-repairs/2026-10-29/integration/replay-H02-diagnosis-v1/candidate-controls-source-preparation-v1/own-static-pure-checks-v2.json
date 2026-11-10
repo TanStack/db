@@ -1,0 +1,83 @@
+{
+  "slot": 2,
+  "workers": 1,
+  "serial": true,
+  "authorization": "native author lent free slot2 while root borrowed slot3",
+  "initialTypeFailure": [
+    {
+      "name": "format",
+      "cmd": "/Users/kyle.mathews/.n/bin/node node_modules/prettier/bin/prettier.cjs --write packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "6d1c48",
+      "wall_time_seconds": 0.151712541,
+      "exit_code": 0,
+      "original_token_count": 107,
+      "output": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts 76ms (unchanged)\npackages/query-db-collection/tests/queued-answer-completion-history-oracle.ts 24ms (unchanged)\npackages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts 9ms (unchanged)\npackages/query-db-collection/tests/queued-answer-progress-oracle.ts 11ms (unchanged)\nscripts/h02-progress/completion-checker-controls.ts 13ms\n"
+    },
+    {
+      "name": "type",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --noEmit --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "bb7e9e",
+      "wall_time_seconds": 0.417386417,
+      "exit_code": 2,
+      "original_token_count": 310,
+      "output": "scripts/h02-progress/completion-checker-controls.ts(120,7): error TS2345: Argument of type '{ partialOperation: string; phase: \"candidate-cut\"; run: string; view: CompletionPublicView; operations: CompletionOperationObservation[]; ... 6 more ...; pendingD2: boolean; } | ... 16 more ... | { ...; }' is not assignable to parameter of type 'CandidateObservation'.\n  Object literal may only specify known properties, and 'partialOperation' does not exist in type 'CandidateCommon & { cut: \"trigger\"; holdBeforeDemand: boolean; changed: boolean; readyWasPromise: boolean; inputBefore: number; inputAfter: number; pendingD2: boolean; }'.\nscripts/h02-progress/completion-checker-controls.ts(467,65): error TS2345: Argument of type '{ error: string; phase: \"candidate-cut\"; run: string; view: CompletionPublicView; operations: CompletionOperationObservation[]; ... 6 more ...; pendingD2: boolean; } | ... 25 more ... | { ...; }' is not assignable to parameter of type 'TailObservation'.\n  Object literal may only specify known properties, and 'error' does not exist in type 'CandidateCommon & { cut: \"trigger\"; holdBeforeDemand: boolean; changed: boolean; readyWasPromise: boolean; inputBefore: number; inputAfter: number; pendingD2: boolean; }'.\n"
+    }
+  ],
+  "correctedChecks": [
+    {
+      "name": "format",
+      "cmd": "/Users/kyle.mathews/.n/bin/node node_modules/prettier/bin/prettier.cjs --write packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "adae42",
+      "wall_time_seconds": 0.230513875,
+      "exit_code": 0,
+      "original_token_count": 110,
+      "output": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts 70ms (unchanged)\npackages/query-db-collection/tests/queued-answer-completion-history-oracle.ts 24ms (unchanged)\npackages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts 9ms (unchanged)\npackages/query-db-collection/tests/queued-answer-progress-oracle.ts 10ms (unchanged)\nscripts/h02-progress/completion-checker-controls.ts 17ms (unchanged)\n"
+    },
+    {
+      "name": "type",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --noEmit --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "26717a",
+      "wall_time_seconds": 0.36322225,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "lint",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/eslint.config.mjs packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "2ae0d6",
+      "wall_time_seconds": 2.268294209,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "pure-emit",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --outDir /private/tmp/h02-completion-pure-v2 --rootDir /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1 --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "57c15d",
+      "wall_time_seconds": 0.273038417,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "pure-checker",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=384 --input-type=module - <<'JS'\nimport { writeFileSync } from 'node:fs'\nimport { runCompletionCheckerControls } from '/private/tmp/h02-completion-pure-v2/scripts/h02-progress/completion-checker-controls.js'\nconst controls=runCompletionCheckerControls()\nconst record={kind:'pure-comparison-calibration',controls,accepted:controls.filter(x=>x.outcome==='accepted').length,rejected:controls.filter(x=>x.outcome==='rejected').length,receiving:0,generatedProgramsExecuted:0,runtimeMutants:0}\nwriteFileSync('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-preparation-v1/pure-checker-calibration-v2.json',JSON.stringify(record,null,2)+'\\n')\nprocess.stdout.write(JSON.stringify({accepted:record.accepted,rejected:record.rejected,total:controls.length,receiving:0,generatedProgramsExecuted:0,runtimeMutants:0})+'\\n')\nJS",
+      "chunk_id": "c04ac2",
+      "wall_time_seconds": 0.002117208,
+      "exit_code": 0,
+      "original_token_count": 26,
+      "output": "{\"accepted\":16,\"rejected\":43,\"total\":59,\"receiving\":0,\"generatedProgramsExecuted\":0,\"runtimeMutants\":0}\n"
+    },
+    {
+      "name": "lint-changed-equivalent",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+      "chunk_id": "635f64",
+      "wall_time_seconds": 10.001412292,
+      "session_id": 47498,
+      "original_token_count": 0,
+      "output": ""
+    }
+  ],
+  "runtimeReceiving": 0
+}

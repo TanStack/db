@@ -1,0 +1,62 @@
+{
+  "kind": "inert native table registration/full-name selection/verbose console calibration only",
+  "results": [
+    {
+      "index": 0,
+      "fullName": "queued-answer receiving neighbors checks receiving neighbor 'nonempty conflicting replay'",
+      "selector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty conflicting replay'$",
+      "selectedPassed": 1,
+      "skipped": 4,
+      "report": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-0.report.json",
+      "reportSha256": "119a93519470cf244c787820dbcc06b5dfa0c1c8c2ad68e4dada602457afd597",
+      "consolePayloadRetained": true
+    },
+    {
+      "index": 1,
+      "fullName": "queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'",
+      "selector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$",
+      "selectedPassed": 1,
+      "skipped": 4,
+      "report": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-1.report.json",
+      "reportSha256": "5d8f3f3a1d2998ad64778eb1d00a83ffb3d178b53f4062cf0ca970eb4915190f",
+      "consolePayloadRetained": true
+    },
+    {
+      "index": 2,
+      "fullName": "queued-answer receiving neighbors checks receiving neighbor 'empty scope-key publication'",
+      "selector": "^queued-answer receiving neighbors checks receiving neighbor 'empty scope-key publication'$",
+      "selectedPassed": 1,
+      "skipped": 4,
+      "report": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-2.report.json",
+      "reportSha256": "72945cda599fbfcdfcab8c45d748a5b519814d64ae51dcaae41b41159426a24a",
+      "consolePayloadRetained": true
+    },
+    {
+      "index": 3,
+      "fullName": "queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'",
+      "selector": "^queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'$",
+      "selectedPassed": 1,
+      "skipped": 4,
+      "report": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-3.report.json",
+      "reportSha256": "c99031a7b78e7b8955ad232e45230c02351ce64d40070f7e02a9287b632e843d",
+      "consolePayloadRetained": true
+    },
+    {
+      "index": 4,
+      "fullName": "queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'",
+      "selector": "^queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'$",
+      "selectedPassed": 1,
+      "skipped": 4,
+      "report": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-4.report.json",
+      "reportSha256": "a769aa4341dd4a8aea9e181604b28d7257815003858e24365017449dd4069ccb",
+      "consolePayloadRetained": true
+    }
+  ],
+  "oldPlainControl": {
+    "selector": "checks receiving neighbor nonempty scope-key publication",
+    "selectedPassed": 0,
+    "skipped": 5,
+    "reportSha256": "90d14e772fa93c576ab20d434ff54be5b4799d80ae4596f899d3e1e50cb1e436"
+  },
+  "limits": "No DB driver, model, production import or receiving history; this calibrates installed native titles and explicit reporter capture only."
+}

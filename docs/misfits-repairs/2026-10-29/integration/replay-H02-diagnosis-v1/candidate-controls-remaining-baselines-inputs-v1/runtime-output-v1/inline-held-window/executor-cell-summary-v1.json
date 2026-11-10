@@ -1,0 +1,32 @@
+{
+  "cellId": "inline-held-window",
+  "ordinal": 2,
+  "rootBatchAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "actualOuterExitCode": 0,
+  "actualToolCompletionChunk": "cc297f",
+  "parentTestChildExitCode": 0,
+  "receivers": [
+    {
+      "originalDirectory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3",
+      "copiedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window/receiving-artifacts",
+      "nativeFiles": 1957,
+      "allCopiedBytesReadBack": true,
+      "receiptCount": 444,
+      "epochs": 3,
+      "cuts": 2,
+      "semanticActions": 4,
+      "workerCleaned": 1,
+      "nativeExitCode": 0,
+      "bindingStatus": "bound",
+      "bindingProfile": "completion-baseline-v1"
+    }
+  ],
+  "operationalAndTestChecksPassed": true,
+  "failures": [],
+  "independentActualReviewRequired": true,
+  "classification": "pending independent actual-result review; no product verdict by collector",
+  "noAutomaticRerun": true,
+  "noCanonicalImport": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted"
+}

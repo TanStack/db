@@ -1,0 +1,17 @@
+{
+  "own-source-freeze-v2.json": "f5a06b11f530bba5891bfe875fb31919b96a7563c5280e4907e03057d0d72bbc",
+  "frozen-own-source-v2/sources/packages/query-db-collection/tests/queued-answer-completion-oracle.ts": "3bb328d2b6b1285fff88674c558188b88254789ba7f6abe9f3d94cb910858d05",
+  "frozen-own-source-v2/sources/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts": "5e1902e7ea02b8f11521c8ef5cc5b63c426fe3b92b50174e5c755be9b3c892fc",
+  "frozen-own-source-v2/sources/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts": "726f4919ff69052e8a7c3ae7c9b26a866dcb935d3393e80152da85d7349cc082",
+  "frozen-own-source-v2/sources/packages/query-db-collection/tests/queued-answer-progress-oracle.ts": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e",
+  "frozen-own-source-v2/sources/scripts/h02-progress/completion-checker-controls.ts": "5ffc80cece86da00eac633dfcc01f4b8974e3be2029c50cf38d9c42f52bb6083",
+  "frozen-own-source-v2/records/source-report-v2.md": "c302b3fd62516323f102580169647e8e2627cb574c912e4db2ba307733b6ca70",
+  "frozen-own-source-v2/records/initial-copied-inventory.json": "85d859af3b2f46cfd89876203a953040432bbcf12cfd1bf4f1343aa4f3baff6b",
+  "frozen-own-source-v2/records/pure-checker-calibration-v2.json": "bfe867ef0cca32f0a02678e2719c1009e4bf5b61d0775e870f6a03b060dd757b",
+  "frozen-own-source-v2/records/preserved-original-semantics.json": "2aaa76475c065cc99ae4e31351f5d47f1d656ede0810461332ff7a76d9d95073",
+  "frozen-own-source-v2/records/own-static-pure-checks-v2.json": "8730de314ec6768d0033cbbfe7635c98917c7c3b2e15d9db8a0a5ec82b5388fa",
+  "frozen-own-source-v2/records/own-static-pure-completion-v2.json": "56bc4382e1343b2bde455be8b0fef2cdd54bac68caa00a177e27d40defbd1748",
+  "frozen-own-source-v2/records/final-source-identity-check-v2.json": "f2499779d08831d651f877c800d6a3c0a42bacfbdf8cdf2ff12f562d1cb33dbc",
+  "frozen-own-source-v2/records/own-source-freeze-v1.json": "3ddcd6a44dde1a373b0c5270452532761a4f9685ad83326288822c003179fd71",
+  "frozen-own-source-v2/records/own-packet-sha256-v1.json": "c8b812cffbeec38f0a53d931e9316ef14b5d892f7f78d19bd2a8dbf872cbee5d"
+}

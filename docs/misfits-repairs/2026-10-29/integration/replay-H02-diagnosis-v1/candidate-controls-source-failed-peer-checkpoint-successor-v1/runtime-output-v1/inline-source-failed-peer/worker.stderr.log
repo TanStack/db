@@ -1,0 +1,15 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: baseline receiving instrumentation failed; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/receipts.jsonl
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:316:11
+    314|     outcome.bindingError !== undefined
+    315|   )
+    316|     throw new Error(
+       |           ^
+    317|       `baseline receiving instrumentation failed; inspect ${outcome.lo…
+    318|     )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

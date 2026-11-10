@@ -1,0 +1,57 @@
+{
+  "status": "Qualified finite bounded queued-answer progress RED under exact admitted gate; independent root result acceptance pending",
+  "finiteHistories": 1,
+  "nativeFailed": 1,
+  "nativeSkipped": 4,
+  "capturedNativeName": "queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'",
+  "actualHistory": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "subscription",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "rawReceiptCount": 70961,
+  "partialReachCounts": {
+    "nonempty-prior": 1,
+    "held-provider-read": 1,
+    "conflicting-cache-premise": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 0,
+    "final-publication": 0,
+    "worker-cleaned": 0
+  },
+  "measuredConflictSequence": 182,
+  "completedResolvingEnqueueSequence": 184,
+  "matchingExecutionThroughFinalDrain": false,
+  "firstKillTrigger": "post-enqueue-window",
+  "reason": "wall",
+  "bindingStatus": "bound",
+  "bindings": 486,
+  "bindingLimits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation.",
+  "operational": {
+    "outerExitCode": 1,
+    "childSignal": "SIGKILL",
+    "childExitCode": null,
+    "heap": false,
+    "observationError": null,
+    "cleanupErrors": [],
+    "remainingGroupRows": [],
+    "elapsedMs": 3531,
+    "maxSampledGroupRssBytes": 691273728,
+    "outerPid": 11686,
+    "outerPgid": 11686,
+    "childPid": 11702,
+    "childOriginalPgid": 11702,
+    "rootAbsenceReceiptSha256": "05a891e582a8d6f50f12e0c29c313fb7df82f230fc632e5bcc227e39b2b6bb5a"
+  },
+  "sourceIdentityBeforeAndAfter": {
+    "sources": 563,
+    "packagePayloads": 2544,
+    "nodeLocksAndLinksMatched": true
+  },
+  "limits": "Finite admitted non-execution witness, not proof of infinite execution or product deadline. Direct adapter cleanup/final publication not reached. Metadata temporal coherence, broader histories, candidate20states and other receiving controls remain separate. No retry, later recipe, source or production edit admitted."
+}

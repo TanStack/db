@@ -1,0 +1,224 @@
+{
+  "scope": "independent bounded parsing/hashing and pure text calibration only; no receiving execution, reviewer test/build/verifier, or source edits",
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "manifestSha256": "67c3f331a859240819275135260433cb7009eb21e3676e291752d12d34c83221",
+  "memberCount": 1952,
+  "totalBytes": 68221119,
+  "memberMismatches": [],
+  "missing": [],
+  "extra": [],
+  "receipts": {
+    "sha256": "7a6f8aa247a3a1e60f17b40f676ed6fe7bb3ae48ec7998b337e027f94f75b850",
+    "completeContiguousCount": 141963,
+    "bytes": 37674726,
+    "counts": {
+      "worker-start": 1,
+      "actual-key-prefix": 70995,
+      "query-key-callback": 28369,
+      "source-establishing-receipt": 1,
+      "acquisition-attempt": 14187,
+      "source-stack": 4,
+      "provider-request": 13,
+      "provider-answer": 10,
+      "acquisition-accepted": 14187,
+      "acquisition-release": 14179,
+      "cache-success": 9,
+      "public-change": 1,
+      "initial-publication": 1,
+      "reload-start": 1,
+      "release-scope": 2,
+      "conflicting-cache-premise": 1,
+      "retained-publication": 1,
+      "answer-queued": 1
+    },
+    "selected": {
+      "8": {
+        "h02": true,
+        "sequence": 8,
+        "phase": "source-stack",
+        "cut": "initial-acquisition",
+        "stackSha256": "58ec22f2a3a2f052c2cd5e9c048e1a36c8349cf66013ebfc98d1153f32617700"
+      },
+      "213": {
+        "h02": true,
+        "sequence": 213,
+        "phase": "source-stack",
+        "cut": "queued-answer-premise",
+        "stackSha256": "149150163aa3003fc6e0ccd0fcfb40dbbce8c4241f8027d827e1a5eb4c4ceafc"
+      },
+      "214": {
+        "h02": true,
+        "sequence": 214,
+        "phase": "conflicting-cache-premise",
+        "cut": "held-queryFn-registration",
+        "pivot": 3,
+        "pendingAtom": "[\"h02-progress-markers\",2,[3]]",
+        "pendingKey": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cached": {
+          "version": 4,
+          "backendVersion": 0,
+          "rows": [
+            3
+          ]
+        },
+        "emptySibling": {
+          "atom": "[\"h02-progress-markers\",1,[3]]",
+          "key": [
+            "h02-progress-markers",
+            1,
+            [
+              3
+            ]
+          ],
+          "answer": {
+            "version": 10,
+            "backendVersion": 1,
+            "rows": []
+          }
+        },
+        "observed": {
+          "pending": true,
+          "aborted": false,
+          "pendingScope": [
+            3
+          ],
+          "pendingOwner": 2,
+          "pendingStartCount": 1,
+          "pendingActualCount": 1,
+          "pendingStatus": "success",
+          "pendingFetchStatus": "fetching",
+          "siblingScope": [
+            3
+          ],
+          "siblingOwner": 1,
+          "siblingStartCount": 0,
+          "siblingActualCount": 1,
+          "siblingStatus": "success",
+          "siblingRows": [],
+          "physicalQueriesCurrent": true,
+          "pendingPhysicalQuery": 4,
+          "currentPhysicalQuery": 4,
+          "siblingPhysicalQuery": 10,
+          "siblingAnswerPhysicalQuery": 10
+        }
+      },
+      "216": {
+        "h02": true,
+        "sequence": 216,
+        "phase": "answer-queued",
+        "kind": "resolving-conflict",
+        "atom": "[\"h02-progress-markers\",2,[3]]",
+        "key": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cachedVersion": 4,
+        "emptyVersion": 10,
+        "scheduler": "microtask",
+        "enqueueReturned": true
+      },
+      "223": {
+        "h02": true,
+        "sequence": 223,
+        "phase": "source-stack",
+        "cut": "first-repeated-held-acquisition",
+        "attempt": 14,
+        "owner": 2,
+        "keys": [
+          3
+        ],
+        "stackSha256": "33244bd23f23aac60c87fc5bcf11ebab00775449562d9fef3215cbd9c6aecdf1"
+      },
+      "224": {
+        "h02": true,
+        "sequence": 224,
+        "phase": "source-stack",
+        "stackSha256": "6331b986141a80a27c2ed8a465c32dd59f3dc09589537fd9a92ad2aea345b011"
+      }
+    },
+    "last": {
+      "h02": true,
+      "sequence": 141963,
+      "phase": "actual-key-prefix",
+      "boundary": "cache-observerRemoved",
+      "key": [
+        "h02-progress-markers",
+        2,
+        [
+          3
+        ]
+      ],
+      "actualBaseKey": [
+        "h02-progress-markers"
+      ],
+      "valid": true
+    },
+    "distinctHashes": {
+      "query-key-callback": 9,
+      "provider-request": 8,
+      "provider-answer": 8,
+      "cache-success": 8
+    },
+    "distinctProviderPhysicalQueries": 12,
+    "owners": {
+      "1": 8,
+      "2": 14179
+    },
+    "unmatchedAcquisitions": [
+      1,
+      3,
+      5,
+      7,
+      9,
+      10,
+      11,
+      12
+    ],
+    "maxOutstandingAcquisitions": 9,
+    "finalOutstandingAcquisitions": 8,
+    "actualKeyBoundaries": {
+      "queryKey-callback": 28369,
+      "cache-added": 12,
+      "cache-observerResultsUpdated": 14205,
+      "cache-observerAdded": 14187,
+      "cache-updated": 22,
+      "queryFn-context": 13,
+      "cache-observerRemoved": 14183,
+      "cache-removed": 4
+    }
+  },
+  "stderrCalibration": {
+    "scope": "pure replay of captured text; actual runtime chunk partition unrecorded",
+    "characters": 7851,
+    "headlineOffset": 464,
+    "headlineDistanceFromEnd": 7387,
+    "rawRegexMatches": true,
+    "partitions": [
+      {
+        "partition": "whole-stderr",
+        "chunks": 1,
+        "heapDetected": false
+      },
+      {
+        "partition": "1024-character-pieces",
+        "chunks": 8,
+        "heapDetected": true
+      },
+      {
+        "partition": "one-character",
+        "chunks": 7851,
+        "heapDetected": true
+      }
+    ]
+  },
+  "classification": "resource-limited finite prefix after actual conflict and host enqueue; no product RED/GREEN, no proof of infinite execution, no attribution of retained heap, no closure"
+}

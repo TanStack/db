@@ -1,0 +1,309 @@
+--- Q/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
++++ inactive-successor/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
+@@ -1,4 +1,4 @@
+-import { isDeepStrictEqual } from 'node:util'
++import { inspect, isDeepStrictEqual } from 'node:util'
+ import {
+   checkRetainedWindowSnapshot,
+   referenceJoinedWindowRows,
+@@ -438,6 +438,108 @@
+         )
+     return loads
+   }
++  // These records describe the original peer binding. They neither select a
++  // replacement peer nor decide whether lawful retirement has occurred.
++  const bindingIdentity = (value: unknown) =>
++    (typeof value === `object` && value !== null) ||
++    typeof value === `function`
++      ? { kind: typeof value, identity: fixture.recorder.object(value) }
++      : { kind: typeof value, value: inspect(value) }
++  const queryKeyRepresentation = (value: unknown) => {
++    const nodes: Array<{
++      identity: number
++      prototype: ReturnType<typeof bindingIdentity>
++      prototypeDescription: string
++      properties: Array<{
++        key: string
++        enumerable: boolean
++        configurable: boolean
++        writable?: boolean
++        value?: ReturnType<typeof bindingIdentity>
++        get?: ReturnType<typeof bindingIdentity>
++        set?: ReturnType<typeof bindingIdentity>
++      }>
++    }> = []
++    const seen = new Set<object>()
++    const visit = (current: unknown): void => {
++      if (
++        !(
++          (typeof current === `object` && current !== null) ||
++          typeof current === `function`
++        ) ||
++        seen.has(current)
++      )
++        return
++      seen.add(current)
++      const prototype: object | null = Object.getPrototypeOf(current)
++      const properties = Reflect.ownKeys(current).map((key) => {
++        const descriptor = Object.getOwnPropertyDescriptor(current, key)!
++        const propertyValue: unknown = descriptor.value
++        return {
++          key: typeof key === `symbol` ? inspect(key) : key,
++          enumerable: descriptor.enumerable === true,
++          configurable: descriptor.configurable === true,
++          ...(`value` in descriptor
++            ? {
++                writable: descriptor.writable === true,
++                value: bindingIdentity(propertyValue),
++              }
++            : {
++                get: bindingIdentity(descriptor.get),
++                set: bindingIdentity(descriptor.set),
++              }),
++        }
++      })
++      nodes.push({
++        identity: fixture.recorder.object(current),
++        prototype: bindingIdentity(prototype),
++        prototypeDescription: inspect(prototype, {
++          depth: 0,
++          customInspect: false,
++          getters: false,
++        }),
++        properties,
++      })
++      for (const key of Reflect.ownKeys(current)) {
++        const descriptor = Object.getOwnPropertyDescriptor(current, key)!
++        if (`value` in descriptor) visit(descriptor.value as unknown)
++      }
++    }
++    visit(value)
++    return {
++      // JSON alone erases nested IR prototypes. Keep a descriptor graph and
++      // inspection text; accessors and custom inspection are never invoked.
++      inspection: inspect(value, {
++        depth: null,
++        showHidden: true,
++        customInspect: false,
++        getters: false,
++        maxArrayLength: null,
++        maxStringLength: null,
++      }),
++      nodes,
++    }
++  }
++  const recordPeerDiagnostic = (
++    boundary: string,
++    capture: () => unknown,
++  ): void => {
++    try {
++      fixture.recorder.event(boundary, capture())
++    } catch (error) {
++      // A diagnostic failure cannot replace the original binding-guard error
++      // or introduce a new binding predicate. Keep it separately on stderr.
++      try {
++        console.error({
++          completionPeerDiagnosticFailure: boundary,
++          message: String(error),
++          stack: error instanceof Error ? error.stack : undefined,
++        })
++      } catch {
++        // Preserve the existing receiving outcome if stderr also fails.
++      }
++    }
++  }
+   const bindHeldRequest = (request: CompletionProviderRequest) => {
+     const loads = establishingLoads(request).map((load) => {
+       const receipt = need(load.receipt, `original held receipt`)
+@@ -455,6 +557,16 @@
+         queryKeyValue: structuredClone(load.queryKey),
+         error: undefined as unknown,
+       }
++      recordPeerDiagnostic(`baseline-held-peer-key-snapshot-fidelity`, () => ({
++        role: `load`,
++        source: binding.source,
++        load: binding.id,
++        generation: binding.generation,
++        enteredAt: binding.enteredAt,
++        matchesAtBind: isDeepStrictEqual(load.queryKey, binding.queryKeyValue),
++        current: queryKeyRepresentation(load.queryKey),
++        saved: queryKeyRepresentation(binding.queryKeyValue),
++      }))
+       void receipt.then(
+         () => undefined,
+         (error: unknown) => {
+@@ -463,7 +575,7 @@
+       )
+       return binding
+     })
+-    return {
++    const binding = {
+       request,
+       appliedLoad: request.appliedLoad,
+       options: request.options,
+@@ -473,6 +585,15 @@
+       id: request.id,
+       loads,
+     }
++    recordPeerDiagnostic(`baseline-held-peer-key-snapshot-fidelity`, () => ({
++      role: `request`,
++      source: binding.source,
++      request: binding.id,
++      matchesAtBind: isDeepStrictEqual(request.queryKey, binding.queryKeyValue),
++      current: queryKeyRepresentation(request.queryKey),
++      saved: queryKeyRepresentation(binding.queryKeyValue),
++    }))
++    return binding
+   }
+   let heldPeer: ReturnType<typeof bindHeldRequest> | undefined
+   let peerDisposition: `pending` | `retired` | undefined
+@@ -814,10 +935,134 @@
+             !isDeepStrictEqual(load.queryKey, binding.queryKeyValue)
+           )
+         })
+-      )
++      ) {
++        recordPeerDiagnostic(`baseline-original-peer-binding-mismatch`, () => {
++          const checks = [
++            {
++              clause: `request.appliedLoad identity`,
++              failed: peer.request.appliedLoad !== peer.appliedLoad,
++            },
++            {
++              clause: `request.options identity`,
++              failed: peer.request.options !== peer.options,
++            },
++            {
++              clause: `request.queryKey identity`,
++              failed: peer.request.queryKey !== peer.queryKey,
++            },
++            {
++              clause: `request.queryKey saved value`,
++              failed: !isDeepStrictEqual(
++                peer.request.queryKey,
++                peer.queryKeyValue,
++              ),
++            },
++            {
++              clause: `request.source`,
++              failed: peer.request.source !== peer.source,
++            },
++            { clause: `request.id`, failed: peer.request.id !== peer.id },
++            ...peer.loads.flatMap((binding) => {
++              const { load } = binding
++              return [
++                {
++                  clause: `load provider membership`,
++                  failed: !fixture.providers[peer.source].loads().includes(load),
++                },
++                { clause: `load.id`, failed: load.id !== binding.id },
++                { clause: `load.source`, failed: load.source !== binding.source },
++                {
++                  clause: `load.generation`,
++                  failed: load.generation !== binding.generation,
++                },
++                {
++                  clause: `load.enteredAt`,
++                  failed: load.enteredAt !== binding.enteredAt,
++                },
++                {
++                  clause: `load.receipt identity`,
++                  failed: load.receipt !== binding.receipt,
++                },
++                {
++                  clause: `load.options identity`,
++                  failed: load.options !== binding.options,
++                },
++                {
++                  clause: `load.signal identity`,
++                  failed: load.options.signal !== binding.signal,
++                },
++                {
++                  clause: `load.queryKey identity`,
++                  failed: load.queryKey !== binding.queryKey,
++                },
++                {
++                  clause: `load.queryKey saved value`,
++                  failed: !isDeepStrictEqual(load.queryKey, binding.queryKeyValue),
++                },
++              ].map((check) => ({
++                ...check,
++                source: binding.source,
++                load: binding.id,
++                generation: binding.generation,
++              }))
++            }),
++          ]
++          return {
++            failedClauses: checks.filter((check) => check.failed),
++            request: {
++              identity: bindingIdentity(peer.request),
++              saved: {
++                appliedLoad: bindingIdentity(peer.appliedLoad),
++                options: bindingIdentity(peer.options),
++                queryKey: bindingIdentity(peer.queryKey),
++                queryKeyValue: queryKeyRepresentation(peer.queryKeyValue),
++                source: peer.source,
++                id: peer.id,
++              },
++              current: {
++                appliedLoad: bindingIdentity(peer.request.appliedLoad),
++                options: bindingIdentity(peer.request.options),
++                queryKey: bindingIdentity(peer.request.queryKey),
++                queryKeyValue: queryKeyRepresentation(peer.request.queryKey),
++                source: peer.request.source,
++                id: peer.request.id,
++              },
++            },
++            loads: peer.loads.map((binding) => ({
++              identity: bindingIdentity(binding.load),
++              saved: {
++                providerMembership: true,
++                id: binding.id,
++                source: binding.source,
++                generation: binding.generation,
++                enteredAt: binding.enteredAt,
++                receipt: bindingIdentity(binding.receipt),
++                options: bindingIdentity(binding.options),
++                signal: bindingIdentity(binding.signal),
++                queryKey: bindingIdentity(binding.queryKey),
++                queryKeyValue: queryKeyRepresentation(binding.queryKeyValue),
++              },
++              current: {
++                providerMembership: fixture.providers[peer.source]
++                  .loads()
++                  .includes(binding.load),
++                id: binding.load.id,
++                source: binding.load.source,
++                generation: binding.load.generation,
++                enteredAt: binding.load.enteredAt,
++                receipt: bindingIdentity(binding.load.receipt),
++                options: bindingIdentity(binding.load.options),
++                signal: bindingIdentity(binding.load.options.signal),
++                queryKey: bindingIdentity(binding.load.queryKey),
++                queryKeyValue: queryKeyRepresentation(binding.load.queryKey),
++              },
++            })),
++          }
++        })
+         throw new Error(
+           `completion instrument: original held peer binding changed before failure barrier`,
+         )
++      }
+       const peerPending =
+         !peer.request.answered &&
+         !peer.request.cancelled() &&
+@@ -1021,7 +1266,12 @@
+     // Freeze the physical cut before any comparison can fail. The failure
+     // history reaches this barrier before releasing the peer or waiting on the
+     // window operation; raw callback lists remain complete, including duplicates.
+-    emit(`completion-baseline-checkpoint-captured`, common)
++    // The writer preserves payload fields after its envelope. Keep this local
++    // marker distinct from the typed complete cut emitted after closeEpoch().
++    emit(`completion-baseline-checkpoint-captured`, {
++      ...common,
++      phase: `completion-baseline-checkpoint-captured`,
++    })
+     closeEpoch()
+     let observation: CompletionBaselineObservation
+     switch (boundary) {

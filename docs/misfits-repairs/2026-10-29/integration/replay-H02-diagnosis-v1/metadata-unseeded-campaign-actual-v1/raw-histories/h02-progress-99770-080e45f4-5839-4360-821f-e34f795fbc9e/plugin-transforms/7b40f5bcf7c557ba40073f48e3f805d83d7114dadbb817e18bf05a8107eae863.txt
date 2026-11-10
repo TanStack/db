@@ -1,0 +1,17 @@
+import { Aggregate, ConditionalSelect, Func, isExpressionLike } from "../ir.js";
+export function findAggregate(value) {
+  if (value === null || typeof value !== `object`) return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const aggregate = findAggregate(item);
+      if (aggregate) return aggregate;
+    }
+    return void 0;
+  }
+  if (value instanceof Aggregate) return value;
+  if (value instanceof Func) return findAggregate(value.args);
+  if (value instanceof ConditionalSelect)
+    return findAggregate([value.branches, value.defaultValue]);
+  if (isExpressionLike(value)) return void 0;
+  return findAggregate(Object.values(value));
+}

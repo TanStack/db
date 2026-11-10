@@ -1,0 +1,59 @@
+import {
+  and,
+  eq,
+  gt,
+  gte,
+  isNull,
+  isUndefined,
+  lt,
+  not,
+  or
+} from "../query/builder/functions.js";
+import { Value } from "../query/ir.js";
+import { codedMessage, devBuild } from "../error-message.js";
+function isNullish(expression) {
+  return or(isNull(expression), isUndefined(expression));
+}
+function followsBoundary(clause, value) {
+  const nullish = isNullish(clause.expression);
+  if (value == null) {
+    return clause.compareOptions.nulls === `first` ? not(nullish) : new Value(false);
+  }
+  const operator = clause.compareOptions.direction === `asc` ? gt : lt;
+  const comparison = operator(clause.expression, new Value(value));
+  return clause.compareOptions.nulls === `last` ? or(comparison, nullish) : comparison;
+}
+export function buildCursor(orderBy, values) {
+  if (values.length === 0) return void 0;
+  if (orderBy.length === 0 || values.length !== 1) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Only leading-column cursors are supported` : codedMessage(169)
+    );
+  }
+  return followsBoundary(orderBy[0], values[0]);
+}
+export function buildCursorCurrent(orderBy, values) {
+  const { expression } = orderBy[0] ?? {};
+  if (!expression || values.length === 0) return void 0;
+  const value = values[0];
+  if (value == null) return isNullish(expression);
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return void 0;
+    return and(
+      gte(expression, new Value(value)),
+      lt(expression, new Value(new Date(value.getTime() + 1)))
+    );
+  }
+  if (typeof value === `object`) return void 0;
+  return eq(expression, new Value(value));
+}
+export function canExpressCursorOrder(orderBy, values) {
+  if (orderBy.length === 0 || values.length !== 1) return false;
+  const value = values[0];
+  if (value == null) return false;
+  if (value instanceof Date) return Number.isFinite(value.getTime());
+  if (typeof value === `string`) {
+    return orderBy[0].compareOptions.stringSort === `lexical`;
+  }
+  return typeof value === `number` && Number.isFinite(value) || typeof value === `bigint` || typeof value === `boolean`;
+}

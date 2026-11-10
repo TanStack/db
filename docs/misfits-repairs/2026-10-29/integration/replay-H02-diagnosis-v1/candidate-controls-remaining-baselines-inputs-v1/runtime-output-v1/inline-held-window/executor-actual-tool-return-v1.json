@@ -1,0 +1,20 @@
+{
+  "initial": {
+    "chunk_id": "565a84",
+    "wall_time_seconds": 1.003088459,
+    "session_id": 82825,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "actualCompletion": {
+    "chunk_id": "cc297f",
+    "wall_time_seconds": 0.000018417,
+    "exit_code": 0,
+    "original_token_count": 419,
+    "output": "{\"classification\":\"finite test command passed; inspect assertions and reach evidence\",\"heap\":false,\"identityMatched\":true,\"remainingGroup\":0,\"cleanupErrors\":0,\"exitCode\":0,\"signal\":null,\"cleanupDiagnostics\":[],\"elapsedMonotonicMs\":3040.4093749999997,\"maxSampledGroupRssBytes\":708083712,\"originalPgid\":59913,\"registeredReceivingGroups\":[{\"pid\":59919,\"pgid\":59919,\"parentPid\":59916,\"detached\":true,\"worktree\":\"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1\",\"executable\":\"/Users/kyle.mathews/.n/bin/node\",\"args\":[\"--max-old-space-size=384\",\"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs\",\"run\",\"--config\",\"scripts/h02-progress/completion-receiving.config.ts\",\"packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts\"],\"directory\":\"/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3\"}],\"stdoutSha256\":\"46a667a69c4d78e77e5338d6f8e9211da85012cf88ba6b2b26a4e7cef9006e51\",\"stderrSha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"limits\":\"Finite baseline assertions and reaches require review. Operational failures never supply product RED. RSS aggregates the original group and each synchronously registered receiving group without double-counting. Cleanup verifies these owned groups only. A supervisor interrupted between spawn and registration can leave an unknown group; no unregistered/escaped-group claim is made.\"}\n"
+  },
+  "outerExitCode": 0,
+  "cellId": "inline-held-window",
+  "rootBatchAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "maxInvocations": 1
+}

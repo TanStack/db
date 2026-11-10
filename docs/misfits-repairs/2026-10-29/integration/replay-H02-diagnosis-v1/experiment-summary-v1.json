@@ -1,0 +1,823 @@
+[
+  {
+    "name": "E01-raw-source",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-raw.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "56e2f2854d978826ad89747f209d4e00db50879f8e065e21ab6d5607359919c8",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": 1,
+    "termination": null,
+    "elapsedSeconds": 7.369,
+    "maximumGroupRssBytes": 1024933888,
+    "rssSamples": 44,
+    "pgid": 89575,
+    "primitiveEventCount": 0,
+    "phaseCounts": {},
+    "checkpoints": []
+  },
+  {
+    "name": "E02-instrumented",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-instrumented.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "022884047c8adb771771d48861ca7785bc3932ecd2a7bb565bff8213819670a9",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": 1,
+    "termination": null,
+    "elapsedSeconds": 2.283,
+    "maximumGroupRssBytes": 595951616,
+    "rssSamples": 14,
+    "pgid": 92316,
+    "primitiveEventCount": 132,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 29,
+      "key": 52,
+      "fetch": 13,
+      "acquisition-return": 28,
+      "subscribed": 1,
+      "preload-start": 1,
+      "preload-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 45,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 63288808
+      }
+    ]
+  },
+  {
+    "name": "E03-hardcap",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-hardcap.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "82b386baea70469fb17e5f6d45fabe710a815e6945b1746a579b531c2d808ab8",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.971,
+    "maximumGroupRssBytes": 608403456,
+    "rssSamples": 13,
+    "pgid": 97351,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 29,
+      "key": 48,
+      "fetch": 13,
+      "acquisition-return": 28,
+      "subscribed": 1,
+      "preload-start": 1,
+      "preload-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 45,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 63557352
+      }
+    ]
+  },
+  {
+    "name": "E04-no-spy",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-no-spy.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "9448eac20c9e277ddbb50aac64dbf3140d5b1ef37239d00be7d74ad02a666b11",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.619,
+    "maximumGroupRssBytes": 595083264,
+    "rssSamples": 11,
+    "pgid": 97663,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 29,
+      "key": 48,
+      "fetch": 13,
+      "acquisition-return": 28,
+      "subscribed": 1,
+      "preload-start": 1,
+      "preload-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 45,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 63738288
+      }
+    ]
+  },
+  {
+    "name": "E05-checkpoints",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-checkpoints.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "48b26449007412b08d811432d61f1c2109b566c963e5831b669601d84623a015",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.61,
+    "maximumGroupRssBytes": 596246528,
+    "rssSamples": 11,
+    "pgid": 99037,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 23,
+      "key": 37,
+      "fetch": 13,
+      "acquisition-return": 23,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 14,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 49,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 63704072
+      },
+      {
+        "event": 71,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 64112976
+      },
+      {
+        "event": 72,
+        "phase": "release-flush-settled",
+        "turn": 0,
+        "heapUsed": 64202208
+      },
+      {
+        "event": 74,
+        "phase": "release-answer",
+        "keys": [
+          3
+        ],
+        "heapUsed": 64203944
+      }
+    ]
+  },
+  {
+    "name": "E06-minimal-records",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-minimal-records.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "9fcaa59a38373b87577d212cd734fc2f506fdaaa3bcb895f5966ccb0b5791f23",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.575,
+    "maximumGroupRssBytes": 596213760,
+    "rssSamples": 11,
+    "pgid": 351,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 29,
+      "key": 48,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 20,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 41,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 69252768
+      },
+      {
+        "event": 59,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69664152
+      },
+      {
+        "event": 60,
+        "phase": "release-flush-settled",
+        "turn": 0,
+        "heapUsed": 69751448
+      },
+      {
+        "event": 62,
+        "phase": "release-answer",
+        "keys": [
+          3
+        ],
+        "heapUsed": 69753048
+      }
+    ]
+  },
+  {
+    "name": "E07-no-include",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-no-include.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "75664561995cc83a8ff8082a32c32871239b2ed2c2c2169c99b7ac76b0765357",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": 0,
+    "termination": null,
+    "elapsedSeconds": 1.721,
+    "maximumGroupRssBytes": 573898752,
+    "rssSamples": 11,
+    "pgid": 1135,
+    "primitiveEventCount": 53,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 8,
+      "key": 12,
+      "fetch": 8,
+      "subscribed": 1,
+      "preload-start": 1,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 2,
+      "diagnostic-settled": 1,
+      "cleanup-start": 1,
+      "unload": 4
+    },
+    "checkpoints": [
+      {
+        "event": 21,
+        "phase": "preload-settled",
+        "acquisitionCount": 4,
+        "requestCount": 4,
+        "owners": 1,
+        "cacheCount": 4,
+        "heapUsed": 67539960
+      },
+      {
+        "event": 39,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 67901960
+      },
+      {
+        "event": 40,
+        "phase": "release-flush-settled",
+        "turn": 0,
+        "heapUsed": 67965608
+      },
+      {
+        "event": 42,
+        "phase": "release-answer",
+        "keys": [
+          3
+        ],
+        "heapUsed": 67967272
+      },
+      {
+        "event": 43,
+        "phase": "release-flush-settled",
+        "turn": 1,
+        "heapUsed": 68139832
+      },
+      {
+        "event": 44,
+        "phase": "diagnostic-settled",
+        "heapUsed": 68140640
+      }
+    ]
+  },
+  {
+    "name": "E08-no-window",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-no-window.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "fba5105b08d9763f8ee4fd4053c21a0989e9c97c9a8d82637b3005172a0cc131",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": 0,
+    "termination": null,
+    "elapsedSeconds": 1.747,
+    "maximumGroupRssBytes": 571637760,
+    "rssSamples": 11,
+    "pgid": 1377,
+    "primitiveEventCount": 37,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 4,
+      "key": 6,
+      "fetch": 4,
+      "subscribed": 1,
+      "preload-start": 1,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 2,
+      "diagnostic-settled": 1,
+      "cleanup-start": 1,
+      "unload": 2
+    },
+    "checkpoints": [
+      {
+        "event": 15,
+        "phase": "preload-settled",
+        "acquisitionCount": 2,
+        "requestCount": 2,
+        "owners": 2,
+        "cacheCount": 2,
+        "heapUsed": 67575392
+      },
+      {
+        "event": 27,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "heapUsed": 67838408
+      },
+      {
+        "event": 28,
+        "phase": "release-flush-settled",
+        "turn": 0,
+        "heapUsed": 67936432
+      },
+      {
+        "event": 30,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "heapUsed": 67938032
+      },
+      {
+        "event": 31,
+        "phase": "release-flush-settled",
+        "turn": 1,
+        "heapUsed": 68264544
+      },
+      {
+        "event": 32,
+        "phase": "diagnostic-settled",
+        "heapUsed": 68265352
+      }
+    ]
+  },
+  {
+    "name": "E09-cache-observations",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-cache-observations.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "0b5e0275e9461532b1d5c9f6238a93109c20c4cc6d6cc3b670ff0d1fc000dee6",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.582,
+    "maximumGroupRssBytes": 589037568,
+    "rssSamples": 11,
+    "pgid": 3545,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 21,
+      "acquisition-state": 20,
+      "key": 32,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 12,
+      "unload-state": 12,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1
+    },
+    "checkpoints": [
+      {
+        "event": 53,
+        "phase": "preload-settled",
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 69295080
+      },
+      {
+        "event": 75,
+        "phase": "release-answer",
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69730176
+      },
+      {
+        "event": 76,
+        "phase": "release-flush-settled",
+        "turn": 0,
+        "heapUsed": 69813672
+      },
+      {
+        "event": 78,
+        "phase": "release-answer",
+        "keys": [
+          3
+        ],
+        "heapUsed": 69815272
+      }
+    ]
+  },
+  {
+    "name": "E10-timer-completion",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-timer-completion.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "c3764073d3122dd558ed10090a8366cac68648aceeb6ec5b7ac8238f221a3386",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.709,
+    "maximumGroupRssBytes": 597000192,
+    "rssSamples": 11,
+    "pgid": 23291,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 28,
+      "key": 48,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 20,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1,
+      "timer-completion-armed": 1
+    },
+    "checkpoints": [
+      {
+        "event": 41,
+        "phase": "preload-settled",
+        "elapsedMs": 26.80483300000003,
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 68992712
+      },
+      {
+        "event": 59,
+        "phase": "release-answer",
+        "elapsedMs": 28.57208300000002,
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69411240
+      },
+      {
+        "event": 60,
+        "phase": "release-flush-settled",
+        "elapsedMs": 30.098124999999982,
+        "turn": 0,
+        "heapUsed": 69495480
+      },
+      {
+        "event": 62,
+        "phase": "release-answer",
+        "elapsedMs": 30.125583000000006,
+        "keys": [
+          3
+        ],
+        "heapUsed": 69497448
+      },
+      {
+        "event": 66,
+        "phase": "timer-completion-armed",
+        "elapsedMs": 31.115833000000066,
+        "heapUsed": 69671448
+      }
+    ]
+  },
+  {
+    "name": "E11-microtask-completion",
+    "argv": [
+      "node",
+      "--max-old-space-size=384",
+      "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+      "run",
+      "--coverage.enabled=false",
+      "--typecheck.enabled=false",
+      "--maxWorkers=1",
+      "--pool=forks",
+      "--fileParallelism=false",
+      "--config",
+      "h02.vite.config.ts",
+      "tests/h02-microtask-completion.test.ts"
+    ],
+    "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+    "NODE_OPTIONS": "--max-old-space-size=384",
+    "testSha256": "5ee9e09e371885f77852ba73847ff2b55013d376e5c86d7dbe978c468889110c",
+    "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+    "exitCode": -9,
+    "termination": "event-cap",
+    "elapsedSeconds": 1.631,
+    "maximumGroupRssBytes": 594214912,
+    "rssSamples": 11,
+    "pgid": 24448,
+    "primitiveEventCount": 128,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 28,
+      "key": 48,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 20,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1,
+      "microtask-completion-armed": 1
+    },
+    "checkpoints": [
+      {
+        "event": 41,
+        "phase": "preload-settled",
+        "elapsedMs": 22.585375,
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 69260128
+      },
+      {
+        "event": 59,
+        "phase": "release-answer",
+        "elapsedMs": 23.791750000000093,
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69674800
+      },
+      {
+        "event": 60,
+        "phase": "release-flush-settled",
+        "elapsedMs": 25.258750000000077,
+        "turn": 0,
+        "heapUsed": 69762872
+      },
+      {
+        "event": 62,
+        "phase": "release-answer",
+        "elapsedMs": 25.270624999999995,
+        "keys": [
+          3
+        ],
+        "heapUsed": 69764840
+      },
+      {
+        "event": 66,
+        "phase": "microtask-completion-armed",
+        "elapsedMs": 25.792583000000036,
+        "heapUsed": 69939760
+      }
+    ]
+  }
+]

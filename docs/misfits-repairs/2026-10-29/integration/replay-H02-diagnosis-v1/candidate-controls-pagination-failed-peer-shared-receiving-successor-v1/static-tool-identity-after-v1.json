@@ -1,0 +1,15 @@
+{
+  "beforeSha256": "15f2f8e9d65fbd53ccce126bec6fcb29961885e0dd85956c84c5fb016ae79eed",
+  "unchanged": true,
+  "node": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "version": "v24.19.0",
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "eslintPayloadFiles": 426,
+  "typescriptPayloadFiles": 132,
+  "prettierPayloadFiles": 56,
+  "sourceFeedbackScriptSha256": "f8f90a9f6a41fbbd2b7edbafcae27714d5e2ec4e60092b17ca472435a9fc89b0",
+  "reportFeedbackScriptSha256": "f8f90a9f6a41fbbd2b7edbafcae27714d5e2ec4e60092b17ca472435a9fc89b0",
+  "gitBufferPreloadSha256": "0e6be6b0012f0b08188ef40da2c15f76d45c98c45efe2d3d25c5e1399d4b04c3"
+}

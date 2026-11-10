@@ -1,0 +1,24 @@
+{
+  "admittedBy": "/root",
+  "admittedRuntime": true,
+  "reservedHeavySlot": 2,
+  "soleSlotOwner": "ROOT inline-park-root singleton",
+  "maxInvocations": 1,
+  "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/frozen-inputs-v1/recipes/inline-park-root.json",
+  "recipeSha256": "75c504604c01c690dda2794de17a12691f598d200bc8dc3368826692c65fa10c",
+  "inputFreezeSha256": "b16d79c6f307e59a43f9bd1d06a64693aa98ca189dfd2893a7cb59c176fadcb5",
+  "inputPacketSha256": "da70aad067b328d48e400beda1bacb14b34cebbafee4c3cae2dd4ddcbfce36e5",
+  "sourceFreezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "sourcePacketSha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+  "independentGateSha256": "5b5020c73e38f6bc8a5c457be7660a6188292f33bf50aa39bb022d1959a87661",
+  "bindingProfile": "completion-baseline-v1",
+  "programSha256": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "processVisibilityReceiptSha256": "9eeef12c2709a59dd40f9b2960cbd301a41c7a63ad10f7c5d475ba0f9805d52c",
+  "after": "stop after one actual completion, no automatic next cell/retry"
+}

@@ -1,0 +1,141 @@
+import { chunkedArrayPush } from "./utils.js";
+import { hash } from "./hashing/index.js";
+export class MultiSet {
+  #inner;
+  constructor(data = []) {
+    this.#inner = data;
+  }
+  toString(indent = false) {
+    return `MultiSet(${JSON.stringify(this.#inner, null, indent ? 2 : void 0)})`;
+  }
+  toJSON() {
+    return JSON.stringify(Array.from(this.getInner()));
+  }
+  static fromJSON(json) {
+    return new MultiSet(JSON.parse(json));
+  }
+  /**
+   * Apply a function to all records in the collection.
+   */
+  map(f) {
+    return new MultiSet(
+      this.#inner.map(([data, multiplicity]) => [f(data), multiplicity])
+    );
+  }
+  /**
+   * Filter out records for which a function f(record) evaluates to False.
+   */
+  filter(f) {
+    return new MultiSet(this.#inner.filter(([data, _]) => f(data)));
+  }
+  /**
+   * Negate all multiplicities in the collection.
+   */
+  negate() {
+    return new MultiSet(
+      this.#inner.map(([data, multiplicity]) => [data, -multiplicity])
+    );
+  }
+  /**
+   * Concatenate two collections together.
+   */
+  concat(other) {
+    const out = [];
+    chunkedArrayPush(out, this.#inner);
+    chunkedArrayPush(out, other.getInner());
+    return new MultiSet(out);
+  }
+  /**
+   * Produce as output a collection that is logically equivalent to the input
+   * but which combines identical instances of the same record into one
+   * (record, multiplicity) pair.
+   *
+   * Record identity depends on the shape of the whole multiset:
+   *
+   * - Keyed: every record is a `[key, value]` pair with a string or number
+   *   key. Keys and primitive values compare by value, and object values by
+   *   reference. A value that is an array of length 2 is a join tuple, and
+   *   its two elements compare by the same rule.
+   * - Unkeyed, one primitive type: every record is a string, or every record
+   *   is a number. Records compare as `Map` keys do, and a `-0` record is
+   *   returned as `0`.
+   * - Otherwise, records compare by structure (`hash`).
+   *
+   * Each identity keeps its first record in input order with the summed
+   * multiplicity. Identities whose sum is zero are dropped. The input is not
+   * changed.
+   */
+  consolidate() {
+    const inner = this.#inner;
+    if (inner.every(
+      ([data]) => Array.isArray(data) && data.length === 2 && (typeof data[0] === `string` || typeof data[0] === `number`)
+    )) {
+      return consolidateKeyed(inner);
+    }
+    let primitiveType;
+    const requireHash = inner.some(([data]) => {
+      const type = typeof data;
+      if (type !== `string` && type !== `number`) return true;
+      primitiveType ??= type;
+      return type !== primitiveType;
+    });
+    return requireHash ? consolidateBy(inner, hash) : consolidateBy(inner, (data) => data, true);
+  }
+  extend(other) {
+    const otherArray = other instanceof MultiSet ? other.getInner() : other;
+    chunkedArrayPush(this.#inner, otherArray);
+  }
+  add(item, multiplicity) {
+    if (multiplicity !== 0) {
+      this.#inner.push([item, multiplicity]);
+    }
+  }
+  getInner() {
+    return this.#inner;
+  }
+}
+function consolidateKeyed(inner) {
+  const leaves = /* @__PURE__ */ new Map();
+  const tuples = /* @__PURE__ */ new Map();
+  const entries = [];
+  for (const [data, multiplicity] of inner) {
+    const [key, value] = data;
+    let entry;
+    if (Array.isArray(value) && value.length === 2) {
+      let byFirst = tuples.get(key);
+      if (!byFirst) tuples.set(key, byFirst = /* @__PURE__ */ new Map());
+      let bySecond = byFirst.get(value[0]);
+      if (!bySecond) byFirst.set(value[0], bySecond = /* @__PURE__ */ new Map());
+      entry = bySecond.get(value[1]);
+      if (!entry) {
+        bySecond.set(value[1], entry = [data, 0]);
+        entries.push(entry);
+      }
+    } else {
+      let byValue = leaves.get(key);
+      if (!byValue) leaves.set(key, byValue = /* @__PURE__ */ new Map());
+      entry = byValue.get(value);
+      if (!entry) {
+        byValue.set(value, entry = [data, 0]);
+        entries.push(entry);
+      }
+    }
+    entry[1] += multiplicity;
+  }
+  return new MultiSet(entries.filter(([, multiplicity]) => multiplicity !== 0));
+}
+function consolidateBy(inner, identityOf, keepIdentity = false) {
+  const consolidated = /* @__PURE__ */ new Map();
+  for (const [data, multiplicity] of inner) {
+    const identity = identityOf(data);
+    const entry = consolidated.get(identity);
+    if (entry) entry[1] += multiplicity;
+    else consolidated.set(identity, [data, multiplicity]);
+  }
+  const result = [];
+  for (const [identity, [data, multiplicity]] of consolidated) {
+    if (multiplicity !== 0)
+      result.push([keepIdentity ? identity : data, multiplicity]);
+  }
+  return new MultiSet(result);
+}

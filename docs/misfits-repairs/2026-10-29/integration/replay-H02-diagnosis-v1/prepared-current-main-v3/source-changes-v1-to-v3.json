@@ -1,0 +1,86 @@
+[
+  {
+    "path": "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "status": "unchanged",
+    "beforeSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "afterSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+    "status": "modified",
+    "beforeSha256": "e25404567cf8667cbda8f1c177d94e08b1d4e0defa94c5deabd7eb1a2e4717d6",
+    "afterSha256": "5ab01ce82607ecff372577ef1ccba7ca46848a0b7adfb0eabd57466257059d21"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+    "status": "modified",
+    "beforeSha256": "25e9fa792dae1acb0b2ccd3c059e63e9e77d4ff4905fd427ae6769470ac1d0e3",
+    "afterSha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+    "status": "modified",
+    "beforeSha256": "1ff61bfdfe56c5a63b0d4f3bbb3837d45295bde48b558c6c329f755e9c3baa59",
+    "afterSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+    "status": "modified",
+    "beforeSha256": "758cef3276a5269dd8b28a5add667e46d33cc1c604c85b57774f9ab8c377928f",
+    "afterSha256": "35477e105ca1a71bf5fdcc4de6550e31214abfbff8e8f68c9f2f4e68de3990db"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+    "status": "unchanged",
+    "beforeSha256": "ec15efd9ca0b827a531db4cf560cd06040215d4c7e9bd556721283432ee50208",
+    "afterSha256": "ec15efd9ca0b827a531db4cf560cd06040215d4c7e9bd556721283432ee50208"
+  },
+  {
+    "path": "scripts/h02-progress/bindings-calibration.test.mjs",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "ce36cb923806e7289646c24b9e1276c3f4b7d4031cd34a67e689415953c7214a"
+  },
+  {
+    "path": "scripts/h02-progress/calibration.config.ts",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "2c6f5c42a9b4c67211604ac3f6f92188597d4c7c0a71e976ba010c83aa01328d"
+  },
+  {
+    "path": "scripts/h02-progress/checker-calibration.test.ts",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "d0d167b3edbb77be0c6987ea01807c016fa06ff5e718909536471f803a5c3a84"
+  },
+  {
+    "path": "scripts/h02-progress/eslint.config.mjs",
+    "status": "unchanged",
+    "beforeSha256": "71e94882843c94560d64eb0a58cd7dc469f4a97f999ff31c2624c67ad87d06b2",
+    "afterSha256": "71e94882843c94560d64eb0a58cd7dc469f4a97f999ff31c2624c67ad87d06b2"
+  },
+  {
+    "path": "scripts/h02-progress/source-binding.setup.ts",
+    "status": "modified",
+    "beforeSha256": "ca68ad5ddcba766eb880d58cd46467385489dbc2a46f2bf16261732c89470ffd",
+    "afterSha256": "1cad4346f920be998da96a006f93dfb192e99f7b1da7dc0b233a1a883fe0d52c"
+  },
+  {
+    "path": "scripts/h02-progress/tsconfig.json",
+    "status": "unchanged",
+    "beforeSha256": "ba1fe0c807d4bbfb91185d25fc338bab2511c695d472682f885373df5165bf08",
+    "afterSha256": "ba1fe0c807d4bbfb91185d25fc338bab2511c695d472682f885373df5165bf08"
+  },
+  {
+    "path": "scripts/h02-progress/verify-bindings.mjs",
+    "status": "modified",
+    "beforeSha256": "0ab3839a82659175c72ed4db45f05d9295f580781ceb6051747a0ab6441291d3",
+    "afterSha256": "1f08564ce3f321d1d57b9eda6bf009ac045114e57c26bf051ed783c4e4aaae73"
+  },
+  {
+    "path": "scripts/h02-progress/vitest.config.ts",
+    "status": "unchanged",
+    "beforeSha256": "d3428cb09831e5ff455f7b43eaa9698de55c776f70643204bb85d7d1778af034",
+    "afterSha256": "d3428cb09831e5ff455f7b43eaa9698de55c776f70643204bb85d7d1778af034"
+  }
+]

@@ -1,0 +1,125 @@
+{
+  "admissionSha256": "0825d82d96afde7e2edd60cf2f86b8a2225e78a1831840ac49236742382f53ce",
+  "artifacts": 11,
+  "freshOutputAbsent": true,
+  "nativeLaunches": 0,
+  "preflight": {
+    "bindingSha256": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470",
+    "canonicalProgram": {
+      "actualProgramEvidenceRequired": [
+        "prepared.json/history.json",
+        "worker-start.history",
+        "parent selected name and quarter-2 context",
+        "actual root/downstream update and previousValue comparisons",
+        "per-history finalizer success",
+        "normal worker-cleaned receipt"
+      ],
+      "canonicalEncoding": "JSON sorted keys, compact separators, UTF-8, no trailing newline",
+      "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+      "displayName": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+      "filterName": "queued-answer metadata receiving checks source followup 'scope' 'default' quarter 2",
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 0,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 10,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "perHistoryFinalizer": {
+        "callSite": "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "callSiteSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+        "definition": "packages/query-db-collection/tests/queued-answer-metadata-oracle.ts",
+        "definitionSha256": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+        "requirement": "After successful outcome validation, every fixed/generated/direct-replay history calls metadata.finish(); declared optional followup requires completed shared publication comparison and normal worker cleanup regardless of aggregate reach."
+      },
+      "receivingBoundary": "direct eager source sync update through established QueryClient graph; no QueryClient-fetched marker transition or changing output metadata",
+      "requiredReachStates": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "positive-held-provider-read",
+        "held-root",
+        "held-downstream",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "messages-root",
+        "messages-downstream",
+        "final-root",
+        "final-downstream",
+        "worker-cleaned",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-update-root",
+        "followup-previous-value-root",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "followup-update-downstream",
+        "followup-previous-value-downstream"
+      ]
+    },
+    "gate": "source",
+    "limits": "Direct eager source update after checked reload baseline; stable metadata values; no strict conflicting-cache progress or generated/mutant claim",
+    "nativeLaunches": 0,
+    "nativeProcessProbes": 0,
+    "priorAcceptedDiscovery": [
+      {
+        "classificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+        "nativeNames": 20,
+        "productPassCredit": false,
+        "receivingReachCredit": false,
+        "resultFreezeSha256": "da91882f1c06b924a8956be32d668d74ac9268dee9b78916821407e861573c5e",
+        "stage": "universe"
+      },
+      {
+        "classificationSha256": "4fd95de65589d512920a37f7ff92d90abdee1f54a9f265441bacc808ebb692d4",
+        "nativeNames": 1,
+        "productPassCredit": false,
+        "receivingReachCredit": false,
+        "resultFreezeSha256": "7f797473ed69940fdca4f4506ef99a71997224fb3785aa99e7c9dc71006958b6",
+        "stage": "selector"
+      }
+    ],
+    "productPassCredit": false,
+    "receivingReachCredit": false,
+    "receivingRecipeSha256": "0d355458749b39d551e79e56371007ce14beca345c5e4ad97e10054039ff3847",
+    "sourceEquivalence": {
+      "discoveryEquivalence": "Accepted20-name and exact selected-name evidence retains original limits. No fresh native discovery or execution is inferred.",
+      "inventorySha256": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84",
+      "productionMembers": 511,
+      "registrationSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+      "sourceReviewSha256": "a07ed61feca7172165fb6d2489ce9d255fe160d761464152827f2dd584efd9f2",
+      "successorSourceMembers": 589,
+      "unchangedPredecessorMembers": 587
+    },
+    "status": "READ/HASH ONLY; root toolchain recovery acceptance and separate one-shot admission required",
+    "toolchainRecoveryAcceptance": "ROOT-OWNED AND REQUIRED; no changed wrapper is accepted as a baseline"
+  },
+  "status": "one-shot admission prerequisites verified without native launch",
+  "verified": [
+    "firstCommand",
+    "packetManifest",
+    "binding",
+    "independentReview",
+    "sharedRecoveryQualification",
+    "recovery/actualRepair",
+    "recovery/postAudit",
+    "recovery/closeout",
+    "recovery/formattingAccount"
+  ]
+}

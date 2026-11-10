@@ -1,0 +1,30 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "instrument failure; confirmed test-integrity defect",
+  "result": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-result-freeze-v2.json",
+    "sha256": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb"
+  },
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-receiving-actual-review-v2.md",
+    "sha256": "e295b0f5683da036b18897f970734c30ec54ee2ad75713a1c9f68dbcd847eea2"
+  },
+  "independentAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-receiving-actual-review-v2.json",
+    "sha256": "0776f3a772e3680cb68fa3b9f99aaa0133d60ef2ebd3caf2be3dd307f985d1d6"
+  },
+  "actualOuterExit": 1,
+  "receivingChildExit": 0,
+  "inference": "Retained outcome selector omits followup-start/followup-publication while keeping public-change seq182. Postrun checker loses phase transition and expects reloadrank30 for lawful followuprank35. Realtime observer sees206 receipts; retained outcome has21.",
+  "evidence": "Complete1948inner+3outer member hashes,588source hashes, canonical program, normalcleanup and original recorded ID absence verified. All31 observed reach counters remain facts; explicit metadata.finish and reach.assertReached did not execute.",
+  "repairAuthorized": "Smallest test-only selector stage correction with actual selector round-trip pure calibrations, preserving every old baseline/followup/previousValue/omission/finalizer obligation; additive successor freeze and independent source review before separately admitted native run",
+  "priorRootAttempt": "Classification creation first stopped before write because root guessed nonexistent audit filename. Correct path discovered by rg --files; no earlier file was written. Actual test result unchanged.",
+  "productRed": false,
+  "productGreen": false,
+  "closureCredit": false,
+  "retryAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false
+}

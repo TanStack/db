@@ -1,0 +1,31 @@
+{
+  "classifiedBy": "/root",
+  "verdict": "CONFIRMED-OPEN bounded product RED at first root callback",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/inline-source-failed-peer-result-freeze-v1.json",
+    "sha256": "37065c97890248961352332dc1a85ac252ecc4d6cd673a98f2706167b617d4d6"
+  },
+  "independentActualReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-source-failed-peer-checkpoint-actual-independent-review-v1.md",
+    "sha256": "d41d903daef37da930046d1f7b21e896edf959d7545207dc7496d4df59e3a96c"
+  },
+  "productionBase": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "actualOuterToolCompletion": "1cfb7b",
+  "actualOuterExitCode": 1,
+  "law": "An active imperative window whose required work fails preserves the prior complete public snapshot",
+  "authority": "ARCHITECTURE atomic window publication, including failed required work; explicit accepted window barrier",
+  "decisiveCheckpoint": "raw301 boundary286 root callback, emitted raw302 before delivery checker throws",
+  "expected": "two prior complete rows at settled limit2",
+  "actual": "three root rows, third with children[], at settled limit2",
+  "physicalPremises": "two exact original requests and pending applied-load receipts; chosen source fails while peer still pending",
+  "contaminationLimit": "Later downstream/cut/settlement are after thrown test listener assertion and get no independent product credit",
+  "testIntegrityFinding": "Live assertion escapes callback and can perturb continuation; use existing pagination owner nonthrowing recorder for closure",
+  "primaryOracle": "pagination-oracle.property.test.ts ready failed-window baseline law; missing failure x pending-dependent-source shape",
+  "next": "extend primary generated grammar and shared real Query receiving judgment; unchanged production RED before repair, then GREEN and hostile mutant",
+  "candidate20": "all UNREACHED",
+  "actualHelperNoActiveOperation": "UNREACHED",
+  "innerFailureKillValidation": "prior EPERM and group identity limitations remain separately accounted",
+  "newRuntimeAdmitted": false,
+  "canonicalImport": false,
+  "publishing": false
+}

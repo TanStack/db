@@ -1,0 +1,236 @@
+import { MurmurHashStream, getSymbolIdentity, randomHash } from "./murmur.js";
+import { isTemporal } from "./temporal.js";
+const TRUE = randomHash();
+const FALSE = randomHash();
+const NULL = randomHash();
+const UNDEFINED = randomHash();
+const KEY = randomHash();
+const FUNCTIONS = randomHash();
+const DATE_MARKER = { hash: randomHash() };
+const REGEXP_MARKER = { hash: randomHash() };
+const OBJECT_MARKER = { hash: randomHash() };
+const ARRAY_MARKER = { hash: randomHash() };
+const MAP_MARKER = { hash: randomHash() };
+const SET_MARKER = { hash: randomHash() };
+const UINT8ARRAY_MARKER = { hash: randomHash() };
+const TEMPORAL_MARKER = { hash: randomHash() };
+const MAX_STRUCTURAL_HASH_WORK = 1e6;
+const MAX_STRUCTURAL_HASH_DEPTH = 768;
+const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128;
+const hashCache = /* @__PURE__ */ new WeakMap();
+const referenceValues = /* @__PURE__ */ new WeakSet();
+export function registerOpaqueHash(value) {
+  cachedReferenceHash(value);
+}
+export function hash(input) {
+  const hasher = new MurmurHashStream();
+  updateHasher(hasher, input);
+  return hasher.digest();
+}
+function hashObject(input, context) {
+  if (context.activeObjects.size >= MAX_STRUCTURAL_HASH_DEPTH) {
+    throw new RangeError(
+      `Value is too complex to hash safely: structural depth`
+    );
+  }
+  context.activeObjects.add(input);
+  let valueHash;
+  try {
+    const [marker, header, body] = objectParts(input);
+    const hasher = new MurmurHashStream();
+    hasher.update(marker.hash);
+    for (const value of header)
+      if (body) updateHasher(hasher, value, context);
+      else hasher.update(value);
+    if (body) {
+      const keys = Object.keys(body);
+      const denseArray = Array.isArray(body) && keys.length === body.length && (keys.length === 0 || keys[keys.length - 1] === String(body.length - 1));
+      if (!denseArray) keys.sort();
+      keys.push(
+        ...Object.getOwnPropertySymbols(body).filter(
+          (key) => Object.prototype.propertyIsEnumerable.call(body, key)
+        ).sort(
+          (left, right) => getSymbolIdentity(left) - getSymbolIdentity(right)
+        )
+      );
+      for (const key of keys) {
+        hasher.update(KEY);
+        hasher.update(key);
+        updateHasher(hasher, body[key], context);
+      }
+    }
+    valueHash = hasher.digest();
+  } finally {
+    context.activeObjects.delete(input);
+  }
+  context.pendingHashes.set(input, valueHash);
+  return valueHash;
+}
+function objectParts(input) {
+  if (input instanceof Date) {
+    const time = input.getTime();
+    return [DATE_MARKER, [Number.isNaN(time) ? `invalid` : time]];
+  }
+  if (isBinaryValue(input))
+    return [
+      UINT8ARRAY_MARKER,
+      [String.fromCharCode.apply(null, input)]
+    ];
+  if (isTemporal(input))
+    return [TEMPORAL_MARKER, [input[Symbol.toStringTag], input.toString()]];
+  if (input instanceof RegExp)
+    return [REGEXP_MARKER, [input.source, input.flags, input.lastIndex], input];
+  if (input instanceof Map) return [MAP_MARKER, [], [...input.entries()]];
+  if (input instanceof Set) return [SET_MARKER, [], [...input.values()]];
+  return input instanceof Array ? [ARRAY_MARKER, [input.length], input] : [OBJECT_MARKER, [], input];
+}
+function updateHasher(hasher, input, context) {
+  if (context && ++context.work > MAX_STRUCTURAL_HASH_WORK) {
+    throw new RangeError(`Value is too complex to hash safely: structural work`);
+  }
+  if (input === null) {
+    hasher.update(NULL);
+    return;
+  }
+  switch (typeof input) {
+    case `undefined`:
+      hasher.update(UNDEFINED);
+      return;
+    case `boolean`:
+      hasher.update(input ? TRUE : FALSE);
+      return;
+    case `number`:
+      hasher.update(isNaN(input) ? NaN : input === 0 ? 0 : input);
+      return;
+    case `bigint`:
+    case `string`:
+    case `symbol`:
+      hasher.update(input);
+      return;
+    case `object`:
+      hasher.update(getCachedHash(input, context));
+      return;
+    case `function`:
+      hasher.update(cachedReferenceHash(input));
+  }
+}
+function getCachedHash(input, context) {
+  const cached = hashCache.get(input) ?? context?.pendingHashes.get(input);
+  if (cached !== void 0) return cached;
+  if (isReferenceHashedObject(input)) return cachedReferenceHash(input);
+  if (context) {
+    if (context.activeObjects.has(input)) {
+      throw new TypeError(`Cannot hash cyclic structural values`);
+    }
+    return hashObject(input, context);
+  }
+  const root = {
+    activeObjects: /* @__PURE__ */ new Set(),
+    work: 0,
+    pendingHashes: /* @__PURE__ */ new Map()
+  };
+  const result = hashObject(input, root);
+  for (const [object, valueHash] of root.pendingHashes) {
+    hashCache.set(object, valueHash);
+  }
+  return result;
+}
+function isReferenceHashedObject(input) {
+  return referenceValues.has(input) || typeof File !== `undefined` && input instanceof File || isBinaryValue(input) && input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD;
+}
+function isBinaryValue(input) {
+  return typeof Buffer !== `undefined` && input instanceof Buffer || input instanceof Uint8Array;
+}
+export function equalHashValues(left, right) {
+  const compared = /* @__PURE__ */ new Map();
+  const keys = (value) => Reflect.ownKeys(value).filter(
+    (key) => Object.prototype.propertyIsEnumerable.call(value, key)
+  );
+  function equal(a, b) {
+    if (a === b || Number.isNaN(a) && Number.isNaN(b)) return true;
+    if (a === null || b === null || typeof a !== `object` || typeof b !== `object` || isReferenceHashedObject(a) || isReferenceHashedObject(b))
+      return false;
+    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
+      return false;
+    const peers = compared.get(a);
+    if (peers?.has(b)) return true;
+    const [aMarker, aHeader, aBody] = objectParts(a);
+    const [bMarker, bHeader, bBody] = objectParts(b);
+    if (aMarker !== bMarker || !aHeader.every((value, index) => value === bHeader[index]))
+      return false;
+    if (!aBody || !bBody) return true;
+    if (peers) peers.add(b);
+    else compared.set(a, /* @__PURE__ */ new Set([b]));
+    const aKeys = keys(aBody);
+    return aKeys.length === keys(bBody).length && aKeys.every(
+      (key) => Object.prototype.propertyIsEnumerable.call(bBody, key) && equal(aBody[key], bBody[key])
+    );
+  }
+  return equal(left, right);
+}
+let nextRefId = 1;
+function cachedReferenceHash(fn) {
+  let valueHash = hashCache.get(fn);
+  if (valueHash === void 0) {
+    valueHash = nextRefId ^ FUNCTIONS;
+    nextRefId++;
+    hashCache.set(fn, valueHash);
+    referenceValues.add(fn);
+  }
+  return valueHash;
+}
+const MARKER_TAGS = /* @__PURE__ */ new Map([
+  [ARRAY_MARKER, `[`],
+  [OBJECT_MARKER, `{`],
+  [DATE_MARKER, `<`],
+  [REGEXP_MARKER, `/`],
+  [MAP_MARKER, `&`],
+  [SET_MARKER, `*`],
+  [UINT8ARRAY_MARKER, `^`],
+  [TEMPORAL_MARKER, `?`]
+]);
+const MAX_IDENTITY_DEPTH = 4;
+export function structuralIdentity(value, depth = 0) {
+  switch (typeof value) {
+    case `number`:
+      return `#${value === 0 ? 0 : value}`;
+    case `string`:
+      return `"${value.length}:${value}`;
+    case `boolean`:
+      return value ? `+` : `-`;
+    case `undefined`:
+      return `~`;
+    case `bigint`:
+      return `%${value}`;
+    case `symbol`:
+      return `$${getSymbolIdentity(value)}`;
+    case `object`: {
+      if (value === null) return `!`;
+      if (depth >= MAX_IDENTITY_DEPTH || isReferenceHashedObject(value))
+        return void 0;
+      const [marker, header, body] = objectParts(value);
+      let head = MARKER_TAGS.get(marker);
+      for (const part of header) {
+        if (Number.isNaN(part)) return void 0;
+        head += structuralIdentity(part, depth + 1);
+      }
+      if (!body) return head;
+      if (Object.getOwnPropertySymbols(body).some(
+        (key) => Object.prototype.propertyIsEnumerable.call(body, key)
+      ))
+        return void 0;
+      let parts = ``;
+      for (const key of Object.keys(body).sort()) {
+        const part = structuralIdentity(
+          body[key],
+          depth + 1
+        );
+        if (part === void 0) return void 0;
+        parts += `${key.length}:${key}=${part}|`;
+      }
+      return `${head}:${parts.length}:${parts}`;
+    }
+    default:
+      return void 0;
+  }
+}

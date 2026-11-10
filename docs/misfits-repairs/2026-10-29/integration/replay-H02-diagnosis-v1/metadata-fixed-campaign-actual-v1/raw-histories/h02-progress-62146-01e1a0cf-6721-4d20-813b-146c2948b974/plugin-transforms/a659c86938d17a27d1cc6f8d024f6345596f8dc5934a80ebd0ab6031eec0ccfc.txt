@@ -1,0 +1,30 @@
+import { normalizeValue } from "../utils/comparison.js";
+import { isVirtualPropName } from "../virtual-props.js";
+export function equalityKey(value) {
+  const normalized = normalizeValue(value);
+  const type = typeof normalized;
+  return type === `string` || type === `number` || type === `boolean` ? `${type}:${String(normalized)}` : void 0;
+}
+export function readPath(row, path) {
+  try {
+    let value = row;
+    for (const segment of path) value = value?.[segment];
+    return value;
+  } catch {
+    return void 0;
+  }
+}
+export function equalityConjunct(expression, rowPath) {
+  if (expression.type !== `func` || expression.name !== `eq`) return void 0;
+  const args = expression.args;
+  if (args.length !== 2) return void 0;
+  const left = args[0];
+  const right = args[1];
+  const ref = left.type === `ref` ? left : right;
+  const literal = left.type === `val` ? left : right;
+  if (ref.type !== `ref` || literal.type !== `val`) return void 0;
+  const path = rowPath(ref);
+  if (!path?.length || isVirtualPropName(path[0])) return void 0;
+  const literalKey = equalityKey(literal.value);
+  return literalKey === void 0 ? void 0 : { path, literalKey };
+}

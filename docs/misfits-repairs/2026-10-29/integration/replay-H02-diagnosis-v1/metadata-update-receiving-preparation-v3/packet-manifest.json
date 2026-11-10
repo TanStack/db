@@ -1,0 +1,69 @@
+{
+  "acceptedSelectorClassificationSha256": "4fd95de65589d512920a37f7ff92d90abdee1f54a9f265441bacc808ebb692d4",
+  "acceptedUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "artifacts": {
+    "binding.json": {
+      "bytes": 2207,
+      "sha256": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470"
+    },
+    "calibrate.py": {
+      "bytes": 1813,
+      "sha256": "d78bde7283f65805cc592f8d15372309907be6e886f773c1de83b4420046284d"
+    },
+    "first-command.json": {
+      "bytes": 3467,
+      "sha256": "0202923c2af3b89485d744ce789293a522cc1efd2412df4a78a1f42accda5a51"
+    },
+    "launcher-scope-default-q2.zsh": {
+      "bytes": 2717,
+      "sha256": "76843f2532facb6174d7213d987026e4abce6f60a144103352037d2713e18b82"
+    },
+    "pure-results.json": {
+      "bytes": 1377,
+      "sha256": "4e7b4ec9ac5936e3922a4e9f64898b9d774c1e4758a849996a2eae2b187117e2"
+    },
+    "recipes.json": {
+      "bytes": 3145,
+      "sha256": "0d355458749b39d551e79e56371007ce14beca345c5e4ad97e10054039ff3847"
+    },
+    "report.md": {
+      "bytes": 4637,
+      "sha256": "05d992a3ea690b191cef3d3fa7b75550ff844e03824d46a236ab4514c5026758"
+    },
+    "source-preparation-preflight.json": {
+      "bytes": 4883,
+      "sha256": "c964cc9d845474364a6c57067f1940b9136218bd12d5618eeb34b4a891be2ae9"
+    },
+    "static-results.json": {
+      "bytes": 778,
+      "sha256": "37c4788527b46689c98acf41aa31dedc4814912c049ca0a7fc7aeddf4b8b199f"
+    },
+    "verify.py": {
+      "bytes": 6071,
+      "sha256": "4acd4e023098048285e44f2416e91c1c987e14144bf1bab3ef52103ee65132b8"
+    },
+    "zsh-syntax.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "bindingSha256": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470",
+  "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "containmentChanged": false,
+  "failedReceivingResultFreezeSha256": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newDiscoveryEpochs": 0,
+  "newGenericLauncher": false,
+  "newGuardian": false,
+  "newRuntimeAdmitted": false,
+  "productionMembersUnchanged": 511,
+  "retentionCorrectionOnly": true,
+  "sourceEdits": 0,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceInventorySha256": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84",
+  "sourceMembers": 589,
+  "sourceReviewSha256": "a07ed61feca7172165fb6d2489ce9d255fe160d761464152827f2dd584efd9f2",
+  "status": "FROZEN source/static/pure same-singleton receiving rebind; independent exact preparation review and root recovery/admission pending",
+  "toolchainRecoveryAcceptance": "root-owned and required"
+}

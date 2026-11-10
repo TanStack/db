@@ -1,0 +1,100 @@
+{
+  "at": "2026-10-30T04:34:49.327138+00:00",
+  "classification": "instrumentation I/O failure before required conditional queued premise",
+  "outerToolExecChunkId": "bb39ba",
+  "outerToolCompletionChunkId": "f880a8",
+  "outerExitCode": 1,
+  "outer": {
+    "pid": 78265,
+    "pgid": 78265,
+    "selected": 1,
+    "failed": 1,
+    "skipped": 3,
+    "log": "outer-vitest-v4.log"
+  },
+  "parentVitestWorkerPid": 78277,
+  "receiving": {
+    "pid": 78280,
+    "pgid": 78280,
+    "historiesAttempted": 1,
+    "selected": 1,
+    "failed": 1,
+    "reason": "exited",
+    "exitCode": 1,
+    "signal": null,
+    "runtimeDirectory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-78277-400166e4-a247-400b-87ca-a6bc9bee6116",
+    "frozenRawCopy": "raw",
+    "elapsedMsAtFinalBinding": 2366,
+    "maxSampledGroupRssBytes": 478609408,
+    "killAttempted": false,
+    "lastGroupRows": [],
+    "supervisorCleanupErrors": []
+  },
+  "ioFailure": {
+    "code": "EAGAIN",
+    "message": "resource temporarily unavailable, write",
+    "driverLocation": "queued-answer-progress-driver.ts:42 writeSync(1,...)",
+    "secondaryLocation": "queued-answer-progress.receiving.test.ts:17 worker-error writeSync also fails",
+    "transport": "nonblocking stdout pipe; synchronous logging throws into receiving execution",
+    "rawReceiptCompleteness": "not established; source sequence increment can precede failed write; no missing event is credited",
+    "observedSequenceGaps": [
+      {
+        "before": 2519,
+        "after": 2521
+      }
+    ],
+    "malformedReceiptLines": []
+  },
+  "observedPhaseCounts": {
+    "worker-start": 1,
+    "actual-key-prefix": 1276,
+    "query-key-callback": 481,
+    "source-establishing-receipt": 1,
+    "acquisition-attempt": 244,
+    "source-stack": 1,
+    "provider-request": 13,
+    "provider-answer": 10,
+    "acquisition-accepted": 244,
+    "acquisition-release": 235,
+    "cache-success": 9,
+    "public-change": 1,
+    "initial-publication": 1,
+    "reload-start": 1,
+    "release-scope": 2
+  },
+  "reached": {
+    "initial-publication": 1,
+    "reload-start": 1,
+    "conflicting-cache-premise": 0,
+    "answer-queued": 0,
+    "answer-executed": 0,
+    "final-publication": 0,
+    "cleanup-start": 0,
+    "worker-cleaned": 0,
+    "worker-error": 0
+  },
+  "binding": {
+    "status": "bound",
+    "entries": 318,
+    "failures": [],
+    "separateReport": "bound-provenance-v1.json"
+  },
+  "progressRed": false,
+  "semanticProductRed": false,
+  "productGreen": false,
+  "wallHeapRssTermination": false,
+  "cleanupLimit": "process-group cleanup observed by supervisor and root; direct Collection cleanup is not established by absent worker-cleaned receipt",
+  "rootIndependentProcessObservation": {
+    "source": "root agent approved ps observation after this run",
+    "pgids": [
+      78265,
+      78280
+    ],
+    "membersRemaining": 0,
+    "authorExecutedThisCheck": false
+  },
+  "sourceEditsAfterRun": 0,
+  "receivingRerunsAfterThisAttempt": 0,
+  "priorAttempts": "v3 sandbox and URL setup failures each executed zero receiving histories; this v4 attempt executed one receiving history and failed before queued premise",
+  "disposition": "frozen; root separately authorizes source-only regular-file logging repair/calibration/review, with no new receiving admission"
+}

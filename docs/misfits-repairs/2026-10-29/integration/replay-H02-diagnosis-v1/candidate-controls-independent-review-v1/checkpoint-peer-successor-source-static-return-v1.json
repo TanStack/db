@@ -1,0 +1,93 @@
+{
+  "at": "2026-10-30T12:24:15.369032+00:00",
+  "verdict": "bounded ACCEPT of normal bound-key inactive source suitability; diagnostic fault claim qualification required",
+  "normalBoundKeysAndWorkingSinkBlockingSourceFindings": 0,
+  "newReportingEvidenceItems": 1,
+  "claimQualification": "local helper suppresses direct diagnostic capture exceptions; no unconditional original terminal error preservation across failed receipt sink and unchanged teardown",
+  "manifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/packet-manifest-v1.json",
+    "sha256": "a56541c3188c6a8348aa1187575e0192410dc3e8d86d1a9697628dc4a9312d25"
+  },
+  "sourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/source-freeze-v1.json",
+    "sha256": "1bb89680e1cf69142d2edec1d5936a8e8a2a58ae12eff39f524d3422205ca4d8"
+  },
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-source-independent-review-v1.md",
+    "sha256": "a774320684e68b4bdb04b572a66a6a877ad327711f428ee8f386aa69ee767ccd"
+  },
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-source-independent-facts-v2.json",
+    "sha256": "137b4924c1cb70f34cbe8650ed5169b3512091c6535f4471b7d24102394de136"
+  },
+  "sourceOnlyFaultWitness": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-diagnostic-fault-source-witness-v1.json",
+    "sha256": "d3abf201d4f6fb44b50328058658b2a0a1b61939bf608aeee5e847555bfa3956"
+  },
+  "correctedStaticAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-checkpoint-peer-successor-source-v2.py",
+      "sha256": "7d170f48c1a952f8544763e73812ffe4605fcaec4eda6536e5bb682371b33fbe"
+    },
+    "actual": "26041f",
+    "exit": 0,
+    "errors": []
+  },
+  "initialStaticAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-checkpoint-peer-successor-source-v1.py",
+      "sha256": "b5e6c9dea3b7b1f1404bccc5c030d1c5bfd5d325d501792b3af69036d194864b"
+    },
+    "facts": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-source-independent-facts-v1.json",
+      "sha256": "2b74b3192f05074784a58f2a2eae1f42f8229a463aeadf912d35ffb3029f7651"
+    },
+    "actual": "f7ee8d",
+    "exit": 1,
+    "failure": "reviewer whole-file versus no-final-LF guard hash-domain mistake",
+    "preserved": true
+  },
+  "savedCalibration": {
+    "actual": "1b31d5",
+    "exit": 0,
+    "result": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/boundary-calibration-v1/result-v1.json",
+      "sha256": "8dd921eddacd6ca8d12a996f60edc664c952e242f1c65437699d7974196b1ba5"
+    },
+    "cases": 12,
+    "corrected": 4,
+    "hostileRejected": 8,
+    "reviewerReruns": 0,
+    "credit": "finite pure instrument routing only"
+  },
+  "members": 120,
+  "memberBytes": 2599271,
+  "inactiveCopies": 85,
+  "changedInactiveSources": 1,
+  "acceptedWBindings": 596,
+  "acceptedQCopies": 85,
+  "productionEntriesUnchanged": 511,
+  "historicalQMappedMembers": 126,
+  "literalQMembers": 133,
+  "DMembers": 21,
+  "EMembers": 1996,
+  "runtimeAdmission": false,
+  "executableRemap": false,
+  "boundProgramImports": 0,
+  "boundProgramExecutions": 0,
+  "typecheck": 0,
+  "nativeProcessProbes": 0,
+  "productionAuthority": false,
+  "bugClassClosure": false,
+  "allCandidateStates": "UNREACHED",
+  "actualHelperNoActiveOperation": "UNREACHED",
+  "state14": "proposed and unadopted",
+  "sourceHold": "active",
+  "laterOperationalPreparation": "separately bind exact paths/imports/config/loader/evaluated modules/tools/resources and seek ROOT admission; no recipe allocated here",
+  "artifactLint": "PENDING ROOT",
+  "slot2": "returned",
+  "ledgerPrefix": {
+    "rows": 119,
+    "sha256": "eabfde1b27f844712d9f191656cfd58443b8b3313190c37aea2cfd0562439795"
+  }
+}

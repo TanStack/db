@@ -1,0 +1,134 @@
+{
+  "kind": "Independent Python-standard-library source/hash/parse/text review only",
+  "verdict": "Source and finite recipe acceptance; no receiving or product verdict, no admission",
+  "packet": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4",
+    "manifestSha256": "5a3d1e13e8dc71e8ae48c36c3cd4a669e1fb93b5458a017050ac7b2f7ccf1b42",
+    "members": 87,
+    "bytes": 1989247
+  },
+  "sourceFreezeSha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d",
+  "finiteRecipesSha256": "34725da611e1cc2eae78d0ad5511f12f7d48dc6138861639d1716863fd85bd63",
+  "sourceCounts": {
+    "productionFiles": 511,
+    "instrumentFiles": 34,
+    "sharedInstrumentFiles": 18
+  },
+  "all563LiveSourceEntriesMatch": true,
+  "fourFileExactPatchReverseVerified": {
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+      "beforeSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed",
+      "afterSha256": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+      "hunks": 10
+    },
+    "scripts/h02-progress/checker-calibration.test.ts": {
+      "beforeSha256": "c41c42147071517c33213ced766f434161e8ba53271113792a3cd880be591ced",
+      "afterSha256": "268c738cd9b1452f188892e435fe66086124884cd9647b1e79e2c5f7c2d6bca4",
+      "hunks": 2
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": {
+      "beforeSha256": "ad43de0acf2c61d0edcfe0f6b663b30861eb6c277a7029786d5c555c0c1b86e7",
+      "afterSha256": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436",
+      "hunks": 2
+    },
+    "docs/contributing/oracle-coverage.md": {
+      "beforeSha256": "6552b56974de18425a806098246a337fcf740fc24f09e243581fa71306446c01",
+      "afterSha256": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a",
+      "hunks": 1
+    }
+  },
+  "productionAndReceivingMapsUnchanged": true,
+  "nineDependencyMapsUnchangedFromAcceptedV3": {
+    "packages": 9,
+    "regularPayloadFiles": 2544,
+    "newDependencyPayloadAudit": false
+  },
+  "rawDriverAndSharedJudgmentUnchanged": true,
+  "calibrationEvidence": {
+    "pureRED": {
+      "failed": 2,
+      "passed": 15,
+      "oldCheckerSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed"
+    },
+    "pureGREEN": {
+      "passed": 17,
+      "failed": 0,
+      "titles": [
+        "identifies watchdog noncompletion only after measured premise and enqueue",
+        "does not classify a callback observed during final drain as noncompletion",
+        "preserves resource termination as a separate instrument failure",
+        "preserves a recording failure ahead of a watchdog progress judgment",
+        "accepts virtual-enriched public rows at every payload checkpoint",
+        "rejects selected payload corruption inside virtual-enriched rows",
+        "preserves ordered row positions when public rows carry virtual fields",
+        "accepts complete prior-to-final publication after provider releases",
+        "rejects a wrong transient before a later valid final publication",
+        "rejects a bad payload even when the callback read is correct",
+        "rejects an omitted final callback even when final rows are correct",
+        "rejects an absent reload boundary instead of bypassing event judgment",
+        "rejects a return to prior after final first publishes",
+        "rejects a duplicate insert without normalizing it away",
+        "rejects a missing delete without normalizing it away",
+        "rejects duplicate updates even when their final folded value is correct",
+        "compares an initial synchronous snapshot at the initiating subscriber cut"
+      ]
+    },
+    "serialStaticCommandRecords": 6,
+    "limits": "Recorded checker/static evidence only; commands not rerun, no product RED/GREEN"
+  },
+  "recipes": [
+    {
+      "path": "nonempty conflicting replay",
+      "launcherSha256": "58f834ea99fadcd200d7520bd5d54ca29d35f0fd52dadaad67767424c5ad8ef6",
+      "exactSelector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty conflicting replay'$",
+      "freshOutputDirectory": true
+    },
+    {
+      "path": "nonempty scope-key publication",
+      "launcherSha256": "5bd8f25eaef422d07b4b528b8f96e7b2f472d37f2decf64b2d07b2b05e6caf7a",
+      "exactSelector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$",
+      "freshOutputDirectory": true
+    },
+    {
+      "path": "empty scope-key publication",
+      "launcherSha256": "0a0ab6339691ef7c2066087bbd59c159f666e74c58f06befed4465de62f91f4e",
+      "exactSelector": "^queued-answer receiving neighbors checks receiving neighbor 'empty scope-key publication'$",
+      "freshOutputDirectory": true
+    },
+    {
+      "path": "literal true initial cut",
+      "launcherSha256": "b150e131e44c9bba6469be3b65e38fca1ec32909b7dc07865203a23735e7a9e9",
+      "exactSelector": "^queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'$",
+      "freshOutputDirectory": true
+    },
+    {
+      "path": "ordinary synchronous mutation cut",
+      "launcherSha256": "77cfed849bbcafdec36ff0e90736e1463946f607547b86e7da6df3b9523698b6",
+      "exactSelector": "^queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'$",
+      "freshOutputDirectory": true
+    }
+  ],
+  "ownershipRecipe": {
+    "recipeSha256": "b5397ed223b8ba8d232bcae8cd467d12ee3dfc089e6543ee33dfc5e9f5d816e1",
+    "launcherSha256": "15f586e743918e5e5683987926414519f41ae0e8b2282288f3a567f4deaf3f2d",
+    "finiteHistories": 42,
+    "freshOutputDirectory": true
+  },
+  "candidateStates": {
+    "declared": 20,
+    "receivingReached": 0
+  },
+  "authorityCorrection": {
+    "stableId": "H02-V4-IND-AUTHORITY-CORRECTION-01",
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-owner-exact-worktree-authority-correction-v1.md",
+    "sha256": "a18a81f020588d9514c53dd48d64df156b8c3236ad38db790b99c22545b94450",
+    "exactOwnerSha256": "3b0b5cebd4e20505073c363d2670bc61528a79e13835711241667613c7c89258"
+  },
+  "limits": [
+    "Exact frozen V4 delta against previously accepted V3; no broader dependency audit repeated",
+    "No receiving runtime, tests, builds, project verifiers, native formatting/collection, process checks, source edits or retries performed",
+    "V3 nonempty result remains an instrument-domain failure with no product verdict",
+    "Existing metadata-owner coverage retained; real QueryClient reload/event temporal receiving gap remains",
+    "Separate root singleton admission required before any receiving invocation"
+  ]
+}

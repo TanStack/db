@@ -1,0 +1,21 @@
+{
+  "finding": "F01",
+  "originalClaim": "All eight mutants intend the shared metadata delta comparator at followup-publication.",
+  "technicalVerdict": "Confirmed source-plan error for four full-current mutants; the ordinary target previous-value assertion rejects first.",
+  "action": "Additive plan/classifier correction only; no source/test behavior changed.",
+  "durableValue": "Distinguish law rejection from a specific comparator's invocation. Preserve first divergence and source-order receiving boundaries.",
+  "correctedIds": [
+    "scope-default-root-full-current-previous-value",
+    "scope-default-downstream-full-current-previous-value",
+    "scope-authored-root-full-current-previous-value",
+    "scope-authored-downstream-full-current-previous-value"
+  ],
+  "omissionIds": [
+    "scope-default-root-omit-previous-value",
+    "scope-default-downstream-omit-previous-value",
+    "scope-authored-root-omit-previous-value",
+    "scope-authored-downstream-omit-previous-value"
+  ],
+  "runtimeEvidence": "None; corrected source prediction only.",
+  "originalPlanUnmodified": true
+}

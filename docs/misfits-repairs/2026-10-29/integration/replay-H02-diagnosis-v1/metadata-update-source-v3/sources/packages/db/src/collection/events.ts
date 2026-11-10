@@ -1,0 +1,228 @@
+import { EventEmitter } from '../event-emitter.js'
+import type { Collection } from './index.js'
+import type { CollectionStatus } from '../types.js'
+import type { BasicExpression } from '../query/ir.js'
+
+/**
+ * Event emitted when the collection status changes
+ */
+export interface CollectionStatusChangeEvent {
+  type: `status:change`
+  collection: Collection
+  previousStatus: CollectionStatus
+  status: CollectionStatus
+}
+
+/**
+ * Event emitted when the collection status changes to a specific status
+ */
+export interface CollectionStatusEvent<T extends CollectionStatus> {
+  type: `status:${T}`
+  collection: Collection
+  previousStatus: CollectionStatus
+  status: T
+}
+
+/**
+ * Event emitted when the number of subscribers to the collection changes
+ */
+export interface CollectionSubscribersChangeEvent {
+  type: `subscribers:change`
+  collection: Collection
+  previousSubscriberCount: number
+  subscriberCount: number
+}
+
+/**
+ * Event emitted when the collection's loading more state changes
+ */
+export interface CollectionLoadingSubsetChangeEvent {
+  type: `loadingSubset:change`
+  collection: Collection<any, any, any, any, any>
+  isLoadingSubset: boolean
+  previousIsLoadingSubset: boolean
+  loadingSubsetTransition: `start` | `end`
+}
+
+/**
+ * Event emitted when the Collection's health tree may have changed: its own
+ * status or problems, or for a live query, those of a Collection it depends
+ * on. Read `collection.health` for the current tree.
+ */
+export interface CollectionHealthChangeEvent {
+  type: `health:change`
+  collection: Collection<any, any, any, any, any>
+}
+
+/**
+ * Event emitted when the collection is truncated (all data cleared)
+ */
+export interface CollectionTruncateEvent {
+  type: `truncate`
+  collection: Collection<any, any, any, any, any>
+}
+
+/**
+ * Event emitted when the sync adapter reports that rows it serves for loaded
+ * subsets may have shifted between served pages. Ordered live queries then
+ * re-establish their windows with a bounded repair.
+ */
+export interface CollectionLoadedSubsetsInvalidatedEvent {
+  type: `loadedSubsets:invalidated`
+  collection: Collection<any, any, any, any, any>
+}
+
+export type CollectionIndexSerializableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<CollectionIndexSerializableValue>
+  | {
+      [key: string]: CollectionIndexSerializableValue
+    }
+
+export interface CollectionIndexResolverMetadata {
+  kind: `constructor` | `async`
+  /** Stable for built-in indexes; diagnostic and build-dependent for custom constructors. */
+  name?: string
+}
+
+export interface CollectionIndexMetadata {
+  /**
+   * Version for the signature serialization contract.
+   */
+  signatureVersion: 1
+  /**
+   * Stable signature derived from expression + serializable options.
+   * Non-serializable option fields are intentionally omitted.
+   */
+  signature: string
+  indexId: number
+  name?: string
+  expression: BasicExpression
+  resolver: CollectionIndexResolverMetadata
+  options?: CollectionIndexSerializableValue
+}
+
+export interface CollectionIndexAddedEvent {
+  type: `index:added`
+  collection: Collection<any, any, any, any, any>
+  index: CollectionIndexMetadata
+}
+
+export interface CollectionIndexRemovedEvent {
+  type: `index:removed`
+  collection: Collection<any, any, any, any, any>
+  index: CollectionIndexMetadata
+}
+
+export type AllCollectionEvents = {
+  'status:change': CollectionStatusChangeEvent
+  'subscribers:change': CollectionSubscribersChangeEvent
+  'loadingSubset:change': CollectionLoadingSubsetChangeEvent
+  'health:change': CollectionHealthChangeEvent
+  truncate: CollectionTruncateEvent
+  'loadedSubsets:invalidated': CollectionLoadedSubsetsInvalidatedEvent
+  'index:added': CollectionIndexAddedEvent
+  'index:removed': CollectionIndexRemovedEvent
+} & {
+  [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
+}
+
+export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
+  event: AllCollectionEvents[T],
+) => void
+
+export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
+  private collection!: Collection<any, any, any, any, any>
+
+  constructor() {
+    super()
+  }
+
+  setDeps(deps: { collection: Collection<any, any, any, any, any> }) {
+    this.collection = deps.collection
+  }
+
+  /**
+   * Emit an event to all listeners
+   * Public API for emitting collection events
+   */
+  emit<T extends keyof AllCollectionEvents>(
+    event: T,
+    eventPayload: AllCollectionEvents[T],
+  ): void {
+    this.emitInner(event, eventPayload)
+  }
+
+  emitStatusChange<T extends CollectionStatus>(
+    status: T,
+    previousStatus: CollectionStatus,
+    isCurrent: () => boolean,
+  ) {
+    this.emitInnerWhile(
+      `status:change`,
+      {
+        type: `status:change`,
+        collection: this.collection,
+        previousStatus,
+        status,
+      },
+      isCurrent,
+    )
+    if (!isCurrent()) return
+
+    // Emit specific status event using type assertion
+    const eventKey: `status:${T}` = `status:${status}`
+    this.emitInnerWhile(
+      eventKey,
+      {
+        type: eventKey,
+        collection: this.collection,
+        previousStatus,
+        status,
+      } as AllCollectionEvents[`status:${T}`],
+      isCurrent,
+    )
+  }
+
+  emitHealthChange() {
+    this.emit(`health:change`, {
+      type: `health:change`,
+      collection: this.collection,
+    })
+  }
+
+  emitSubscribersChange(
+    subscriberCount: number,
+    previousSubscriberCount: number,
+  ) {
+    this.emit(`subscribers:change`, {
+      type: `subscribers:change`,
+      collection: this.collection,
+      previousSubscriberCount,
+      subscriberCount,
+    })
+  }
+
+  emitIndexAdded(index: CollectionIndexMetadata) {
+    this.emit(`index:added`, {
+      type: `index:added`,
+      collection: this.collection,
+      index,
+    })
+  }
+
+  emitIndexRemoved(index: CollectionIndexMetadata) {
+    this.emit(`index:removed`, {
+      type: `index:removed`,
+      collection: this.collection,
+      index,
+    })
+  }
+
+  cleanup() {
+    this.clearListeners()
+  }
+}

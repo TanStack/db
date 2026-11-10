@@ -1,0 +1,212 @@
+import { BaseQueryBuilder } from "./query/builder/index.js";
+import { collectSourceRefs, requireCollectionSource } from "./query/ir.js";
+import { isCollection, isFailedStatus } from "./live-query-primitives.js";
+import {
+  DEFAULT_GC_TIME_MS,
+  UNSUBSCRIBED_GC_FLOOR_MS
+} from "./collection/lifecycle.js";
+import { createLiveQueryCollection } from "./query/live-query-collection.js";
+import { LIVE_QUERY_INTERNAL } from "./query/live/internal.js";
+import { getBuilderFromConfig } from "./query/live/collection-registry.js";
+import {
+  getStableQueryBuilderHash,
+  getStableValueHash
+} from "./query/ir-stable-identity.js";
+import { getStringCollationIdentity } from "./query/runtime-reference-identity.js";
+import { codedMessage, devBuild } from "./error-message.js";
+import { InvalidPoolOptionError } from "./errors.js";
+export function configPool(config) {
+  const { pool } = config;
+  if (pool !== void 0 && typeof pool?.createPooledLiveQuery !== `function`)
+    throw new InvalidPoolOptionError();
+  return pool;
+}
+export function rejectLiveQueryInput(collections, rejection) {
+  try {
+    if (collections) resumeDeferredLiveQueryCollections(collections);
+  } catch {
+  }
+  throw rejection;
+}
+export function releaseDeferredOnReclaim(liveQuery, deferredCollections) {
+  if (deferredCollections.size === 0) return void 0;
+  const pending = new Set(deferredCollections);
+  const release = () => {
+    try {
+      resumeDeferredLiveQueryCollections(pending);
+    } catch {
+    }
+  };
+  const gcTime = liveQuery.config.gcTime ?? DEFAULT_GC_TIME_MS;
+  if (gcTime > 0 && Number.isFinite(gcTime) && liveQuery.status !== `idle`) {
+    return liveQuery.once(`status:cleaned-up`, release);
+  }
+  const timer = setTimeout(release, UNSUBSCRIBED_GC_FLOOR_MS);
+  return () => clearTimeout(timer);
+}
+export function resumeDeferredLiveQueryCollections(collections, reportSourceErrors = false) {
+  const pending = Array.from(collections);
+  collections.clear();
+  let firstFailure;
+  for (const collection of pending) {
+    try {
+      collection._resumeSyncStart();
+      if (reportSourceErrors && isFailedStatus(collection.status)) {
+        throw collection._lifecycle.getSyncError();
+      }
+    } catch (error) {
+      firstFailure ??= { error };
+    }
+  }
+  if (firstFailure) throw firstFailure.error;
+}
+function createInitialQueryBuilder() {
+  return new BaseQueryBuilder();
+}
+function createCollectionResolver(dbClient, deferredCollections) {
+  if (!dbClient) return void 0;
+  return (options) => {
+    if (!deferredCollections) {
+      return dbClient.collection(
+        options
+      );
+    }
+    const collection = dbClient._materializeCollectionForRender(
+      options
+    );
+    if (collection._deferSyncStart()) deferredCollections.add(collection);
+    return collection;
+  };
+}
+export function prepareLiveQueryValue(value, dbClient, deferredCollections) {
+  if (typeof value === `function`) {
+    return prepareLiveQueryValue(
+      value(createInitialQueryBuilder()),
+      dbClient,
+      deferredCollections
+    );
+  }
+  if (value instanceof BaseQueryBuilder) {
+    return value._bindCollectionSources(
+      createCollectionResolver(dbClient, deferredCollections)
+    );
+  }
+  if (value && typeof value === `object` && !isCollection(value) && !(value instanceof BaseQueryBuilder) && `query` in value) {
+    const pool = configPool(value);
+    const {
+      query,
+      queryKey: _queryKey,
+      client: _client,
+      pool: _pool,
+      ...config
+    } = value;
+    const preparedQuery = prepareLiveQueryValue(
+      query,
+      dbClient,
+      deferredCollections
+    );
+    if (preparedQuery === void 0 || preparedQuery === null) {
+      return preparedQuery;
+    }
+    return {
+      ...config,
+      // A DbClient query never pools, so its identity must not depend on
+      // pool: a server preload and a client hook must hash alike.
+      ...pool && !dbClient ? { pool } : {},
+      query: preparedQuery
+    };
+  }
+  return value;
+}
+export function getPreparedLiveQuerySources(value, onUnboundDescriptor) {
+  if (isCollection(value)) return [value];
+  const query = value instanceof BaseQueryBuilder ? value : value && typeof value === `object` && `query` in value ? value.query : value;
+  if (query instanceof BaseQueryBuilder) {
+    return collectSourceRefs(query._getQuery()).map(
+      (source) => source.type === `descriptorRef` ? onUnboundDescriptor ? onUnboundDescriptor(source.alias) : requireCollectionSource(source) : source.collection
+    );
+  }
+  return isCollection(query) ? [query] : [];
+}
+export function getLiveQueryRowOptions(value) {
+  if (isCollection(value)) {
+    const { config: config2 } = value;
+    const internal = config2.utils?.[LIVE_QUERY_INTERNAL];
+    return [
+      internal?.hasCustomGetKey ? config2.getKey : void 0,
+      config2.schema
+    ];
+  }
+  const config = value;
+  return [config?.getKey, config?.schema];
+}
+export function getPreparedLiveQueryIdentity(value, pool) {
+  if (isCollection(value)) return [`collection`, value.id];
+  if (value instanceof BaseQueryBuilder) {
+    const pooled = pool?.getPooledQueryIdentity(value);
+    return pooled === void 0 ? [`query`, getStableQueryBuilderHash(value)] : [`pooled`, pooled];
+  }
+  if (value && typeof value === `object` && `query` in value) {
+    const config = value;
+    return [
+      // getKey and schema bind for this query identity. Inline options must
+      // not turn a normal framework render into a new Collection.
+      `config`,
+      getPreparedLiveQueryIdentity(config.query, configPool(config)),
+      [`singleResult`, config.singleResult === true],
+      [
+        `defaultStringCollation`,
+        getStringCollationIdentity(config.defaultStringCollation)
+      ]
+    ];
+  }
+  if (value === void 0 || value === null) return [`disabled`];
+  return [`value`, value];
+}
+export function getLiveQueryHash(preparedValue, queryKey) {
+  if (queryKey?.length) {
+    const query = preparedValue instanceof BaseQueryBuilder ? preparedValue : preparedValue && typeof preparedValue === `object` && `query` in preparedValue ? preparedValue.query : void 0;
+    const ir = isCollection(preparedValue) ? getBuilderFromConfig(preparedValue.config)?.getWindow() : query instanceof BaseQueryBuilder ? query._getQuery() : void 0;
+    const window = ir && (ir.limit !== void 0 || (ir.offset ?? 0) !== 0) ? [{ limit: ir.limit, offset: ir.offset ?? 0 }] : [];
+    return getStableValueHash([`queryKey`, queryKey, ...window], `queryKey`);
+  }
+  const identity = isCollection(preparedValue) ? [`collection`, preparedValue.id] : [`derived`, getPreparedLiveQueryIdentity(preparedValue)];
+  return getStableValueHash(identity, `queryKey`);
+}
+function poolConfig(config, gcTime, pool) {
+  if (!(config.query instanceof BaseQueryBuilder) || !Object.keys(config).every((key) => key === `query` || key === `gcTime`)) {
+    return void 0;
+  }
+  return pool.createPooledLiveQuery(config.query, {
+    gcTime: config.gcTime ?? gcTime
+  });
+}
+export function resolveLiveQueryValue(value, {
+  gcTime,
+  pool,
+  startSync = true
+} = {}) {
+  if (value === void 0 || value === null) return null;
+  if (isCollection(value)) {
+    value.startSyncImmediate();
+    return value;
+  }
+  if (value instanceof BaseQueryBuilder) {
+    return (pool ? pool.createPooledLiveQuery(value, { gcTime }) : void 0) ?? createLiveQueryCollection({ query: value, startSync, gcTime });
+  }
+  if (typeof value === `object`) {
+    const requested = configPool(value);
+    const { pool: _pool, ...given } = value;
+    const pooling = pool === false ? void 0 : requested ?? pool;
+    const built = pooling && typeof given.query === `function` ? given.query(createInitialQueryBuilder()) : void 0;
+    const config = built instanceof BaseQueryBuilder ? { ...given, query: built } : given;
+    return (pooling ? poolConfig(config, gcTime, pooling) : void 0) ?? createLiveQueryCollection({
+      ...config,
+      startSync: config.startSync ?? startSync,
+      gcTime: config.gcTime ?? gcTime
+    });
+  }
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}` : codedMessage(102, { type: typeof value })
+  );
+}

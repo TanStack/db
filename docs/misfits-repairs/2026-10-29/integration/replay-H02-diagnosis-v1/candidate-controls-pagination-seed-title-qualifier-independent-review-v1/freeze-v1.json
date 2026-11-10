@@ -1,0 +1,27 @@
+{
+  "reviewer": "/root/ordered_traversal_design",
+  "inputPacketManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-seed-title-qualifier-successor-v1/packet-manifest.json",
+    "sha256": "0a2f48c30e4477ed3cd7355db8abb5d3c43ed378cb9772683608b4268be9d904"
+  },
+  "files": {
+    "ledger-v1.jsonl": {
+      "sha256": "154b0243c6a02fda8f061d9f20489eda5f1fe974e925741e75fcc087f2b1e786",
+      "bytes": 4739
+    },
+    "facts-v1.json": {
+      "sha256": "37dd07205fadc81341108e3f663d0dfcd793c229bf5ecce64e99d1c079ae123c",
+      "bytes": 2921
+    },
+    "report-v1.md": {
+      "sha256": "9ff63588f39a1945fd2d39932f87fbafd1442fef1812572dadcbac2473d409f9",
+      "bytes": 7000
+    }
+  },
+  "verdict": "ACCEPT source-only component and bounded pure calibration; no native admission",
+  "originalN10AndActual16Unchanged": true,
+  "sealedSuccessor8Unchanged": true,
+  "nativeExecutions": 0,
+  "configModelTestImports": 0,
+  "futureOperationalRebindRequired": true
+}

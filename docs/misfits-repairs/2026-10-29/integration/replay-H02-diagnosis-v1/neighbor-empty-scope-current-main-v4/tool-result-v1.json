@@ -1,0 +1,11 @@
+{
+  "tool": "exec_command",
+  "chunk_id": "88887f",
+  "wall_time_seconds": 0,
+  "exit_code": 127,
+  "output": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-empty-scope-v4.zsh:5: operation not permitted: /bin/ps\n",
+  "cmd": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-empty-scope-v4.zsh",
+  "session_id_returned": false,
+  "sandbox_permissions": "use_default",
+  "note": "This preserves the exact tool return; no stderr log is fabricated."
+}

@@ -1,0 +1,121 @@
+{
+  "limit": "Original recorded PID/target identities only. No reconstructed initial group receipts; outer lifecycle actual getpgid observation occurred after exit.",
+  "processes": [
+    {
+      "groupTarget": 62130,
+      "identitySource": "actual launcher-process.txt",
+      "pid": 62130,
+      "role": "outer"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "frozen supervisor process.pid naming in eight actual prepared UUID paths; no initial parent getpgid or direct parent/outer PPID receipt",
+      "pid": 62146,
+      "role": "receiving-parent"
+    },
+    {
+      "groupTarget": 62199,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-01e1a0cf-6721-4d20-813b-146c2948b974/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62199,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-01e1a0cf-6721-4d20-813b-146c2948b974/receipts.jsonl.writer.json",
+      "pid": 62211,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62232,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-0c212e4b-d360-4db2-a818-cb3b1f632fd5/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62232,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-0c212e4b-d360-4db2-a818-cb3b1f632fd5/receipts.jsonl.writer.json",
+      "pid": 62237,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62330,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-1cc8d244-859a-46dd-b33d-71fb2463fa89/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62330,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-1cc8d244-859a-46dd-b33d-71fb2463fa89/receipts.jsonl.writer.json",
+      "pid": 62333,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62258,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-33e8a2db-b575-4f0b-a0d2-c578365de82a/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62258,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-33e8a2db-b575-4f0b-a0d2-c578365de82a/receipts.jsonl.writer.json",
+      "pid": 62261,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62404,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-7dce3e49-5f2d-470c-8f27-368a9ba5d8a6/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62404,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-7dce3e49-5f2d-470c-8f27-368a9ba5d8a6/receipts.jsonl.writer.json",
+      "pid": 62407,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62356,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-890b8af0-5113-4131-9f47-6722d5ff95f6/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62356,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-890b8af0-5113-4131-9f47-6722d5ff95f6/receipts.jsonl.writer.json",
+      "pid": 62359,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62427,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-d00d92ca-46b8-4495-a5d8-6155960ef3cc/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62427,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-d00d92ca-46b8-4495-a5d8-6155960ef3cc/receipts.jsonl.writer.json",
+      "pid": 62430,
+      "role": "receipt-writer"
+    },
+    {
+      "groupTarget": 62379,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-e149308a-0c6b-47fc-a217-caa5989142f9/supervisor.json",
+      "limit": "detached target group from bound spawn design, no persisted initial actual getpgid",
+      "pid": 62379,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-62146-e149308a-0c6b-47fc-a217-caa5989142f9/receipts.jsonl.writer.json",
+      "pid": 62382,
+      "role": "receipt-writer"
+    }
+  ]
+}

@@ -1,0 +1,194 @@
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 38)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 35)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+}
+
+ RUN  v4.1.12 /private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection
+
+{"event":1,"phase":"test-start","elapsedMs":0.020125000000007276,"heapUsed":64697264}
+{"event":2,"phase":"key-prefix","elapsedMs":1.4462910000000875,"subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":64738568}
+{"event":3,"phase":"markers-created","elapsedMs":2.0452080000000024,"heapUsed":64834240}
+{"event":4,"phase":"source-created","elapsedMs":2.255708000000027,"heapUsed":64861536}
+{"event":5,"phase":"live-created","elapsedMs":8.01829100000009,"heapUsed":65547008}
+{"event":6,"phase":"key-prefix","elapsedMs":11.225791000000072,"subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":65920824}
+{"event":7,"phase":"acquisition","elapsedMs":12.537500000000023,"acquisitionCount":1,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":66041704}
+{"event":8,"phase":"key","elapsedMs":12.720957999999996,"owner":0,"ownerCount":1,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":0,"heapUsed":66410664}
+{"event":9,"phase":"fetch","elapsedMs":13.800749999999994,"keys":[1,2],"requestCount":1,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":66216480}
+{"event":10,"phase":"acquisition","elapsedMs":15.006708000000003,"acquisitionCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":66389720}
+{"event":11,"phase":"key","elapsedMs":15.032750000000078,"owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":66394192}
+{"event":12,"phase":"fetch","elapsedMs":15.152666000000067,"keys":[2],"requestCount":2,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":66686008}
+{"event":13,"phase":"subscribed","elapsedMs":15.743166000000087,"heapUsed":66598816}
+{"event":14,"phase":"preload-start","elapsedMs":15.749458000000004,"heapUsed":66599768}
+{"event":15,"phase":"unload","elapsedMs":16.91258300000004,"owner":1,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":66773208}
+{"event":16,"phase":"key","elapsedMs":16.951916000000097,"owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":66779392}
+{"event":17,"phase":"acquisition","elapsedMs":18.47595799999999,"acquisitionCount":3,"owner":0,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67161104}
+{"event":18,"phase":"key","elapsedMs":18.489666000000057,"owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":67165648}
+{"event":19,"phase":"fetch","elapsedMs":18.64250000000004,"keys":[3],"requestCount":3,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":67479520}
+{"event":20,"phase":"acquisition","elapsedMs":18.812875000000076,"acquisitionCount":4,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67277664}
+{"event":21,"phase":"key","elapsedMs":18.82633300000009,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":67282104}
+{"event":22,"phase":"fetch","elapsedMs":18.933958000000075,"keys":[3],"requestCount":4,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67570168}
+{"event":23,"phase":"unload","elapsedMs":19.3827500000001,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":67895088}
+{"event":24,"phase":"key","elapsedMs":19.39462500000002,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67899432}
+{"event":25,"phase":"acquisition","elapsedMs":20.134208000000058,"acquisitionCount":5,"owner":0,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67837768}
+{"event":26,"phase":"key","elapsedMs":20.149291000000062,"owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67842248}
+{"event":27,"phase":"fetch","elapsedMs":20.248083000000065,"keys":[4],"requestCount":5,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":68027504}
+{"event":28,"phase":"acquisition","elapsedMs":20.37208300000009,"acquisitionCount":6,"owner":1,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68080432}
+{"event":29,"phase":"key","elapsedMs":20.38220799999999,"owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":68084888}
+{"event":30,"phase":"fetch","elapsedMs":20.451166000000057,"keys":[4],"requestCount":6,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":68002936}
+{"event":31,"phase":"unload","elapsedMs":20.747916000000032,"owner":1,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":68269936}
+{"event":32,"phase":"key","elapsedMs":20.759750000000054,"owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":68274520}
+{"event":33,"phase":"acquisition","elapsedMs":21.21645799999999,"acquisitionCount":7,"owner":0,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68765224}
+{"event":34,"phase":"key","elapsedMs":21.228083000000083,"owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":68769896}
+{"event":35,"phase":"fetch","elapsedMs":21.298958000000084,"keys":[5],"requestCount":7,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":68593872}
+{"event":36,"phase":"acquisition","elapsedMs":21.4056250000001,"acquisitionCount":8,"owner":1,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68658896}
+{"event":37,"phase":"key","elapsedMs":21.41375000000005,"owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":68663400}
+{"event":38,"phase":"fetch","elapsedMs":21.47183300000006,"keys":[5],"requestCount":8,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68702400}
+{"event":39,"phase":"unload","elapsedMs":21.741500000000087,"owner":1,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":69044400}
+{"event":40,"phase":"key","elapsedMs":21.75004100000001,"owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69048808}
+{"event":41,"phase":"preload-settled","elapsedMs":22.585375,"acquisitionCount":8,"requestCount":8,"owners":2,"cacheCount":8,"heapUsed":69260128}
+{"event":42,"phase":"reload-start","elapsedMs":22.596750000000043,"heapUsed":69261488}
+{"event":43,"phase":"key-prefix","elapsedMs":23.137500000000045,"subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":69354240}
+{"event":44,"phase":"reload-called","elapsedMs":23.202333000000067,"heapUsed":69368944}
+{"event":45,"phase":"acquisition","elapsedMs":23.302875000000085,"acquisitionCount":9,"owner":0,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69694384}
+{"event":46,"phase":"key","elapsedMs":23.313625000000002,"owner":0,"ownerCount":2,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":69699160}
+{"event":47,"phase":"fetch","elapsedMs":23.39329100000009,"keys":[1,2],"requestCount":9,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":69740128}
+{"event":48,"phase":"acquisition","elapsedMs":23.478375000000028,"acquisitionCount":10,"owner":0,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69763000}
+{"event":49,"phase":"key","elapsedMs":23.487291000000027,"owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":69767488}
+{"event":50,"phase":"fetch","elapsedMs":23.568875000000048,"keys":[3],"requestCount":10,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":69801440}
+{"event":51,"phase":"acquisition","elapsedMs":23.593250000000012,"acquisitionCount":11,"owner":0,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69813000}
+{"event":52,"phase":"key","elapsedMs":23.600208000000066,"owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":69817496}
+{"event":53,"phase":"fetch","elapsedMs":23.65229099999999,"keys":[4],"requestCount":11,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":69612160}
+{"event":54,"phase":"acquisition","elapsedMs":23.674458000000072,"acquisitionCount":12,"owner":0,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69623072}
+{"event":55,"phase":"key","elapsedMs":23.681083000000058,"owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":69627576}
+{"event":56,"phase":"fetch","elapsedMs":23.72812500000009,"keys":[5],"requestCount":12,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69663392}
+{"event":57,"phase":"reload-initial-flush-settled","elapsedMs":23.77520800000002,"heapUsed":69671888}
+{"event":58,"phase":"release-turn","elapsedMs":23.78195800000003,"turn":0,"heapUsed":69673160}
+{"event":59,"phase":"release-answer","elapsedMs":23.791750000000093,"keys":[1,2],"heapUsed":69674800}
+{"event":60,"phase":"release-flush-settled","elapsedMs":25.258750000000077,"turn":0,"heapUsed":69762872}
+{"event":61,"phase":"release-turn","elapsedMs":25.26545800000008,"turn":1,"heapUsed":69763840}
+{"event":62,"phase":"release-answer","elapsedMs":25.270624999999995,"keys":[3],"heapUsed":69764840}
+{"event":63,"phase":"acquisition","elapsedMs":25.629625000000033,"acquisitionCount":13,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":70335064}
+{"event":64,"phase":"key","elapsedMs":25.640291000000047,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69890752}
+{"event":65,"phase":"fetch","elapsedMs":25.78554100000008,"keys":[3],"requestCount":13,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69938224}
+{"event":66,"phase":"microtask-completion-armed","elapsedMs":25.792583000000036,"heapUsed":69939760}
+{"event":67,"phase":"unload","elapsedMs":26.11854100000005,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":70198968}
+{"event":68,"phase":"key","elapsedMs":26.12783300000001,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70203376}
+{"event":69,"phase":"acquisition","elapsedMs":26.43520799999999,"acquisitionCount":14,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":70467920}
+{"event":70,"phase":"key","elapsedMs":26.44429100000002,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70472432}
+{"event":71,"phase":"unload","elapsedMs":26.711625000000026,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":71032088}
+{"event":72,"phase":"key","elapsedMs":26.725916000000097,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71036496}
+{"event":73,"phase":"acquisition","elapsedMs":26.989875000000097,"acquisitionCount":15,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":71257960}
+{"event":74,"phase":"key","elapsedMs":27.000958000000082,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70924328}
+{"event":75,"phase":"unload","elapsedMs":27.274,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":71180992}
+{"event":76,"phase":"key","elapsedMs":27.284208000000035,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71185368}
+{"event":77,"phase":"acquisition","elapsedMs":27.514375000000086,"acquisitionCount":16,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":71404328}
+{"event":78,"phase":"key","elapsedMs":27.52383300000008,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71408840}
+{"event":79,"phase":"unload","elapsedMs":27.759208000000058,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":71627312}
+{"event":80,"phase":"key","elapsedMs":27.768083000000047,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71631752}
+{"event":81,"phase":"acquisition","elapsedMs":27.981540999999993,"acquisitionCount":17,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72289344}
+{"event":82,"phase":"key","elapsedMs":27.99120800000003,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72293856}
+{"event":83,"phase":"unload","elapsedMs":28.225625000000036,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72071344}
+{"event":84,"phase":"key","elapsedMs":28.240166000000045,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72499128}
+{"event":85,"phase":"acquisition","elapsedMs":28.496708000000012,"acquisitionCount":18,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72322216}
+{"event":86,"phase":"key","elapsedMs":28.505500000000097,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72326728}
+{"event":87,"phase":"unload","elapsedMs":28.72595799999999,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72530936}
+{"event":88,"phase":"key","elapsedMs":28.73670800000002,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72535376}
+{"event":89,"phase":"acquisition","elapsedMs":28.944375000000036,"acquisitionCount":19,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72751776}
+{"event":90,"phase":"key","elapsedMs":28.95337500000005,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72756288}
+{"event":91,"phase":"unload","elapsedMs":29.13808300000005,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72953912}
+{"event":92,"phase":"key","elapsedMs":29.149833000000058,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72958320}
+{"event":93,"phase":"acquisition","elapsedMs":29.344625000000065,"acquisitionCount":20,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":73579456}
+{"event":94,"phase":"key","elapsedMs":29.352583000000095,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73883024}
+{"event":95,"phase":"unload","elapsedMs":29.55441600000006,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":73406672}
+{"event":96,"phase":"key","elapsedMs":29.561915999999997,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73411080}
+{"event":97,"phase":"acquisition","elapsedMs":29.788875000000075,"acquisitionCount":21,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74015448}
+{"event":98,"phase":"key","elapsedMs":29.798625000000015,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73652928}
+{"event":99,"phase":"unload","elapsedMs":30.019083000000023,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74230960}
+{"event":100,"phase":"key","elapsedMs":30.029291000000057,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74235368}
+{"event":101,"phase":"acquisition","elapsedMs":30.221666000000027,"acquisitionCount":22,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74440992}
+{"event":102,"phase":"key","elapsedMs":30.229332999999997,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74445512}
+{"event":103,"phase":"unload","elapsedMs":30.43612500000006,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74296728}
+{"event":104,"phase":"key","elapsedMs":30.44504100000006,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74301136}
+{"event":105,"phase":"acquisition","elapsedMs":30.63387499999999,"acquisitionCount":23,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74507992}
+{"event":106,"phase":"key","elapsedMs":30.64216600000009,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74512504}
+{"event":107,"phase":"unload","elapsedMs":30.833541000000082,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74717168}
+{"event":108,"phase":"key","elapsedMs":30.841000000000008,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74721576}
+{"event":109,"phase":"acquisition","elapsedMs":31.004500000000007,"acquisitionCount":24,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74926224}
+{"event":110,"phase":"key","elapsedMs":31.012000000000057,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74930744}
+{"event":111,"phase":"unload","elapsedMs":31.194458000000054,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75126024}
+{"event":112,"phase":"key","elapsedMs":31.20133300000009,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75130432}
+{"event":113,"phase":"acquisition","elapsedMs":31.372375000000034,"acquisitionCount":25,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":75672640}
+{"event":114,"phase":"key","elapsedMs":31.379333000000088,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75677160}
+{"event":115,"phase":"unload","elapsedMs":31.57304099999999,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75558712}
+{"event":116,"phase":"key","elapsedMs":31.58008300000006,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75563120}
+{"event":117,"phase":"acquisition","elapsedMs":31.733583000000067,"acquisitionCount":26,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":75766080}
+{"event":118,"phase":"key","elapsedMs":31.741750000000025,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75770600}
+{"event":119,"phase":"unload","elapsedMs":31.914582999999993,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75973608}
+{"event":120,"phase":"key","elapsedMs":31.9217910000001,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75978016}
+{"event":121,"phase":"acquisition","elapsedMs":32.070666000000074,"acquisitionCount":27,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":76182144}
+{"event":122,"phase":"key","elapsedMs":32.082708000000025,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76186664}
+{"event":123,"phase":"unload","elapsedMs":32.272583000000054,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":76384272}
+{"event":124,"phase":"key","elapsedMs":32.27983300000005,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76388600}
+{"event":125,"phase":"acquisition","elapsedMs":32.43354099999999,"acquisitionCount":28,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":76591720}
+{"event":126,"phase":"key","elapsedMs":32.440458000000035,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76596152}
+{"event":127,"phase":"unload","elapsedMs":32.655125,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":76795776}
+{"event":128,"phase":"key","elapsedMs":32.662000000000035,"owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76800088}
+H02_EVENT_LIMIT_REACHED

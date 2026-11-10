@@ -1,0 +1,27 @@
+{
+  "scope": "static registration/source binding only; no runtime title-result evidence",
+  "bindings": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sha256": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235",
+      "soleTopLevelPlainItRegistration": true,
+      "registrationCount": 1,
+      "title": "checks a selected baseline constituent through the shared judgment",
+      "registrationLine": 54,
+      "ancestorTitles": [],
+      "fastCheckSuffixAllowed": false
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "soleTopLevelPlainItRegistration": true,
+      "registrationCount": 1,
+      "title": "records a source-bound completion receiving gate",
+      "registrationLine": 13,
+      "ancestorTitles": [],
+      "fastCheckSuffixAllowed": false
+    }
+  ],
+  "parentSelector": "established S exact file and exact sole plain-it title preserved; no additional suffix or broad result qualifier",
+  "runtime": 0
+}

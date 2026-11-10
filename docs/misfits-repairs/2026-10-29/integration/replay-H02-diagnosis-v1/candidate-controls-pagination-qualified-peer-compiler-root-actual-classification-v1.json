@@ -1,0 +1,32 @@
+{
+  "kind": "Root actual compiler classification",
+  "actualApi": {
+    "initial": "4b6893",
+    "session": 64181,
+    "final": "e81dd0",
+    "outerExitCode": 1
+  },
+  "child": {
+    "pid": 16757,
+    "originalPgid": 16757,
+    "exitCode": 0,
+    "finalOwnedRows": [],
+    "stopErrors": []
+  },
+  "disposition": "Strict static gate FAILED; no retroactive pass or native receiving authority.",
+  "failure": "653 complete unique listFiles paths:650 bound;3 declaration paths missing from prebound finite input map. Child TypeScript0 is distinct from failed outer closure.",
+  "unbound": [
+    "fractional-indexing/src/index.d.ts",
+    "@tanstack/pacer-lite declaration",
+    "buffer declaration"
+  ],
+  "independentReviewSha256": "693451a330053856ec096873ed63533e605cd484179f4bfd0ad28aa169deb3ec",
+  "independentFreezeSha256": "c109a945d48316cadd74d543f4b5f56aaa813b77142138809ab2167fdcb0f39a",
+  "checks": 54314,
+  "beforeAfterInputs": 12580,
+  "protectedCopiedEntriesUnchanged": 834,
+  "remaining": "Add exact three-file finite supplement without weakening unknown-input assertion, then separately decide a fresh compiler attempt. Preserve failed receipt and all source/argv/limits.",
+  "nativeAdmission": false,
+  "productRedGreen": false,
+  "canonicalImport": false
+}

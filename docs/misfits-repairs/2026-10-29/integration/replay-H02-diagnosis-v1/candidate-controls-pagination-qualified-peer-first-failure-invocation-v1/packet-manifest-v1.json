@@ -1,0 +1,38 @@
+{
+  "schema": "h02-exact-first-failure-invocation-source-packet-v1",
+  "status": "FROZEN minimal ready-to-review first failure invocation; no runtime authority",
+  "files": {
+    "exact-first-failure-tool-v1.json": {
+      "sha256": "a01db0c9968c89b34d4e98a6c1f7e8d0839047f32181384ec177a53858707f68",
+      "bytes": 13919
+    },
+    "launch-one-failure-v1.sh.txt": {
+      "sha256": "4254ab308162ab7223e2fa5dedeee61e4db20dd534a30a5fd68c17061fe853b5",
+      "bytes": 957
+    },
+    "report-v1.md": {
+      "sha256": "752a6c583a4a45529b035c315201220d1cd23ba577775c5dfeebff40afc81f67",
+      "bytes": 3021
+    }
+  },
+  "fileCount": 3,
+  "selfExcluded": true,
+  "launcherSha256": "4254ab308162ab7223e2fa5dedeee61e4db20dd534a30a5fd68c17061fe853b5",
+  "toolProposalSha256": "a01db0c9968c89b34d4e98a6c1f7e8d0839047f32181384ec177a53858707f68",
+  "reportSha256": "752a6c583a4a45529b035c315201220d1cd23ba577775c5dfeebff40afc81f67",
+  "recipeSha256": "03297e00e2683be4d22c9add73770ef5503bb639fefcb8f5645948a3758a365f",
+  "programSha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+  "sourceBindingSha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca",
+  "nativeArgvRecipeAndBudgetsUnchanged": true,
+  "sourceDelta": "none",
+  "compilerSuccessReviewFreezeSha256": "922a5489be7b637371269c36e84d0c7afa097b636ec31bff696f39a85f179669",
+  "smallSelectedRefsVerified": 14,
+  "completeRawCaptureOnlyLauncher": true,
+  "freshFailureOutputAbsent": true,
+  "executions": 0,
+  "nativeReceiving": 0,
+  "processProbes": 0,
+  "broadCensus": false,
+  "successAdmitted": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

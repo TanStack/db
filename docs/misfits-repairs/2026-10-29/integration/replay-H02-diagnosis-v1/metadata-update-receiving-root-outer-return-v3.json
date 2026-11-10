@@ -1,0 +1,34 @@
+{
+  "recordedBy": "/root/evaluate_metadata_external",
+  "status": "ACTUAL OUTER SUCCESS retained separately from child; independent classification pending",
+  "actualOuterExitCode": 0,
+  "initialToolReturn": {
+    "chunk_id": "719531",
+    "wall_time_seconds": 1.003991542,
+    "session_id": 1270,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "completionToolReturn": {
+    "chunk_id": "506b0d",
+    "wall_time_seconds": 0.000014333,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "outerPid": 12461,
+  "outerPgid": 12461,
+  "receivingParentPid": 12597,
+  "originalReceivingLeaderPid": 12600,
+  "originalReceiptWriterPid": 12603,
+  "receivingChildExitCode": 0,
+  "rootAdmissionSha256": "0825d82d96afde7e2edd60cf2f86b8a2225e78a1831840ac49236742382f53ce",
+  "nativeInvocationsThisAdmission": 1,
+  "observedSelectedTestOutcome": "1 passed, 19 skipped; exact scope/default positive-quarter2 test",
+  "metadataReachCounters": 31,
+  "metadataPerHistoryFinishCompleted": "Selected fixed test passed after awaiting run(); frozen run() calls metadata.finish() after outcome validation. This is source/order/pass evidence, not a dedicated finalizer runtime receipt.",
+  "reachAssertReachedCompleted": "Selected fixed test passed; frozen callback calls reach.assertReached() after awaiting run(). No separate runtime completion receipt.",
+  "retry": false,
+  "nextLaneAdmitted": false,
+  "productRedGreenCredit": false
+}

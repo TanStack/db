@@ -1,0 +1,14 @@
+{
+  "latestCapturedExactLint": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-followups-v1/validation-account-v1.json",
+    "sha256": "ea0627d641fe84ccb1aa1e9683ffd09715812cca11bba7f8e8fd5d0b6b8d1874",
+    "initial": "d04e0b",
+    "session": 70292,
+    "final": "99c04e",
+    "exit": 0
+  },
+  "laterCaptureArtifactValidation": "PENDING ROOT final coordinated lint after additive artifact writes",
+  "rootInstruction": "ROOT owns final coordinated lint after these additive artifact writes; do not run another lint now. Seal result with latest captured exact lint pointer and later-artifact validation pending.",
+  "newLintInvocations": 0,
+  "noHistoricalStatusNormalization": true
+}

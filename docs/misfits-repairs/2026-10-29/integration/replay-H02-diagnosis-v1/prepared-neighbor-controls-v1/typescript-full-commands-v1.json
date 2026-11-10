@@ -1,0 +1,20 @@
+{
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+    "-p",
+    "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/tsconfig.json"
+  ],
+  "exitCode": null,
+  "signal": "SIGABRT",
+  "scope": "all proposed sources including full ownership primary-owner overlay; static compiler only, no test module loaded",
+  "typeOnlyDependency": {
+    "name": "@standard-schema/spec",
+    "version": "1.1.0",
+    "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@standard-schema+spec@1.1.0/node_modules/@standard-schema/spec",
+    "packageJsonSha256": "58e5bd75ddd0684c88b07cd799585cc72a37fd6efb8ab0c936d49e230d5164fb",
+    "declarationsSha256": "bdd14f07b4eca0b4b5203b85b8dbc4d084c749fa590bee5ea613e1641dcd3b29",
+    "use": "existing installed declaration mapped only in temporary static project; no install, override or live link change"
+  },
+  "initialMissingResolutionPreserved": true
+}

@@ -1,0 +1,28 @@
+{
+  "runtimeAdmission": "NOT ADMITTED; exact independent review and root admission required; recipe constructor equality not executed",
+  "proposals": [
+    {
+      "schedule": "failure-first",
+      "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "recipeSha256": "91902d7feb8c80f945991a8777493ae0befc4cda4f1f8675e2dc4b07303e10b8",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+      ]
+    },
+    {
+      "schedule": "success",
+      "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-success.json",
+      "recipeSha256": "fa4a989b7716c6eda1d1e8024b880185dc4ed1ccae13bc2f14bc16a9a129b71b",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/recipes/inline-window-success.json"
+      ]
+    }
+  ],
+  "successRequirement": "same-source actual successful neighbor must calibrate shared recorder/comparison before production",
+  "limits": "unchanged receiving outer60s/384MiB/1GiB and child20s/384MiB/1GiB; numerical bounds are operational only; separate2GiB proposal applies only to primary containment",
+  "laterRealSettlementRetry": "OPEN under primary pagination owner"
+}

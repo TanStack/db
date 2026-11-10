@@ -1,0 +1,26 @@
+{
+  "kind": "inert native registration only; no DB receiving execution",
+  "sourcePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+  "sourceSha256": "ad43de0acf2c61d0edcfe0f6b663b30861eb6c277a7029786d5c555c0c1b86e7",
+  "tableInitializer": "[\n  {\n    name: 'nonempty conflicting replay',\n    history: { ...queuedAnswerExample, nonemptyPrior: true },\n    states: [\n      'nonempty-prior',\n      'held-provider-read',\n      'conflicting-cache-premise',\n      'completed-enqueue',\n      'answer-executed',\n      'final-publication',\n      'worker-cleaned',\n    ],\n  },\n  {\n    name: 'nonempty scope-key publication',\n    history: {\n      ...queuedAnswerExample,\n      cacheIdentity: 'scope',\n      nonemptyPrior: true,\n    },\n    states: [\n      'nonempty-prior',\n      'held-provider-read',\n      'completed-enqueue',\n      'answer-executed',\n      'root-change',\n      'downstream-change',\n      'final-publication',\n      'worker-cleaned',\n    ],\n  },\n  {\n    name: 'empty scope-key publication',\n    history: {\n      ...queuedAnswerExample,\n      cacheIdentity: 'scope',\n      nonemptyPrior: false,\n    },\n    states: [\n      'empty-prior',\n      'held-provider-read',\n      'completed-enqueue',\n      'answer-executed',\n      'root-change',\n      'downstream-change',\n      'final-publication',\n      'worker-cleaned',\n    ],\n  },\n  {\n    name: 'literal true initial cut',\n    history: { kind: 'sync-initial', keyShift: 0, rankScale: 10 },\n    states: [\n      'literal-true-establishing-receipt',\n      'subscriber-return-before-preload',\n      'final-publication',\n      'worker-cleaned',\n    ],\n  },\n  {\n    name: 'ordinary synchronous mutation cut',\n    history: { kind: 'sync-mutation', keyShift: 0, rankScale: 10 },\n    states: [\n      'ordinary-mutation-return-before-host-turn',\n      'final-publication',\n      'worker-cleaned',\n    ],\n  },\n]",
+  "tableSha256": "8b9d024399f1a914fa0e7a5b9fe42f086a8a6e8ba6dd84e53100584353c0be58",
+  "titleExpression": "'checks receiving neighbor $name'",
+  "titleExpressionSha256": "cb15ee20bb56b9a6223ad6fd8ccbf671197e98382550e81e3ff9b700d8f9813e",
+  "suiteExpression": "'queued-answer receiving neighbors'",
+  "names": [
+    "nonempty conflicting replay",
+    "nonempty scope-key publication",
+    "empty scope-key publication",
+    "literal true initial cut",
+    "ordinary synchronous mutation cut"
+  ],
+  "fixtureSha256": "d673cd7f5b75089ed29c1db1a3a943e8916f73b3db10ce251e6576720f15806a",
+  "configSha256": "0525b6693e55bebda527178b964312512263a9923dd848937b1fb8fc0c4e7ab9",
+  "substitution": "queuedAnswerExample is an inert empty object; only native names/selection/console retention are examined",
+  "limits": {
+    "nodeHeapMiB": 384,
+    "workerHeapMiB": 384,
+    "maxWorkers": 1,
+    "testTimeoutMs": 5000
+  }
+}

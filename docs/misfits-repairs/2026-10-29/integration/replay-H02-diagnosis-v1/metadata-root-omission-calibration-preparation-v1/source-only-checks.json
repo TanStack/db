@@ -1,0 +1,13 @@
+{
+  "F01CorrectionFreezeSha256": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4",
+  "exactSourcePlaceholdersResolved": true,
+  "freshFutureWorkspaceAbsent": true,
+  "inertLauncherSha256": "2163ef0b3872fd7451c001c6302512d87a22333a598890154ac6596ce67fce76",
+  "inertTestSourceSha256": "4a47eb7d67429acd289893e678770828826ad8847f8d4b9436e6e29bf38365ba",
+  "kind": "Passive text/hash preparation checks only",
+  "originalActualCaptureManifestSha256": "9522fa338cd148a0353553bf0964202d527c56f76a4c7e2c0ddd9265966fe4e4",
+  "rootOwnsLint": true,
+  "rootQualifiedActualClassificationSha256": "4339f336b5fd89702455f4c95f90d384f4185d88ea804fbd9619c3540e4ffee3",
+  "sourceFreezeUnchanged": true,
+  "syntaxCompileImportRuntimeProbesMaterializationPerformed": false
+}

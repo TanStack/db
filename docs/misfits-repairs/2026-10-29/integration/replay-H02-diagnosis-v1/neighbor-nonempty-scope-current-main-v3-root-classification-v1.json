@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-30T06:53:08.088776+00:00",
+  "rootClassified": true,
+  "acceptedForNext": false,
+  "classification": "observation abstraction/instrument assertion failure; no product verdict",
+  "resultManifestSha256": "8aa49478501ab26f62df98a68687f92b0a22d7c4984820713199fb24a221723f",
+  "verifiedMembers": 1957,
+  "selectedFailed": 1,
+  "skipped": 4,
+  "contiguousRawReceipts": 159,
+  "reportedReach": {
+    "nonempty-prior": 0,
+    "held-provider-read": 0,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 0,
+    "downstream-change": 0,
+    "final-publication": 0,
+    "worker-cleaned": 0
+  },
+  "primaryCause": "payload-only model compared with full public VirtualRow in live callback",
+  "containmentCause": "observation-trigger SIGKILL distinct from primary assertion; no heap/resource failure",
+  "laterRawFacts": "final-publication159 retained, no cleanup-start/worker-cleaned; no retrospective GREEN",
+  "rootAbsenceSha256": "34ac660bb3466db4a41c9a88bd03cd652abea907701f9c8dadc3588e5c9e640e",
+  "authorizedNext": "narrow oracle-only consistent authored-data projection, full raw metadata preserved, calibration and exact source review before fresh run"
+}

@@ -1,0 +1,34 @@
+{
+  "bindingSha256": "86ccd3bf644d96f43e726f1e805c4b8850754707b7bb88c48ccd802cd90bd7b9",
+  "completedRecipes": [],
+  "identityAfter": null,
+  "identityBefore": {
+    "acceptedDisplayCorrectionReviewSha256": "7a67cd9bae25c9ed49b4135ebafa985e2af24768faaa1e2a37cd553b0b632e05",
+    "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+    "dependencyReuseLinks": 4,
+    "freshRecipeSha256": "c9582603691d779f22a10cf60ec16bed95ab49a3efb8ea8a6afaf02a9d2c0714",
+    "namedDependencyOwnPayloads": 2544,
+    "nativeLaunches": 0,
+    "nativeProcessProbes": 0,
+    "originalSourceFiles": 573,
+    "perHistoryFinalizer": {
+      "callSite": "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "callSiteSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "definition": "packages/query-db-collection/tests/queued-answer-metadata-oracle.ts",
+      "definitionSha256": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+      "requirement": "After successful outcome validation, every fixed/generated/direct-replay history calls metadata.finish(); declared optional followup requires completed shared publication comparison and normal worker cleanup regardless of aggregate reach."
+    },
+    "productionFiles": 511,
+    "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2",
+    "successorSourceFiles": 588
+  },
+  "outerPgid": 97300,
+  "outerPid": 97300,
+  "primaryFailure": null,
+  "productPassCredit": false,
+  "receivingReachCredit": false,
+  "secondaryFailures": [],
+  "stage": "universe",
+  "status": "running"
+}

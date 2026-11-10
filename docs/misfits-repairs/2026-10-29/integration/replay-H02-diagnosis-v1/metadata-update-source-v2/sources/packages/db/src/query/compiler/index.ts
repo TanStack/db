@@ -1,0 +1,2704 @@
+import {
+  concat as concatOperator,
+  distinct,
+  filter,
+  join as joinOperator,
+  map,
+  reduce,
+  serializeValue,
+  tap,
+} from '@tanstack/db-ivm'
+import { isPlainObject } from '../../utils/type-guards.js'
+import { getOrCreate } from '../../utils/get-or-create.js'
+import { optimizeQuery } from '../optimizer.js'
+import {
+  createParentContext,
+  createValueIdentity,
+  getParentContextIdentity,
+  getParentContextProjectedBindings,
+  getParentContextValue,
+} from '../equality-value-identity.js'
+import {
+  CollectionInputNotFoundError,
+  DistinctRequiresSelectError,
+  FnSelectWithGroupByError,
+  GroupingOperatorRequiredError,
+  HavingRequiresGroupByError,
+  IncludeOperatorRequiredError,
+  LimitOffsetRequireOrderByError,
+  NonAggregateExpressionNotInGroupByError,
+  QueryCompilationError,
+  UnsupportedFnSelectResultError,
+  UnsupportedFromTypeError,
+} from '../../errors.js'
+import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
+import {
+  BaseQueryBuilder,
+  collectExternalRefsFromQuery,
+} from '../builder/index.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  IncludeWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from '../builder/functions.js'
+import {
+  ConditionalSelect,
+  IncludesSubquery,
+  PropRef,
+  Value as ValClass,
+  collectCollectionSources,
+  collectPropRefs,
+  getFromSources,
+  getHavingExpression,
+  getWhereExpression,
+  isBasicOrAggregateExpression,
+  isExpressionLike,
+  requireCollectionSource,
+} from '../ir.js'
+import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { createSourceRecord } from '../../utils/source-record.js'
+import { deepEquals } from '../../utils.js'
+import { normalizeValue } from '../../utils/comparison.js'
+import { codedMessage, devBuild } from '../../error-message.js'
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate,
+} from './evaluators.js'
+import { processJoins, registerLazyDemandPlan } from './joins.js'
+import { findAggregate } from './find-aggregate.js'
+import { getLazyLoadTargets } from './lazy-targets.js'
+import { processOrderBy } from './order-by.js'
+import { crossJoinParentRoutes } from './parent-routes.js'
+import { queriesMatchForCaching } from './query-equivalence.js'
+import {
+  INCLUDES_PUBLIC_KEY,
+  INCLUDES_ROUTING,
+  attachRouteMetadata,
+  attachRouteMetadataToResult,
+  getNamespacedRouteMetadata,
+  getRouteMetadata,
+  getRoutedScalarMetadata,
+  stripInternalCallbackMetadata,
+  stripInternalRouteMetadata,
+  stripRouteMetadata,
+} from './route-metadata.js'
+import { processSelect } from './select.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { OrderByOptimizationInfo } from './order-by.js'
+import type {
+  Aggregate,
+  BasicExpression,
+  CollectionRef,
+  CollectionSourceRef,
+  From,
+  IncludesMaterialization,
+  QueryIR,
+  QueryRef,
+  UnionAll,
+} from '../ir.js'
+import type { LazyCollectionCallbacks } from './joins.js'
+import type { IStreamBuilder, KeyValue, MultiSet } from '@tanstack/db-ivm'
+import type { Collection } from '../../collection/index.js'
+import type {
+  InputRow,
+  KeyedStream,
+  NamespacedAndKeyedStream,
+  NamespacedRow,
+  ResultStream,
+} from '../../types.js'
+import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
+
+export type { WindowOptions } from './types.js'
+export { INCLUDES_PUBLIC_KEY, INCLUDES_ROUTING } from './route-metadata.js'
+
+function getUnsupportedFnSelectResultDescription(
+  value: unknown,
+  seen: Set<object> = new Set(),
+): string | undefined {
+  if (value instanceof IncludeWrapper) return `include()`
+  if (value instanceof BaseQueryBuilder) return `a child query builder`
+  if (value instanceof ToArrayWrapper) return `toArray()`
+  if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`
+  if (value instanceof MaterializeWrapper) return `materialize()`
+  if (value instanceof CaseWhenWrapper) return `caseWhen()`
+  if (isExpressionLike(value)) {
+    return value &&
+      typeof value === `object` &&
+      `name` in value &&
+      typeof value.name === `string`
+      ? `${value.name}()`
+      : `a query expression`
+  }
+  if (value === null || typeof value !== `object` || seen.has(value)) {
+    return undefined
+  }
+
+  seen.add(value)
+  const keys = [
+    ...Object.keys(value),
+    ...Object.getOwnPropertySymbols(value).filter((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    ),
+  ]
+  for (const key of keys) {
+    const entry = (value as Record<PropertyKey, unknown>)[key]
+    const unsupported = getUnsupportedFnSelectResultDescription(entry, seen)
+    if (unsupported) return unsupported
+  }
+  return undefined
+}
+
+export function validateFnSelectResult(value: unknown): void {
+  const unsupportedValueDescription =
+    getUnsupportedFnSelectResultDescription(value)
+  if (unsupportedValueDescription) {
+    throw new UnsupportedFnSelectResultError(unsupportedValueDescription)
+  }
+}
+
+type ConditionalSelectGuard = {
+  condition: BasicExpression
+  expected: boolean
+}
+
+type SourceInclude = {
+  sourceAlias: string
+  include: IncludesCompilationResult
+}
+
+type ProjectedSourceIncludePath = {
+  path: Array<string>
+  guards: Array<ConditionalSelectGuard>
+}
+
+type CompiledParentProjection = {
+  alias: string
+  field: Array<string>
+  bindingKey?: string
+  compiled: (row: NamespacedRow) => unknown
+}
+
+function projectParentContext(
+  nsRow: NamespacedRow,
+  projections: Array<CompiledParentProjection>,
+  valueIdentity: ValueIdentity,
+): Record<string, any> {
+  const inherited = getRouteMetadata(nsRow)?.parentContext
+  const inheritedValue = getParentContextValue(inherited)
+  const parentContext: Record<string, any> =
+    inheritedValue === undefined ? {} : { ...inheritedValue }
+  const projectedBindings = {
+    ...getParentContextProjectedBindings(inherited),
+  }
+  const projectedIdentity: Array<unknown> = []
+
+  for (const projection of projections) {
+    const projectedValue = projection.compiled(nsRow)
+    projectedIdentity.push([
+      projection.alias,
+      projection.bindingKey,
+      projection.field,
+      valueIdentity.equality(projectedValue),
+    ])
+    if (projection.bindingKey !== undefined) {
+      projectedBindings[projection.bindingKey] = projectedValue
+    }
+    if (projection.field.length === 0) {
+      const projectedAlias = projectedValue
+      parentContext[projection.alias] =
+        projectedAlias != null && typeof projectedAlias === `object`
+          ? { ...projectedAlias }
+          : projectedAlias
+      continue
+    }
+
+    const inheritedAlias = parentContext[projection.alias]
+    const aliasContext =
+      inheritedAlias != null && typeof inheritedAlias === `object`
+        ? { ...inheritedAlias }
+        : {}
+    parentContext[projection.alias] = aliasContext
+
+    let target = aliasContext
+    for (let index = 0; index < projection.field.length - 1; index++) {
+      const segment = projection.field[index]!
+      const inheritedNested = target[segment]
+      const nested =
+        inheritedNested != null && typeof inheritedNested === `object`
+          ? { ...inheritedNested }
+          : {}
+      target[segment] = nested
+      target = nested
+    }
+    target[projection.field[projection.field.length - 1]!] = projectedValue
+  }
+
+  return createParentContext(
+    parentContext,
+    [getParentContextIdentity(inherited), projectedIdentity],
+    projectedBindings,
+  )
+}
+
+function parameterizeByParentRoutes(
+  pipeline: NamespacedAndKeyedStream,
+  parentKeyStream: KeyedStream,
+  mainSource: string,
+  valueIdentity: ValueIdentity,
+): NamespacedAndKeyedStream {
+  return crossJoinParentRoutes(
+    pipeline,
+    parentKeyStream,
+    (rowKey, row, correlationKey, parentContext) => {
+      const namespaced = {
+        ...getParentContextValue(parentContext),
+        ...(row as Record<string, unknown>),
+      } as Record<string, any>
+      namespaced[mainSource] = {
+        ...namespaced[mainSource],
+        [INCLUDES_PUBLIC_KEY]:
+          namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
+      }
+      attachRouteMetadata(namespaced, correlationKey, parentContext)
+      return [
+        serializeValue([
+          valueIdentity.equality(rowKey),
+          valueIdentity.equality(correlationKey),
+          getParentContextIdentity(parentContext),
+        ]),
+        namespaced,
+      ] as [string, NamespacedRow]
+    },
+  ) as NamespacedAndKeyedStream
+}
+
+function getRowCorrelationKey(row: NamespacedRow, mainSource: string): unknown {
+  return getNamespacedRouteMetadata(row, mainSource)?.correlationKey
+}
+
+function getRowParentContext(row: NamespacedRow, mainSource: string): unknown {
+  return getNamespacedRouteMetadata(row, mainSource)?.parentContext ?? null
+}
+
+function correlationValuesEqual(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return false
+  const normalizedLeft = normalizeValue(left)
+  const normalizedRight = normalizeValue(right)
+  return (
+    Object.is(normalizedLeft, normalizedRight) ||
+    (typeof normalizedLeft === `number` &&
+      typeof normalizedRight === `number` &&
+      Number.isNaN(normalizedLeft) &&
+      Number.isNaN(normalizedRight))
+  )
+}
+
+/**
+ * Result of compiling an includes subquery, including the child pipeline
+ * and metadata needed to route child results to parent-scoped Collections.
+ */
+export interface IncludesCompilationResult {
+  /** Filtered child pipeline (post inner-join with parent keys) */
+  pipeline: ResultStream
+  /** Result field name on parent (e.g., "issues") */
+  fieldName: string
+  /** Path where the included value is written in the parent result */
+  resultPath: Array<string>
+  /** Parent-side correlation ref (e.g., project.id) */
+  correlationField: PropRef
+  /** Child-side correlation ref (e.g., issue.projectId) */
+  childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
+  /** Full compilation result for the child query (for nested includes + alias tracking) */
+  childCompilationResult: CompilationResult
+  /** Parent-side projection refs for parent-referencing filters */
+  parentProjection?: Array<PropRef>
+  /** How the output layer materializes the child result on the parent row */
+  materialization: IncludesMaterialization
+  /** Internal field used to unwrap scalar child selects */
+  scalarField?: string
+  /** The materializer the include value brought */
+  runtime: IncludesRuntime
+}
+
+/**
+ * Result of query compilation including both the pipeline and source-specific WHERE clauses
+ */
+export interface CompilationResult {
+  /** The ID of the main collection */
+  collectionId: string
+
+  /** The compiled query pipeline (D2 stream) */
+  pipeline: ResultStream
+
+  /** Runtime identity scope owned by this compiled graph. */
+  valueIdentity: ValueIdentity
+
+  /** Map of opaque source IDs to their WHERE clauses for index optimization */
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>
+
+  /**
+   * Maps FROM and JOIN source aliases to collection IDs within this compiled
+   * query. Includes keep their own alias maps in their child results.
+   * Enables per-alias subscriptions for self-joins.
+   * Example: `{ employee: 'employees-col-id', manager: 'employees-col-id' }`
+   */
+  aliasToCollectionId: Record<string, string>
+
+  /**
+   * Flattened mapping from outer alias to innermost alias for subqueries.
+   * Always provides one-hop lookups, never recursive chains.
+   *
+   * Example: `{ activeUser: 'user' }` when `.from({ activeUser: subquery })`
+   * where the subquery uses `.from({ user: collection })`.
+   *
+   * For deeply nested subqueries, the mapping goes directly to the innermost alias:
+   * `{ author: 'user' }` (not `{ author: 'activeUser' }`), so `aliasRemapping[alias]`
+   * always resolves in a single lookup.
+   *
+   * Used to resolve subscriptions during lazy loading when join aliases differ from
+   * the inner aliases where collection subscriptions were created.
+   */
+  aliasRemapping: Record<string, string>
+
+  /** Child pipelines for includes subqueries */
+  includes?: Array<IncludesCompilationResult>
+}
+
+const valueIdentitiesByCache = new WeakMap<QueryCache, ValueIdentity>()
+
+function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
+  return getOrCreate(valueIdentitiesByCache, cache, createValueIdentity)
+}
+
+/**
+ * Compiles a query IR into a D2 pipeline
+ * @param rawQuery The query IR to compile
+ * @param inputs Mapping of source aliases to input streams (e.g., `{ employee: input1, manager: input2 }`)
+ * @param collections Mapping of collection IDs to Collection instances
+ * @param subscriptions Mapping of source aliases to CollectionSubscription instances
+ * @param callbacks Mapping of source aliases to lazy loading callbacks
+ * @param lazySources Set of source identities that should load data lazily
+ * @param optimizableOrderByCollections Map of source IDs to order-by optimization info
+ * @param cache Optional cache for compiled subqueries (used internally for recursion)
+ * @param queryMapping Optional lineage from optimized queries to user-defined queries
+ * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
+ */
+type CompileQueryArgs = [
+  rawQuery: QueryIR,
+  inputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection<any, any, any, any, any>>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache?: QueryCache,
+  queryMapping?: QueryMapping,
+  parentKeyStream?: KeyedStream,
+  childCorrelationField?: PropRef,
+  // An enclosing windowed query or findOne can drop this include's parents.
+  ancestorHasTopK?: boolean,
+]
+
+export function compileQuery(...args: CompileQueryArgs): CompilationResult {
+  return compileQueryInternal(args, false)
+}
+
+export function compileCollectionQuery(
+  ...args: CompileQueryArgs
+): CompilationResult {
+  return compileQueryInternal(args, false, true)
+}
+
+function compileQueryInternal(
+  [
+    rawQuery,
+    inputs,
+    collections,
+    subscriptions,
+    callbacks,
+    lazySources,
+    optimizableOrderByCollections,
+    setWindowFn,
+    cache = new WeakMap(),
+    queryMapping = new WeakMap(),
+    parentKeyStream,
+    childCorrelationField,
+    ancestorHasTopK = false,
+  ]: CompileQueryArgs,
+  scopeValidated: boolean,
+  publishCollectionRoot = false,
+): CompilationResult {
+  // Check if the original raw query has already been compiled
+  const cachedResult =
+    parentKeyStream === undefined ? cache.get(rawQuery) : undefined
+  if (cachedResult) {
+    return cachedResult
+  }
+  const valueIdentity = getCompilationValueIdentity(cache)
+
+  // Validate the raw query BEFORE optimization to check user's original structure.
+  // This must happen before optimization because the optimizer may create internal
+  // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
+  if (!scopeValidated) validateQueryStructure(rawQuery)
+  const rawSources = collectCollectionSources(rawQuery)
+
+  // Optimize the query before compilation
+  const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
+    optimizeQuery(rawQuery)
+  const sourceWhereClauses = keyWhereClausesBySource(
+    rawQuery,
+    aliasWhereClauses,
+  )
+  // Use a mutable binding so we can shallow-clone select before includes mutation
+  let query = optimizedQuery
+
+  // Create mapping from optimized query to original for caching
+  queryMapping.set(query, rawQuery)
+  mapNestedQueries(query, rawQuery, queryMapping)
+
+  // Create a copy of the inputs map to avoid modifying the original
+  const allInputs = Object.assign(createSourceRecord<KeyedStream>(), inputs)
+  bindSourceInputs(rawSources, allInputs)
+
+  // Track alias to collection id relationships discovered during compilation.
+  // This includes all user-declared aliases plus inner aliases from subqueries.
+  const aliasToCollectionId: Record<string, string> = {}
+
+  // Track alias remapping for subqueries (outer alias → inner alias)
+  // e.g., when .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
+  // we store: aliasRemapping['activeUser'] = 'user'
+  const aliasRemapping: Record<string, string> = {}
+
+  // Create a map of source aliases to input streams.
+  // Inputs MUST be keyed by alias (e.g., `{ employee: input1, manager: input2 }`),
+  // not by collection ID. This enables per-alias subscriptions where different aliases
+  // of the same collection (e.g., self-joins) maintain independent filtered streams.
+  const sources: Record<string, KeyedStream> = {}
+
+  // Process the FROM clause to get the source stream.
+  const {
+    alias: mainSource,
+    collectionId: mainCollectionId,
+    pipeline: initialPipeline,
+    sources: fromSources,
+    sourceIncludes,
+    directIncludes,
+    isUnionFrom,
+    isParentRouted,
+  } = processFromClause(
+    query.from,
+    allInputs,
+    collections,
+    subscriptions,
+    callbacks,
+    lazySources,
+    optimizableOrderByCollections,
+    ignoreWindow,
+    cache,
+    queryMapping,
+    aliasToCollectionId,
+    aliasRemapping,
+    sourceWhereClauses,
+    parentKeyStream,
+    publishCollectionRoot,
+  )
+  Object.assign(sources, fromSources)
+  const sourceCarriesInternalRouteState =
+    parentKeyStream !== undefined ||
+    sourceIncludes.length > 0 ||
+    directIncludes.length > 0
+
+  // If this is an includes child query, inner-join the raw input with parent keys.
+  // This filters the child collection to only rows matching parents in the result set.
+  // The inner join happens BEFORE namespace wrapping / WHERE / SELECT / ORDER BY,
+  // so the child pipeline only processes rows that match parents.
+  let pipeline: NamespacedAndKeyedStream = initialPipeline
+  const childCorrelationAlias = childCorrelationField?.path[0]
+  const joinsParentDirectly =
+    !isUnionFrom &&
+    !isParentRouted &&
+    parentKeyStream !== undefined &&
+    childCorrelationField !== undefined &&
+    childCorrelationAlias === mainSource
+  if (parentKeyStream && childCorrelationField && joinsParentDirectly) {
+    const mainInput = sources[mainSource]!
+    let filteredMainInput = mainInput
+    // Join on query equality rather than raw JavaScript identity. Keep the raw
+    // child value beside the row so result routing can still expose it.
+    const childFieldPath = childCorrelationField.path.slice(1) // remove alias prefix
+    const childRekeyed = mainInput.pipe(
+      map(([key, row]: [unknown, any]) => {
+        const correlationValue = getNestedValue(row, childFieldPath)
+        return [
+          valueIdentity.serializeEquality(correlationValue),
+          [key, row, correlationValue],
+        ] as [unknown, [unknown, any, unknown]]
+      }),
+    )
+
+    const equalityParentKeys = parentKeyStream.pipe(
+      map(([correlationValue, parentContext]: [unknown, unknown]) => [
+        valueIdentity.serializeEquality(correlationValue),
+        parentContext,
+      ]),
+      reduce((values: Array<[unknown, number]>) =>
+        values.map(([value, multiplicity]) => [
+          value,
+          multiplicity > 0 ? 1 : 0,
+        ]),
+      ),
+    )
+
+    // Inner join: only children whose correlation key exists in parent keys pass through
+    const joined = childRekeyed.pipe(joinOperator(equalityParentKeys, `inner`))
+
+    // Extract: [correlationValue, [[childKey, childRow], parentContext]] → [childKey, childRow]
+    // Keep routing metadata outside the user-visible row namespace.
+    filteredMainInput = joined.pipe(
+      filter(([_correlationValue, [childSide]]: any) => {
+        return childSide != null
+      }),
+      map(([_correlationIdentity, [childSide, parentSide]]: any) => {
+        const [childKey, childRow, correlationValue] = childSide
+        const tagged: any = attachRouteMetadata(
+          {
+            ...childRow,
+            [INCLUDES_PUBLIC_KEY]: childKey,
+          },
+          correlationValue,
+          parentSide,
+        )
+        const effectiveKey =
+          parentSide != null
+            ? serializeValue([
+                valueIdentity.equality(childKey),
+                getParentContextIdentity(parentSide),
+              ])
+            : childKey
+        return [effectiveKey, tagged]
+      }),
+    )
+
+    // Update sources so the rest of the pipeline uses the filtered input
+    sources[mainSource] = filteredMainInput
+
+    pipeline = wrapInputWithAlias(filteredMainInput, mainSource)
+  } else if (parentKeyStream && !isParentRouted) {
+    // QueryRefs, unions, and joined-source correlations need the route before
+    // source-local joins, filters, grouping, ordering, or windows run.
+    pipeline = parameterizeByParentRoutes(
+      initialPipeline,
+      parentKeyStream,
+      mainSource,
+      valueIdentity,
+    )
+  }
+
+  // Process JOIN clauses if they exist
+  if (query.join && query.join.length > 0) {
+    pipeline = processJoins(
+      pipeline,
+      query.join,
+      sources,
+      mainCollectionId,
+      mainSource,
+      allInputs,
+      cache,
+      queryMapping,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      ignoreWindow,
+      rawQuery,
+      query.from,
+      (...args) => compileQueryInternal(args, true, publishCollectionRoot),
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      joinsParentDirectly,
+      valueIdentity,
+      parentKeyStream,
+    )
+  }
+
+  // A RIGHT or FULL join can add a row without the main source after that
+  // source was filtered by parent keys. Check the correlation again once the
+  // joined row is visible; a missing main-side correlation cannot join a route.
+  const canLoseMainSide = query.join?.some(
+    ({ type }) => type === `right` || type === `full`,
+  )
+  if (
+    parentKeyStream &&
+    childCorrelationField &&
+    (!joinsParentDirectly || canLoseMainSide)
+  ) {
+    const compiledChildCorrelation = compileExpression(childCorrelationField)
+    pipeline = pipeline.pipe(
+      filter(([, row]) =>
+        correlationValuesEqual(
+          compiledChildCorrelation(row),
+          getRowCorrelationKey(row, mainSource),
+        ),
+      ),
+    ) as NamespacedAndKeyedStream
+  }
+
+  // Process the WHERE clause if it exists
+  if (query.where && query.where.length > 0) {
+    // Apply each WHERE condition as a filter (they are ANDed together)
+    for (const where of query.where) {
+      const whereExpression = getWhereExpression(where)
+      const compiledWhere = compileExpression(whereExpression)
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return toBooleanPredicate(compiledWhere(namespacedRow))
+        }),
+      )
+    }
+  }
+
+  // Process functional WHERE clauses if they exist
+  if (query.fnWhere && query.fnWhere.length > 0) {
+    for (const fnWhere of query.fnWhere) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          const callbackRow = sourceCarriesInternalRouteState
+            ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+            : namespacedRow
+          return toBooleanPredicate(fnWhere(callbackRow))
+        }),
+      )
+    }
+  }
+
+  // Extract includes from SELECT, compile child pipelines, and replace with placeholders.
+  // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
+  // (so IncludesSubquery nodes are stripped before select compilation).
+  const inputIncludes = [
+    ...directIncludes,
+    ...sourceIncludes.map(({ include }) => include),
+  ]
+  const materializeSelectInput = !!query.fnSelect && inputIncludes.length > 0
+  let includesResults: Array<IncludesCompilationResult> = !query.select
+    ? [...directIncludes]
+    : []
+  let includesRoutingFns: Array<{
+    fieldName: string
+    getRouting: (nsRow: any) => IncludeRouting
+  }> = []
+  // Includes inherited from a source or a QueryRef route by the tag their
+  // compiled rows already carry, at each path the select projects them to.
+  const inheritedIncludes = [
+    ...sourceIncludes.map(({ sourceAlias, include }) => ({
+      include,
+      keyPrefix: `${sourceAlias}.`,
+      paths:
+        query.select != null
+          ? findProjectedIncludePaths(query.select, [
+              sourceAlias,
+              ...include.resultPath,
+            ])
+          : query.fnSelect && !materializeSelectInput
+            ? []
+            : [{ path: [sourceAlias, ...include.resultPath], guards: [] }],
+      route: (nsRow: NamespacedRow) =>
+        readRouteTag(nsRow[sourceAlias], include.fieldName),
+    })),
+    ...(query.select ? directIncludes : []).map((include) => ({
+      include,
+      keyPrefix: ``,
+      paths: findProjectedIncludePaths(query.select!, include.resultPath),
+      route: (nsRow: NamespacedRow) => readRouteTag(nsRow, include.fieldName),
+    })),
+  ]
+  for (const { include, keyPrefix, paths, route } of inheritedIncludes) {
+    for (const { path: resultPath, guards } of paths) {
+      const fieldName = getUniqueIncludesRoutingKey(
+        keyPrefix + resultPath.join(`.`),
+        includesRoutingFns,
+      )
+      includesResults.push({ ...include, fieldName, resultPath })
+      includesRoutingFns.push({
+        fieldName,
+        getRouting: compileGuardedRouting(guards, route),
+      })
+    }
+  }
+  // One walker finds aggregates; the aggregate it finds carries the grouping
+  // compiler.
+  const selectAggregate = findAggregate(query.select)
+  const selectHasAggregates = selectAggregate !== undefined
+  // A windowed query's or a findOne's includes compile after its top-K and
+  // route only from the rows it shows (law 12); others compile here.
+  const hasOrderBy = (query.orderBy?.length ?? 0) > 0
+  const parentHasTopK = hasOrderBy || !!query.singleResult
+  const deferredIncludes: Array<(windowRows: WindowRows) => void> = []
+  if (query.select) {
+    const includesEntries = extractIncludesFromSelect(query.select)
+    // A nested include has one Collection per row, not one value per group,
+    // so it cannot sit in a grouped or aggregate select.
+    if (
+      includesEntries.length > 0 &&
+      ((query.groupBy?.length ?? 0) > 0 || selectHasAggregates)
+    )
+      throw new NonAggregateExpressionNotInGroupByError(
+        includesEntries[0]!.path.join(`.`),
+      )
+    if (includesEntries.length > 0) {
+      query = { ...query, select: { ...query.select } }
+    }
+    for (const { key, path, subquery, guards } of includesEntries) {
+      // Query IR built by hand must carry the runtime its include needs.
+      const runtime = subquery.runtime as Partial<IncludesRuntime> | undefined
+      if (typeof runtime?.materializeCompilation !== `function`)
+        throw new IncludeOperatorRequiredError(key)
+      const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
+      // Branch parent pipeline: map to [correlationValue, parentContext]
+      // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
+      const compiledCorrelation = compileExpression(subquery.correlationField)
+      const compiledProjections: Array<CompiledParentProjection> =
+        subquery.parentProjection?.map((ref) => ({
+          alias: ref.path[0]!,
+          field: ref.path.slice(1),
+          bindingKey: ref.bindingId
+            ? JSON.stringify([ref.bindingId, ref.path.slice(1)])
+            : undefined,
+          compiled: compileExpression(ref),
+        })) ?? []
+      // One routing function serves both the parent-key branch and the
+      // INCLUDES_ROUTING tag on $selected.
+      const getRouting = compileGuardedRouting(guards, (nsRow) => ({
+        active: true,
+        correlationKey: compiledCorrelation(nsRow),
+        parentContext:
+          compiledProjections.length > 0
+            ? projectParentContext(nsRow, compiledProjections, valueIdentity)
+            : null,
+      }))
+      const compileInclude = (windowRows?: WindowRows) => {
+        // A top-K result row carries the route its select tagged; reading it
+        // keeps the routes identical to the rows the query publishes.
+        const routes = windowRows
+          ? windowRows.pipe(map(([, [row]]) => windowRoute(row, fieldName)))
+          : pipeline.pipe(map(([, row]) => getRouting(row)))
+        // Deduplicate: when multiple parents share the same correlation key (and
+        // parentContext), clamp multiplicity to 1 so the inner join doesn't
+        // produce duplicate child entries that cause incorrect deletions.
+        let parentKeys: KeyedStream = routes.pipe(
+          filter((routing: IncludeRouting) => routing.active),
+          // A parent key may carry no parent context (null).
+          map(
+            (routing) =>
+              [routing.correlationKey, routing.parentContext] as InputRow,
+          ),
+          reduce((values) =>
+            values.map(
+              ([v, mult]) => [v, mult > 0 ? 1 : 0] as [typeof v, number],
+            ),
+          ),
+        )
+
+        // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
+        // Resolve the child correlation field to concrete collection targets so
+        // subquery and union child sources can load by branch when it is safe.
+        const childSourceAlias = subquery.childCorrelationField.path[0]!
+        const directChildCollection =
+          subquery.query.from.type === `collectionRef`
+            ? subquery.query.from.collection
+            : undefined
+        const lazyTargets = getLazyLoadTargets(
+          subquery.query,
+          subquery.query.from,
+          childSourceAlias,
+          subquery.childCorrelationField,
+          directChildCollection,
+          aliasRemapping,
+        )
+
+        if (lazyTargets.length > 0) {
+          // Mark each child source as lazy so CollectionSubscriber skips its
+          // initial full load, and index the correlation field for lookups.
+          for (const target of lazyTargets) {
+            lazySources.add(target.sourceId)
+            const targetFieldName = target.path[0]
+            if (targetFieldName) {
+              ensureIndexForField(
+                targetFieldName,
+                target.path,
+                target.collection,
+              )
+            }
+          }
+
+          // Static demand starts at once only when no top-K here or in an
+          // enclosing query can drop the rows it names: no window and no
+          // findOne, or a findOne showing one row for one named value.
+          const staticKeys = getStaticDemandKeys(
+            rawQuery,
+            subquery.correlationField,
+          )
+          const initialKeys =
+            !ancestorHasTopK &&
+            (!windowRows ||
+              (query.singleResult &&
+                query.offset === undefined &&
+                (query.limit ?? 1) > 0 &&
+                staticKeys.size === 1))
+              ? staticKeys
+              : new Set<unknown>()
+          const demandPlans = lazyTargets.map((target) =>
+            registerLazyDemandPlan(callbacks, target, initialKeys),
+          )
+          const demandWeights = new Map<
+            string,
+            { key: unknown; weight: number }
+          >()
+
+          // Keep the async demand adapter in sync with the current parent-key
+          // relation. Retired keys stop participating in readiness immediately.
+          parentKeys = parentKeys.pipe(
+            tap((data: MultiSet<InputRow>) => {
+              for (const [[correlationValue], weight] of data.getInner()) {
+                if (correlationValue == null) continue
+                const encoded =
+                  valueIdentity.serializeEquality(correlationValue)
+                const nextWeight =
+                  (demandWeights.get(encoded)?.weight ?? 0) + weight
+                if (nextWeight === 0) demandWeights.delete(encoded)
+                else
+                  demandWeights.set(encoded, {
+                    key: correlationValue,
+                    weight: nextWeight,
+                  })
+              }
+              const keys = new Set(
+                [...demandWeights.values()]
+                  .filter(({ weight }) => weight > 0)
+                  .map(({ key: demandedKey }) => demandedKey),
+              )
+              lazyTargets.forEach((target, index) =>
+                callbacks[target.sourceId]?.setDemand?.(
+                  demandPlans[index]!,
+                  keys,
+                ),
+              )
+            }),
+          )
+        }
+
+        // If parent filters exist, append them to the child query's WHERE
+        const childQuery =
+          subquery.parentFilters && subquery.parentFilters.length > 0
+            ? {
+                ...subquery.query,
+                where: [
+                  ...(subquery.query.where || []),
+                  ...subquery.parentFilters,
+                ],
+              }
+            : subquery.query
+
+        // Recursively compile child query WITH the parent key stream
+        const childResult = compileQueryInternal(
+          [
+            childQuery,
+            allInputs,
+            collections,
+            subscriptions,
+            callbacks,
+            lazySources,
+            optimizableOrderByCollections,
+            ignoreWindow,
+            cache,
+            queryMapping,
+            parentKeys,
+            subquery.childCorrelationField,
+            ancestorHasTopK || parentHasTopK,
+          ],
+          true,
+          subquery.materialization === `collection`,
+        )
+
+        // Each include retains its own compilation result and lexical aliases.
+        // Copying them into this scope would let a child shadow a source used by
+        // the enclosing query's lazy join.
+        for (const [alias, whereClause] of childResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+
+        includesResults.push({
+          pipeline: childResult.pipeline,
+          fieldName,
+          resultPath: path,
+          correlationField: subquery.correlationField,
+          childCorrelationField: subquery.childCorrelationField,
+          hasOrderBy: (subquery.query.orderBy?.length ?? 0) > 0,
+          childCompilationResult: childResult,
+          parentProjection: subquery.parentProjection,
+          materialization: subquery.materialization,
+          scalarField: subquery.scalarField,
+          runtime: subquery.runtime,
+        })
+      }
+      if (parentHasTopK) deferredIncludes.push(compileInclude)
+      else compileInclude()
+
+      includesRoutingFns.push({ fieldName, getRouting })
+
+      // Replace includes entry in select with a null placeholder
+      query = {
+        ...query,
+        select: replaceIncludesInSelectValue(query.select!, path).value,
+      }
+    }
+  }
+
+  if (
+    query.distinct &&
+    !query.fnSelect &&
+    !query.select &&
+    query.from.type !== `unionAll`
+  ) {
+    throw new DistinctRequiresSelectError()
+  }
+
+  if (query.fnSelect && query.groupBy && query.groupBy.length > 0) {
+    throw new FnSelectWithGroupByError()
+  }
+
+  const routingFns = includesRoutingFns
+  const getRowIncludesRouting = (row: NamespacedRow) =>
+    Object.fromEntries(
+      routingFns.map(({ fieldName, getRouting }) => [
+        fieldName,
+        getRouting(row),
+      ]),
+    )
+  if (materializeSelectInput) {
+    if (!inputIncludes.every(isInlineInclude)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.`
+          : codedMessage(128),
+      )
+    }
+    // Input paths belong before the callback: its arbitrary output may rename
+    // or discard them. Inline values need no public Collection boundary.
+    const inputPipeline = pipeline.pipe(
+      map(
+        ([key, row]: [
+          unknown,
+          NamespacedRow & { [INCLUDES_ROUTING]?: object },
+        ]) => [
+          key,
+          [
+            {
+              ...row,
+              [INCLUDES_ROUTING]: {
+                ...row[INCLUDES_ROUTING],
+                ...getRowIncludesRouting(row),
+              },
+            },
+            undefined,
+          ],
+        ],
+      ),
+    ) as ResultStream
+    const materializedInput =
+      includesResults[0]!.runtime.materializeCompilation({
+        pipeline: inputPipeline,
+        includes: includesResults,
+        valueIdentity,
+        collectionId: mainCollectionId,
+        sourceWhereClauses,
+        aliasToCollectionId,
+        aliasRemapping,
+      })
+    pipeline = materializedInput.pipeline.pipe(
+      map(([key, [value]]) => {
+        const row = { ...value }
+        delete row[INCLUDES_ROUTING]
+        return [key, row]
+      }),
+    ) as NamespacedAndKeyedStream
+    includesResults = []
+    includesRoutingFns = []
+  }
+
+  const sourceBindings = new Map(
+    getAllSources(query).map((source) => [source.alias, source.bindingId]),
+  )
+  const unionRows = query.from.type === `unionAll`
+  // Process the SELECT clause early - always create $selected
+  // This eliminates duplication and allows for DISTINCT implementation
+  if (query.fnSelect) {
+    const fnSelect = (row: NamespacedRow) => {
+      const selected = query.fnSelect!(row)
+      validateFnSelectResult(selected)
+      return selected
+    }
+    const sourceAliases = [...sourceBindings.keys()]
+    // Handle functional select - apply the function to transform the row
+    const projectRow = (namespacedRow: NamespacedRow) => {
+      const callbackRow = sourceCarriesInternalRouteState
+        ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+        : namespacedRow
+      const selectResults = fnSelect(callbackRow)
+      let selected = selectResults
+      if (
+        selectResults &&
+        typeof selectResults === `object` &&
+        (Array.isArray(selectResults) || isPlainObject(selectResults))
+      ) {
+        selected = Array.isArray(selectResults)
+          ? [...selectResults]
+          : { ...selectResults }
+        if (
+          publishCollectionRoot &&
+          !sourceAliases.some((alias) => selectResults === callbackRow[alias])
+        ) {
+          // New functional objects are projections. Equal field values cannot
+          // prove which source (if any) authored them.
+          for (const prop of VIRTUAL_PROP_NAMES) delete selected[prop]
+        }
+        const routing = (namespacedRow as any)[INCLUDES_ROUTING]
+        if (routing) {
+          selected[INCLUDES_ROUTING] = routing
+        }
+      }
+      return {
+        ...namespacedRow,
+        $selected: selected,
+      }
+    }
+    pipeline = pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
+  } else if (query.select) {
+    // An aggregate query computes its select values from each group, so it
+    // does not project rows first.
+    if (!selectHasAggregates && !(query.groupBy && query.groupBy.length > 0))
+      pipeline = processSelect(pipeline, query.select, allInputs)
+  } else {
+    // If no SELECT clause, create $selected with the main table data
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]) => {
+        const routedScalar = getRoutedScalarMetadata(namespacedRow)
+        const selectResults =
+          isUnionFrom && routedScalar
+            ? routedScalar.value
+            : !isUnionFrom && !query.join && !query.groupBy
+              ? namespacedRow[mainSource]
+              : namespacedRow
+
+        return [
+          key,
+          {
+            ...namespacedRow,
+            $selected: selectResults,
+          },
+        ] as [string, typeof namespacedRow & { $selected: any }]
+      }),
+    )
+  }
+
+  // Tag $selected with routing metadata so the materialization graph can route
+  // children without depending on the user's projection.
+  if (includesRoutingFns.length > 0) {
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]: any) => {
+        const selected = Array.isArray(namespacedRow.$selected)
+          ? [...namespacedRow.$selected]
+          : { ...namespacedRow.$selected }
+        selected[INCLUDES_ROUTING] = getRowIncludesRouting(namespacedRow)
+        return [key, { ...namespacedRow, $selected: selected }]
+      }),
+    )
+  }
+
+  // Process the GROUP BY clause if it exists.
+  // When in includes mode (parentKeyStream), pass mainSource so that groupBy
+  // preserves route metadata for per-parent aggregation.
+  const groupByMainSource = parentKeyStream ? mainSource : undefined
+  // A ref reads the query's own rows when it is bound to one of its sources.
+  // A ref bound to an ancestor scope can reuse a source alias. After a
+  // unionAll, an unbound ref names a field of the union's rows.
+  const isSourceRef = (ref: PropRef) => {
+    const binding = sourceBindings.get(ref.path[0]!)
+    if (binding !== undefined) return (ref.bindingId ?? binding) === binding
+    // `$selected` names the query's own select values, not a source.
+    return (
+      unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
+    )
+  }
+  // An aggregate value or groupKeys brings the grouping compiler. A groupBy,
+  // or an aggregate anywhere, needs it; query IR built by hand may lack it.
+  // The query compiles every aggregate with the compiler any one brings.
+  const aggregate =
+    selectAggregate ??
+    findAggregate([
+      query.having,
+      query.orderBy?.map((clause) => clause.expression),
+    ])
+  const grouping = query.grouping ?? aggregate?.grouping
+  const grouped = (query.groupBy?.length ?? 0) > 0
+  if ((grouped || aggregate) && !grouping)
+    throw new GroupingOperatorRequiredError()
+  // SELECT aggregates without GROUP BY make one implicit group.
+  if (grouping && (grouped || selectAggregate)) {
+    pipeline = grouping.processGroupBy(
+      pipeline,
+      query.groupBy ?? [],
+      valueIdentity,
+      isSourceRef,
+      query.having,
+      query.select,
+      query.fnHaving,
+      mainCollectionId,
+      groupByMainSource,
+      sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
+    )
+  }
+
+  // Process the HAVING clause if it exists (only applies after GROUP BY)
+  // An aggregate anywhere in SELECT, wrapped or not, makes one implicit group.
+  if (
+    query.having &&
+    (!query.groupBy || query.groupBy.length === 0) &&
+    !selectHasAggregates
+  ) {
+    throw new HavingRequiresGroupByError()
+  }
+
+  // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
+  if (
+    query.fnHaving &&
+    query.fnHaving.length > 0 &&
+    (!query.groupBy || query.groupBy.length === 0)
+  ) {
+    // If there's no GROUP BY but there are fnHaving clauses, apply them as filters
+    for (const fnHaving of query.fnHaving) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          const callbackRow =
+            sourceCarriesInternalRouteState || includesRoutingFns.length > 0
+              ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+              : namespacedRow
+          return fnHaving(callbackRow)
+        }),
+      )
+    }
+  }
+
+  // DISTINCT tracks visibility by selected value, so an insert-before-delete
+  // replacement with the same key must be normalized first; joined
+  // contributors may differ in unselected namespaces, and only the public
+  // value and its route/order inputs must be congruent. Ordering already
+  // batches each key's retractions before its insertions (topKBatch), and
+  // materialized relations reduce by public key, so other queries keep their
+  // compiled rows.
+  if (!selectHasAggregates && query.distinct) {
+    pipeline = canonicalizeSelectedRows(
+      pipeline,
+      query,
+      mainSource,
+      parentKeyStream !== undefined,
+    )
+  }
+
+  // Process the DISTINCT clause if it exists
+  if (query.distinct) {
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
+  }
+
+  const metadataSource = query.select
+    ? getWholeRowSourceAliases(query.select)
+    : query.from.type === `unionAll`
+      ? undefined
+      : [mainSource]
+  const finalizeRow = (
+    key: unknown,
+    row: Record<string, any>,
+    orderByIndex: string | undefined,
+  ) => {
+    const finalResults =
+      query.fnSelect && publishCollectionRoot
+        ? unwrapValue(row.$selected)
+        : attachVirtualPropsToSelected(
+            unwrapValue(row.$selected),
+            row,
+            publishCollectionRoot,
+            metadataSource,
+          )
+    // When in includes mode, embed the correlation key and parentContext
+    if (parentKeyStream) {
+      return [
+        key,
+        [
+          stripInternalRouteMetadata(finalResults),
+          orderByIndex,
+          getRowCorrelationKey(row, mainSource),
+          getRowParentContext(row, mainSource),
+          getIncludesPublicKey(row, mainSource, key),
+        ],
+      ] as any
+    }
+    return [key, [finalResults, orderByIndex]] as [
+      unknown,
+      [any, string | undefined],
+    ]
+  }
+
+  // A single-result query must expose only its first row when another query
+  // consumes it as a QueryRef, before the outer join or filter runs.
+  const resultLimit = query.singleResult
+    ? Math.min(query.limit ?? 1, 1)
+    : query.limit
+  if (
+    !hasOrderBy &&
+    (query.limit !== undefined || query.offset !== undefined)
+  ) {
+    throw new LimitOffsetRequireOrderByError()
+  }
+  let resultPipeline: ResultStream
+  let ownWindowFn: ((options: WindowOptions) => void) | undefined
+  if (hasOrderBy || query.singleResult) {
+    // When in includes mode with limit/offset, use grouped ordering so that
+    // the limit is applied per parent (per correlation key), not globally.
+    const includesGroupKeyFn =
+      parentKeyStream &&
+      (resultLimit !== undefined || query.offset !== undefined)
+        ? (_key: unknown, row: unknown) => {
+            const correlationKey = getRowCorrelationKey(
+              row as NamespacedRow,
+              mainSource,
+            )
+            const parentContext = getRowParentContext(
+              row as NamespacedRow,
+              mainSource,
+            )
+            if (parentContext != null) {
+              return serializeValue([
+                valueIdentity.equality(correlationKey),
+                getParentContextIdentity(parentContext),
+              ])
+            }
+            return valueIdentity.equality(correlationKey)
+          }
+        : undefined
+
+    const ordered = processOrderBy(
+      rawQuery,
+      pipeline,
+      // With no explicit order, top-K breaks ties by the public row key.
+      query.orderBy ?? [],
+      query.select || {},
+      grouping,
+      collections[mainCollectionId]!,
+      optimizableOrderByCollections,
+      (windowFn) => (ownWindowFn = windowFn),
+      resultLimit,
+      query.offset,
+      includesGroupKeyFn,
+    )
+    for (const compileInclude of deferredIncludes) compileInclude(ordered)
+    // Only after its includes compile, so a failed child leaves no window.
+    if (ownWindowFn) setWindowFn(ownWindowFn)
+    resultPipeline = ordered.pipe(
+      map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
+    ) as ResultStream
+  } else {
+    resultPipeline = pipeline.pipe(
+      map(([key, row]) => finalizeRow(key, row, undefined)),
+    ) as ResultStream
+  }
+
+  // Cache the result before returning (use original query as key)
+  const compilationResult: CompilationResult = {
+    collectionId: mainCollectionId,
+    pipeline: resultPipeline,
+    valueIdentity,
+    sourceWhereClauses,
+    aliasToCollectionId,
+    aliasRemapping,
+    includes: includesResults.length > 0 ? includesResults : undefined,
+  }
+  if (parentKeyStream === undefined) cache.set(rawQuery, compilationResult)
+
+  return compilationResult
+}
+
+function isInlineInclude(include: IncludesCompilationResult): boolean {
+  return (
+    include.materialization !== `collection` &&
+    (include.childCompilationResult.includes ?? []).every(isInlineInclude)
+  )
+}
+
+function keyWhereClausesBySource(
+  query: QueryIR,
+  clauses: Map<string, BasicExpression<boolean>>,
+): Map<string, BasicExpression<boolean>> {
+  const localSources = [
+    ...getFromSources(query.from),
+    ...(query.join?.map(({ from }) => from) ?? []),
+  ].filter((source): source is CollectionRef => source.type === `collectionRef`)
+  const localSourceByAlias = new Map(
+    localSources.map((source) => [source.alias, source]),
+  )
+  const result = new Map<string, BasicExpression<boolean>>()
+  for (const [key, clause] of clauses) {
+    const source = localSourceByAlias.get(key)
+    if (source) result.set(source.sourceId, clause)
+  }
+  return result
+}
+
+function bindSourceInputs(
+  sources: Array<CollectionRef>,
+  inputs: Record<string, KeyedStream>,
+): void {
+  // Callers may key inputs by alias. Bind them to source identities once;
+  // compilation then reads inputs by SourceId only, so a source whose
+  // identity was lost fails instead of reading a same-named source.
+  for (const source of sources) {
+    const input = inputs[source.sourceId] ?? inputs[source.alias]
+    if (input) inputs[source.sourceId] = input
+  }
+}
+
+function canonicalizeSelectedRows(
+  pipeline: NamespacedAndKeyedStream,
+  query: QueryIR,
+  mainSource: string,
+  isIncludedRelation: boolean,
+): NamespacedAndKeyedStream {
+  const compiledOrder = (query.orderBy ?? []).map(({ expression }) =>
+    compileExpression(expression),
+  )
+  const signature = (row: any) => ({
+    value: row.$selected,
+    routing: row.$selected?.[INCLUDES_ROUTING],
+    outerCorrelation: isIncludedRelation
+      ? getRowCorrelationKey(row, mainSource)
+      : undefined,
+    parentContext: isIncludedRelation
+      ? getRowParentContext(row, mainSource)
+      : undefined,
+    order: compiledOrder.map((evaluate) => evaluate(row)),
+  })
+
+  return pipeline.pipe(
+    reduce((values: Array<[any, number]>) => {
+      const totalMultiplicity = values.reduce(
+        (total, [, multiplicity]) => total + multiplicity,
+        0,
+      )
+      if (totalMultiplicity === 0) return []
+      if (totalMultiplicity < 0) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Query row has negative multiplicity`
+            : codedMessage(129),
+        )
+      }
+
+      const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0]
+      if (!visible)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Query row has no positive contributor`
+            : codedMessage(130),
+        )
+      const visibleSignature = signature(visible)
+
+      for (const [candidate, multiplicity] of values) {
+        if (
+          multiplicity > 0 &&
+          !deepEquals(visibleSignature, signature(candidate))
+        ) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Query contributors with the same row key are not congruent`
+              : codedMessage(131),
+          )
+        }
+      }
+
+      return [[visible, 1]]
+    }),
+  ) as NamespacedAndKeyedStream
+}
+
+/** Validate each lexical scope before optimization changes the plan. */
+function validateExpressionBindings(
+  expression: BasicExpression | Aggregate,
+  availableBindings: ReadonlySet<string>,
+): void {
+  for (const ref of collectPropRefs(expression)) {
+    if (ref.bindingId !== undefined && !availableBindings.has(ref.bindingId)) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.`
+          : codedMessage(238, { path: ref.path }),
+      )
+    }
+  }
+}
+
+function validateSelectBindings(
+  value: unknown,
+  availableBindings: ReadonlySet<string>,
+): void {
+  if (value instanceof IncludesSubquery) return
+  if (isBasicOrAggregateExpression(value)) {
+    validateExpressionBindings(value, availableBindings)
+  } else if (value instanceof ConditionalSelect) {
+    for (const branch of value.branches) {
+      validateExpressionBindings(branch.condition, availableBindings)
+      validateSelectBindings(branch.value, availableBindings)
+    }
+    if (value.defaultValue !== undefined) {
+      validateSelectBindings(value.defaultValue, availableBindings)
+    }
+  } else if (isNestedSelectObject(value)) {
+    for (const nested of Object.values(value)) {
+      validateSelectBindings(nested, availableBindings)
+    }
+  }
+}
+
+function validateQueryStructure(
+  query: QueryIR,
+  ancestorBindings: ReadonlySet<string> = new Set(),
+): void {
+  // One scope cannot name two sources alike.
+  const levelAliases = getAllSources(query).map((source) => source.alias)
+  for (const [index, alias] of levelAliases.entries()) {
+    if (levelAliases.indexOf(alias) !== index) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.`
+          : codedMessage(211, { alias }),
+      )
+    }
+  }
+
+  const availableBindings = new Set(ancestorBindings)
+
+  // A FROM subquery sees ancestors, but not its own enclosing source
+  // declaration. Union branches do not expose their sources to one another.
+  if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      validateQueryStructure(branch, ancestorBindings)
+    }
+  } else {
+    for (const source of getFromSources(query.from)) {
+      if (source.type === `queryRef`) {
+        validateQueryStructure(source.query, ancestorBindings)
+      }
+      availableBindings.add(source.bindingId)
+    }
+  }
+
+  // Each join may read sources declared before it and its joined source.
+  // A binding captured from an unrelated query is not an ancestor, even if
+  // that query happened to use the same alias text.
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `queryRef`) {
+        validateQueryStructure(joinClause.from.query, ancestorBindings)
+      }
+      const joinBindings = new Set(availableBindings)
+      joinBindings.add(joinClause.from.bindingId)
+      validateExpressionBindings(joinClause.on, joinBindings)
+      availableBindings.add(joinClause.from.bindingId)
+    }
+  }
+
+  for (const where of query.where ?? []) {
+    validateExpressionBindings(getWhereExpression(where), availableBindings)
+  }
+  for (const expression of query.groupBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
+  for (const having of query.having ?? []) {
+    validateExpressionBindings(getHavingExpression(having), availableBindings)
+  }
+  for (const { expression } of query.orderBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
+  if (query.select) {
+    validateSelectBindings(query.select, availableBindings)
+    for (const { subquery } of extractIncludesFromSelect(query.select)) {
+      validateExpressionBindings(subquery.correlationField, availableBindings)
+      const childBindings = new Set(availableBindings)
+      for (const source of getAllSources(subquery.query)) {
+        childBindings.add(source.bindingId)
+      }
+      validateExpressionBindings(subquery.childCorrelationField, childBindings)
+      for (const where of subquery.parentFilters ?? []) {
+        validateExpressionBindings(getWhereExpression(where), childBindings)
+      }
+      validateQueryStructure(subquery.query, availableBindings)
+      const projected = new Set(
+        (subquery.parentProjection ?? []).map((ref) =>
+          JSON.stringify([ref.bindingId, ref.path]),
+        ),
+      )
+      const required = [
+        ...collectExternalRefsFromQuery(subquery.query),
+        ...(subquery.parentFilters ?? []).flatMap((where) =>
+          collectPropRefs(getWhereExpression(where)),
+        ),
+      ]
+      for (const ref of required) {
+        if (
+          ref.bindingId !== undefined &&
+          availableBindings.has(ref.bindingId) &&
+          !projected.has(JSON.stringify([ref.bindingId, ref.path]))
+        ) {
+          throw new QueryCompilationError(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Include query is missing a captured parent projection for "${ref.path.join(`.`)}".`
+              : codedMessage(239, { path: ref.path }),
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Processes the FROM clause, handling direct collection references and subqueries.
+ * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
+ */
+function processFromClause(
+  from: From,
+  allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache: QueryCache,
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
+): {
+  alias: string
+  pipeline: NamespacedAndKeyedStream
+  collectionId: string
+  sources: Record<string, KeyedStream>
+  sourceIncludes: Array<SourceInclude>
+  directIncludes: Array<IncludesCompilationResult>
+  isUnionFrom: boolean
+  isParentRouted: boolean
+} {
+  const valueIdentity = getCompilationValueIdentity(cache)
+  if (from.type === `unionAll`) {
+    return processUnionAll(
+      from,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      parentKeyStream,
+      publishCollectionRoot,
+    )
+  }
+
+  if (from.type !== `unionFrom`) {
+    const { alias, input, collectionId, sourceIncludes, isParentRouted } =
+      processFrom(
+        from,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        aliasToCollectionId,
+        aliasRemapping,
+        sourceWhereClauses,
+        parentKeyStream,
+        publishCollectionRoot,
+      )
+
+    return {
+      alias,
+      pipeline: wrapInputWithAlias(input, alias),
+      collectionId,
+      sources: { [alias]: input },
+      sourceIncludes,
+      directIncludes: [],
+      isUnionFrom: false,
+      isParentRouted,
+    }
+  }
+
+  if (from.sources.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionFrom`)
+  }
+
+  const sources: Record<string, KeyedStream> = {}
+  const sourceIncludes: Array<SourceInclude> = []
+  let pipeline: NamespacedAndKeyedStream | undefined
+  let mainAlias = ``
+  let mainCollectionId = ``
+
+  for (const source of from.sources) {
+    const {
+      alias,
+      input,
+      collectionId,
+      sourceIncludes: childSourceIncludes,
+      isParentRouted,
+    } = processFrom(
+      source,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      parentKeyStream,
+      publishCollectionRoot,
+    )
+
+    if (!mainAlias) {
+      mainAlias = alias
+      mainCollectionId = collectionId
+    }
+    sources[alias] = input
+    sourceIncludes.push(...childSourceIncludes)
+
+    const routedBranch =
+      parentKeyStream && !isParentRouted
+        ? parameterizeByParentRoutes(
+            wrapInputWithAlias(input, alias),
+            parentKeyStream,
+            alias,
+            valueIdentity,
+          )
+        : wrapInputWithAlias(input, alias)
+    const branch = routedBranch.pipe(
+      map(([key, row]) => {
+        const branchKey = `${alias}:${encodeKeyForUnionBranch(key)}`
+        const aliasRow = row[alias] as Record<PropertyKey, unknown> | undefined
+        const publicKey = aliasRow?.[INCLUDES_PUBLIC_KEY] ?? key
+        const branchPublicKey = `${alias}:${encodeKeyForUnionBranch(publicKey)}`
+        const branchRow = parentKeyStream
+          ? {
+              ...row,
+              [INCLUDES_PUBLIC_KEY]: branchPublicKey,
+              [alias]: {
+                ...row[alias],
+                [INCLUDES_PUBLIC_KEY]: branchPublicKey,
+              },
+            }
+          : row
+        return [branchKey, branchRow] as [string, typeof row]
+      }),
+    )
+
+    pipeline = pipeline ? pipeline.pipe(concatOperator(branch)) : branch
+  }
+
+  return {
+    alias: mainAlias,
+    pipeline: pipeline!,
+    collectionId: mainCollectionId,
+    sources,
+    sourceIncludes,
+    directIncludes: [],
+    isUnionFrom: true,
+    isParentRouted: parentKeyStream !== undefined,
+  }
+}
+
+function processUnionAll(
+  from: UnionAll,
+  allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache: QueryCache,
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
+): {
+  alias: string
+  pipeline: NamespacedAndKeyedStream
+  collectionId: string
+  sources: Record<string, KeyedStream>
+  sourceIncludes: Array<SourceInclude>
+  directIncludes: Array<IncludesCompilationResult>
+  isUnionFrom: boolean
+  isParentRouted: boolean
+} {
+  if (from.queries.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionAll`)
+  }
+
+  const sources: Record<string, KeyedStream> = {}
+  const sourceIncludes: Array<SourceInclude> = []
+  const directIncludes: Array<IncludesCompilationResult> = []
+  let pipeline: NamespacedAndKeyedStream | undefined
+  let mainCollectionId = ``
+  const branchAliases = new Set<string>()
+
+  for (let index = 0; index < from.queries.length; index++) {
+    const branch = from.queries[index]!
+    for (const source of getAllSources(branch)) {
+      if (branchAliases.has(source.alias)) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Duplicate source alias "${source.alias}" in unionAll query branches. ` +
+                `Use distinct aliases in each branch before passing them to unionAll().`
+            : codedMessage(132, { alias: source.alias }),
+        )
+      }
+      branchAliases.add(source.alias)
+    }
+    const branchResult = compileQueryInternal(
+      [
+        branch,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        parentKeyStream,
+        undefined,
+      ],
+      true,
+      publishCollectionRoot,
+    )
+
+    if (!mainCollectionId) {
+      mainCollectionId = branchResult.collectionId
+    }
+    Object.assign(aliasToCollectionId, branchResult.aliasToCollectionId)
+    Object.assign(aliasRemapping, branchResult.aliasRemapping)
+    directIncludes.push(...(branchResult.includes ?? []))
+    Object.assign(sources, allInputs)
+    for (const [alias, where] of branchResult.sourceWhereClauses) {
+      sourceWhereClauses.set(alias, where)
+    }
+
+    const branchPipeline = branchResult.pipeline.pipe(
+      map((data: any) => {
+        const [key, [row, _order, correlationKey, parentContext, publicKey]] =
+          data
+        const branchKey = `${index}:${encodeKeyForUnionBranch(key)}`
+        const branchPublicKey = `${index}:${encodeKeyForUnionBranch(
+          publicKey ?? key,
+        )}`
+        const routedRow = parentKeyStream
+          ? attachRouteMetadataToResult(
+              row,
+              correlationKey,
+              parentContext,
+              branchPublicKey,
+            )
+          : row
+        return [branchKey, routedRow] as [string, Record<string, any>]
+      }),
+    )
+
+    pipeline = pipeline
+      ? pipeline.pipe(concatOperator(branchPipeline))
+      : branchPipeline
+  }
+
+  return {
+    alias: ``,
+    pipeline: pipeline!,
+    collectionId: mainCollectionId,
+    sources,
+    sourceIncludes,
+    directIncludes,
+    isUnionFrom: true,
+    isParentRouted: parentKeyStream !== undefined,
+  }
+}
+
+function wrapInputWithAlias(
+  input: KeyedStream,
+  alias: string,
+): NamespacedAndKeyedStream {
+  return input.pipe(
+    map(([key, row]) => {
+      const inputRow: unknown = row
+      const scalar = getRoutedScalarMetadata(inputRow)
+      if (scalar) {
+        const nsRow = attachRouteMetadata(
+          {
+            ...getParentContextValue(scalar.parentContext),
+            [alias]: scalar.value,
+            [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+          },
+          scalar.correlationKey,
+          scalar.parentContext,
+        ) as unknown as NamespacedRow
+        return [key, nsRow] as [unknown, NamespacedRow]
+      }
+
+      if (inputRow == null || typeof inputRow !== `object`) {
+        return [key, { [alias]: inputRow }] as [unknown, NamespacedRow]
+      }
+
+      // Initialize the record with a nested structure. Route metadata remains
+      // outside the user namespace while projected parent aliases stay visible.
+      const route = getRouteMetadata(inputRow)
+      const cleanRow = route
+        ? stripRouteMetadata(inputRow as Record<PropertyKey, unknown>)
+        : inputRow
+      const nsRow: Record<string, any> = {
+        ...getParentContextValue(route?.parentContext),
+        [alias]: cleanRow,
+      }
+      if (route) {
+        attachRouteMetadata(nsRow, route.correlationKey, route.parentContext)
+      }
+      return [key, nsRow] as [unknown, Record<string, typeof row>]
+    }),
+  )
+}
+
+function encodeKeyForUnionBranch(key: unknown): string {
+  if (typeof key === `string`) {
+    return `string:${key}`
+  }
+  if (typeof key === `number`) {
+    return `number:${String(key)}`
+  }
+  if (typeof key === `bigint`) {
+    return `bigint:${String(key)}`
+  }
+  return `${typeof key}:${JSON.stringify(key)}`
+}
+
+function processFrom(
+  from: CollectionSourceRef | QueryRef,
+  allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache: QueryCache,
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
+): {
+  alias: string
+  input: KeyedStream
+  collectionId: string
+  sourceIncludes: Array<SourceInclude>
+  isParentRouted: boolean
+} {
+  switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
+    case `collectionRef`: {
+      const input = allInputs[from.sourceId]
+      if (!input) {
+        throw new CollectionInputNotFoundError(
+          from.alias,
+          from.collection.id,
+          Object.keys(allInputs),
+        )
+      }
+      aliasToCollectionId[from.alias] = from.collection.id
+      return {
+        alias: from.alias,
+        input,
+        collectionId: from.collection.id,
+        sourceIncludes: [],
+        isParentRouted: false,
+      }
+    }
+    case `queryRef`: {
+      // Preserve the user-defined query as the cache key when optimization
+      // only copied it. If the optimizer changed the query, compile that IR;
+      // substituting its origin would discard pushed predicates.
+      const originalQuery = queryMapping.get(from.query)
+      const queryToCompile =
+        originalQuery && queriesMatchForCaching(from.query, originalQuery)
+          ? originalQuery
+          : from.query
+      const subQueryResult = compileQueryInternal(
+        [
+          queryToCompile,
+          allInputs,
+          collections,
+          subscriptions,
+          callbacks,
+          lazySources,
+          optimizableOrderByCollections,
+          setWindowFn,
+          cache,
+          queryMapping,
+          parentKeyStream,
+          undefined,
+        ],
+        true,
+        publishCollectionRoot,
+      )
+
+      // Pull up alias mappings from subquery to parent scope.
+      // This includes both the innermost alias-to-collection mappings AND
+      // any existing remappings from nested subquery levels.
+      Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
+      Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      // More importantly, pulling up for optimizer-created subqueries can cause issues
+      // when the optimizer has restructured the query.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const subqueryFromAlias = getFirstFromAlias(from.query.from)
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === subqueryFromAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
+
+      // Create a FLATTENED remapping from outer alias to innermost alias.
+      // For nested subqueries, this ensures one-hop lookups (not recursive chains).
+      //
+      // Example with 3-level nesting:
+      //   Inner:  .from({ user: usersCollection })
+      //   Middle: .from({ activeUser: innerSubquery })     → creates: activeUser → user
+      //   Outer:  .from({ author: middleSubquery })        → creates: author → user (not author → activeUser)
+      //
+      // The key insight: We search through the PULLED-UP aliasToCollectionId (which contains
+      // the innermost 'user' alias), so we always map directly to the deepest level.
+      // This means aliasRemapping[alias] is always a single lookup, never recursive.
+      // Needed for subscription resolution during lazy loading.
+      const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
+        (alias) =>
+          subQueryResult.aliasToCollectionId[alias] ===
+          subQueryResult.collectionId,
+      )
+      if (innerAlias && innerAlias !== from.alias) {
+        aliasRemapping[from.alias] = innerAlias
+      }
+
+      // Extract the pipeline from the compilation result
+      const subQueryInput = subQueryResult.pipeline
+
+      // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
+      // We need to extract just the value for use in parent queries
+      const extractedInput = subQueryInput.pipe(
+        map((data: any) => {
+          const [
+            key,
+            [value, _orderByIndex, correlationKey, parentContext, publicKey],
+          ] = data
+          // Unwrap Value expressions that might have leaked through as the entire row
+          const unwrapped = attachRouteMetadataToResult(
+            unwrapValue(value),
+            correlationKey,
+            parentContext,
+            publicKey,
+          )
+          return [key, unwrapped] as [unknown, any]
+        }),
+      )
+
+      return {
+        alias: from.alias,
+        input: extractedInput,
+        collectionId: subQueryResult.collectionId,
+        sourceIncludes:
+          subQueryResult.includes?.map((include) => ({
+            sourceAlias: from.alias,
+            include,
+          })) ?? [],
+        isParentRouted: parentKeyStream !== undefined,
+      }
+    }
+    default:
+      throw new UnsupportedFromTypeError((from as any).type)
+  }
+}
+
+// Only compiler-created Value instances are wrappers; user rows may have
+// ordinary `type` and `value` fields with the same shape.
+function unwrapValue(value: any): any {
+  return value instanceof ValClass ? value.value : value
+}
+
+// A nullish spread contributes no properties. Keep source order so the last
+// present whole-row spread supplies metadata, just as it supplies row fields.
+function getWholeRowSourceAliases(select: unknown): Array<string> {
+  if (select instanceof PropRef && select.path.length === 1)
+    return [select.path[0]!]
+  if (!isPlainObject(select)) return []
+  return Object.entries(select).flatMap(([name, value]) =>
+    name.startsWith(`__SPREAD_SENTINEL__`) &&
+    value instanceof PropRef &&
+    value.path.length === 1
+      ? [value.path[0]!]
+      : [],
+  )
+}
+
+function copySelectedRow(selected: Record<PropertyKey, any>) {
+  return Array.isArray(selected) ? [...selected] : { ...selected }
+}
+
+function attachVirtualPropsToSelected(
+  selected: any,
+  row: Record<string, any>,
+  isCollectionRoot: boolean,
+  metadataSources: ReadonlyArray<string> | undefined,
+): any {
+  if (
+    !selected ||
+    typeof selected !== `object` ||
+    (!Array.isArray(selected) && !isPlainObject(selected))
+  ) {
+    return selected
+  }
+
+  const selectedRecord = selected as Record<PropertyKey, any>
+  // Union output is already a branch row, rather than an aliased source.
+  const source =
+    metadataSources === undefined
+      ? row
+      : metadataSources.reduce<unknown>(
+          (prior, alias) => row[alias] ?? prior,
+          undefined,
+        )
+  const sourceRecord =
+    isCollectionRoot && source !== null && typeof source === `object`
+      ? (source as Record<PropertyKey, any>)
+      : undefined
+  let result = selectedRecord
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (isCollectionRoot && prop in selectedRecord) {
+      // An explicit virtual name in a root projection cannot replace source
+      // metadata. Ordinary projections acquire their own Collection metadata.
+      const owner =
+        sourceRecord && prop in sourceRecord ? sourceRecord : undefined
+      if (owner) {
+        const value = owner[prop]
+        if (selectedRecord[prop] !== value) {
+          if (result === selectedRecord)
+            result = copySelectedRow(selectedRecord)
+          result[prop] = value
+        }
+      } else {
+        if (result === selectedRecord) result = copySelectedRow(selectedRecord)
+        delete result[prop]
+      }
+    } else if (selectedRecord[prop] == null && prop in row) {
+      if (result === selectedRecord) result = copySelectedRow(selectedRecord)
+      result[prop] = row[prop]
+    }
+  }
+
+  return result
+}
+
+function getIncludesPublicKey(
+  row: Record<string, any>,
+  mainSource: string,
+  fallback: unknown,
+): unknown {
+  return (
+    row[mainSource]?.[INCLUDES_PUBLIC_KEY] ??
+    (row as any)[INCLUDES_PUBLIC_KEY] ??
+    fallback
+  )
+}
+
+/**
+ * Recursively records the user-defined origin of optimized subqueries.
+ * Compilation still consumes the optimized query; the mapping is lineage used
+ * to distinguish user-defined subqueries from optimizer-created wrappers.
+ */
+function mapNestedQueries(
+  optimizedQuery: QueryIR,
+  originalQuery: QueryIR,
+  queryMapping: QueryMapping,
+): void {
+  mapNestedFromQueries(optimizedQuery.from, originalQuery.from, queryMapping)
+
+  // Map JOIN clauses if they exist
+  if (optimizedQuery.join && originalQuery.join) {
+    for (
+      let i = 0;
+      i < optimizedQuery.join.length && i < originalQuery.join.length;
+      i++
+    ) {
+      const optimizedJoin = optimizedQuery.join[i]!
+      const originalJoin = originalQuery.join[i]!
+
+      if (
+        optimizedJoin.from.type === `queryRef` &&
+        originalJoin.from.type === `queryRef`
+      ) {
+        queryMapping.set(optimizedJoin.from.query, originalJoin.from.query)
+        // Recursively map nested queries in joins
+        mapNestedQueries(
+          optimizedJoin.from.query,
+          originalJoin.from.query,
+          queryMapping,
+        )
+      }
+    }
+  }
+}
+
+function getAllSources(query: QueryIR): Array<CollectionSourceRef | QueryRef> {
+  return [
+    ...getFromSources(query.from),
+    ...(query.join?.map((join) => join.from) ?? []),
+  ]
+}
+
+function getFirstFromAlias(from: QueryIR[`from`]): string {
+  return getFromSources(from)[0]?.alias ?? ``
+}
+
+function findProjectedIncludePaths(
+  select: Record<string, any>,
+  targetPath: Array<string>,
+): Array<ProjectedSourceIncludePath> {
+  const resultPaths: Array<ProjectedSourceIncludePath> = []
+
+  const visitSelectObject = (
+    obj: Record<string, any>,
+    prefix: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+        visitSpreadSentinel(key, value, prefix, guards)
+        continue
+      }
+      visitSelectValue(value, [...prefix, key], guards)
+    }
+  }
+
+  const visitSpreadSentinel = (
+    key: string,
+    value: any,
+    path: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+    const splitIndex = rest.lastIndexOf(`__`)
+    const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+    const isRefExpr =
+      value &&
+      typeof value === `object` &&
+      `type` in value &&
+      value.type === `ref`
+    const sourcePath = isRefExpr
+      ? (value as PropRef).path
+      : pathStr.split(`.`).filter(Boolean)
+
+    if (pathStartsWith(targetPath, sourcePath)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(sourcePath.length)],
+        guards,
+      })
+    }
+  }
+
+  const visitSelectValue = (
+    value: any,
+    path: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    if (value instanceof PropRef && pathStartsWith(targetPath, value.path)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(value.path.length)],
+        guards,
+      })
+      return
+    }
+
+    if (value instanceof ConditionalSelect) {
+      const previousBranchGuards: Array<ConditionalSelectGuard> = []
+      for (const branch of value.branches) {
+        visitSelectValue(branch.value, path, [
+          ...guards,
+          ...previousBranchGuards,
+          { condition: branch.condition, expected: true },
+        ])
+        previousBranchGuards.push({
+          condition: branch.condition,
+          expected: false,
+        })
+      }
+      if (value.defaultValue !== undefined) {
+        visitSelectValue(value.defaultValue, path, [
+          ...guards,
+          ...previousBranchGuards,
+        ])
+      }
+      return
+    }
+
+    if (isNestedSelectObject(value)) {
+      visitSelectObject(value, path, guards)
+    }
+  }
+
+  visitSelectObject(select, [], [])
+  return resultPaths
+}
+
+function pathStartsWith(path: Array<string>, prefix: Array<string>): boolean {
+  return (
+    prefix.length <= path.length && prefix.every((part, i) => path[i] === part)
+  )
+}
+
+function mapNestedFromQueries(
+  optimizedFrom: QueryIR[`from`],
+  originalFrom: QueryIR[`from`],
+  queryMapping: QueryMapping,
+): void {
+  if (optimizedFrom.type === `unionAll` && originalFrom.type === `unionAll`) {
+    for (
+      let i = 0;
+      i < optimizedFrom.queries.length && i < originalFrom.queries.length;
+      i++
+    ) {
+      const optimizedBranch = optimizedFrom.queries[i]!
+      const originalBranch = originalFrom.queries[i]!
+      queryMapping.set(optimizedBranch, originalBranch)
+      mapNestedQueries(optimizedBranch, originalBranch, queryMapping)
+    }
+    return
+  }
+
+  const optimizedSources = getFromSources(optimizedFrom)
+  const originalSources = getFromSources(originalFrom)
+
+  for (
+    let i = 0;
+    i < optimizedSources.length && i < originalSources.length;
+    i++
+  ) {
+    const optimizedSource = optimizedSources[i]!
+    const originalSource = originalSources[i]!
+    if (
+      optimizedSource.type === `queryRef` &&
+      originalSource.type === `queryRef`
+    ) {
+      queryMapping.set(optimizedSource.query, originalSource.query)
+      mapNestedQueries(
+        optimizedSource.query,
+        originalSource.query,
+        queryMapping,
+      )
+    }
+  }
+}
+
+/**
+ * Walks a Select object to find IncludesSubquery entries.
+ * Plain nested objects still reject includes, but ConditionalSelect branches can
+ * contain guarded nested includes that are only materialized when the branch
+ * condition is true.
+ */
+function extractIncludesFromSelect(select: Record<string, any>): Array<{
+  key: string
+  path: Array<string>
+  subquery: IncludesSubquery
+  guards: Array<ConditionalSelectGuard>
+}> {
+  const results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }> = []
+  for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    if (value instanceof IncludesSubquery) {
+      results.push({
+        key: getIncludesRoutingKey([key], results),
+        path: [key],
+        subquery: value,
+        guards: [],
+      })
+    } else if (value instanceof ConditionalSelect) {
+      collectIncludesFromConditionalSelect(value, [key], [], results)
+    } else if (isNestedSelectObject(value)) {
+      // Check nested objects for IncludesSubquery — not supported yet
+      assertNoNestedIncludes(value, key)
+    }
+  }
+  return results
+}
+
+function collectIncludesFromConditionalSelect(
+  conditional: ConditionalSelect,
+  prefixPath: Array<string>,
+  guards: Array<ConditionalSelectGuard>,
+  results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }>,
+): void {
+  const previousBranchGuards: Array<ConditionalSelectGuard> = []
+  for (const branch of conditional.branches) {
+    collectIncludesFromSelectValue(
+      branch.value,
+      prefixPath,
+      [
+        ...guards,
+        ...previousBranchGuards,
+        { condition: branch.condition, expected: true },
+      ],
+      results,
+    )
+    previousBranchGuards.push({
+      condition: branch.condition,
+      expected: false,
+    })
+  }
+
+  if (conditional.defaultValue !== undefined) {
+    collectIncludesFromSelectValue(
+      conditional.defaultValue,
+      prefixPath,
+      [...guards, ...previousBranchGuards],
+      results,
+    )
+  }
+}
+
+function collectIncludesFromSelectValue(
+  value: any,
+  prefixPath: Array<string>,
+  guards: Array<ConditionalSelectGuard>,
+  results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }>,
+): void {
+  if (value instanceof IncludesSubquery) {
+    const key = getIncludesRoutingKey(prefixPath, results)
+    results.push({ key, path: prefixPath, subquery: value, guards })
+    return
+  }
+
+  if (value instanceof ConditionalSelect) {
+    collectIncludesFromConditionalSelect(value, prefixPath, guards, results)
+    return
+  }
+
+  if (!isNestedSelectObject(value)) {
+    return
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    collectIncludesFromSelectValue(child, [...prefixPath, key], guards, results)
+  }
+}
+
+function getIncludesRoutingKey(
+  path: Array<string>,
+  entries: Array<{ key: string }>,
+): string {
+  return getUniqueIncludesRoutingKey(path.join(`.`), entries)
+}
+
+function getUniqueIncludesRoutingKey(
+  baseKey: string,
+  entries: Array<{ key?: string; fieldName?: string }>,
+): string {
+  const taken = new Set(entries.map((entry) => entry.key ?? entry.fieldName))
+  if (!taken.has(baseKey)) return baseKey
+  let suffix = entries.length
+  while (taken.has(`${baseKey}#${suffix}`)) suffix++
+  return `${baseKey}#${suffix}`
+}
+
+/** Check if a value is a nested plain object in a select (not an IR expression node) */
+function isNestedSelectObject(value: any): value is Record<string, any> {
+  return (
+    value != null &&
+    typeof value === `object` &&
+    !Array.isArray(value) &&
+    !isExpressionLike(value) &&
+    !isRefProxy(value)
+  )
+}
+
+function assertNoNestedIncludes(
+  obj: Record<string, any>,
+  parentPath: string,
+): void {
+  for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    if (value instanceof IncludesSubquery) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Includes subqueries must be at the top level of select(). ` +
+              `Found nested includes at "${parentPath}.${key}".`
+          : codedMessage(133, { parentPath, key }),
+      )
+    }
+    if (isNestedSelectObject(value)) {
+      assertNoNestedIncludes(value, `${parentPath}.${key}`)
+    }
+  }
+}
+
+/**
+ * Replaces the IncludesSubquery at `path` inside a select value, through
+ * nested objects and conditional branches, with a null Value placeholder, so
+ * processSelect() never sees it. Returns the new value and whether anything
+ * was replaced, so each level rebuilds only the objects that changed.
+ */
+function replaceIncludesInSelectValue(
+  value: any,
+  path: Array<string>,
+): { value: any; replaced: boolean } {
+  if (path.length === 0 && value instanceof IncludesSubquery) {
+    return { value: new ValClass(null), replaced: true }
+  }
+
+  if (value instanceof ConditionalSelect) {
+    return replaceIncludesInConditionalSelect(value, path)
+  }
+
+  if (path.length === 0 || !isNestedSelectObject(value)) {
+    return { value, replaced: false }
+  }
+
+  const [head, ...rest] = path
+  const result = replaceIncludesInSelectValue(value[head!], rest)
+  if (!result.replaced) {
+    return { value, replaced: false }
+  }
+  return {
+    value: {
+      ...value,
+      [head!]: result.value,
+    },
+    replaced: true,
+  }
+}
+
+function replaceIncludesInConditionalSelect(
+  conditional: ConditionalSelect,
+  path: Array<string>,
+): { value: ConditionalSelect; replaced: boolean } {
+  let replaced = false
+  const branches = conditional.branches.map((branch) => {
+    const result = replaceIncludesInSelectValue(branch.value, path)
+    if (!result.replaced) {
+      return branch
+    }
+    replaced = true
+    return { ...branch, value: result.value }
+  })
+
+  let defaultValue = conditional.defaultValue
+  if (conditional.defaultValue !== undefined) {
+    const result = replaceIncludesInSelectValue(conditional.defaultValue, path)
+    if (result.replaced) {
+      replaced = true
+      defaultValue = result.value
+    }
+  }
+
+  if (!replaced) {
+    return { value: conditional, replaced: false }
+  }
+
+  return {
+    value: new ConditionalSelect(branches, defaultValue),
+    replaced: true,
+  }
+}
+
+/**
+ * Gets a nested value from an object by path segments.
+ * For v1 with single-level correlation fields (e.g., `projectId`), it's just `obj[path[0]]`.
+ */
+function getNestedValue(obj: any, path: Array<string>): any {
+  let value = obj
+  for (const segment of path) {
+    if (value == null) return value
+    value = value[segment]
+  }
+  return value
+}
+
+type IncludeRouting = {
+  active: boolean
+  correlationKey: unknown
+  parentContext: Record<string, any> | null
+}
+
+/** Only the query's own top-K answers setWindow; subqueries never do. */
+const ignoreWindow = () => {}
+
+/** Rows a windowed query or a findOne shows, with their fractional index. */
+type WindowRows = IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>>
+
+/** The include route a compiled value's routing tag holds for one field. */
+function readRouteTag(
+  value: unknown,
+  fieldName: string,
+): IncludeRouting | undefined {
+  const tag = (
+    value as { [INCLUDES_ROUTING]?: Record<string, IncludeRouting> } | undefined
+  )?.[INCLUDES_ROUTING]
+  return tag?.[fieldName]
+}
+
+/** The route a top-K result row's select tagged; a missing tag is an invariant. */
+function windowRoute(row: NamespacedRow, fieldName: string): IncludeRouting {
+  const routing = readRouteTag(row.$selected, fieldName)
+  if (!routing)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A windowed or findOne result row has no include route`
+        : codedMessage(243),
+    )
+  return routing
+}
+
+/**
+ * Compiles a select-branch guard set once and resolves the include route only
+ * for rows whose guards hold. Every other row is routed as inactive.
+ */
+function compileGuardedRouting(
+  guards: Array<ConditionalSelectGuard>,
+  resolve: (nsRow: any) => IncludeRouting | undefined,
+): (nsRow: any) => IncludeRouting {
+  const compiledGuards = guards.map((guard) => ({
+    condition: compileExpression(guard.condition),
+    expected: guard.expected,
+  }))
+  return (nsRow) => {
+    const active = compiledGuards.every(
+      (guard) =>
+        isCaseWhenConditionTrue(guard.condition(nsRow)) === guard.expected,
+    )
+    return (
+      (active ? resolve(nsRow) : undefined) ?? {
+        active: false,
+        correlationKey: null,
+        parentContext: null,
+      }
+    )
+  }
+}
+
+export type CompileQueryFn = typeof compileQuery
+
+function getStaticDemandKeys(query: QueryIR, ref: PropRef): Set<unknown> {
+  const constraints: Array<Set<unknown>> = []
+  const visit = (expression: BasicExpression): void => {
+    if (expression.type !== `func`) return
+    if (expression.name === `and`) {
+      expression.args.forEach(visit)
+      return
+    }
+    if (expression.name !== `eq` && expression.name !== `in`) return
+
+    const [left, right] = expression.args
+    const value =
+      left?.type === `ref` &&
+      pathsEqual(left.path, ref.path) &&
+      right instanceof ValClass
+        ? right.value
+        : right?.type === `ref` &&
+            pathsEqual(right.path, ref.path) &&
+            left instanceof ValClass
+          ? left.value
+          : undefined
+    if (value === undefined) return
+    constraints.push(new Set(Array.isArray(value) ? value : [value]))
+  }
+
+  query.where?.forEach((where) => visit(getWhereExpression(where)))
+  if (constraints.length === 0) return new Set()
+  return new Set(
+    [...constraints[0]!].filter((value) =>
+      constraints.slice(1).every((constraint) => constraint.has(value)),
+    ),
+  )
+}
+
+function pathsEqual(left: Array<string>, right: Array<string>): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => segment === right[index])
+  )
+}

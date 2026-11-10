@@ -1,0 +1,21 @@
+{
+  "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "runs": [
+    {
+      "initialChunk": "f3947e",
+      "sessionId": 25788,
+      "finalChunk": "0343a4",
+      "actualExitCode": 1,
+      "reason": "Archived emitted JavaScript classified as source at two shared replay helpers"
+    },
+    {
+      "initialChunk": "de7628",
+      "sessionId": 49737,
+      "finalChunk": "a127b3",
+      "actualExitCode": 0,
+      "after": "Exact historical emit bytes relocated to textual archive with explicit old-key resolver; source/rule/ignore/budgets unchanged"
+    }
+  ],
+  "note": "Later source edits still require final lint; this receipt records actual completed runs only"
+}

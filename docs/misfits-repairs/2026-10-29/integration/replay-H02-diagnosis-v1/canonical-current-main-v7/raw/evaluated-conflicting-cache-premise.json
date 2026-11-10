@@ -1,0 +1,2274 @@
+{
+  "cut": "conflicting-cache-premise",
+  "selectedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "inventory": [
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/source-binding.setup.ts",
+      "url": "/scripts/h02-progress/source-binding.setup.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/source-binding.setup.ts",
+      "evaluated": true,
+      "imports": [
+        "crypto",
+        "fs",
+        "inspector",
+        "path",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/startup-inspector.mjs"
+      ],
+      "sourceSha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13",
+      "codeSha256": "205ba0b2c79a51d6238bbb0d9afa5e3883023e14e1f8a8a008e03cccb4fc0377"
+    },
+    {
+      "id": "crypto",
+      "url": "/@id/__vite-browser-external:node:crypto",
+      "file": "crypto",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:crypto"
+    },
+    {
+      "id": "fs",
+      "url": "/@id/__vite-browser-external:node:fs",
+      "file": "fs",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:fs"
+    },
+    {
+      "id": "inspector",
+      "url": "/@id/__vite-browser-external:node:inspector",
+      "file": "inspector",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:inspector"
+    },
+    {
+      "id": "path",
+      "url": "/@id/__vite-browser-external:node:path",
+      "file": "path",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:path"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/startup-inspector.mjs",
+      "url": "/scripts/h02-progress/startup-inspector.mjs",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/startup-inspector.mjs",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e3e6748f8c2fb673779e7c1143b2c4afe10d2688bc7ffa226b7bbc01754ad905",
+      "codeSha256": "b200367d4b912855dea4c42cae9d3c55ac832816f17f85001570514b70fbc38b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "evaluated": true,
+      "imports": [
+        "fs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts"
+      ],
+      "sourceSha256": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+      "codeSha256": "357b7ceec760b278789471084a733e6682a39bdd1b5f02b9ad23b4aaef432a25"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs",
+      "url": "/scripts/h02-progress/receipt-transport.mjs",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs",
+      "evaluated": true,
+      "imports": [
+        "fs",
+        "path",
+        "util"
+      ],
+      "sourceSha256": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da",
+      "codeSha256": "a647574a145384297f1b1aa660b79eb7ae279395e7f9e009fdfac23ff3c91b19"
+    },
+    {
+      "id": "util",
+      "url": "/@id/__vite-browser-external:node:util",
+      "file": "util",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:util"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/reference-expression-oracle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/witness-premise.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+      ],
+      "sourceSha256": "e91715a74c2b8e9ff5126b054da9ba2f5d0128e4dc373ed2c459410e463ff006",
+      "codeSha256": "e49bca9b8b9fa408099835bb1e98b2b0277b1292ad2f4235adabf9ed03b224c1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts",
+      "url": "/packages/db/src/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/types.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/optimistic-action.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-adapter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-only.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-storage.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db-wrapper.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-persistence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-receipt.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/paced-mutations.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/basic-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/btree-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/reverse-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/index-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/expression-helpers.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/effect.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts"
+      ],
+      "sourceSha256": "897961cdc23a8587ac7d882dfc10e2e0184afd452ee2e60efb89a2a425321277",
+      "codeSha256": "fdde733166706eb3ecb72dfbc61d1d8b3de797ccb3305976bc8e74116e305c0c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+      "url": "/packages/db/src/query/ir.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts"
+      ],
+      "sourceSha256": "f457b852e61c6dbb5fd654a7fd1f6b50ed2d9e9773444e2ba5b0e702b8dcc118",
+      "codeSha256": "c48eeee834d20686faebbd0242adab009cea44b2be65facdfc432a6fcc98281a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+      "url": "/packages/db/src/error-message.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9ab4a64436c3db3a61f3a84b5ccff11359ccdf5676c81b81dc3be9db9c1dff13",
+      "codeSha256": "7098833d2747190e80fe3ad83adc89b0447b20c9392a41f7574588c4f5b3b152"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "url": "/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "909d40e4425647ae58850decd6891fa7f6aa4690cd76e82c3ced13b70dc93b10",
+      "codeSha256": "efd7ac2c2fad9cb83cfc47fb72de5ccfa07a4e8c0dd20f2e405be3096df26f26"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+      "url": "/packages/db/src/collection/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/validate-config.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/change-events.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/indexes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/mutations.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/events.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts"
+      ],
+      "sourceSha256": "9802283653165dc317b34cfb97cba5fbf4ee574e628afe9645babb4ac09bac3c",
+      "codeSha256": "ccc61a97385f4597efa52cc73b45d049fa4f3be410d6b26efc54eec20481919b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+      "url": "/packages/db-ivm/src/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/types.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts"
+      ],
+      "sourceSha256": "d8a1237d1cdf958354e458754ab3e340c04250dcdcb2f7cd67f7ee072e280647",
+      "codeSha256": "65440f8bea20773ae6eb4d1a4c14caffae744f2e52d7691cd327d150ff7fcd25"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+      "url": "/packages/db-ivm/src/d2.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts"
+      ],
+      "sourceSha256": "1afc8bf4a587ea281905333ba2a96a475b7799a08d67fcd10b7531ba1de8adb7",
+      "codeSha256": "fc125b607524656e28586b2917a95d983099758213a5941f10408947c5340849"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+      "url": "/packages/db-ivm/src/graph.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "a46ce4fc6e9c9399fec7c77281cb056b216dba28d41a22e41ed5eb0c8f26fac0",
+      "codeSha256": "1b4c7195da380644a50b0f30b4d3d58af6fcce4232a6464d08571b8570a96df9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+      "url": "/packages/db-ivm/src/multiset.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/index.ts"
+      ],
+      "sourceSha256": "105aae2dd54580e114be1059cef4a2453716a98604c590e1d0f26d3189eedec9",
+      "codeSha256": "0cfd8db5f1966f208ee03cc4bb3418f191d287605663c3a121dcd3859f7726db"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts",
+      "url": "/packages/db-ivm/src/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/temporal.ts"
+      ],
+      "sourceSha256": "96a35cfb8197533027c85e0986d8e4d85f32dfe53913864198782d0d01463490",
+      "codeSha256": "0af26516a204e601f3a38a954415ae1fd9edfef5035ca0525df9e7e7351d3f3a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/temporal.ts",
+      "url": "/packages/db-ivm/src/hashing/temporal.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/temporal.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e94abec5b31971ca1af6bc5e47de70c4f997c9b36cc665025ea9889be69b564a",
+      "codeSha256": "025d3afdf660e5b0f3fae40180856cb2b7d22ef001433ff1005b3a790850f45b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/index.ts",
+      "url": "/packages/db-ivm/src/hashing/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts"
+      ],
+      "sourceSha256": "7c69736a3bed223bbafa1c387ffd352f544051ce786420bd9d0d82451c9bff43",
+      "codeSha256": "768d5a71ed248d28f04301cd2b2218b705605be7b4badf8862fc610bde96429a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts",
+      "url": "/packages/db-ivm/src/hashing/hash.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/murmur.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/temporal.ts"
+      ],
+      "sourceSha256": "951a44ec2ce0524e9ba28306e25abbff0efdcd02ca6b8f959b45963032fb2d24",
+      "codeSha256": "79ea628701663032a4dab86fd636186735262f910029e717186c53467cd74142"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/murmur.ts",
+      "url": "/packages/db-ivm/src/hashing/murmur.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/murmur.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "55b50358e37521654f70c206219a4c0bd276e5bde995c2272c934200f655e1ac",
+      "codeSha256": "b1026f0366b5375ca7137221b20cadbd1017b7e0171ed1fd9304af56afbad4e1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/index.ts",
+      "url": "/packages/db-ivm/src/operators/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/pipe.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/map.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/filter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/concat.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/output.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/consolidate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/join.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/reduce.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/distinct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/orderBy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupBy.ts"
+      ],
+      "sourceSha256": "8c6608f72bf98ae827a2f8cfcc21e886049649ac28a0745011fe854913677b1c",
+      "codeSha256": "617c97b0d71c2b73d45ebf8eb5f0096403336ec2cb91b96634ff833906199876"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/pipe.ts",
+      "url": "/packages/db-ivm/src/operators/pipe.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/pipe.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "17e3ed788cfd5c3945211284c37399a9168e1e85609e6f939262444ad780856e",
+      "codeSha256": "ded02bfe296e051f81adc4e28fe1e7eb69ae11dab36e6d48a37f2623c5ccdd46"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/map.ts",
+      "url": "/packages/db-ivm/src/operators/map.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/map.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "31ed85ed7246ab42719723d5ad03faceb3b1e9345d112a9342856914d0742edd",
+      "codeSha256": "be0926bc480b1409acaf35298265113c016ce49a1da4ccb4ec1b0a714edac354"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts",
+      "url": "/packages/db-ivm/src/operators/tap.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "7966b8e60871d3e28dd3d5f54f4375faf2e50de12c0d3bf0b44f6350cae4f9c6",
+      "codeSha256": "4f74f88df9c3f92f9a05dfb208838864ea0399179ea8ce010f772cb2dfd1266d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/filter.ts",
+      "url": "/packages/db-ivm/src/operators/filter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/filter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "d53af7776a7aa5619f891a4c00a8b0af2102aeb67e65bb04e2451d28d9fec714",
+      "codeSha256": "44f7107a31dfbc91aae4cc764be147213d90c64bc9871d8c1327950b57261c95"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/concat.ts",
+      "url": "/packages/db-ivm/src/operators/concat.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/concat.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "157fc2807de482a3fecb56f51e5f1b2be49d613b6665cb3889abf7d01a8cd8ba",
+      "codeSha256": "a60c2c4d9b8e50d84e83c8da3131e7249ec676b9690523cae75e1bdf1ba331ce"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/output.ts",
+      "url": "/packages/db-ivm/src/operators/output.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/output.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "0968eb6580a7d3ad2b2a36846c8ad175c97e588da6d1dfdadc2caaebe63bc703",
+      "codeSha256": "c4b33e4b905acf043ac7df2f319a4077852be1668d9cf8a68c232f10c391cab9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/consolidate.ts",
+      "url": "/packages/db-ivm/src/operators/consolidate.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/consolidate.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "b38b7580ee182473fb02bfd8bf8c9021cb1aa0fb1a59ea75594c128fad06b279",
+      "codeSha256": "8b4df0c6d377db35ac6c912ecd0ea70aff9ddefb9f2f3e7fdb640e301d2825f3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/join.ts",
+      "url": "/packages/db-ivm/src/operators/join.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/join.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/indexes.ts"
+      ],
+      "sourceSha256": "8f5f78fa973a94e8bd7a7b15991548a60cf25fafabd10722bd221818b4707b81",
+      "codeSha256": "725a221c9892267bb6c1294292865a20f90e3f203d748cc66ca7c62b912e8f20"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/indexes.ts",
+      "url": "/packages/db-ivm/src/indexes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/indexes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/index.ts"
+      ],
+      "sourceSha256": "972d634e3e5faf9693ca93562e6b54a30ac1b5a00a5f95509534d5c74313105d",
+      "codeSha256": "35b84341d38ee97e58617f7403049cf44f337d7fea0381eb8c1521a2b8484144"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/reduce.ts",
+      "url": "/packages/db-ivm/src/operators/reduce.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/reduce.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/indexes.ts"
+      ],
+      "sourceSha256": "ec7e794c587ebace6431ba03847d980cf6bc01ef805bcb1310483a3c06a64629",
+      "codeSha256": "107fed42dee83dc3130523f828435aed7519c6e7803fbecc81c89d1bbdd7ff1e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/distinct.ts",
+      "url": "/packages/db-ivm/src/operators/distinct.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/distinct.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "35b026e81627fab615ec664d631e02091dd307c91d32c1dd54546e453ba767c0",
+      "codeSha256": "3cee2489f19331bf2c98f42e4a9c38e3e666a1f3cea53fcabdb4d0298e4c92fe"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "url": "/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKState.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "37a708f0d29f916c839230875d87d84479cec1cc3e668de351849c091da14be7",
+      "codeSha256": "f52fca60fa32d628e6aaec63d6a54f9077f306f310d9a17177a9f1778b035254"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKState.ts",
+      "url": "/packages/db-ivm/src/operators/topKState.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKState.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "166549d5b44d73e10d0ee284fc324dd87b3bcf46f2ec3212d02c08bc07392977",
+      "codeSha256": "290dd4b25ff85a32ed2a17adaa91eeea0af9885841af136025bb9613a990bddb"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKArray.ts",
+      "url": "/packages/db-ivm/src/operators/topKArray.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKArray.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts"
+      ],
+      "sourceSha256": "a4889e6bf625027a048d2fdd74be5b96ac085a36abc4cc7e5d291ef2583ec916",
+      "codeSha256": "bf5dd97e4c7773f547b922a757499eab067d47ed7a12327bff8c88fde0f30b06"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "url": "/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKState.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "878f6fc16a06b2d384a3567137b653f580b4d3811e84050e68d978751339140c",
+      "codeSha256": "3a6c14b6167dc8fd4e69e841e49e53c2e747d7cc5d7664af420b8fb38537b06b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/orderBy.ts",
+      "url": "/packages/db-ivm/src/operators/orderBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/orderBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/consolidate.ts"
+      ],
+      "sourceSha256": "1c2261f2622fb256d9223f7392b2195a9eee48ee77218c11b2930d35f2800757",
+      "codeSha256": "5a64b114e029ae96ae6878152c3c0c41ad8a02e4eeee85e34a9e8c7d3641acbf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "url": "/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/consolidate.ts"
+      ],
+      "sourceSha256": "7072e0aaa26e1244a92a6410eb5cd4d75cf199d702599d87ed546b811f7f34cf",
+      "codeSha256": "5056cc98a07d49d2d309da1e11aabbc131a04532e8f80e3ab5e1d47b75289cd5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupBy.ts",
+      "url": "/packages/db-ivm/src/operators/groupBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/groupBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/hashing/hash.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/map.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/reduce.ts"
+      ],
+      "sourceSha256": "14629481a3f6014a259248b4fa610087ee69cba954cb80dbf4c700f3c2b5c166",
+      "codeSha256": "b09bf5ff5bf0d846fbfa7e5c16a5f0e99accdc11941d4b2d040e0ca87e473a2f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/types.ts",
+      "url": "/packages/db-ivm/src/types.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/types.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "6e76bf3f2af58e171123b8cb6a647b8a6c9908d7377e27b01aa4bfc5c0ac022d",
+      "codeSha256": "36db2ee7768b53695b4d0220390cb69b094e080774cef62fbbd5c008e43ca6e4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+      "url": "/packages/db/src/utils/uuid.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "0365c5c02b46eabac53562dac87b342656e2774b36385a094c16b3a9db3a5ca1",
+      "codeSha256": "b968149710b31c697f1b60a2680f0e46363c0e059b73ddb974d40004a8071fb3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+      "url": "/packages/db/src/collection-options.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options-brand.ts"
+      ],
+      "sourceSha256": "0b0f9713312f9554f62c020dda3bae8291303dbeadb85adfee76515a28442feb",
+      "codeSha256": "2acfb038acfb7b26c7d0ee3db4f91292dd6ac87b4b36b00baa4ffdba2c599159"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options-brand.ts",
+      "url": "/packages/db/src/collection-options-brand.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options-brand.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "93df3fc8d90531ca926c6e9ca48653dbda9259cfaaade9c23cbbf35131b2e1ed",
+      "codeSha256": "cbc4039005e19b03d940453870ae382439f01983f96fcbddaa29a997b3e95891"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+      "url": "/packages/db/src/errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "48d1e786bc84793ca16a2f5d4dcc80a914a03aa1a4753c08a99d7847c6a8120d",
+      "codeSha256": "d8f25f0d2d19815b2fe3d20fe7ef5b6959bd7dfc51c8a3133c6a748d4b14cb52"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+      "url": "/packages/db/src/query/live/collection-registry.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts"
+      ],
+      "sourceSha256": "c24da0f80292e4fa22370711cdf66e52ec44989f8fda50430025aa5b25510e65",
+      "codeSha256": "09d88a64387ef9788b4541133e870c3569bd53d6f412cb0e09d65bb2c26d3394"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts",
+      "url": "/packages/db/src/query/live/internal.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "3aa788cfb3647e2758ff9befe18e4503bc68797fd97d55dc5c3905db9a7145fc",
+      "codeSha256": "68aca7c770649b744d01d0e12bf06bb281830c62612be89f0989b9d59d7bd9b3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/validate-config.ts",
+      "url": "/packages/db/src/collection/validate-config.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/validate-config.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/config-errors.ts"
+      ],
+      "sourceSha256": "10bc3f83c357cf8b835694c73df9adf413c6190f924256786f17e123a688489a",
+      "codeSha256": "2c12d77a42d3a08ac685e49f46f298a5feeccd7c80d52c440c94204428967ac3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/config-errors.ts",
+      "url": "/packages/db/src/collection/config-errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/config-errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "ffe046ad75542c863e1781c192191479cdcb68e7dcfaf92c9ce180ee48522cc0",
+      "codeSha256": "1cfc1bed98ed4d734b3c1a139d928380ede0355f30f02b6895ad4622ca4fed75"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/change-events.ts",
+      "url": "/packages/db/src/collection/change-events.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/change-events.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-conjunct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "754f897ba843d004eaf5bfe3f047fc53aa24eb49a16ae1eae4073e32ec17ba49",
+      "codeSha256": "9a1d37a86a1fdde2c765a105c881decd9a1004b40502152c55838f5b1a6c6da1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+      "url": "/packages/db/src/query/compiler/evaluators.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "499cb252c6e2c166cf626bf88c6c08ced102020558bdccab46a6d12acd52ec92",
+      "codeSha256": "98c04c89a2d7a48abf6b18e4c7793e7c67d3c0dd7867835425e0768ad1db808f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+      "url": "/packages/db/src/utils/comparison.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "78c8163a2b6819ffd59f5aedc4b40d0490042c7dc3ca0799e84a2f0f9fb170de",
+      "codeSha256": "05595688ab4b58e58870281844e735c3100f356839defdc7d7b25a1312c2d8c9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+      "url": "/packages/db/src/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "de7d370b0ddfed65865d3cc48d7607f02630dc9f820ad0d68ac80763987cf272",
+      "codeSha256": "510128c5ca025f13d60b2465b473f93803d53f4382d7d4fdf696de6f43e81654"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts",
+      "url": "/packages/db/src/query/runtime-reference-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "c1c695e80771ab545e58254381333bd24469813d69f448106df2dc5a5de1db48",
+      "codeSha256": "ff0c125a3e60c07880487a39b91afe4793b05264d43fc8c3cee6a9f8b5559de6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+      "url": "/packages/db/src/query/equality-value-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts"
+      ],
+      "sourceSha256": "a7b65759c20ebec4d83c47ec744bbd382da9a86ffa4c9e59028827127081d016",
+      "codeSha256": "9b48aacde9d2bb7922572e42ad4db72cd1bdb41d2eb496ddcd053c92aaf5b56c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts",
+      "url": "/packages/db/src/query/compiler/route-metadata.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts"
+      ],
+      "sourceSha256": "53283291ce25656339492bff678b8742a7fdc7b60c49d3b7f7015569e5c06788",
+      "codeSha256": "a82839f3eb2877f9b545ea56cf5583d8dfa09cbcf85215bd7eb09a47c7e92ebd"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+      "url": "/packages/db/src/utils/type-guards.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b7a63accd5abd4dd5c93bb451650fc962a2fdcc3981e70f0b7b373ebeb5f07db",
+      "codeSha256": "784b0e50437b08d4e447f4ee45ef3350c6f252af3ea251339c102e0450d45c00"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+      "url": "/packages/db/src/utils/index-optimization.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/reverse-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts"
+      ],
+      "sourceSha256": "034310477e43f29bfe3493a56ee3b3524378ae3f941f4a452e6a15b9aec24425",
+      "codeSha256": "15dd03f10e61f1bc5eb22241a1d91b20fd92d2d65641852785b912a5e20717c5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/reverse-index.ts",
+      "url": "/packages/db/src/indexes/reverse-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/reverse-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "ebf2d22eb0eec10acb4df154488862243ec20be117bc069fe307fc991853dd0b",
+      "codeSha256": "ffedec0e82970fb7b4c2ab983a3d021f3c64ca7d44ac57eef6a91d194f7a6c6d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+      "url": "/packages/db/src/virtual-props.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "28acdeda1137e0aad5f02af309939ee23bad61ae05cd1130b8d5d39925897a9a",
+      "codeSha256": "687879dcb96186880b955a811057190b7a78cfb7ecb2f4396f4868272683a002"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+      "url": "/packages/db/src/indexes/auto-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/index-registry.ts"
+      ],
+      "sourceSha256": "d226516a7514c40e83010ab211020adba17965af96bd6d3b96e88989c6f31b51",
+      "codeSha256": "82ca105a0e5948a842534c65661212bead95b6ad20b663624c01387ae81d7610"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+      "url": "/packages/db/src/query/builder/functions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/grouping.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/wrapper-identity.ts"
+      ],
+      "sourceSha256": "25eebaaa6ab6abfc0dfc035f96fbb5119e4127c15db063a6e1164d06f3effba2",
+      "codeSha256": "1906e40e34d2d29935bc5e5bca0c9141c8460e03220e949893137329fc683452"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/grouping.ts",
+      "url": "/packages/db/src/query/compiler/grouping.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/grouping.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/group-by.ts"
+      ],
+      "sourceSha256": "60bf53ca65138c45894858d222187e3ba94c831c0a3223bd3234d60ac832405f",
+      "codeSha256": "99d0979150b5d7c66140f429a3516520817bc62c14a225b45fd7d8f79a74a791"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/group-by.ts",
+      "url": "/packages/db/src/query/compiler/group-by.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/group-by.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "b8db87c995a44f229488dc7dc15a95041224184bb400b914f56d7368ee5f4722",
+      "codeSha256": "cdcbd3294495eda13ee571b30322ade36d4f84c1c80c30680a959559bae0d991"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+      "url": "/packages/db/src/query/builder/ref-proxy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/wrapper-identity.ts"
+      ],
+      "sourceSha256": "898e671e5656ebfb0a7dc0683de6b83e4ff1bc339616435caa1d60def4e6b767",
+      "codeSha256": "14a74eee277c3459880a294527903df036aa5b6e92742fc100158d33a14cd152"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/wrapper-identity.ts",
+      "url": "/packages/db/src/query/builder/wrapper-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/wrapper-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "3053d30505c57f0eb16cc573e196291e617aff7479151508bbaa397fa3757f57",
+      "codeSha256": "c3f222eb503e6064deca62ded2d62e9dd9d48679a92f29486eb585a92ab845b2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/index-registry.ts",
+      "url": "/packages/db/src/indexes/index-registry.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/index-registry.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "d44e34c9e5d90db56dee7f91e402f2547d91647ae100cc4752bc13bcd49e2719",
+      "codeSha256": "78d741e083361a085609a40bfe812e720d92dfdf8bdd10344f34e1a438499277"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-conjunct.ts",
+      "url": "/packages/db/src/query/equality-conjunct.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-conjunct.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts"
+      ],
+      "sourceSha256": "02041d880376b46814ab072747a9b0493e24cd4bd72df8389726780e535cc584",
+      "codeSha256": "907d0ccce72d67b303084cb5c54dc03ee39780268547d8c043c894e20186fce6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/order-by.ts",
+      "url": "/packages/db/src/query/compiler/order-by.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/order-by.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts"
+      ],
+      "sourceSha256": "45c15469bb52e11b74a5f6e95b31c659f15e34d33e4bd2fb45bc5caf017d190c",
+      "codeSha256": "b263f3195daeca2f64f15f4853756a7fec860f4368ce608a4b848c8070e92330"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts",
+      "url": "/packages/db/src/query/compiler/expressions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "70925f2d29f57aec189d0e7f485d0531534e3482f0696a5e9a1141d8cf36c42d",
+      "codeSha256": "d3d3edc44f9e6f93a3acd06ef697c3ac76aabf032661d2bde1f48cbd25f25da3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts",
+      "url": "/packages/db/src/collection/state.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/SortedMap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "codeSha256": "3ba9b8f0196b77506ef145262b01f352127ec14509618758fd7ead0e009b6396"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/SortedMap.ts",
+      "url": "/packages/db/src/SortedMap.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/SortedMap.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "5ffa75ae2c41e2c657931728186fe9bd9c9b60f8da81cbf327c7c41417e2debc",
+      "codeSha256": "cca68861062ab3315db084b09b44b0ea8772872ff0656fc9682b1acef5caff4b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts",
+      "url": "/packages/db/src/collection/changes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts"
+      ],
+      "sourceSha256": "3a8878ab58df162f8108c5cdd6470562af7e6ed65a7b3e720f6b329bc0378628",
+      "codeSha256": "ec5231cdf524f42477a68846c088b065da096d1e74f7780625d08aba711069df"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+      "url": "/packages/db/src/scheduler.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "b21cbbdc088b3c1dc4840b7db857ee7f262e6958dc8bc300398ad8e93da4f01a",
+      "codeSha256": "74a17a72922b680c932b49d7789787bb1bedba3bcce48769f460a20d68aaf877"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+      "url": "/packages/db/src/utils/callbacks.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "da4d6fc8d94bf93d07442eefbebd1ec0c183ef559fa7eebceb51b3652816708a",
+      "codeSha256": "7dfe010fc1031bfeb701942541e2b0f9ced01c6c5bde32fc14e204ef692343a1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts",
+      "url": "/packages/db/src/collection/subscription.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/event-emitter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/cursor.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/change-events.ts"
+      ],
+      "sourceSha256": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "codeSha256": "44e3cafced736c12867c1b06d1f0f48fe8bbf8842c254e7995cc0232786121a0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/event-emitter.ts",
+      "url": "/packages/db/src/event-emitter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/event-emitter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "1d8775f3c2dbc9c833f03d2b9bb0d55d1606419e43d661064cc95cd91eb187e8",
+      "codeSha256": "ee2105bae85599365b9e7cf172c94758c6f7510a3f75159a0d72dc1a8ceeff2e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/cursor.ts",
+      "url": "/packages/db/src/utils/cursor.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/cursor.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "b728649d395a8e4e61cd6a63479be92ce2d4d4a08dc73beb549b92dafec5181f",
+      "codeSha256": "3994fe69adb1d7ea020852ab69205bb83db330eac03d0143559f95c4539da0c4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+      "url": "/packages/db/src/utils/error.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "133924e3809af4a69826c08774455f12f10aba675cbc92a4298525868bba4ece",
+      "codeSha256": "11b48abf991e995140c1d05a4b049485570142d99d50d8b24cc3d6eba650ef1e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+      "url": "/packages/db/src/deferred.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9c99553d7ab92ac89d377cb3382a9dfbdf592635c87b86eac8aa1f18efc4da68",
+      "codeSha256": "729a855460b22a914b33c8365f6e16abd973255f832d62ac81a3bde3369480db"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+      "url": "/packages/db/src/live-query-primitives.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "44b28251bc2c234c5c47df25d5219a0e6ffc766d63ab9f9087dfd450d35dfd63",
+      "codeSha256": "de2cf2e44d9aeb9c98806349de737e8752ec01404588f142475819a17a048689"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts",
+      "url": "/packages/db/src/collection/lifecycle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/browser-polyfills.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/cleanup-queue.ts"
+      ],
+      "sourceSha256": "0aee449fa231215d8d3d086e1e37e761f332c75a6cae50fabd3101ed057a84b7",
+      "codeSha256": "9a3f7bce64d4bc5f6b84f7457f47f1c9c51a50746bc51648b57158ac742c8d0a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/browser-polyfills.ts",
+      "url": "/packages/db/src/utils/browser-polyfills.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/browser-polyfills.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b3212d22af7254eb8c286d89393eb043324abd0b5a7ddbc8eaaa505e292b437b",
+      "codeSha256": "eca91a389c545435a599b1046983ab198f33c073a219c6de12c96f9bbb04d977"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/cleanup-queue.ts",
+      "url": "/packages/db/src/collection/cleanup-queue.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/cleanup-queue.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "869a5fdff4680354a9b3c68d3e5228ffe701507968dd1a5ae2123ed856fe517e",
+      "codeSha256": "1d69c17cccf65de7e65569cd8af49e1003e34a599aecd875145e0bc5c83956db"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts",
+      "url": "/packages/db/src/collection/sync.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-receipt.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts"
+      ],
+      "sourceSha256": "12120489cabc124acd52a4ed690fce1ddd903602c8cda373b910f9fa744b4697",
+      "codeSha256": "a2a3a117d5861598cf806c1e2df05868505ec24879b97152e9e09bfd1927911f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-receipt.ts",
+      "url": "/packages/db/src/sync-receipt.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-receipt.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "5ab4074603d96c23decd4fae499ed55f3a6ee5077e379f370d9b76fd90565399",
+      "codeSha256": "9e25e3b23479259ce6e0e783ee1d968e21af16e67e74d1c2a855dfbdb22aad1f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/indexes.ts",
+      "url": "/packages/db/src/collection/indexes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/indexes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "f6a800dbe0f6e326884bf6d0b4912c126a82ef87413eb7490241fb1f56ca8f6f",
+      "codeSha256": "5807d1c1afe7320925c8e940f93c58ed4ba598b41909fa2c6685b9d1e6b7da42"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts",
+      "url": "/packages/db/src/indexes/base-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "63e35c6bf011ad361882509a521407acf29b9404ce4e810a8f4d54b50c0e6685",
+      "codeSha256": "8f9514701212a04fcd32ccea77cc8c837b1e977124048ea6e7c7074d60cd871a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/mutations.ts",
+      "url": "/packages/db/src/collection/mutations.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/mutations.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "a9fb56d836eab56789154735841a7d2908d940d438196c5dc2d7a85f16132848",
+      "codeSha256": "382c69a0b65ddbac7a00dc91226848a286536ce6023119c936e65581f4eaddfc"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/proxy.ts",
+      "url": "/packages/db/src/proxy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/proxy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "97fd4841cd8532a8bd2f08197d0d755cf348a50e5df0b2f4705079895f2a42c1",
+      "codeSha256": "ad8b68319cb75584fb15f76cc04677800582bd5bf23081b98f1a7a46b972901f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+      "url": "/packages/db/src/transactions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/duplicate-instance-check.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transaction-commit-work.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "772998f86099b370835e8617ca79c85e3df214a71875649cf9ff425574205589",
+      "codeSha256": "4f8f6e512b0372d926c65e30b7b4f9c8fa8c4f006f845ac177cbacaea2450cf8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/duplicate-instance-check.ts",
+      "url": "/packages/db/src/duplicate-instance-check.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/duplicate-instance-check.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "7ea3110958ff28f9befe760c60fc6fcd695bfba76aba76d654220358e6e8f8f5",
+      "codeSha256": "f3598728878a2eceb65a22239166365dc19621ae2dc1cbe7764135a7610b4307"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transaction-commit-work.ts",
+      "url": "/packages/db/src/transaction-commit-work.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transaction-commit-work.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b3c341c01f7a8b1207683fb3388b66b1173481f43ea59160e1922778e64872fe",
+      "codeSha256": "fd762035768035b95ba90a44ebadea9dda8e29c105b289cf8842ed47a6d76eba"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/events.ts",
+      "url": "/packages/db/src/collection/events.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/events.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/event-emitter.ts"
+      ],
+      "sourceSha256": "afe1913937b6e8859a0b9061436eb6563695247300f71582bf656f5710bab45c",
+      "codeSha256": "5356a7f4fecfc418898992bdf192cc5d981538cc20a910070d5a439059e1a932"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts",
+      "url": "/packages/db/src/collection/health-tree.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts"
+      ],
+      "sourceSha256": "3c9c72ffa3045d1719883bd609df87d98d336140fe6076e485f7535b9debdc59",
+      "codeSha256": "0bdc4c22184ce40facec8901b84757ccbcd6f6c6174a458553faa581a22a3aea"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts",
+      "url": "/packages/db/src/client.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer-client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts"
+      ],
+      "sourceSha256": "0c07442588bf7cf2847b2a63b5ead361f803631d566c93ff09f5882c82ccb250",
+      "codeSha256": "e2b33a525ea9effd63d3b844ff3925042ae5da865ab37268197bebd0e501edfd"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+      "url": "/packages/db/src/query/live-query-collection.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts"
+      ],
+      "sourceSha256": "d9fa71c30a1dbb69d58e2e11c2ba4acbeaa727f8d1ee70ce3d225be08ce7224f",
+      "codeSha256": "2c0309310922628b2f604b75cc9d7f1532b0135639e6a8ae65fce979e4eb6451"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts",
+      "url": "/packages/db/src/query/live/collection-config-builder.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/public-key-reduction.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/utils.ts"
+      ],
+      "sourceSha256": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+      "codeSha256": "2697c8144a11d76673dc4d55782f5295e56ae74295d1dfa2b6d67c134c2f7333"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts",
+      "url": "/packages/db/src/query/compiler/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/get-or-create.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/optimizer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/joins.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/find-aggregate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/lazy-targets.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/parent-routes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/query-equivalence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/select.ts"
+      ],
+      "sourceSha256": "56559f340bd684b1389130fc772505fe27c7d5a34c2a55cf047e831a35f624c3",
+      "codeSha256": "065c96a417b8dbc940fabab06377861689beb09405c2898ffb6ffa9fd2f931ec"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/get-or-create.ts",
+      "url": "/packages/db/src/utils/get-or-create.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/get-or-create.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "eb56ba9e1a6eddecc8241062cb9a4ea0afca7437fbb50f0404de1276a611ee82",
+      "codeSha256": "0dc131af6172830985cb3751a8dff2450e13d6da7a2888e6da8392cda2b3ebe2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/optimizer.ts",
+      "url": "/packages/db/src/query/optimizer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/optimizer.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/find-aggregate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "4f359a9488bc178dcfcb5bbe56c04ab5589575c1224afffdd5b082d0cd1e8059",
+      "codeSha256": "ffc1d96b433476dd89634c7964a6c9e8960f2edb915ae1fa0b34ce45a71d179b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/find-aggregate.ts",
+      "url": "/packages/db/src/query/compiler/find-aggregate.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/find-aggregate.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "8714ef7f93008a2cec4b6afd3369b93bc691b6f1ca9ec977a3e9530ff285a43c",
+      "codeSha256": "de0940aca96810a0bec898698a17d35d215f0628839dbda2f544fedcd3169c15"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+      "url": "/packages/db/src/query/builder/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/join-conditions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/query-ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/clone-query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts"
+      ],
+      "sourceSha256": "8a5c3397e84601025e0589fa5e5303d5054773cb45d083bfb56ac2ff28646f26",
+      "codeSha256": "6cb040e6bf4075740e9761dca685ba086ea19934790039f7eb4e4c7ffabd9dc1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/join-conditions.ts",
+      "url": "/packages/db/src/query/join-conditions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/join-conditions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "c2659d14f7a15203343de19b66cb83195c7ab5c26f953b52bbf6f40bbe012802",
+      "codeSha256": "6b8c570be7bb0bf15070380d6ccb38ad94c97fb64d876f56e0a3e76e9761af03"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/query-ir.ts",
+      "url": "/packages/db/src/query/builder/query-ir.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/query-ir.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "6aa35045e8a83c63a68e3af2de951879aaa2b91c132606db6d0bfd32247af108",
+      "codeSha256": "0db710882e6c8e80d7d4ed6603e882a923aaf68d46e6c515d28bf7ddab3617ca"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/clone-query.ts",
+      "url": "/packages/db/src/query/builder/clone-query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/clone-query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts"
+      ],
+      "sourceSha256": "d149bec44c8a26da59519dc9bb2e7ca4013cc04028ac46830bafe4cca439c752",
+      "codeSha256": "4237f2eb6f74dfd92da74f1df3f061fcfb8332fd20209f35ebcefa640dac2f33"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/source-record.ts",
+      "url": "/packages/db/src/utils/source-record.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/source-record.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "48023571bd2e850170b78a34a3a9d14940d97742f510f96cad4baaf4a75694e3",
+      "codeSha256": "b9d270be8fd55bb3b22e374c5022bcef6261bf883100cbfb3aeb087d55a75ea1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/joins.ts",
+      "url": "/packages/db/src/query/compiler/joins.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/joins.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/join-conditions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/lazy-targets.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/parent-routes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/query-equivalence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "8f0aacfc3e09bbc2672cc21af75ac8b27e1f957a47ee8e36ce3b451137beff08",
+      "codeSha256": "c001964709375db19ce9c0b3dc5165a9e3b1da770ecfb5cac0203950c06c9b42"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/lazy-targets.ts",
+      "url": "/packages/db/src/query/compiler/lazy-targets.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/lazy-targets.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "6949ebfac1f0d76b64dc9a3c1cfee87490702a21de235c320fdd7aaa02b77587",
+      "codeSha256": "71240892e88808599265590b284d2cc1185ca0e8bab0802db9562197ddf4e607"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/parent-routes.ts",
+      "url": "/packages/db/src/query/compiler/parent-routes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/parent-routes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "d59e9d64534c53bb58349f07c121158adc9b37cac7a0b5150493e6368442c18b",
+      "codeSha256": "ac442b674d7a4903031f6ca424d9cfaee1e0e297ec036de9fae0c19d45831ff6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/query-equivalence.ts",
+      "url": "/packages/db/src/query/compiler/query-equivalence.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/query-equivalence.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts"
+      ],
+      "sourceSha256": "7171fa0f1aa960297ba1269193ed3527967d78ebf1c19ef03544604280aa4480",
+      "codeSha256": "ae174fde7bd4dc239c2644621e72111a2207c7d0689c3325b262e4daaa655389"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts",
+      "url": "/packages/db/src/query/ir-stable-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/query-ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "7d41ca1a6f044d087a6addca6fd4a891828c72d3bf2db079adb95979eedd9f66",
+      "codeSha256": "325bfd1ba971fe6f0479d29d712a42522c5b1e145cf75e256e352c201281ecaf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/select.ts",
+      "url": "/packages/db/src/query/compiler/select.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/select.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts"
+      ],
+      "sourceSha256": "a4b60959e37ea674bfac8f3cc4076c35facb9378891f72603c309e92c2882760",
+      "codeSha256": "0cc42400f71675f1b753f0b200701f3df49019a3bdf7b67fb4fb42163f92a76c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/public-key-reduction.ts",
+      "url": "/packages/db/src/query/live/public-key-reduction.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/public-key-reduction.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "6bba0de854b7ddd1417696409c28c92d94f65366ca4e3f26ceb6a46111ea7b83",
+      "codeSha256": "99de6a436595a8ae8229130d647f1bc9a2722f8b6a50d90aeb7754f7d4382942"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts",
+      "url": "/packages/db/src/query/live/collection-subscriber.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/ordered-source-loader.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts"
+      ],
+      "sourceSha256": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+      "codeSha256": "876bba5700b1c34d388616fe66ec676469ac5ee1ad7effa81cc8621e3669ba5c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/ordered-source-loader.ts",
+      "url": "/packages/db/src/query/live/ordered-source-loader.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/ordered-source-loader.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/cursor.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts"
+      ],
+      "sourceSha256": "188382f75335916bb37ca53c72b469bc345b588082ca310a8390f4dbdaa2a450",
+      "codeSha256": "976d6132a9f0700b0b2e1fe0f5d63b7a470d72cf56c3507220abba784ffc8b8c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/utils.ts",
+      "url": "/packages/db/src/query/live/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "00d2a0462ea2a997f50d104f641e9837cdf1341fc763116a0df773f6888f1646",
+      "codeSha256": "61904d2f74a5a42d195cf79971a3f2b4e19199aa6c889cec82938136a0093b77"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts",
+      "url": "/packages/db/src/query/live/subset-demand-controller.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts"
+      ],
+      "sourceSha256": "fc0ee1159e167a52fd2490fe4f5ba42d9253eafb002528b686caa96d32302dd2",
+      "codeSha256": "76c1578f5f0b0e8a64e58aa330c0f5b2bc6ec83ad53ad28d2165f651a9793377"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts",
+      "url": "/packages/db/src/query/live/graph-scheduler.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts"
+      ],
+      "sourceSha256": "bdd37b3814814a2bf32fa55422a2fb039107d04cbf4fbd79df67056c5bc4654b",
+      "codeSha256": "1d14a3d8ad6aab4a683449a8c06149b2fc215da878353d03cafde8afddab9eac"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer.ts",
+      "url": "/packages/db/src/live-query-observer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts"
+      ],
+      "sourceSha256": "96c4c5fad774ea2ab60e58f98f7886c25d3f1843eb10dfc339dc58983c17d5f4",
+      "codeSha256": "0317e35c3b21194d33a6795464c5c6d7f7c270b502d56ba4f3caa3ff605e47b3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer-client.ts",
+      "url": "/packages/db/src/live-query-observer-client.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer-client.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-source.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts"
+      ],
+      "sourceSha256": "dab8ffeca97ac0eb2a4f8663250d7d218f9ab782d6c4a438b654f3adbed90773",
+      "codeSha256": "13e41c44275708e49aed7a4314f1c25302915cce82e418f6de53606ea284778c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+      "url": "/packages/db/src/live-query-options.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "524541f5f2ea6852720f37cd78ddb31d62b8f83d8ea83293baf8a7f2e3048a41",
+      "codeSha256": "0d921d0b7839be964fd6f2c7168cd9f03c3e3be1aa67cecb3eef2942c2da49fe"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-source.ts",
+      "url": "/packages/db/src/query/pooled-source.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-source.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "777947447dc196cc34ad0b2be83c13ba4736997215816c228ff2a8abd172e53a",
+      "codeSha256": "85245b240e6b5f70f80e49662a2f58a5f9143d83ff4d8d5cbb82dee0ebd55a56"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/types.ts",
+      "url": "/packages/db/src/types.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/types.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "codeSha256": "de0513f34f6d316aca19526a5d19b859cd087bc8ad704991cb9d7c469c201d46"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/index.ts",
+      "url": "/packages/db/src/query/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-live-query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/group-keys.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/grouping.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/includes-runtime.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/include-functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/query-once.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/subset-dedupe.ts"
+      ],
+      "sourceSha256": "6e3e166f6570842b7e8da850040960815adc8d15684be5f35bb875854a2d37f2",
+      "codeSha256": "0e5d2bea88f5329f3d399f8775eca231252d85a953f77e72d8fc659e635dbd65"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-live-query.ts",
+      "url": "/packages/db/src/query/pooled-live-query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-live-query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/SortedMap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/cleanup-queue.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/equality-conjunct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/pooled-source.ts"
+      ],
+      "sourceSha256": "490a7efb3318cf7c089d71af1e6f64ab444416a8662831dc34505dfd050e132b",
+      "codeSha256": "83f438b193edfa2d8dcf461014e32753e474ac392d5e197f23f24a35d49b82d3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/group-keys.ts",
+      "url": "/packages/db/src/query/builder/group-keys.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/group-keys.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/grouping.ts"
+      ],
+      "sourceSha256": "333fc756bff61aea0e249e5ad75ddc0a5343410f1c02270b25ad673a48ea9403",
+      "codeSha256": "a3170fedda703a8087bea155f39585d5ed3dc56c59a581f14371b20af6223e8d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/includes-runtime.ts",
+      "url": "/packages/db/src/query/live/includes-runtime.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/includes-runtime.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/materialized-pipeline.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/bucket-facade-adapter.ts"
+      ],
+      "sourceSha256": "5be2395cff94fdb99a5712e021109eba16e79b74334fda5a68ffba76242c3c10",
+      "codeSha256": "129f451e72ae66390c473b4c60db5a4e724042c59a12282f3deccbb46ae21d8e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/materialized-pipeline.ts",
+      "url": "/packages/db/src/query/live/materialized-pipeline.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/materialized-pipeline.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/public-key-reduction.ts"
+      ],
+      "sourceSha256": "f5cf651fea9537e12ad71eb8aff44991e43513aa769016c95e5d38b304f1ea2a",
+      "codeSha256": "0e55ee42d1aba7c0ba6f2466b52388420ab2c95e8a04422654be6664a2d8ef0c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "url": "/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/get-or-create.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/materialized-pipeline.ts"
+      ],
+      "sourceSha256": "7aae32f2a4d5aad783fe84bfde78073bac0c526ea7a9615b3ce285360e43b6bc",
+      "codeSha256": "3af04a842c340cf407d0a615c1d0c443a803130adaa25f87a2b6ed70176e7fd6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/include-functions.ts",
+      "url": "/packages/db/src/query/builder/include-functions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/include-functions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/includes-runtime.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/functions.ts"
+      ],
+      "sourceSha256": "78612562bb571f37f95416eea52e1991a154ccfe13f42e50d4ffb921d4604786",
+      "codeSha256": "565b1a5511779c0c2497b3a96d90e9b165cc9a02b7c0b43007ccdae03ddfe938"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/query-once.ts",
+      "url": "/packages/db/src/query/query-once.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/query-once.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts"
+      ],
+      "sourceSha256": "1399a24809ce83173f0d952ab35620bc4430874cb96ab14229495fad3ef57478",
+      "codeSha256": "cc124407d7717c32abb001411fb8a088d7d6c5f3de8d88efd4ea9a008ce7016f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/subset-dedupe.ts",
+      "url": "/packages/db/src/query/subset-dedupe.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/subset-dedupe.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/ir-stable-identity.ts"
+      ],
+      "sourceSha256": "c535bb2a38db491d1c11024c88c71dc1664a59bae3c19f1f5bec35d37d5b99de",
+      "codeSha256": "33b8fc822d278bfdc5cf5bcde310f83877c74840f528a5c322906547e227cc49"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/optimistic-action.ts",
+      "url": "/packages/db/src/optimistic-action.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/optimistic-action.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/type-guards.ts"
+      ],
+      "sourceSha256": "3b3d98ec0561927c301c6979256bbcd98faf0ee41b2b6690abe1c189eeaf4fec",
+      "codeSha256": "8719040a0ee9b92bae42d762ab553da55ca2a51ba334793afeb99dccb52716af"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-adapter.ts",
+      "url": "/packages/db/src/live-query-adapter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-adapter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-binding.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-controller.ts"
+      ],
+      "sourceSha256": "d9cdb5d94192061ca0b1d61d288998b34ae34294226f5219213cb639a0bfc2d7",
+      "codeSha256": "0ca85f4348edc7ff310b514fea70329e6b057785836aa91ced8bab2131186b80"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-binding.ts",
+      "url": "/packages/db/src/live-query-window-binding.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-binding.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-controller.ts"
+      ],
+      "sourceSha256": "c291596aeeac20349b6aefa1526d4a2641f96e89eaae279af9704bac2cbe70c1",
+      "codeSha256": "917562ecc58da671aa71f87455c2c161ba6c429c582b539b77f99231d8143cff"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-controller.ts",
+      "url": "/packages/db/src/live-query-window-controller.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-window-controller.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "81fd80e363b9bfbd0c70837812089d0640d1d083c53d97be55661e3d134346e1",
+      "codeSha256": "b6b0b0d8509bc20502c3e0203228c7b53a4af673dbcdb93e863f382d33ca5b0b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-only.ts",
+      "url": "/packages/db/src/local-only.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-only.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts"
+      ],
+      "sourceSha256": "fea6e26a682a80031d32f045e0141064646a55f16a8e57957c8f25e6389e054e",
+      "codeSha256": "52c88e36a77c0e19b29b546fef60bc71f446720251e9238fc3f712a6e516b540"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-storage.ts",
+      "url": "/packages/db/src/local-storage.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/local-storage.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transaction-commit-work.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "5d1e1e3de35ad066981e4972204e903f8de1a5c98a35c2f207eace37fb30199e",
+      "codeSha256": "e986aecb64ea07a963f783d99f93b0c3ac0627a53d46b8c6dafc552a9c08902b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db.ts",
+      "url": "/packages/db/src/indexed-db.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db-wrapper.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "354a3e02c711e1db3ce1fb651d190aa45a58e238a42c5d9f9d6ee394d55ad95f",
+      "codeSha256": "d4f5879c24ebbe0d417e2ea7519fefa6de60a5ffc2d1fb511cfe9fa4f829a539"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db-wrapper.ts",
+      "url": "/packages/db/src/indexed-db-wrapper.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexed-db-wrapper.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "216fcac76c01b1af8363cda8a93678f53cd2cd58c9df918cd3d56d2a1f25fd11",
+      "codeSha256": "359b6d865bb80df1716ac4d729c3d58ed0224f1effee3ab9179da731db54fd0c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-persistence.ts",
+      "url": "/packages/db/src/sync-persistence.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/sync-persistence.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "7052e177e444acbe47b57dc5d5bf7f57aae339c7ef6b7308765ea56f81bd4251",
+      "codeSha256": "d52afb3d81b68f7f7aaecd2d7cc2be93701412e817a4e8beed474f6e47b0854f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/paced-mutations.ts",
+      "url": "/packages/db/src/paced-mutations.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/paced-mutations.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "064eccfb1101c6860d9b93d22c18d1538f2595728f215a24be3abf2cb8e205bc",
+      "codeSha256": "607bc747e48ad18b25a3a53253763c189f093050431c26c7b1640b8e79b2bb67"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/index.ts",
+      "url": "/packages/db/src/strategies/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/debounceStrategy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/queueStrategy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/throttleStrategy.ts"
+      ],
+      "sourceSha256": "89409b3e87ef0c9366d5fc045289330d204cc58b33b8a08fb27cf0e67332a9e4",
+      "codeSha256": "889911423defc807334df44fba49d173f6bfe9de09156da97dd72dccc7a66657"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/debounceStrategy.ts",
+      "url": "/packages/db/src/strategies/debounceStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/debounceStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/serial-pacer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "8ab894803575f1cfab85939adbf67637342bf2e230e34d0db9bb642f205cdce5",
+      "codeSha256": "5447335a3a79c223af83c58ee2a77580a77c6698d1fd4f7fd13bc62d53de3cd7"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/serial-pacer.ts",
+      "url": "/packages/db/src/strategies/serial-pacer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/serial-pacer.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "63f4aa8f7aacd4bbe5cc3d56173fdb9231fedea68bb721bb2d420cf2303ec679",
+      "codeSha256": "dde6998e4b966e716dde445fc09bf1aef81f235fcd23f5efef2f19669760a9a2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/commit-completion.ts",
+      "url": "/packages/db/src/strategies/commit-completion.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/commit-completion.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "96dc5b54ee70de38e2458800bafab3ebc2880afec7eb48e197831f55a331065e",
+      "codeSha256": "b5497f1e610b42363f17a22e9668e824271ec419778b982cf71a42a927f05e77"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/queueStrategy.ts",
+      "url": "/packages/db/src/strategies/queueStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/queueStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "a7a0df7331b92af04b2ee3391620eeee5a37ca0a9a9d1d146066f0c14c6cb6e0",
+      "codeSha256": "5cdd4150008f912e444ebaf21d83e72bfae82b690b03e4f1ff667eb366afcc70"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/throttleStrategy.ts",
+      "url": "/packages/db/src/strategies/throttleStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/throttleStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/serial-pacer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "028b5a000cc5a49a0176a42f0bb0c5cbb0a71849e543b523b080942947f40cb7",
+      "codeSha256": "cae7b17a10f0dd85754ba2ae08fdd699bfc7680b18d615f7aec7602baf3c75a0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/basic-index.ts",
+      "url": "/packages/db/src/indexes/basic-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/basic-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/array-utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts"
+      ],
+      "sourceSha256": "9a128909d6df2c6d5b9ef07295a55f9f587170721cb7c6a652dd9c43eb674633",
+      "codeSha256": "10e82db5ca3ba8332d8f8b72de9715dcc12ed0c2f27d6e2b782c2d747b49653c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/array-utils.ts",
+      "url": "/packages/db/src/utils/array-utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/array-utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "a151c6b1779cf975e85e53a7b2328865889738df1f0d0fc3b8a8e466d15911f2",
+      "codeSha256": "feb93d07c050df81cd9bf10215c21d0893500d396651df544125b97e627a8721"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/btree-index.ts",
+      "url": "/packages/db/src/indexes/btree-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/btree-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/array-utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/btree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/indexes/base-index.ts"
+      ],
+      "sourceSha256": "b006f65cf1c2ab14004e7311f4ac4b89958e919fb8439cd9ca25090789e37186",
+      "codeSha256": "b880ca6e844b22e05be10d2a5b2fc0232b4a9b04643565ea55a56139b2968ba0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/btree.ts",
+      "url": "/packages/db/src/utils/btree.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/btree.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e2172d757bfdaf3e528fe94864876fac9de24a66302ed1930d108daa1f525b1e",
+      "codeSha256": "a2a9069c001d808a0c0402590f98b85fa10a3a145f78ca5bb13a6098adc9554f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/expression-helpers.ts",
+      "url": "/packages/db/src/query/expression-helpers.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/expression-helpers.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "15d6635f8b28dafee0ca0afe2e8598545f09995a5b992798916d789167383019",
+      "codeSha256": "e9e0f0a39f617aec7dae7ba6427821a9f937af4e3442c1fbd3e9660bc045d9d9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/effect.ts",
+      "url": "/packages/db/src/query/effect.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/effect.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/ordered-source-loader.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/utils.ts"
+      ],
+      "sourceSha256": "38726e384d3e9c136aef5682649422187531f32f107360cc5b9c2fbc54ca22f4",
+      "codeSha256": "6b655e99f94fb2ab5e5cd627ab62b6522bc5771b9602845db6ccee0ca2f81af9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/reference-expression-oracle.ts",
+      "url": "/packages/db/tests/reference-expression-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/reference-expression-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/oracle-declaration.ts"
+      ],
+      "sourceSha256": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "codeSha256": "ab3d793fdd62831108fb122053e850f9b2d52d1dbf762c20f10a91f5e8a1770c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/oracle-declaration.ts",
+      "url": "/packages/db/tests/oracle-declaration.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/oracle-declaration.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "4dc22be210d46ce1d6590b911cf6bc077a78bfef1e54a98c637688b54830139c",
+      "codeSha256": "aa52dc6eede9dc2d596c8b70e84812fdfed7da57bdfe5a294eb628e56bc630f3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/witness-premise.ts",
+      "url": "/scripts/h02-progress/witness-premise.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/witness-premise.ts",
+      "evaluated": true,
+      "imports": [
+        "util"
+      ],
+      "sourceSha256": "28b1abc8d502b50f96ce4bb18bdeee47955a7bf5ed160b4f38c80e1f8fb1966f",
+      "codeSha256": "97920823a3261b6eb82eb75a16e2821c32dd98125f5487f4bb109fdf5ddabebb"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts",
+      "url": "/packages/query-db-collection/src/query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/manual-sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/cleanup.ts"
+      ],
+      "sourceSha256": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "codeSha256": "02ec71e6d78a76593ed04e8e92d5c7ca35a9a1cf5f86b6cf58f51a6852c59273"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/errors.ts",
+      "url": "/packages/query-db-collection/src/errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts"
+      ],
+      "sourceSha256": "328909ca6887c49d8451200b388fb28bf0fc6d62cbdf2377835e8f8d4566f910",
+      "codeSha256": "cd5cc1a6eb28f8c04ad053e2133b61d56e40e37adf1d1f96b22b3cb3cd103fb8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/manual-sync.ts",
+      "url": "/packages/query-db-collection/src/manual-sync.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/manual-sync.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/errors.ts"
+      ],
+      "sourceSha256": "46561af0d5a176a76f73425f329d1bdee5d94e6a731d2eacfe99041e853683dd",
+      "codeSha256": "cf277495c13079c3bcc98651b70ad13e40f677573b5ac366ac424fe50979c912"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/cleanup.ts",
+      "url": "/packages/query-db-collection/src/cleanup.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/cleanup.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9a64ecdd6411043129594c88f39378e63fa4bfa52b1e72ea23d0b912c9208df2",
+      "codeSha256": "9fbef14eb44fcf5a577c230f158b683ab9d663228d5e31b8b0f351226a912b8c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "util",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/oracle-declaration.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/query/load-subset-retained-publication-oracle.ts"
+      ],
+      "sourceSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed",
+      "codeSha256": "574ffd8fdccd44cb6366f1574e5d20d194cb9394aa606297018225cd55695df8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+      "url": "/packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/oracle-declaration.ts"
+      ],
+      "sourceSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+      "codeSha256": "b80bef39cbc570b363160a4dc62e73c4107befa17afeb6d53ad06a74b3540f27"
+    }
+  ]
+}

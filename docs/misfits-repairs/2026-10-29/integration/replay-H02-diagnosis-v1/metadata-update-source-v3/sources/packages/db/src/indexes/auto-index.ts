@@ -1,0 +1,156 @@
+import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { indexableOperations } from '../query/builder/functions.js'
+import { hasVirtualPropPath } from '../virtual-props'
+import { findIndexForField } from '../utils/index-optimization.js'
+import { codedWarning, devBuild } from '../error-message.js'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
+import type { CompareOptions } from '../query/builder/types'
+import type { BasicExpression } from '../query/ir'
+import type { CollectionImpl } from '../collection/index.js'
+import type { IndexReader } from './base-index.js'
+
+function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
+  // Only proceed if auto-indexing is enabled
+  // Note: autoIndex: 'eager' without defaultIndexType is caught at construction time
+  // in CollectionImpl, so we don't need to check for it here.
+  return collection.config.autoIndex === `eager`
+}
+
+export function ensureIndexForField<
+  T extends Record<string, any>,
+  TKey extends string | number,
+>(
+  fieldName: string,
+  fieldPath: Array<string>,
+  collection: CollectionImpl<T, TKey, any, any, any>,
+  compareOptions?: CompareOptions,
+  canUse?: (index: IndexReader<TKey>) => boolean,
+) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return
+  }
+  const autoIndex = shouldAutoIndex(collection)
+  if (!autoIndex && !isDevModeEnabled()) {
+    return
+  }
+
+  const compareOpts = compareOptions ?? {
+    ...DEFAULT_COMPARE_OPTIONS,
+    ...collection.compareOptions,
+  }
+
+  // Check if we already have an index for this field
+  const existingIndex = findIndexForField(
+    collection,
+    fieldPath,
+    compareOpts,
+    canUse,
+  )
+
+  if (existingIndex) {
+    return // Index already exists
+  }
+
+  if (!autoIndex) {
+    checkCollectionSizeForIndex(
+      collection.id || `unknown`,
+      collection.size,
+      fieldPath,
+    )
+    return
+  }
+
+  // Create a new index for this field using the collection's createIndex method
+  // The collection will use its defaultIndexType
+  try {
+    collection.createIndex(
+      (row) => {
+        // Navigate through the field path
+        let current: any = row
+        for (const part of fieldPath) {
+          current = current[part]
+        }
+        return current
+      },
+      {
+        name: `auto:${fieldPath.join(`.`)}`,
+        options: { compareOptions: compareOpts },
+      },
+    )
+  } catch (error) {
+    console.warn(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`
+        : codedWarning(215, { id: collection.id, value: fieldPath.join(`.`) }),
+      error,
+    )
+  }
+}
+
+/** Check indexable WHERE fields for eager indexes or development advice. */
+export function ensureIndexForExpression<
+  T extends Record<string, any>,
+  TKey extends string | number,
+>(
+  expression: BasicExpression,
+  collection: CollectionImpl<T, TKey, any, any, any>,
+): void {
+  if (!shouldAutoIndex(collection) && !isDevModeEnabled()) return
+
+  const indexableExpressions = extractIndexableExpressions(expression)
+
+  for (const { fieldName, fieldPath } of indexableExpressions) {
+    ensureIndexForField(fieldName, fieldPath, collection)
+  }
+}
+
+/**
+ * Extracts all indexable expressions from a where expression
+ */
+function extractIndexableExpressions(
+  expression: BasicExpression,
+): Array<{ fieldName: string; fieldPath: Array<string> }> {
+  const results: Array<{ fieldName: string; fieldPath: Array<string> }> = []
+
+  function extractFromExpression(expr: BasicExpression): void {
+    if (expr.type !== `func`) {
+      return
+    }
+
+    const func = expr as any
+
+    // Handle 'and' expressions by recursively processing all arguments
+    if (func.name === `and`) {
+      for (const arg of func.args) {
+        extractFromExpression(arg)
+      }
+      return
+    }
+
+    // Check if this is a supported operation
+    if (!indexableOperations.includes(func.name)) {
+      return
+    }
+
+    // Check if the first argument is a property reference
+    if (func.args.length < 1 || func.args[0].type !== `ref`) {
+      return
+    }
+
+    const fieldRef = func.args[0]
+    const fieldPath = fieldRef.path
+
+    // Skip if the path is empty
+    if (fieldPath.length === 0) {
+      return
+    }
+
+    // For nested paths, use the full path joined with underscores as the field name
+    // For simple paths, use the first (and only) element
+    const fieldName = fieldPath.join(`_`)
+    results.push({ fieldName, fieldPath })
+  }
+
+  extractFromExpression(expression)
+  return results
+}

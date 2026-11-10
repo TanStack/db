@@ -1,0 +1,27 @@
+{
+  "name": "E03-hardcap",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-hardcap.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "82b386baea70469fb17e5f6d45fabe710a815e6945b1746a579b531c2d808ab8",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": -9,
+  "termination": "event-cap",
+  "elapsedSeconds": 1.971,
+  "maximumGroupRssBytes": 608403456,
+  "rssSamples": 13,
+  "pgid": 97351
+}

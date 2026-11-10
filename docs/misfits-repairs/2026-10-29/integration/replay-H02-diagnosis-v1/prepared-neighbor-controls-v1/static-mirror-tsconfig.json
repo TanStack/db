@@ -1,0 +1,24 @@
+{
+  "extends": "../../packages/query-db-collection/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "baseUrl": "../..",
+    "paths": {
+      "@tanstack/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@tanstack/db-ivm": [
+        "packages/db-ivm/src/index.ts"
+      ],
+      "@standard-schema/spec": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@standard-schema+spec@1.1.0/node_modules/@standard-schema/spec/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../packages/query-db-collection/tests/queued-answer-progress*.ts",
+    "./*.ts",
+    "../../packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts"
+  ]
+}

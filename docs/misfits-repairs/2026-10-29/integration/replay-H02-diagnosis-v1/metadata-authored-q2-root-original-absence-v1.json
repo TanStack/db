@@ -1,0 +1,137 @@
+{
+  "allOriginalRecordedIdentitiesObservedAbsent": true,
+  "atMonotonicNs": 232400030172458,
+  "finishedMonotonicNs": 232400143783291,
+  "groupPsArgv": [
+    "/bin/ps",
+    "-axo",
+    "pid=,pgid=,args="
+  ],
+  "groupPsError": null,
+  "groupPsReturncode": 0,
+  "groupPsStderr": "",
+  "kind": "Actual original recorded identity absence observations",
+  "limits": "Point-in-time observations of original recorded numeric identities only. No initial receiving-parent/outer PPID/PGID or detached actual getpgid receipt exists. Bound detached-spawn target assumption remains. Permission failure, timeout or live/reused identity is not absence and causes no kill/retry.",
+  "originalPids": [
+    71010,
+    71040,
+    71052,
+    71056
+  ],
+  "originalTargetGroups": [
+    71010,
+    71052
+  ],
+  "probes": [
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "71010"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-pid",
+      "target": 71010
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "71040"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-pid",
+      "target": 71040
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "71052"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-pid",
+      "target": 71052
+    },
+    {
+      "actualPs": {
+        "argv": [
+          "/bin/ps",
+          "-o",
+          "pid=,pgid=,args=",
+          "-p",
+          "71056"
+        ],
+        "returncode": 1,
+        "stderr": "",
+        "stdout": ""
+      },
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-pid",
+      "target": 71056
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-target-group",
+      "target": 71010
+    },
+    {
+      "actualPsGroupRows": [],
+      "actualSignalZero": {
+        "errno": 3,
+        "message": "[Errno 3] No such process",
+        "result": "absent",
+        "signal": 0
+      },
+      "kind": "original-target-group",
+      "target": 71052
+    }
+  ]
+}

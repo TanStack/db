@@ -1,0 +1,242 @@
+{
+  "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+  "fullFirstReadOnlyPreflight": {
+    "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+    "cell": "scope-default",
+    "displayName": "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+    "filterName": "queued-answer metadata receiving checks metadata 'scope' 'default'",
+    "identity": {
+      "capturedUniverse": {
+        "actualOriginalOuterExitCode": 1,
+        "capturedJsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+        "displayQualification": {
+          "count": 4,
+          "jsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+          "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+          "names": [
+            "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+            "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+            "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+            "queued-answer metadata receiving > checks metadata 'subscription' 'authored'"
+          ],
+          "stderrEmpty": true
+        },
+        "filterSelectionCredit": false,
+        "originalChildExitCode": 0,
+        "originalStopPreserved": true,
+        "status": "Existing captured bytes qualify under corrected DISPLAY schema only; no rerun",
+        "stopFreezeSha256": "1c47fe8e1526411ac238b86d91ba844aea5ec9237af39b64a55886a08e0872d8"
+      },
+      "namedPackagePayloadFiles": 2544,
+      "recipesSha256": "8d72b7b9458f7a4c92634eac46fa3a8c6af09fc9e22031c253bc62e86b44c704",
+      "sourceFiles": 573,
+      "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a"
+    },
+    "nativeLaunches": 0,
+    "nativeProcessProbes": 0,
+    "nextCandidate": true,
+    "requiredReachStates": [
+      "initial-root",
+      "initial-downstream",
+      "nonempty-prior",
+      "reload-started",
+      "positive-held-provider-read",
+      "held-root",
+      "held-downstream",
+      "completed-enqueue",
+      "answer-executed",
+      "callback-root",
+      "callback-downstream",
+      "selected-upstream-metadata",
+      "messages-root",
+      "messages-downstream",
+      "final-root",
+      "final-downstream",
+      "worker-cleaned"
+    ],
+    "selectorResultSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+    "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+    "staticOnly": false,
+    "status": "PRELAUNCH CHECK ONLY; no receiving or admission credit"
+  },
+  "invalidInputsRejected": [
+    "receiving binding changed",
+    "expected one exact cell"
+  ],
+  "limits": "Read/hash identities and declared recipes only. No native shared-checker compilation, receiving reach, semantic GREEN, mutant kill, or new runtime admission.",
+  "manifestMemberBytes": 73805,
+  "manifestMemberCount": 14,
+  "manifestSha256": "cdf230bea8dfe642572b5d42b7f9daa726efc710b554386792a61a0a527ce2fc",
+  "nativeLaunches": 0,
+  "nativeProcessApisGuarded": true,
+  "nativeProcessProbes": 0,
+  "preservedRecipes": [
+    {
+      "argvHistoryBudgetsUnchanged": true,
+      "cell": "scope-default",
+      "requiredReachCount": 17
+    },
+    {
+      "argvHistoryBudgetsUnchanged": true,
+      "cell": "scope-authored",
+      "requiredReachCount": 17
+    },
+    {
+      "argvHistoryBudgetsUnchanged": true,
+      "cell": "subscription-default",
+      "requiredReachCount": 18
+    },
+    {
+      "argvHistoryBudgetsUnchanged": true,
+      "cell": "subscription-authored",
+      "requiredReachCount": 18
+    }
+  ],
+  "receivingOrTestRuns": 0,
+  "runtimeAdmitted": false,
+  "staticPreflights": [
+    {
+      "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+      "cell": "scope-default",
+      "displayName": "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+      "filterName": "queued-answer metadata receiving checks metadata 'scope' 'default'",
+      "identity": {
+        "status": "static reference checks only; full runtime input gate not run"
+      },
+      "nativeLaunches": 0,
+      "nativeProcessProbes": 0,
+      "nextCandidate": true,
+      "requiredReachStates": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "positive-held-provider-read",
+        "held-root",
+        "held-downstream",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "messages-root",
+        "messages-downstream",
+        "final-root",
+        "final-downstream",
+        "worker-cleaned"
+      ],
+      "selectorResultSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+      "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+      "staticOnly": true,
+      "status": "PRELAUNCH CHECK ONLY; no receiving or admission credit"
+    },
+    {
+      "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+      "cell": "scope-authored",
+      "displayName": "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+      "filterName": "queued-answer metadata receiving checks metadata 'scope' 'authored'",
+      "identity": {
+        "status": "static reference checks only; full runtime input gate not run"
+      },
+      "nativeLaunches": 0,
+      "nativeProcessProbes": 0,
+      "nextCandidate": false,
+      "requiredReachStates": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "positive-held-provider-read",
+        "held-root",
+        "held-downstream",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "messages-root",
+        "messages-downstream",
+        "final-root",
+        "final-downstream",
+        "worker-cleaned"
+      ],
+      "selectorResultSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+      "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+      "staticOnly": true,
+      "status": "PRELAUNCH CHECK ONLY; no receiving or admission credit"
+    },
+    {
+      "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+      "cell": "subscription-default",
+      "displayName": "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+      "filterName": "queued-answer metadata receiving checks metadata 'subscription' 'default'",
+      "identity": {
+        "status": "static reference checks only; full runtime input gate not run"
+      },
+      "nativeLaunches": 0,
+      "nativeProcessProbes": 0,
+      "nextCandidate": false,
+      "requiredReachStates": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "positive-held-provider-read",
+        "held-root",
+        "held-downstream",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "messages-root",
+        "messages-downstream",
+        "final-root",
+        "final-downstream",
+        "worker-cleaned",
+        "conflicting-cache-premise"
+      ],
+      "selectorResultSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+      "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+      "staticOnly": true,
+      "status": "PRELAUNCH CHECK ONLY; no receiving or admission credit"
+    },
+    {
+      "bindingSha256": "919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4",
+      "cell": "subscription-authored",
+      "displayName": "queued-answer metadata receiving > checks metadata 'subscription' 'authored'",
+      "filterName": "queued-answer metadata receiving checks metadata 'subscription' 'authored'",
+      "identity": {
+        "status": "static reference checks only; full runtime input gate not run"
+      },
+      "nativeLaunches": 0,
+      "nativeProcessProbes": 0,
+      "nextCandidate": false,
+      "requiredReachStates": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "positive-held-provider-read",
+        "held-root",
+        "held-downstream",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "messages-root",
+        "messages-downstream",
+        "final-root",
+        "final-downstream",
+        "worker-cleaned",
+        "conflicting-cache-premise"
+      ],
+      "selectorResultSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+      "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+      "staticOnly": true,
+      "status": "PRELAUNCH CHECK ONLY; no receiving or admission credit"
+    }
+  ],
+  "status": "PASS: independent source/hash/read-only preflight only"
+}

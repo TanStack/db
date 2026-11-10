@@ -1,0 +1,193 @@
+{
+  "at": "2026-10-30T09:02:43.696680+00:00",
+  "kind": "static-json-input-validation",
+  "cells": [
+    {
+      "id": "inline-park-root",
+      "programSha256": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+      "recipeSha256": "b16ec72cabaa230e20dfa530a0922c735a9186a7ac880eb86fa50c8ead48ca96",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-park-root.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-held-window",
+      "programSha256": "a4f1a52748536423af49b5f9c346128c64c95ea88f8fa9bbdaff384224aeca14",
+      "recipeSha256": "e0d6ad17e19667f1db82cae99cb7748a77f130ef3c02e17cf9236e25425029dc",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-held-window.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-source-failed-peer",
+      "programSha256": "c5eef9f5c5bdce78790002f0a753684c6dfb3e42fb4b68f0b0b7d5fcbd07e9e7",
+      "recipeSha256": "7512af117fe46d94252044c8f42e508e37332081b211c0b74d7bca8819de04b3",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-subscriber-tail",
+      "programSha256": "914ddf88432ac3c18a0f9621575ffe0b883151aeff0cc745a509f041451d385e",
+      "recipeSha256": "579f0f0571ebaf00964d3f3db031a1ae8ee60505eb95390c9537ad58faf923e9",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-subscriber-tail.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-initial-status-tail",
+      "programSha256": "bdb40ead30c4433ef5c6041e2a132eb9970f93d02bb907eb0dee35d9da18c00f",
+      "recipeSha256": "f20fff3af9d297a4e63acc8e5cf69f478a381b6ccd887f4451ceab5249e5ec33",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-initial-status-tail.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-graph-failure",
+      "programSha256": "2494ffa940f123db9db1619705dc26c24b97264866d11d72b674c4e91e00bcac",
+      "recipeSha256": "16758413dd319780db69d204c71c7559ef43aee5928350204f822b53561cab1b",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-graph-failure.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "inline-cleanup-abandonment",
+      "programSha256": "8eb47f148c9ffc526aa737a26ea2d5ddc8ccec6b8aa0f7c9bf93da25e568aa6a",
+      "recipeSha256": "d4092d07699e2c1f631c34135118e1545e16c9146fa4a8c4acd89f822d3608b9",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-cleanup-abandonment.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-park-root",
+      "programSha256": "bb078ea74a5cd7c21fea9678107b6f21e71a3e4b1e2dba9dcdddacd0fee027e7",
+      "recipeSha256": "289e7fb13e8b214889453393ad8599e3cc2c1a4e482e413c230681591ef35ad3",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-park-root.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-park-facade",
+      "programSha256": "c87cc051e46ede58682e267a6b65469772d214a91b7a5c5bde3535787180cd2b",
+      "recipeSha256": "fc9f19ad0052e9902063688132a958bfa6760e980ae2cb188eb51dd10366b809",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-park-facade.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-facade-rollback",
+      "programSha256": "d449a1e50a72403b35a17e3183660ecb3c66b79483df70f840c4fae94c5feb6c",
+      "recipeSha256": "b8148f93d4f55aacdf212f79e0400bf2fb3fce54009db1cde2e917850afec11a",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-facade-rollback.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-held-window",
+      "programSha256": "2f966572ebe037d8fc07d1cf226adc8d4b577e726edfdd06dfedc165d13e2cea",
+      "recipeSha256": "da5d17449dfcc693fe974669d9bacbadd20bacb774c67fe41380bb55175a636d",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-held-window.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-source-failed-peer",
+      "programSha256": "e5e9dc72d8f81e4f75511760d19835743ba2e32721c1b91097c90d5cb0e0b585",
+      "recipeSha256": "6eb266065ebc5642608c91bcb9b16fd25da9e18ce010b754b0740a8f721ff9cd",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-source-failed-peer.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-subscriber-tail",
+      "programSha256": "16fc514809d5e797f0ff07333bea236a5c83fa8abe6ee235499c0f86c5462009",
+      "recipeSha256": "2a110441330c1bcdf3d62702c7ae248c9d570d453f96d79872466a9ba0d1f2b6",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-subscriber-tail.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-initial-status-tail",
+      "programSha256": "7282b5c22a9e0262ebe92fe344604a095f56f2feb74688bbe2c371473f432be8",
+      "recipeSha256": "8878890ae0030e9c6f2210b523f49ad13d207e9b97767ae42c4f8e6e7263b616",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-initial-status-tail.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-graph-failure",
+      "programSha256": "2b51496fc62c28598847ee835e10aae53f7e38a97ca6ba73143b22e9dabcbbf4",
+      "recipeSha256": "b59ee27f9311b2cdf6b8292a0e45b39458a0b7c8ee95d4a7a1b7f1cfd78946f0",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-graph-failure.json"
+      ],
+      "sourceOnlyValidated": true
+    },
+    {
+      "id": "facade-cleanup-abandonment",
+      "programSha256": "2e746277de5a64e56a923a1d9a29c9102f5fb3b718d356c8a6062cef989d7ecd",
+      "recipeSha256": "e86258e9abaae511b2707b4f5ceb7bdbe9a41356d2339ee4c034e0844431e47f",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/facade-cleanup-abandonment.json"
+      ],
+      "sourceOnlyValidated": true
+    }
+  ],
+  "programs": 16,
+  "recipes": 16,
+  "possibleFixtureConstructions": 18,
+  "noRuntimeOutputDirectoryCreated": true,
+  "receivingOrLauncherModuleImported": false,
+  "semanticActionsExecuted": 0,
+  "modelHistoriesExecuted": 0,
+  "fcSamples": 0,
+  "testCollection": 0,
+  "receiving": 0,
+  "runtimeMutants": 0
+}

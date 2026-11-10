@@ -1,0 +1,11 @@
+{
+  "closeout-v1.json": "4926b0cb2366512afeeeb9d3af9ab1c707e4d999791fcf4bf3db9bcf0b782f87",
+  "historical-input-resolution-postassembly-v1.json": "ab93a37ef2a7ca943dda9e4c62cd58648d786f0f8d621b4a2c56c4a998c4886f",
+  "lint-tool-returns-v1.json": "7a4a19192f3024f0b5e3b198a5c9cbce33c790e5a8b726b632f2e5c02021ce15",
+  "misfits-lint-git-buffer-v1.mjs.txt": "0e6be6b0012f0b08188ef40da2c15f76d45c98c45efe2d3d25c5e1399d4b04c3",
+  "postassembly-identity-v1.json": "8d7be8388ac87b40bca2694e8999f7974daf99bb36e3b693b9563efd67f8c3bf",
+  "report-lint-buffer-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "report-lint-v1.log": "b53414438b700000e8825756dc494bd7a81ce15750576cfabb48720ef655ca2b",
+  "report-v1.md": "92f3ad048946089480d13e0233a25680c25b3dd38d9bf7879667c3fecdc50b90",
+  "source-lint-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

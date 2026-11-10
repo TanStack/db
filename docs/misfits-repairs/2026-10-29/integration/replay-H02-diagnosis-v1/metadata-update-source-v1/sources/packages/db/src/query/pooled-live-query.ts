@@ -1,0 +1,897 @@
+import { SortedMap } from '../SortedMap.js'
+import { codedMessage, devBuild } from '../error-message.js'
+import { CleanupQueue } from '../collection/cleanup-queue.js'
+import {
+  UNSUBSCRIBED_GC_FLOOR_MS,
+  describeProblem,
+  problemOf,
+} from '../collection/lifecycle.js'
+import { buildHealthTree, healthNode } from '../collection/health-tree.js'
+import { makeComparator } from '../utils/comparison.js'
+import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
+import { isVirtualPropName } from '../virtual-props.js'
+import { getWhereExpression } from './ir.js'
+import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
+import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
+import { buildCompareOptions } from './compiler/order-by.js'
+import { createLiveQueryCollection } from './live-query-collection.js'
+import { registerPooledSource } from './pooled-source.js'
+import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
+import type { BaseQueryBuilder } from './builder/index.js'
+import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { CollectionSubscription } from '../collection/subscription.js'
+import type {
+  ChangeMessage,
+  CollectionDependent,
+  CollectionStatus,
+  HealthNode,
+  HealthProblem,
+} from '../types.js'
+import type {
+  CollectionEventHandler,
+  CollectionStatusChangeEvent,
+} from '../collection/events.js'
+
+/**
+ * Live queries that filter one source Collection only by `eq(field, literal)`
+ * share one partition of that source per filtered field set. Each query reads
+ * the group for its literal tuple, so mounting many queries of one shape
+ * costs a lookup each instead of a compiled graph and a source subscription.
+ *
+ * A group holds the rows the partition's source subscription has published,
+ * keyed by the same normalized equality that `eq` uses: a Date equals its
+ * timestamp, `NaN` equals `NaN`, `-0` equals `0`, and nullish values match no
+ * literal.
+ */
+
+type Row = Record<string, unknown>
+type Listener = (changes: Array<ChangeMessage<Row, string | number>>) => void
+type StatusListener = CollectionEventHandler<`status:change`>
+
+interface PartitionGroup {
+  key: string
+  // Key order, as in a live-query Collection without orderBy.
+  rows: SortedMap<string | number, Row>
+  listeners: Set<Listener>
+  revision: number
+  layoutRevision: number
+}
+
+const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
+
+// What a view reads for a value with no rows and no watchers. Real groups
+// draw revisions from their partition's clock, which starts above 0.
+const EMPTY_GROUP: PartitionGroup = {
+  key: ``,
+  rows: new SortedMap(),
+  listeners: new Set(),
+  revision: 0,
+  layoutRevision: 0,
+}
+
+// Length-prefixed, so no two part lists share an encoding.
+function appendGroupKeyPart(groupKey: string, part: string): string {
+  return `${groupKey}${part.length}:${part}`
+}
+
+class Partition {
+  private readonly groups = new Map<string, PartitionGroup>()
+  // Revisions for every group, so a recreated group never repeats one.
+  private clock = 0
+  private subscription: CollectionSubscription | undefined
+  private stopStatusEvents: (() => void) | undefined
+  // One source status listener serves every view of this partition.
+  readonly statusListeners = new Set<StatusListener>()
+  private listenerCount = 0
+  // Views built on this partition and not yet cleaned up.
+  private views = 0
+  private gcTime = 0
+  /**
+   * Set when the partition ends for good: `crashed` when its source starts
+   * cleanup under it (groups keep their last rows), `cleaned-up` when the
+   * source's cleanup ends its dependents first (groups empty, as a cleaned-up
+   * live-query Collection's rows do).
+   */
+  terminated: `crashed` | `cleaned-up` | undefined = undefined
+  // This partition as its source's `subscribers` list it: one pooled live
+  // query for every view it serves.
+  private readonly dependent: CollectionDependent = ((partition) => ({
+    kind: `live-query` as const,
+    get active(): boolean {
+      return partition.listenerCount > 0
+    },
+    end: () => {
+      partition.end()
+      return Promise.resolve()
+    },
+  }))(this)
+
+  constructor(
+    private readonly source: CollectionImpl<any, any, any, any, any>,
+    private readonly paths: Array<Array<string>>,
+    // Row order for an `orderBy` shape; key order otherwise.
+    private readonly compareRows: ((a: Row, b: Row) => number) | undefined,
+    // The partition's entry in its source's map, which a mount looks up.
+    private readonly registry: { add: () => void; remove: () => void },
+  ) {}
+
+  groupKeyOf(row: Row | undefined): string | undefined {
+    if (row === undefined) return undefined
+    let groupKey = ``
+    for (const path of this.paths) {
+      const key = equalityKey(readPath(row, path))
+      if (key === undefined) return undefined
+      groupKey = appendGroupKeyPart(groupKey, key)
+    }
+    return groupKey
+  }
+
+  // Whether two versions of a row hold the same value in every field.
+  private sameFields(a: Row, b: Row): boolean {
+    return this.paths.every((path) =>
+      Object.is(readPath(a, path), readPath(b, path)),
+    )
+  }
+
+  group(key: string): PartitionGroup {
+    let group = this.groups.get(key)
+    if (!group) {
+      const revision = ++this.clock
+      group = {
+        key,
+        rows: new SortedMap(this.compareRows),
+        listeners: new Set(),
+        revision,
+        layoutRevision: revision,
+      }
+      this.groups.set(key, group)
+    }
+    return group
+  }
+
+  /** A group for reading, without creating one. */
+  peek(key: string): PartitionGroup {
+    return this.groups.get(key) ?? EMPTY_GROUP
+  }
+
+  // A group with no rows and no watchers holds nothing anyone can read.
+  private dropIfUnused(group: PartitionGroup): void {
+    if (group.rows.size === 0 && group.listeners.size === 0) {
+      this.groups.delete(group.key)
+    }
+  }
+
+  /**
+   * Keep the shared source subscription open. Each view brings its query's
+   * `gcTime`; the partition keeps the longest, so it never releases before
+   * one of its views' own live-query Collection would have.
+   */
+  retain(gcTime?: number): void {
+    this.views++
+    if (gcTime !== undefined) {
+      // As for a Collection, a non-positive or non-finite gcTime disables GC.
+      const delay = gcTime > 0 && Number.isFinite(gcTime) ? gcTime : Infinity
+      this.gcTime = Math.max(this.gcTime, delay)
+    }
+    if (this.terminated) return
+    // Building a view reads the rows the source already holds; it starts no
+    // provider work until a view has a subscriber or a preload.
+    this.subscribe(true)
+    // Like a Collection that synced before anything subscribed, a view built
+    // during a render gets a grace period to subscribe when it commits.
+    this.scheduleRelease(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  subscribe(deferAcquisition = false): void {
+    if (!deferAcquisition) this.subscription?.resumeDeferredAcquisition()
+    if (!this.terminated && !this.subscription) {
+      // A released partition that subscribes again serves new mounts too.
+      this.registry.add()
+      const stopStatus = this.source.on(`status:change`, (event) => {
+        this.deliverStatus(event)
+      })
+      this.stopStatusEvents = stopStatus
+      // Like a live query, a pooled view crashes when its source starts
+      // cleanup, before the adapter's cleanup settles; queries mounted later
+      // get a new partition.
+      // A cleanup already under way ends the partition inside this
+      // registration, so a listener's throw fails the caller's attachment.
+      let registering = true
+      const stopCleanupStart = this.source._onCleanupStart(() =>
+        this.end(`crashed`, registering),
+      )
+      registering = false
+      // Late registration can terminate before either release handle exists.
+      if (this.terminated as Partition[`terminated`]) {
+        stopCleanupStart()
+        return
+      }
+      this.stopStatusEvents = () => {
+        stopStatus()
+        stopCleanupStart()
+      }
+      try {
+        const subscription = this.source.subscribeChanges(
+          (changes) =>
+            this.apply(changes as Array<ChangeMessage<Row, string | number>>),
+          {
+            includeInitialState: true,
+            deferAcquisition,
+            owner: this.dependent,
+          },
+        )
+        // Cleanup can re-enter while source sync starts, before assignment.
+        if (this.terminated as Partition[`terminated`])
+          subscription.unsubscribe()
+        else this.subscription = subscription
+      } catch (error) {
+        // Failed admission transfers no ownership; the partition is over.
+        this.terminate(`crashed`)
+        throw error
+      }
+    }
+  }
+
+  private terminate(status: `crashed` | `cleaned-up`): void {
+    this.terminated = status
+    CleanupQueue.getInstance().cancel(this)
+    this.release()
+  }
+
+  /** End the partition for good and tell its views. */
+  private end(
+    status: `crashed` | `cleaned-up` = `cleaned-up`,
+    rethrow = false,
+  ): void {
+    if (this.terminated) return
+    const previousStatus = this.source.status
+    this.terminate(status)
+    if (status === `cleaned-up`) {
+      // Emptying is a state change, as a live-query Collection's cleanup
+      // advances its revision, so a detached reader re-reads the rows.
+      for (const group of this.groups.values()) {
+        group.rows.clear()
+        group.revision = group.layoutRevision = ++this.clock
+      }
+    }
+    this.deliverStatus(
+      {
+        type: `status:change`,
+        collection: this.source as unknown as Collection,
+        previousStatus,
+        status,
+      },
+      rethrow,
+    )
+  }
+
+  private deliverStatus(
+    event: CollectionStatusChangeEvent,
+    rethrow = false,
+  ): void {
+    const delivered = this.terminated
+      ? { ...event, status: this.terminated }
+      : event
+    // Each listener gets its own call. During a source event, as from a
+    // Collection's emitter, a throw is reported uncaught; during the
+    // caller's own registration it is rethrown after every call. `release()`
+    // already stopped source events for a terminated partition.
+    const calls = [...this.statusListeners].map(
+      (listener) => () => listener(delivered),
+    )
+    if (rethrow) runAllCallbacks(calls)
+    else
+      for (const call of calls)
+        try {
+          call()
+        } catch (error) {
+          reportUncaught(error)
+        }
+  }
+
+  addListener(group: PartitionGroup, listener: Listener): void {
+    this.subscribe()
+    group.listeners.add(listener)
+    this.listenerCount++
+  }
+
+  removeListener(group: PartitionGroup, listener: Listener): void {
+    if (!group.listeners.delete(listener)) return
+    this.listenerCount--
+    this.dropIfUnused(group)
+    this.scheduleRelease(0)
+  }
+
+  private release(): void {
+    this.stopStatusEvents?.()
+    this.stopStatusEvents = undefined
+    this.subscription?.unsubscribe()
+    this.subscription = undefined
+    this.registry.remove()
+  }
+
+  // Releases on the Collections' shared GC queue, after the longest
+  // `gcTime` of this partition's views.
+  private scheduleRelease(minDelay: number): void {
+    if (this.listenerCount > 0 || !Number.isFinite(this.gcTime)) return
+    const delay = Math.max(this.gcTime, minDelay)
+    CleanupQueue.getInstance().schedule(this, delay, this.releaseIfUnused)
+  }
+
+  /**
+   * One view was cleaned up. The last one releases the source subscription
+   * now if no view listens, as cleaning up a live-query Collection releases
+   * its source subscriptions at once; a sibling view keeps its rows and its
+   * own grace period. A later mount subscribes again.
+   */
+  releaseView(): void {
+    if (--this.views > 0) return
+    CleanupQueue.getInstance().cancel(this)
+    this.releaseIfUnused()
+  }
+
+  private readonly releaseIfUnused = (): void => {
+    if (this.listenerCount > 0) return
+    // Views read groups by key, so a later subscription refills new ones.
+    this.groups.clear()
+    this.release()
+  }
+
+  private apply(changes: Array<ChangeMessage<Row, string | number>>): void {
+    const touched = new Map<
+      PartitionGroup,
+      Array<ChangeMessage<Row, string | number>>
+    >()
+    const record = (
+      group: PartitionGroup,
+      change: ChangeMessage<Row, string | number>,
+    ) => {
+      const list = touched.get(group)
+      if (list) list.push(change)
+      else touched.set(group, [change])
+      if (change.type !== `update`) group.layoutRevision = ++this.clock
+    }
+    for (const change of changes) {
+      const next =
+        change.type === `delete` ? undefined : this.groupKeyOf(change.value)
+      const previous =
+        change.type === `insert`
+          ? undefined
+          : change.type === `update` &&
+              change.previousValue !== undefined &&
+              this.sameFields(change.value, change.previousValue)
+            ? next
+            : this.groupKeyOf(
+                change.type === `delete` ? change.value : change.previousValue,
+              )
+      if (previous !== undefined && previous !== next) {
+        const group = this.group(previous)
+        const old = group.rows.get(change.key)
+        if (group.rows.delete(change.key)) {
+          record(group, { type: `delete`, key: change.key, value: old! })
+        }
+      }
+      if (next !== undefined) {
+        const group = this.group(next)
+        const existed = group.rows.has(change.key)
+        group.rows.set(change.key, change.value)
+        record(
+          group,
+          existed
+            ? change.type === `update`
+              ? change
+              : { ...change, type: `update` }
+            : { type: `insert`, key: change.key, value: change.value },
+        )
+      }
+    }
+    for (const [group, groupChanges] of touched) {
+      group.revision = ++this.clock
+      for (const listener of [...group.listeners]) listener(groupChanges)
+      this.dropIfUnused(group)
+    }
+  }
+}
+
+type Conjunct = { path: Array<string>; pathKey: string; literalKey: string }
+
+type PoolableShape = {
+  paths: Array<Array<string>>
+  shapeKey: string
+  groupKey: string
+  // Conjuncts each view evaluates over its group's rows.
+  residual: Array<BasicExpression>
+  orderBy: OrderBy | undefined
+}
+
+// Whether an expression reads only this query's own row fields, so a view
+// can evaluate it with the compiler's evaluator.
+function readsOnlyRow(expression: BasicExpression, alias: string): boolean {
+  if (expression.type === `val`) return true
+  if (expression.type === `ref`) {
+    const [root, field] = expression.path
+    return root === alias && field !== undefined && !isVirtualPropName(field)
+  }
+  return expression.args.every((arg) => readsOnlyRow(arg, alias))
+}
+
+// Splits a conjunct into `eq(alias.field, literal)` groups and residual
+// conjuncts; false for an expression a view cannot evaluate.
+function collectConjuncts(
+  expression: BasicExpression,
+  alias: string,
+  out: Array<Conjunct>,
+  residual: Array<BasicExpression>,
+): boolean {
+  if (expression.type === `func` && expression.name === `and`) {
+    for (const arg of expression.args) {
+      if (!collectConjuncts(arg, alias, out, residual)) return false
+    }
+    return true
+  }
+  const conjunct = equalityConjunctOf(expression, alias)
+  if (conjunct) out.push(conjunct)
+  else if (readsOnlyRow(expression, alias)) residual.push(expression)
+  else return false
+  return true
+}
+
+function equalityConjunctOf(
+  expression: BasicExpression,
+  alias: string,
+): Conjunct | undefined {
+  const conjunct = equalityConjunct(expression, (ref) =>
+    ref.path[0] === alias ? ref.path.slice(1) : undefined,
+  )
+  return conjunct && { ...conjunct, pathKey: JSON.stringify(conjunct.path) }
+}
+
+// Whether a row passes every residual conjunct, as a WHERE filter decides.
+function rowPredicate(
+  residual: Array<BasicExpression>,
+  alias: string,
+): (row: Row) => boolean {
+  const conjuncts = residual.map((expression) => compileExpression(expression))
+  // One namespaced row, reused so a check allocates nothing.
+  const namespaced: Record<string, unknown> = {}
+  return (row) => {
+    namespaced[alias] = row
+    return conjuncts.every((conjunct) =>
+      toBooleanPredicate(conjunct(namespaced as any)),
+    )
+  }
+}
+
+/**
+ * The equality conjuncts of a query that a partition can serve, or undefined
+ * when any other clause or operand is present.
+ */
+function poolableShape(query: QueryIR): PoolableShape | undefined {
+  if (
+    query.from.type !== `collectionRef` ||
+    query.select ||
+    query.join ||
+    query.groupBy ||
+    query.having ||
+    query.limit !== undefined ||
+    query.offset !== undefined ||
+    query.distinct ||
+    query.singleResult ||
+    query.fnSelect ||
+    query.fnWhere?.length ||
+    query.fnHaving?.length ||
+    !query.where?.length
+  ) {
+    return undefined
+  }
+  const conjuncts: Array<Conjunct> = []
+  const residual: Array<BasicExpression> = []
+  for (const where of query.where) {
+    if (
+      !collectConjuncts(
+        getWhereExpression(where),
+        query.from.alias,
+        conjuncts,
+        residual,
+      )
+    ) {
+      return undefined
+    }
+  }
+  // A partition needs at least one equality to group by.
+  if (conjuncts.length === 0) return undefined
+  const orderBy = query.orderBy?.length ? query.orderBy : undefined
+  const orderKey = orderBy
+    ? orderByKey(orderBy, query.from.alias, query.from.collection)
+    : ``
+  if (orderKey === undefined) return undefined
+  // Most shapes have one or two fields; a general sort costs more than both.
+  if (conjuncts.length === 2) {
+    if (conjuncts[1]!.pathKey < conjuncts[0]!.pathKey) conjuncts.reverse()
+  } else if (conjuncts.length > 2) {
+    conjuncts.sort((a, b) => (a.pathKey < b.pathKey ? -1 : 1))
+  }
+  const paths: Array<Array<string>> = []
+  let shapeKey = ``
+  let groupKey = ``
+  for (const { path, pathKey, literalKey } of conjuncts) {
+    paths.push(path)
+    // Each JSON path delimits itself, so concatenation stays unambiguous.
+    shapeKey += pathKey
+    groupKey = appendGroupKeyPart(groupKey, literalKey)
+  }
+  // Groups of one shape share a row order, so the order is part of it.
+  if (orderKey) shapeKey += `|${orderKey}`
+  return { paths, shapeKey, groupKey, residual, orderBy }
+}
+
+// A key for an `orderBy` over this query's own row fields, or undefined for
+// one a partition cannot share by value, such as a custom string comparator.
+function orderByKey(
+  orderBy: OrderBy,
+  alias: string,
+  source: CollectionImpl<any, any, any, any, any>,
+): string | undefined {
+  let key = ``
+  for (const clause of orderBy) {
+    const { expression } = clause
+    if (
+      expression.type !== `ref` ||
+      !readsOnlyRow(expression, alias) ||
+      expression.path.length < 2
+    ) {
+      return undefined
+    }
+    const options = buildCompareOptions(clause, source)
+    if (options.stringSort === `custom`) return undefined
+    key += JSON.stringify([expression.path.slice(1), options])
+  }
+  return key
+}
+
+// Orders rows as a live-query Collection's `orderBy` does; the group's
+// SortedMap breaks ties by key.
+function rowComparator(
+  orderBy: OrderBy,
+  alias: string,
+  source: CollectionImpl<any, any, any, any, any>,
+): (a: Row, b: Row) => number {
+  const terms = orderBy.map((clause) => ({
+    read: compileExpression(clause.expression),
+    compare: makeComparator(buildCompareOptions(clause, source)),
+  }))
+  // One namespaced row, reused so a comparison allocates nothing.
+  const namespaced: Record<string, unknown> = {}
+  return (a, b) => {
+    for (const { read, compare } of terms) {
+      namespaced[alias] = a
+      const left = read(namespaced as any)
+      namespaced[alias] = b
+      const result = compare(left, read(namespaced as any))
+      if (result !== 0) return result
+    }
+    return 0
+  }
+}
+
+/**
+ * One query's view of its group, read by the live-query observer. Users get
+ * `publicCollection` instead, which builds the query's live-query Collection
+ * on first use and forwards every member to it.
+ */
+class PooledLiveQuery {
+  readonly isLoadingSubset = false
+  // No persisted readiness, single-result config, or layout channel.
+  readonly config = undefined
+  readonly _subscribeLayoutChanges = undefined
+  private collection: Collection<any, any, any> | undefined = undefined
+  private listenerCount = 0
+  // This view's share of its partition ends once, at its first cleanup.
+  private released = false
+  private collectionHold: { unsubscribe: () => void } | undefined = undefined
+
+  constructor(
+    readonly source: CollectionImpl<any, any, any, any, any>,
+    private readonly query: BaseQueryBuilder,
+    private readonly partition: Partition,
+    private readonly groupKey: string,
+    private readonly gcTime: number,
+    // The query's conjuncts beyond its group's equalities, if any.
+    private readonly passes: ((row: Row) => boolean) | undefined,
+    private readonly alias: string,
+  ) {
+    partition.retain(gcTime)
+    registerPooledSource(this, source)
+  }
+
+  // Cleanup discards a view's state, as it does any Collection's (law 14).
+  get status(): CollectionStatus {
+    return this.released
+      ? `cleaned-up`
+      : (this.partition.terminated ?? this.source.status)
+  }
+
+  private endedProblem: HealthProblem | undefined
+
+  /** The same health tree a live-query Collection over this source exposes. */
+  get health(): HealthNode {
+    // Cache keys apart from the alias, which a query may name `root`.
+    const source = buildHealthTree(
+      this.source,
+      { alias: this.alias, id: `source` },
+      this,
+    )
+    // The view shows its source's status error. A terminated partition also
+    // ended this view, for example when its source was cleaned up under it.
+    const error =
+      this.source._lifecycle.statusProblem ??
+      (this.partition.terminated === `crashed`
+        ? (this.endedProblem ??= problemOf([
+            describeProblem(
+              new Error(
+                devBuild() && process.env.NODE_ENV !== `production`
+                  ? `The pooled live query's source ended`
+                  : codedMessage(258),
+              ),
+            ),
+          ]))
+        : null)
+    return healthNode(this, `view`, {
+      alias: `root`,
+      collectionId: this.source.id,
+      kind: `live-query`,
+      status: this.status,
+      failureReason: null,
+      error,
+      reloading: false,
+      sources: [source],
+    })
+  }
+
+  // Read by key: the partition drops a group nobody watches once it empties.
+  private get group(): PartitionGroup {
+    return this.partition.peek(this.groupKey)
+  }
+
+  // A cleaned-up view's revisions never match a group's, which start at 0,
+  // so a reader that cached its rows reads them again.
+  get _stateRevision(): number {
+    return this.released ? -1 : this.group.revision
+  }
+
+  get _layoutRevision(): number {
+    return this.released ? -1 : this.group.layoutRevision
+  }
+
+  entries(): Iterable<[string | number, Row]> {
+    if (this.released) return []
+    const rows = this.group.rows.entries()
+    const passes = this.passes
+    return passes ? [...rows].filter(([, row]) => passes(row)) : rows
+  }
+
+  subscribeChanges(
+    callback: Listener,
+    options: { includeInitialState?: boolean } = {},
+  ): { unsubscribe: () => void } {
+    // A released partition refills its group here, so seed the filter after.
+    this.partition.subscribe()
+    const listener = this.passes ? this.filterChanges(callback) : callback
+    const group = this.partition.group(this.groupKey)
+    this.partition.addListener(group, listener)
+    this.listenerCount++
+    let subscribed = true
+    const unsubscribe = () => {
+      if (!subscribed) return
+      subscribed = false
+      this.partition.removeListener(group, listener)
+      if (--this.listenerCount === 0) {
+        this.collectionHold?.unsubscribe()
+        this.collectionHold = undefined
+      }
+    }
+    try {
+      this.holdCollection()
+      if (options.includeInitialState) {
+        callback(
+          Array.from(this.entries(), ([key, value]) => ({
+            type: `insert`,
+            key,
+            value,
+          })),
+        )
+      }
+    } catch (error) {
+      // A failed bootstrap returned no handle; retire its listener now.
+      unsubscribe()
+      throw error
+    }
+    return { unsubscribe }
+  }
+
+  // While the view is observed, its built Collection stays subscribed, as
+  // the Collection would be if it served the observer itself.
+  private holdCollection(): void {
+    if (this.collection && this.listenerCount > 0) {
+      this.collectionHold ??= this.collection.subscribeChanges(() => {})
+    }
+  }
+
+  // Turns the group's changes into this query's, tracking which rows have
+  // passed its residual conjuncts for this subscription.
+  private filterChanges(callback: Listener): Listener {
+    const passes = this.passes!
+    const visible = new Map(this.entries())
+    return (changes) => {
+      const out: Array<ChangeMessage<Row, string | number>> = []
+      for (const change of changes) {
+        const { key, value } = change
+        const previous = visible.get(key)
+        const next = change.type !== `delete` && passes(value)
+        if (next) visible.set(key, value)
+        else visible.delete(key)
+        if (previous && next) {
+          out.push({ type: `update`, key, value, previousValue: previous })
+        } else if (previous) {
+          out.push({ type: `delete`, key, value: previous })
+        } else if (next) {
+          out.push({ type: `insert`, key, value })
+        }
+      }
+      if (out.length > 0) callback(out)
+    }
+  }
+
+  on(...args: Parameters<CollectionImpl[`on`]>): () => void {
+    const [event, listener] = args
+    // A partition that ended stops following its source, as a cleaned-up or
+    // crashed live-query Collection does: its views announce no later change.
+    if (event === `health:change`)
+      return this.source.on(event, (change) => {
+        if (!this.partition.terminated) listener(change as never)
+      })
+    if (event !== `status:change`) return this.source.on(...args)
+    const listeners = this.partition.statusListeners
+    listeners.add(listener as StatusListener)
+    return () => listeners.delete(listener as StatusListener)
+  }
+
+  preload(): Promise<void> {
+    return this.source.preload()
+  }
+
+  cleanup(options?: { dependents?: boolean }): Promise<void> {
+    const cleanup = this.collection?.cleanup(options) ?? Promise.resolve()
+    // A cleanup that a live query reading the built Collection refuses
+    // changes nothing (law 14): the view keeps its share of the partition.
+    if (
+      !this.released &&
+      (this.collection?._lifecycle.hasStartedCleanup() ?? true)
+    ) {
+      this.released = true
+      this.partition.releaseView()
+    }
+    return cleanup
+  }
+
+  private proxy: Collection<any, any, any> | undefined = undefined
+
+  /** This view as the Collection it stands in for. */
+  get publicCollection(): Collection<any, any, any> {
+    return (this.proxy ??= new Proxy(
+      this,
+      forwardToCollection,
+    ) as unknown as Collection<any, any, any>)
+  }
+
+  materialize(): Collection<any, any, any> {
+    if (!this.collection) {
+      this.collection = createLiveQueryCollection({
+        query: this.query,
+        startSync: true,
+        gcTime: this.gcTime,
+      })
+      this.holdCollection()
+    }
+    return this.collection
+  }
+}
+
+// The observer reads the view itself; users get the live-query Collection.
+const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
+  get(view, property) {
+    const collection = view.materialize()
+    const value = Reflect.get(collection, property, collection)
+    return typeof value === `function` ? value.bind(collection) : value
+  },
+  has(view, property) {
+    return Reflect.has(view.materialize(), property)
+  },
+  // So `instanceof` and query sources accept it as the Collection it is.
+  getPrototypeOf(view) {
+    return Reflect.getPrototypeOf(view.materialize())
+  },
+}
+
+/**
+ * The identity of a query a partition can serve with no residual conjunct:
+ * its source and its `eq` fields and literals, which determine its rows.
+ * Undefined for any other query, which keeps the full structural identity.
+ */
+export function getPooledQueryIdentity(
+  query: BaseQueryBuilder,
+): string | undefined {
+  const ir = query._getQuery()
+  if (ir.from.type !== `collectionRef`) return undefined
+  const shape = poolableShape(ir)
+  if (!shape || shape.residual.length > 0) return undefined
+  return JSON.stringify([ir.from.collection.id, shape.shapeKey, shape.groupKey])
+}
+
+/**
+ * A pooled view for a query a partition can serve, or undefined. The view is
+ * typed as the Collection it stands in for.
+ */
+export function createPooledLiveQuery(
+  query: BaseQueryBuilder,
+  // A live-query Collection's default when the adapter gives none.
+  { gcTime = 5_000 }: { gcTime?: number } = {},
+): Collection<any, any, any> | undefined {
+  const ir = query._getQuery()
+  const shape = poolableShape(ir)
+  if (!shape || ir.from.type !== `collectionRef`) return undefined
+  const source = ir.from.collection
+  // On-demand loading needs the live-query Collection.
+  if (source.config.syncMode === `on-demand`) return undefined
+  let partitions = partitionsBySource.get(source)
+  if (!partitions) {
+    partitions = new Map()
+    partitionsBySource.set(source, partitions)
+  }
+  const { shapeKey } = shape
+  let partition = partitions.get(shapeKey)
+  if (!partition) {
+    const owner = partitions
+    // A released partition may subscribe again; it must not then replace or
+    // remove a newer partition created under its key.
+    const created: Partition = new Partition(
+      source,
+      shape.paths,
+      shape.orderBy && rowComparator(shape.orderBy, ir.from.alias, source),
+      {
+        add: () => {
+          if (!owner.has(shapeKey)) owner.set(shapeKey, created)
+        },
+        remove: () => {
+          if (owner.get(shapeKey) === created) owner.delete(shapeKey)
+        },
+      },
+    )
+    partition = created
+    partitions.set(shapeKey, partition)
+  }
+  // Observers read the view directly; users get its `publicCollection`.
+  return new PooledLiveQuery(
+    source,
+    query,
+    partition,
+    shape.groupKey,
+    gcTime,
+    shape.residual.length > 0
+      ? rowPredicate(shape.residual, ir.from.alias)
+      : undefined,
+    ir.from.alias,
+  ) as unknown as Collection<any, any, any>
+}
+
+/**
+ * Pooled live queries for framework hooks. Pass it as `pool` in a hook's
+ * query config to serve equality-filtered queries of one shape from a shared
+ * partition. Apps that do not pass it do not bundle pooling.
+ */
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
+
+export type PooledLiveQueries = typeof pooledLiveQueries

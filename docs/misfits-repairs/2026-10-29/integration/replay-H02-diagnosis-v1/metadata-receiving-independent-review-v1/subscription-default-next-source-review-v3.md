@@ -1,0 +1,25 @@
+# Subscription/default: next exact source verdict
+
+Verdict: **acceptable for a separate root one-shot admission after root accepts the scope/authored result**. This is source review only; it grants no runtime and no subscription reach. This path requires a measured conflict and has a different result gate from the two scope controls.
+
+The unchanged V3 manifest is `cdf230bea8dfe642572b5d42b7f9daa726efc710b554386792a61a0a527ce2fc`; all 14 member sizes and hashes were rechecked here. Binding remains `919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4`. The reread exact subscription/default launcher has SHA256 `a9c936ef84281465f29f6c3b4d655cb7f3e25e7d0d6e42f4470c2c61dde55630`.
+
+The exact space-joined filter is `^queued-answer metadata receiving checks metadata 'subscription' 'default'$`. The separately hash-checked accepted singleton `03-subscription-default.json`, SHA256 `7493d6ed62d528981508c1cbd38cac6d06dcccac2d83e73194ed742ea59d27c6`, contains exactly the intended test module and display name `queued-answer metadata receiving > checks metadata 'subscription' 'default'`. Prior native list evidence supplies selection calibration only. Runtime pass/fail/skipped evidence remains to be obtained for this cell. Immutable original `nextCandidate=false` is staging metadata, not an admission.
+
+This recipe changes cacheIdentity to **subscription** and retains default keys, query mode, microtask delivery, included ordered window, nonempty prior, keyShift 0 and rankScale 10. Normal finite GREEN requires all **18** states: the 17 snapshot/answer/callback/message/final/cleanup states plus the actual **conflicting-cache-premise**. The existing monitor validates the source-bound driver's measured physical Queries, cached pivot row, later empty sibling answer, distinct physical/cache identities and owner scopes. It checks an actual resolving enqueue after that premise and validates matching atom/key/versions and enqueue return; no inferred conflict from a test name or cache label is sufficient.
+
+The unchanged supervisor/judgments, one worker, disabled file parallelism, exclusive output, input preflight, native checker/source-binding and raw evidence gates remain. Budgets remain 384 MiB outer/child heap, 20 s child, 1 GiB sampled receiving-group RSS, 100 ms sampling, 1,000 ms post-enqueue observation, 20 s/384 MiB verifier and the 60 s **test-body** timeout. No new guardian, yield, graph cap or semantic classifier is added.
+
+This path is eligible for the previously accepted **bounded queued-progress RED** only if actual raw evidence shows the validated conflict, exactly completed resolving enqueue, first watchdog trigger `post-enqueue-window` with wall reason, and no resolving answer execution after complete final receipt drain. Sources must be bound; resource/OOM, setup, provenance, observation/recording, primary comparison and cleanup errors must be absent; the named original identities must be audited. The broad wall/premise diagnostic alone is insufficient. The observation window is instrument containment, not a product time promise.
+
+A valid progress RED supplies **no metadata-mutant kill or terminal metadata GREEN**. Answer execution, root/downstream callbacks, selected upstream metadata, aggregate messages, final snapshots and worker cleanup remain **UNREACHED wherever not actually observed and successfully compared**. Forced process cleanup does not substitute for adapter cleanup. Conversely, a normal metadata GREEN needs all 18 actual reached states and unchanged comparisons; scope successes cannot supply them. Missing premise, ordinary timeout, resource or instrument failure preserves evidence and stops classification.
+
+If root accepts the authored result and chooses this next cell, its minimum separate admission is exactly `metadata-subscription-default-receiving-v3` in the same receiving worktree:
+
+```sh
+exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-admission-preparation-v3/launcher-subscription-default.zsh 919b931558b6d270ba343c4ead5cb6ffbd1c87612760f29518719e141e2672d4
+```
+
+The fixed exclusive output is `/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-runtime-v3/subscription-default`. Reverify frozen inputs through the exact launcher, retain actual outer/native/supervisor/raw receipt/writer/diagnostic/binding evidence and stop after one invocation for root and independent actual-result review. On rejection/setup failure, preserve the first cause and do not bypass, retry, replace a process probe, or run the authored subscription cell.
+
+Separate outer and detached child target cleanup observations remain required. Preserve the established limitation: the supervisor targets its detached childPid group but does not separately persist an initial actual PGID. Exact parent compiled-byte attestation and escaped-descendant census also remain unclaimed. No following runtime or source modification is authorized by this source verdict.

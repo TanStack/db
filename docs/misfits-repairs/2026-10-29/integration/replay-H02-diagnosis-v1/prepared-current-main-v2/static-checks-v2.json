@@ -1,0 +1,59 @@
+{
+  "status": "STATIC CHECKS + PURE CALIBRATIONS ONLY",
+  "typescript": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=384 node_modules/typescript/bin/tsc -p scripts/h02-progress/tsconfig.json --pretty false",
+    "log": "typescript-successor-final-v2.log"
+  },
+  "eslint": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/eslint.config.mjs scripts/h02-progress/*.ts scripts/h02-progress/*.mjs packages/query-db-collection/tests/queued-answer-progress*.ts packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "log": "eslint-complete-final-v2.log",
+    "initialFailure": "eslint-v2.log has two import-order errors, repaired; eslint-final-v2.log and final successor log pass; no rule disabled"
+  },
+  "oracleLint": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+    "log": "lint-changed-complete-final-v2.log"
+  },
+  "verifierCalibration": {
+    "exitCode": 0,
+    "passed": 12,
+    "failed": 0,
+    "command": "env -u NODE_OPTIONS -u NODE_PATH /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 --test scripts/h02-progress/bindings-calibration.test.mjs",
+    "log": "verifier-calibration-v2.log"
+  },
+  "checkerCalibration": {
+    "exitCode": 0,
+    "passed": 8,
+    "failed": 0,
+    "command": "env -u NODE_OPTIONS -u NODE_PATH -u H02_PROGRESS_BINDING_DIR -u H02_PROGRESS_WORKER_HISTORY -u H02_PROGRESS_SELECTED_ROOT /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 node_modules/vitest/vitest.mjs run --config scripts/h02-progress/calibration.config.ts scripts/h02-progress/checker-calibration.test.ts --reporter=verbose",
+    "log": "checker-calibration-final-v2.log",
+    "earlierRun": {
+      "passed": 7,
+      "log": "checker-calibration-v2.log",
+      "reasonForSuccessor": "new duplicate-update sensitivity check before final source freeze"
+    }
+  },
+  "productionEdits": 0,
+  "receiverRuns": 0,
+  "generatedHistories": 0,
+  "oracleProgressRuns": 0,
+  "runtimeBuilds": 0,
+  "preserved": {
+    "productionFiles": 511,
+    "sharedFiles": 11,
+    "materialPackages": 7,
+    "exactRetainedHelperSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c"
+  },
+  "resourceLimitsUnchanged": {
+    "nodeHeapMiB": 384,
+    "sampledGroupRssBytes": 1073741824,
+    "wallMs": 20000
+  },
+  "calibrationCleanup": "Both test command sessions exited 0; verifier child commands were synchronous and all test processes exited; authored temporary fixture directories removed by finally. No receiving group existed.",
+  "launcherSyntax": {
+    "exitCode": 0,
+    "command": "/bin/zsh -n launcher-v2.zsh"
+  }
+}

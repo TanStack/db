@@ -1,0 +1,22 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'
+H02 inert native selection {
+  name: 'literal true initial cut',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'"
+}
+
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication'
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut' 1ms
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  00:31:50
+   Duration  127ms (transform 13ms, setup 0ms, import 20ms, tests 1ms, environment 0ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-3.report.json

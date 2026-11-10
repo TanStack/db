@@ -1,0 +1,337 @@
+{
+  "kind": "Append-only claim dispositions and independent finding ledger",
+  "initialInventorySha256": "d4337bbd378aeb9bfafe4bacdaf776ab890ecb336f36a78fa0e2f9458fc8c575",
+  "claimsAccounted": 58,
+  "claims": [
+    {
+      "id": "PROPOSAL-01",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-02",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-03",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-04",
+      "sourceVerdict": "supported by unchanged accepted historical qualification",
+      "evidenceNote": "Actual root classification and original trace pins match; no new receiving or absence observation performed."
+    },
+    {
+      "id": "PROPOSAL-05",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-06",
+      "sourceVerdict": "coherent unexecuted prediction",
+      "evidenceNote": "Source supports intended sequence185 root metadata rejection, but native result and exact assertion classification remain unmeasured."
+    },
+    {
+      "id": "PROPOSAL-07",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-08",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-09",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "PROPOSAL-10",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-01",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-02",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-03",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-04",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-05",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-06",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-07",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-08",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-09",
+      "sourceVerdict": "supported by unchanged accepted historical qualification",
+      "evidenceNote": "Actual root classification and original trace pins match; no new receiving or absence observation performed."
+    },
+    {
+      "id": "source-only-checks.json-10",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "source-only-checks.json-11",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-01",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-02",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-03",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-04",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-05",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-06",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-07",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-author-diagnostic.json-08",
+      "sourceVerdict": "preserved historical author diagnostic",
+      "evidenceNote": "Recorded passive preparation failure is preserved as evidence input. This review does not rerun it."
+    },
+    {
+      "id": "preparation-freeze.json-01",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-02",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-03",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-04",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-05",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-06",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-07",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-08",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "preparation-freeze.json-09",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-01",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-02",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-03",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-04",
+      "sourceVerdict": "confirmed-open",
+      "evidenceNote": "OMIT-SOURCE-F01: add outer -S in successor."
+    },
+    {
+      "id": "next-invocation.json-05",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-06",
+      "sourceVerdict": "coherent unexecuted prediction",
+      "evidenceNote": "Source supports intended sequence185 root metadata rejection, but native result and exact assertion classification remain unmeasured."
+    },
+    {
+      "id": "next-invocation.json-07",
+      "sourceVerdict": "coherent unexecuted prediction",
+      "evidenceNote": "Source supports intended sequence185 root metadata rejection, but native result and exact assertion classification remain unmeasured."
+    },
+    {
+      "id": "next-invocation.json-08",
+      "sourceVerdict": "coherent unexecuted prediction",
+      "evidenceNote": "Source supports intended sequence185 root metadata rejection, but native result and exact assertion classification remain unmeasured."
+    },
+    {
+      "id": "next-invocation.json-09",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-10",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-11",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-12",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-13",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-14",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-15",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-16",
+      "sourceVerdict": "confirmed-open",
+      "evidenceNote": "OMIT-SOURCE-F02: actual require_escalated mode required by root."
+    },
+    {
+      "id": "next-invocation.json-17",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-18",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-19",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    },
+    {
+      "id": "next-invocation.json-20",
+      "sourceVerdict": "source-supported within stated bounds",
+      "evidenceNote": "Exact text retained in the immutable initial inventory; independent hash/JSON/string/order review supplies no runtime credit."
+    }
+  ],
+  "findings": [
+    {
+      "id": "OMIT-SOURCE-F01",
+      "severity": "P1 for exact admission",
+      "challengedClaim": "The exact proposed launcher first verifies inputs before materializing or executing subject work.",
+      "source": "next-invocation.json cmd / launch-calibration.py.txt startup imports",
+      "technicalVerdict": "confirmed from source; Python -I does not disable system site startup, which precedes the launcher guards",
+      "disposition": "confirmed-open",
+      "action": "Author one minimal immutable successor with outer -I -S -B and matching invocation flags/pins. Root re-reviews and separately admits the exact command.",
+      "law": "Execution provenance must begin at the admitted guarded entry point. This is an operational precondition, not a product law revision.",
+      "authority": "Root continuation requiring suppressed site startup for this launcher; Python -S startup semantics.",
+      "smallestWitness": "Current exact argv contains -I -B and omits -S. No runtime witness was executed.",
+      "durableValue": "Keep interpreter startup outside unbound site customization. No Python or process census required.",
+      "owner": "/root/evaluate_metadata_external; exact admission by /root",
+      "runtimeEvidence": "none",
+      "testGap": "Before-guard startup is outside the current launcher checks; fix the exact outer invocation, not the metadata oracle."
+    },
+    {
+      "id": "OMIT-SOURCE-F02",
+      "severity": "P1 for exact admission",
+      "challengedClaim": "The exact next invocation is suitable for the current root dispatch requirement.",
+      "source": "next-invocation.json sandbox_permissions",
+      "technicalVerdict": "Current proposal records use_default; the root continuation requires actual require_escalated dispatch.",
+      "disposition": "confirmed-open",
+      "action": "Record require_escalated in the successor and use it on the actual exec_command call; keep native argv unchanged apart from the separately required -S.",
+      "law": "Admission/tool metadata must agree with the explicit root dispatch condition. No product behavior changes.",
+      "authority": "Explicit root continuation supplied to this review.",
+      "smallestWitness": "sandbox_permissions is use_default in the frozen proposal.",
+      "durableValue": "A textual admission record cannot substitute for the actual tool call permission mode.",
+      "owner": "/root/evaluate_metadata_external; actual dispatch by /root",
+      "runtimeEvidence": "none",
+      "testGap": "Metadata mismatch, not an oracle comparison gap."
+    }
+  ],
+  "findingDispositionTotals": {
+    "confirmed-open": 2
+  },
+  "rawOriginalFindingCount": 0,
+  "note": "The raw input is a self-authored proposal, not an external review with finding IDs. Its 58 factual/proposed claims remain lossless and separate from the two independent source findings.",
+  "repairAuthority": "Review only; author/root own subject changes. No deferral or closure assertion."
+}

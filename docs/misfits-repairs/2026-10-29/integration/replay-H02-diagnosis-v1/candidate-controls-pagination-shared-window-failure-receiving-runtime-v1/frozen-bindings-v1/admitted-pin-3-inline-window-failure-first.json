@@ -1,0 +1,30 @@
+{
+  "kind": "h02-completion-baseline-constituent",
+  "mode": "baseline-constituent",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-parent.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "-t",
+    "checks a selected baseline constituent through the shared judgment"
+  ],
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+  "sourceFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+  "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/programs/inline-window-failure-first.json",
+  "programSha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+  "gate": "source-failed-peer",
+  "profile": "inline",
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1/inline-window-failure-first",
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "bindingProfile": "completion-baseline-v1"
+}

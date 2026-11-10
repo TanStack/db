@@ -1,0 +1,8 @@
+{
+  "source": "root agent message for source-only setup-repair task",
+  "pgid": 59927,
+  "method": "approved ps",
+  "membersRemaining": 0,
+  "authorExecutedThisCheck": false,
+  "receivingGroupsInV3": 0
+}

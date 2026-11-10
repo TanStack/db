@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-30T06:22:28.629201+00:00",
+  "admittedBy": "/root",
+  "admittedRuntime": true,
+  "slot": 2,
+  "maxInvocations": 1,
+  "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/ownership-recipe-v2.json",
+  "recipeSha256": "59062a2ac0abf4554378120c62eded391f8d06369d3d684d71388c701a452201",
+  "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+  "packetSha256": "189e8351e30c258348f9aefd20ea983ae339b04b572cc6e02519927dae70c133",
+  "independentSourceReviewSha256": "8de8cef1f20fedf65541867f7e9d90090224ef7cf39e823d451287097681bfe8",
+  "independentVerificationSha256": "6fbc8e562e3690a858d4fd870d148f3792560f463ac9563b58726054cc1f6a20",
+  "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-ownership-v2.zsh",
+  "launcherSha256": "e08093ed03f0798c564c87f54f4ec752ac85fe01397d0479a077ca38efd4da6a",
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v2",
+  "finiteHistories": 42,
+  "workerCount": 1,
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "conditionalGate": "Invoke exact frozen ownership launcher once. Preserve full parent/child logs and42 per-history results/reaches,6fresh/no-refetch36stale/refetch, setup/import/cleanup diagnostics, source identities and all original-group captures. Exit0 alone gives no verdict. Timeout/heap/RSS/observation/identity/setup/cleanup failure is operational only. Stop after this command for root classification and independent PID/PGID absence audit. No retry, five progress launchers, candidate activation, source/production/model/grammar/budget edits, install, commit, push, PR or publication."
+}

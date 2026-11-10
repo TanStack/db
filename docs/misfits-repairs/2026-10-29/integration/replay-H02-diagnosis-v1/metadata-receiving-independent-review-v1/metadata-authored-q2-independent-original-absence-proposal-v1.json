@@ -1,0 +1,42 @@
+{
+  "kind": "Minimum independently source-reviewed original-identity absence proposal",
+  "disposition": "Eligible for ROOT separate one-shot decision; no probes admitted by this artifact.",
+  "subjectActualCaptureManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/capture-manifest.json",
+    "sha256": "9522fa338cd148a0353553bf0964202d527c56f76a4c7e2c0ddd9265966fe4e4"
+  },
+  "originalProposal": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/proposed-original-absence.json",
+    "sha256": "c5ab1883f6047a022bca5903048ff45a345b2e81bd54d3c8b0e216686f42bcb9"
+  },
+  "script": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/proposed-original-absence.py",
+    "sha256": "8f6682920c60c0ed8cf5ddf052f02216eb0896b0bd35c36aab8b553bf4042491"
+  },
+  "executable": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+  "executableSha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+  "argv": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/proposed-original-absence.py",
+    "--root-admitted-one-shot"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "requestedToolPermission": "require_escalated",
+  "maxInvocations": 1,
+  "originalPids": [
+    71010,
+    71040,
+    71052,
+    71056
+  ],
+  "originalTargetGroups": [
+    71010,
+    71052
+  ],
+  "exclusiveOutput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-root-original-absence-v1.json",
+  "allowedEffects": "At most5 read-only ps subprocesses, each timeout5s; exactly6 signal-zero observations on these original targets; one exclusive additive result. No nonzero signal, retry, replacement target or product execution.",
+  "qualification": "Point-in-time original numeric identities only; EPERM, timeout, presence/reuse or ambiguity gives no absence credit. Missing initial live PPID/PGID/getpgid stays missing. Root classifies actual output separately.",
+  "after": "Stop on any outcome; no other action admitted.",
+  "processProbesExecuted": false,
+  "runtimeAdmission": false,
+  "rootOwnsLint": true
+}

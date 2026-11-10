@@ -1,0 +1,22 @@
+{
+  "kind": "Root bounded acceptance of U/V inert source preparation",
+  "review": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-operational-source-independent-review-v1.md",
+    "sha256": "6c362213c58a9d79f0b2bcf83b2aae46a60567e49449830c8d989906668e65da"
+  },
+  "UManifestSha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0",
+  "VManifestSha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5",
+  "accepted": "Qualified diagnostic comment and explicit copy/control geometry only",
+  "next": "Prepare exact copy-only materializer/tool invocation for source review; no operation admitted",
+  "remaining": [
+    "Physical copy verification",
+    "Separately selected compiler containment and actual compiler evidence",
+    "Real failure then success receiving witnesses",
+    "Generated enforcement and hostile mutants"
+  ],
+  "sinkFaultLimit": "Direct diagnostic errors are suppressed best effort; unchanged sink/cleanup can mask saved terminal error. No unconditional fault fidelity.",
+  "productionRepair": false,
+  "runtimeAdmission": false,
+  "productRedGreenCredit": false,
+  "canonicalImport": false
+}

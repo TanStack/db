@@ -1,0 +1,166 @@
+{
+  "status": "FROZEN; one admitted canonical run completed; no retry or source edits",
+  "outerExitCode": 1,
+  "originalSupervisorOutcome": {
+    "reason": "exited",
+    "exitCode": 1,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "history": {
+          "kind": "query",
+          "scheduler": "microtask",
+          "cacheIdentity": "subscription",
+          "includes": true,
+          "window": true,
+          "nonemptyPrior": false,
+          "keyShift": 0,
+          "rankScale": 10
+        },
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+        "execPath": "/Users/kyle.mathews/.n/bin/node"
+      },
+      {
+        "h02": true,
+        "sequence": 4,
+        "phase": "source-establishing-receipt",
+        "literalTrue": true
+      },
+      {
+        "h02": true,
+        "sequence": 8,
+        "phase": "source-stack",
+        "cut": "initial-acquisition",
+        "stack": "Error: H02 current initial acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:420:16)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/joins.ts:524:41)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.schedule (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:66:7)\n    at scheduleQueryGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts:23:30)\n    at CollectionConfigBuilder.scheduleGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:935:5)\n    at CollectionConfigBuilder.syncFn (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1022:12)\n    at CollectionSyncManager.enterSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:284:26)\n    at CollectionSyncManager.startSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:219:31)\n    at CollectionChangesManager.startSyncIfStopped (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:446:17)\n    at CollectionChangesManager.startSyncForSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:425:10)\n    at CollectionChangesManager.addSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:464:14)\n    at CollectionChangesManager.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:325:10)\n    at CollectionImpl.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts:1246:26)\n    at driveQueuedAnswerHistory (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:485:29)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts:21:11\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      },
+      {
+        "h02": true,
+        "sequence": 140,
+        "phase": "public-change",
+        "changes": [],
+        "rows": []
+      },
+      {
+        "h02": true,
+        "sequence": 141,
+        "phase": "initial-publication",
+        "rows": [],
+        "ready": true
+      },
+      {
+        "h02": true,
+        "sequence": 142,
+        "phase": "reload-start",
+        "pivot": 3
+      }
+    ],
+    "keyCallbacks": 28546,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-20633-d384358b-6aa5-482e-8318-de6761eea5e0/receipts.jsonl",
+    "primaryObservationError": "instrument receipt transport worker exit: nonzero exit without a worker-error receipt; inspect separate diagnostics",
+    "bindingStatus": "bound"
+  },
+  "observedClassification": "receiving V8 fatal native assertion in inspector/pause path before conditional queued premise; instrument/runtime failure; no product RED/GREEN or closure",
+  "resourceDiagnosticLines": [],
+  "resourceClassifierLimit": "No heap/wall/RSS termination is established. Original supervisor reason exited and unexplained worker-exit primaryObservationError remain preserved. Raw diagnostics establish a native inspector assertion; the exact causal trigger is not established.",
+  "processes": {
+    "outerPid": 20621,
+    "outerPgid": 20621,
+    "supervisingVitestWorkerPid": 20633,
+    "receivingCliPid": 20634,
+    "receivingPgid": 20634,
+    "receivingWorkerPid": 20637,
+    "independentAbsenceCheck": {
+      "owner": "root",
+      "pgids": [
+        20621,
+        20634
+      ],
+      "result": "both empty",
+      "toolChunk": "9ac2fc"
+    }
+  },
+  "containment": {
+    "elapsedMs": 7378,
+    "maxSampledGroupRssBytes": 844546048,
+    "killAttempted": false,
+    "finalGroupRows": [],
+    "cleanupErrors": []
+  },
+  "receipts": {
+    "rawPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v5/raw/receipts.jsonl",
+    "sha256": "f40eb411454d545b3b4d0d01f34576115307a778e2653efa19b7d66179895b86",
+    "bytes": 37880741,
+    "count": 142843,
+    "lastSequence": 142843,
+    "gaps": [],
+    "counts": {
+      "worker-start": 1,
+      "actual-key-prefix": 71438,
+      "query-key-callback": 28546,
+      "source-establishing-receipt": 1,
+      "acquisition-attempt": 14276,
+      "source-stack": 1,
+      "provider-request": 13,
+      "provider-answer": 10,
+      "acquisition-accepted": 14276,
+      "acquisition-release": 14267,
+      "cache-success": 9,
+      "public-change": 1,
+      "initial-publication": 1,
+      "reload-start": 1,
+      "release-scope": 2
+    },
+    "newlineTerminated": true,
+    "writerFaultFilePresent": false
+  },
+  "binding": {
+    "status": "bound",
+    "bindings": 160,
+    "failures": [],
+    "receiptTransport": {
+      "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-20633-d384358b-6aa5-482e-8318-de6761eea5e0/receipts.jsonl",
+      "count": 142843
+    },
+    "sha256": "8f3f3625287ba3eae09a54ef2a3e7639ec0d96bdc19e8c550c80328c4c9dfc99",
+    "v8Phases": {
+      "v8-compiled-script": 1617,
+      "debugger-enabled": 1,
+      "coverage-started": 1,
+      "binding-started": 1,
+      "evaluated-registry-captured": 1
+    },
+    "finalCoverageReached": false
+  },
+  "limits": "No conflicting-cache-premise, answer-queued, answer-executed, final-publication, cleanup-start, worker-cleaned, or worker-error receipt is present. Direct Collection cleanup is not established. A complete finite raw prefix and provenance do not prove queued-answer progress or eventual completion.",
+  "supersedes": {
+    "path": "outcome-v1.json",
+    "sha256": "95c571bad6269957bf99f3a5ea8de97233dbe3dfc43e122c0cd5afe4b5b79bf1",
+    "reason": "preliminary author misread a truncated native stack as heap exhaustion; this corrected account is authoritative; original raw bytes and metadata are unchanged"
+  },
+  "fatalAssertionLines": [
+    "# Fatal error in , line 0",
+    "# Check failed: needs_context && current_scope_ == closure_scope_ && current_scope_->is_function_scope() && !function_.is_null() implies function_->context() != *context_."
+  ],
+  "nativeStackEvidence": [
+    " 3: 0x100c49924 v8::internal::ScopeIterator::start_position() [/Users/kyle.mathews/.n/bin/node]",
+    " 4: 0x100c4bd58 v8::internal::ScopeIterator::VisitLocals(std::__1::function<bool (v8::internal::Handle<v8::internal::String>, v8::internal::Handle<v8::internal::Object>, v8::internal::ScopeIterator::ScopeType)> const&, v8::internal::ScopeIterator::Mode, v8::internal::ScopeIterator::ScopeType) const [/Users/kyle.mathews/.n/bin/node]",
+    " 5: 0x100c4a4b4 v8::internal::ScopeIterator::VisitLocalScope(std::__1::function<bool (v8::internal::Handle<v8::internal::String>, v8::internal::Handle<v8::internal::Object>, v8::internal::ScopeIterator::ScopeType)> const&, v8::internal::ScopeIterator::Mode, v8::internal::ScopeIterator::ScopeType) const [/Users/kyle.mathews/.n/bin/node]",
+    " 6: 0x100c497d0 v8::internal::ScopeIterator::ScopeObject(v8::internal::ScopeIterator::Mode) [/Users/kyle.mathews/.n/bin/node]",
+    " 7: 0x101286974 v8_inspector::V8DebuggerAgentImpl::currentCallFrames(std::__1::unique_ptr<std::__1::vector<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>, std::__1::allocator<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>>>, std::__1::default_delete<std::__1::vector<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>, std::__1::allocator<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>>>>>*) [/Users/kyle.mathews/.n/bin/node]",
+    " 8: 0x10127cd40 v8_inspector::V8DebuggerAgentImpl::didPause(int, v8::Local<v8::Value>, std::__1::vector<int, std::__1::allocator<int>> const&, v8::debug::ExceptionType, bool, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]",
+    "10: 0x1012905e8 v8_inspector::V8Debugger::handleProgramBreak(v8::Local<v8::Context>, v8::Local<v8::Value>, std::__1::vector<int, std::__1::allocator<int>> const&, v8::base::EnumSet<v8::debug::BreakReason, int>, v8::debug::ExceptionType, bool) [/Users/kyle.mathews/.n/bin/node]",
+    "11: 0x100c50e00 v8::internal::Debug::OnDebugBreak(v8::internal::DirectHandle<v8::internal::FixedArray>, v8::internal::StepAction, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]",
+    "13: 0x100c416a4 v8::debug::BreakRightNow(v8::Isolate*, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]",
+    "14: 0x100cd05a8 v8::internal::Isolate::InvokeApiInterruptCallbacks() [/Users/kyle.mathews/.n/bin/node]"
+  ],
+  "setupAcceptance": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v5-independent-static-acceptance-v1.md",
+    "sha256": "9cc33accfd3f618e29fe2e394d1aa64f6631b3d50f3c9a7a0ca9f4d298b34a3f"
+  }
+}

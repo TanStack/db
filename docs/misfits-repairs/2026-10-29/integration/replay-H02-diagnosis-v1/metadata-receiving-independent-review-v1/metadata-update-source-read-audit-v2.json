@@ -1,0 +1,45 @@
+{
+  "additionalUnchangedSupportMembers": 15,
+  "allOriginalFrozenMembersStillMatch": 573,
+  "allSuccessorInventoryMembersMatch": 588,
+  "artifactHashes": {
+    "eslint-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format-final.log": "3f01446609453f150e2f5a4f3855211105aef6f9a62961d5e6ff7a8da9eb5a62",
+    "pure-controls.mjs": "ae410aa8e51207e66ac45cc90c95ef2142f985f2345e78f913c2fefff19469c6",
+    "pure-final.log": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125",
+    "pure-results.json": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125",
+    "source-delta.patch": "89929a730c4bfd2a1bbcf1091e45bb1f51f8bc8db58ee7d3f43a15bcd239eeb1",
+    "static-results.json": "a2047b0e666c0718de62fce11981b064a10f870e97fc4d6ae6731639f7d10532",
+    "typecheck-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "dependencyReuseLinksMatch": 4,
+  "exactChangedOldMembers": {
+    "packages/db/tests/oracle-config.ts": {
+      "after": "30a7243550a2afb44ea3458b70a037a35b2c7e68de6831222acd2538784c786c",
+      "before": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908"
+    },
+    "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts": {
+      "after": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "before": "04673a4e1aa9ef93a01e1562c4953add348ec2df030a59f7b20b8ccf8707108e"
+    },
+    "packages/query-db-collection/tests/queued-answer-metadata-oracle.ts": {
+      "after": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+      "before": "e69dc74e78ba0838af64873a98820060d3e29399a346d14911e006960eaf3b65"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-driver.ts": {
+      "after": "48b095c899883a9afb6362e636c8ac23d998bdde9140870a49ec91bb09dcd954",
+      "before": "99cadc4a48d48fc54e00282dac44a29f99d8b0106c5a18b1eb47cbe01e349b23"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+      "after": "594b2a04511a59e862002b0eb4f93dde7d0d98a6ee0899077246c49ad6ee112b",
+      "before": "74efbfc6f60ebc6b9e368b9d8eb5ec7a715008b6d9e61898a9b6ed76727860d4"
+    }
+  },
+  "limits": "Named source/dependency byte equality only; no transitive/native/host equivalence, actual registration, receiving reach or mutant result.",
+  "namedOwnPackagePayloadsMatch": 2544,
+  "nodeExecutableHashMatches": true,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2",
+  "status": "read/hash only; no project runtime imported or native command executed",
+  "unchangedProductionMembers": 511
+}

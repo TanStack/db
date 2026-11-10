@@ -1,0 +1,285 @@
+import { compareKeys } from "@tanstack/db-ivm";
+import { areSameValueZeroEqual, normalizeValue } from "../utils/comparison.js";
+import { codedMessage, devBuild } from "../error-message.js";
+import {
+  compareKeysReversed,
+  findInsertPositionInArray
+} from "../utils/array-utils.js";
+import {
+  BaseIndex,
+  builtInIndexResolverNames,
+  warnRemovalFailure
+} from "./base-index.js";
+function orderValue(value) {
+  return value instanceof Date ? value.getTime() : value;
+}
+export class BasicIndex extends BaseIndex {
+  constructor() {
+    super(...arguments);
+    // Map for O(1) equality lookups: indexedValue -> Set of PKs
+    this.valueMap = /* @__PURE__ */ new Map();
+    // Sorted array of unique indexed values for range queries
+    this.sortedValues = [];
+    this.sortedExactValues = [];
+    // Set of all indexed PKs
+    this.indexedKeys = /* @__PURE__ */ new Set();
+  }
+  /**
+   * Adds a value to the index
+   */
+  add(key, item) {
+    const indexedValue = this.evaluateAddedValue(key, item);
+    const normalizedValue = normalizeValue(indexedValue);
+    this.addToBucket(key, normalizedValue, indexedValue);
+    this.addRangeValue(indexedValue);
+    this.indexedKeys.add(key);
+  }
+  addToBucket(key, normalizedValue, value) {
+    const keySet = this.valueMap.get(normalizedValue);
+    if (keySet) {
+      keySet.add(key);
+    } else {
+      const orderedValue = orderValue(value);
+      const insertIdx = findInsertPositionInArray(
+        this.sortedValues,
+        orderedValue,
+        this.compareFn
+      );
+      this.valueMap.set(normalizedValue, /* @__PURE__ */ new Set([key]));
+      this.sortedValues.splice(insertIdx, 0, orderedValue);
+      this.sortedExactValues.splice(insertIdx, 0, normalizedValue);
+    }
+  }
+  /**
+   * Removes a value from the index
+   */
+  remove(key, item) {
+    let indexedValue;
+    try {
+      indexedValue = this.evaluateIndexExpression(item);
+    } catch (error) {
+      warnRemovalFailure(key, error);
+      this.indexedKeys.delete(key);
+      return;
+    }
+    const normalizedValue = normalizeValue(indexedValue);
+    this.removeFromBucket(key, normalizedValue, indexedValue);
+    this.removeRangeValue(indexedValue);
+    this.indexedKeys.delete(key);
+  }
+  removeFromBucket(key, normalizedValue, value) {
+    const keySet = this.valueMap.get(normalizedValue);
+    if (keySet?.has(key)) {
+      if (keySet.size === 1) {
+        const orderedValue = orderValue(value);
+        let sortedIndex = findInsertPositionInArray(
+          this.sortedValues,
+          orderedValue,
+          this.compareFn
+        );
+        while (sortedIndex < this.sortedValues.length && this.compareFn(this.sortedValues[sortedIndex], orderedValue) === 0) {
+          if (areSameValueZeroEqual(
+            this.sortedExactValues[sortedIndex],
+            normalizedValue
+          )) {
+            this.sortedValues.splice(sortedIndex, 1);
+            this.sortedExactValues.splice(sortedIndex, 1);
+            break;
+          }
+          sortedIndex++;
+        }
+        this.valueMap.delete(normalizedValue);
+      }
+      keySet.delete(key);
+    }
+  }
+  /**
+   * Updates a value in the index
+   */
+  update(key, oldItem, newItem) {
+    let oldIndexedValue;
+    let newIndexedValue;
+    try {
+      oldIndexedValue = this.evaluateIndexExpression(oldItem);
+      newIndexedValue = this.evaluateIndexExpression(newItem);
+    } catch {
+      this.remove(key, oldItem);
+      this.add(key, newItem);
+      return;
+    }
+    const oldValue = normalizeValue(oldIndexedValue);
+    const newValue = normalizeValue(newIndexedValue);
+    if (areSameValueZeroEqual(oldValue, newValue) && this.valueMap.get(newValue)?.has(key) && this.indexedKeys.has(key)) {
+      this.removeRangeValue(oldIndexedValue);
+      this.addRangeValue(newIndexedValue);
+      return;
+    }
+    this.removeFromBucket(key, oldValue, oldIndexedValue);
+    this.removeRangeValue(oldIndexedValue);
+    this.addToBucket(key, newValue, newIndexedValue);
+    this.addRangeValue(newIndexedValue);
+    this.indexedKeys.add(key);
+  }
+  /**
+   * Builds the index from a collection of entries
+   */
+  build(entries) {
+    this.clear();
+    for (const [key, item] of entries) {
+      const indexedValue = this.evaluateAddedValue(key, item);
+      const value = normalizeValue(indexedValue);
+      const keys = this.valueMap.get(value);
+      if (keys) keys.add(key);
+      else {
+        this.valueMap.set(value, /* @__PURE__ */ new Set([key]));
+        this.sortedValues.push(orderValue(indexedValue));
+        this.sortedExactValues.push(value);
+      }
+      this.addRangeValue(indexedValue);
+      this.indexedKeys.add(key);
+    }
+    const sortable = this.sortedValues.map((value, index) => ({
+      value,
+      exact: this.sortedExactValues[index]
+    }));
+    sortable.sort((left, right) => this.compareFn(left.value, right.value));
+    this.sortedValues = sortable.map(({ value }) => value);
+    this.sortedExactValues = sortable.map(({ exact }) => exact);
+  }
+  /**
+   * Clears all data from the index
+   */
+  clear() {
+    this.valueMap.clear();
+    this.sortedValues = [];
+    this.sortedExactValues = [];
+    this.indexedKeys.clear();
+    this.clearRangeValues();
+  }
+  lookup(operation, value) {
+    const result = this.lookupSupportedOperation(operation, value);
+    if (result !== void 0) return result;
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Operation ${operation} not supported by BasicIndex` : codedMessage(100, { operation })
+    );
+  }
+  /**
+   * Gets the number of indexed keys
+   */
+  get keyCount() {
+    return this.indexedKeys.size;
+  }
+  /**
+   * Performs an equality lookup - O(1)
+   */
+  equalityLookup(value) {
+    const normalizedValue = normalizeValue(value);
+    return this.valueMap.get(normalizedValue) ?? /* @__PURE__ */ new Set();
+  }
+  /**
+   * Performs a range query using binary search - O(log n + m)
+   */
+  rangeQuery(options = {}) {
+    const { from, to, fromInclusive = true, toInclusive = true } = options;
+    const result = /* @__PURE__ */ new Set();
+    if (this.sortedValues.length === 0) {
+      return result;
+    }
+    const orderedFrom = orderValue(from);
+    const orderedTo = orderValue(to);
+    const hasFrom = `from` in options;
+    const hasTo = `to` in options;
+    let startIdx = 0;
+    if (hasFrom) {
+      startIdx = findInsertPositionInArray(
+        this.sortedValues,
+        orderedFrom,
+        this.compareFn
+      );
+      while (!fromInclusive && startIdx < this.sortedValues.length && this.compareFn(this.sortedValues[startIdx], orderedFrom) === 0) {
+        startIdx++;
+      }
+    }
+    let endIdx = this.sortedValues.length;
+    if (hasTo) {
+      endIdx = findInsertPositionInArray(
+        this.sortedValues,
+        orderedTo,
+        this.compareFn
+      );
+      while (toInclusive && endIdx < this.sortedValues.length && this.compareFn(this.sortedValues[endIdx], orderedTo) === 0) {
+        endIdx++;
+      }
+    }
+    for (let i = startIdx; i < endIdx; i++) {
+      const keys = this.valueMap.get(this.sortedExactValues[i]);
+      if (keys) {
+        keys.forEach((key) => result.add(key));
+      }
+    }
+    return result;
+  }
+  /**
+   * Returns the next n items in sorted order
+   */
+  take(n, from, filterFn) {
+    const orderedFrom = orderValue(from);
+    let startIdx = findInsertPositionInArray(
+      this.sortedValues,
+      orderedFrom,
+      this.compareFn
+    );
+    while (startIdx < this.sortedValues.length && this.compareFn(this.sortedValues[startIdx], orderedFrom) <= 0) {
+      startIdx++;
+    }
+    return this.takeFromIndex(n, startIdx, 1, filterFn);
+  }
+  /**
+   * Returns the next n items in reverse sorted order
+   */
+  takeReversed(n, from, filterFn) {
+    const orderedFrom = orderValue(from);
+    let startIdx = findInsertPositionInArray(
+      this.sortedValues,
+      orderedFrom,
+      this.compareFn
+    ) - 1;
+    while (startIdx >= 0 && this.compareFn(this.sortedValues[startIdx], orderedFrom) >= 0) {
+      startIdx--;
+    }
+    return this.takeFromIndex(n, startIdx, -1, filterFn);
+  }
+  /**
+   * Returns the first n items in sorted order (from the start)
+   */
+  takeFromStart(n, filterFn) {
+    return this.takeFromIndex(n, 0, 1, filterFn);
+  }
+  /**
+   * Returns the first n items in reverse sorted order (from the end)
+   */
+  takeReversedFromEnd(n, filterFn) {
+    return this.takeFromIndex(n, this.sortedValues.length - 1, -1, filterFn);
+  }
+  takeFromIndex(n, startIndex, step, filterFn) {
+    const result = [];
+    let index = startIndex;
+    while (index >= 0 && index < this.sortedValues.length && result.length < n) {
+      const groupValue = this.sortedValues[index];
+      const groupKeys = [];
+      do {
+        for (const key of this.valueMap.get(this.sortedExactValues[index]) ?? []) {
+          groupKeys.push(key);
+        }
+        index += step;
+      } while (index >= 0 && index < this.sortedValues.length && this.compareFn(this.sortedValues[index], groupValue) === 0);
+      groupKeys.sort(step === 1 ? compareKeys : compareKeysReversed);
+      for (const key of groupKeys) {
+        if (filterFn?.(key) ?? true) result.push(key);
+        if (result.length >= n) break;
+      }
+    }
+    return result;
+  }
+}
+builtInIndexResolverNames.set(BasicIndex, `BasicIndex`);

@@ -1,0 +1,439 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db
+      Coverage enabled with istanbul
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure callback checkpoint {
+  schedule: 'failure-first',
+  failedScope: [ 3 ],
+  peerScope: [ 3 ],
+  sourceFailureApplied: true,
+  peerPending: true,
+  peerAborted: false,
+  callbacks: 1,
+  firstCallback: {
+    boundary: 'callback',
+    rows: [ [Object], [Object] ],
+    window: { offset: 0, limit: 1 },
+    afterFailureRequest: true
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure reach {
+  campaign: 'fixed seed',
+  counts: {
+    'joined-window-held': 1,
+    'source-failure-handled': 1,
+    'failed-window-retained': 0,
+    'retry-published': 0,
+    'successful-window-published': 0
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure callback checkpoint {
+  schedule: 'failure-first',
+  failedScope: [ 3 ],
+  peerScope: [ 3 ],
+  sourceFailureApplied: true,
+  peerPending: true,
+  peerAborted: false,
+  callbacks: 1,
+  firstCallback: {
+    boundary: 'callback',
+    rows: [ [Object], [Object] ],
+    window: { offset: 0, limit: 1 },
+    afterFailureRequest: true
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure reach {
+  campaign: 'fixed seed',
+  counts: {
+    'joined-window-held': 2,
+    'source-failure-handled': 2,
+    'failed-window-retained': 0,
+    'retry-published': 0,
+    'successful-window-published': 0
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure callback checkpoint {
+  schedule: 'failure-first',
+  failedScope: [ 3 ],
+  peerScope: [ 3 ],
+  sourceFailureApplied: true,
+  peerPending: true,
+  peerAborted: false,
+  callbacks: 1,
+  firstCallback: {
+    boundary: 'callback',
+    rows: [ [Object], [Object] ],
+    window: { offset: 0, limit: 1 },
+    afterFailureRequest: true
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure reach {
+  campaign: 'fixed seed',
+  counts: {
+    'joined-window-held': 3,
+    'source-failure-handled': 3,
+    'failed-window-retained': 0,
+    'retry-published': 0,
+    'successful-window-published': 0
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure callback checkpoint {
+  schedule: 'failure-first',
+  failedScope: [ 2 ],
+  peerScope: [ 2 ],
+  sourceFailureApplied: true,
+  peerPending: true,
+  peerAborted: false,
+  callbacks: 1,
+  firstCallback: {
+    boundary: 'callback',
+    rows: [ [Object], [Object] ],
+    window: { offset: 0, limit: 1 },
+    afterFailureRequest: true
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure reach {
+  campaign: 'fixed seed',
+  counts: {
+    'joined-window-held': 4,
+    'source-failure-handled': 4,
+    'failed-window-retained': 0,
+    'retry-published': 0,
+    'successful-window-published': 0
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure callback checkpoint {
+  schedule: 'failure-first',
+  failedScope: [ 2 ],
+  peerScope: [ 2 ],
+  sourceFailureApplied: true,
+  peerPending: true,
+  peerAborted: false,
+  callbacks: 1,
+  firstCallback: {
+    boundary: 'callback',
+    rows: [ [Object], [Object] ],
+    window: { offset: 0, limit: 1 },
+    afterFailureRequest: true
+  }
+}
+
+stdout | tests/query/pagination-oracle.property.test.ts > pagination recomputation oracle > joined window failure for a fixed seed > retains complete windows across joined failure histories for a fixed seed (with seed=1665)
+pagination joined-window-failure reach {
+  campaign: 'fixed seed',
+  counts: {
+    'joined-window-held': 5,
+    'source-failure-handled': 5,
+    'failed-window-retained': 0,
+    'retry-published': 0,
+    'successful-window-published': 0
+  }
+}
+
+ ❯ |@tanstack/db| tests/query/pagination-oracle.property.test.ts (281 tests | 1 failed | 280 skipped) 93ms
+     ↓ refills a joined result window through a contract-compliant source
+     ↓ loads the full ordered source when no continuation index exists
+     ↓ refines a joined foreign order term through the source tie class
+     ↓ materializes an empty source window
+     ↓ materializes an offset past the final row
+     ↓ materializes an initially empty zero-limit window
+     ↓ rejects the right NaN window members in the wrong order
+     ↓ orders a 'asc' eager window with a NaN or finite middle rank
+     ↓ orders a 'desc' eager window with a NaN or finite middle rank
+     ↓ orders a 'desc' eager window with a NaN or finite middle rank
+     ↓ orders a 'desc' eager window with a NaN or finite middle rank
+     ↓ orders a 'desc' eager window with a NaN or finite middle rank
+     ↓ keeps a NaN window coherent through equal and changed source ranks
+     ↓ clears and restores a nonempty window across a zero limit
+     ↓ advances past an implicit public-key tie class
+     ↓ keeps implicit ties stable across filtered source mutations
+     ↓ updates a row that 'enters the filter'
+     ↓ updates a row that 'leaves the filter'
+     ↓ discovered trace: loads an on-demand window after a zero limit
+     ↓ widens an offset on-demand window after starting at zero limit
+     ↓ starts an on-demand source prefix after opening a zero window with a local row
+     ↓ keeps a failed 'asc' window private after 'sync' source replay until explicit retry
+     ↓ keeps a failed 'asc' window private after 'async' source replay until explicit retry
+     ↓ keeps a failed 'desc' window private after 'sync' source replay until explicit retry
+     ↓ keeps a failed 'desc' window private after 'async' source replay until explicit retry
+     ↓ recovers the first 'error'-rejected ordered request for window +0:1 from the full source
+     ↓ recovers the first 'error'-rejected ordered request for window 2:1 from the full source
+     ↓ recovers the first 'abort'-rejected ordered request for window +0:1 from the full source
+     ↓ recovers the first 'abort'-rejected ordered request for window 2:1 from the full source
+     ↓ does not derive a retry cursor from rows written by a error request
+     ↓ does not derive a retry cursor from rows written by a AbortError request
+     ↓ visible delete repairs an expressible order with a bounded prefix request
+     ↓ visible rank update repairs an expressible order with a bounded prefix request
+     ↓ finishes bounded repair when a visible delete leaves the source underfilled
+     ↓ rejects a malformed bounded-repair request trace
+     ↓ distinguishes a filtered full-source fallback from a repair tie predicate
+     ↓ repairs a capped prefix through its first-column tie and cursor refill (explicit key=false)
+     ↓ repairs a capped prefix through its first-column tie and cursor refill (explicit key=true)
+     ↓ holds a 'asc' page and concurrent live insert when its boundary refinement fails by 'throw'
+     ↓ holds a 'asc' page and concurrent live insert when its boundary refinement fails by 'reject'
+     ↓ holds a 'desc' page and concurrent live insert when its boundary refinement fails by 'throw'
+     ↓ holds a 'desc' page and concurrent live insert when its boundary refinement fails by 'reject'
+     ↓ recovers a failed tie boundary from the authoritative full source
+     ↓ rejects a reentrant window move when an ordered request writes and then throws
+     ↓ rejects a window move reentered from startup request 1 after 'sync' delivery
+     ↓ rejects a window move reentered from startup request 2 after 'sync' delivery
+     ↓ rejects a window move reentered from startup request 1 after 'async' delivery
+     ↓ rejects a window move reentered from startup request 2 after 'async' delivery
+     ↓ rejects a window move reentered from a public change callback
+     ↓ rejects a window move when its sync run is cleaned up: return-only
+     ↓ rejects a window move when its sync run is cleaned up: write-after-cleanup
+     ↓ tracks an asynchronous cursor continuation after synchronous satisfaction
+     ↓ refines locale-ordered continuations locally when predicate IR cannot express the collation
+     ↓ discovered trace: orders an ascending nullable boundary by its second term
+     ↓ orders a descending nullable boundary by its second term
+     ↓ orders an ascending and descending mixed nullable boundary
+     ↓ discovered trace: orders a descending and ascending mixed nullable boundary
+     ↓ uses the public key to break a complete tuple tie
+     ↓ discovered trace: places nulls last in an ascending nullable boundary
+     ↓ places nulls last in a descending nullable boundary
+     ↓ matches multi-column nullable ordering for a fixed seed (with seed=1663)
+     ↓ matches multi-column nullable ordering for a random or replayed seed (with seed=-1032980904)
+     ↓ continues an indexed multi-column window from its leading boundary
+     ↓ matches nullable cursor ordering while an async response is pending for a fixed seed (with seed=1665)
+     ↓ matches nullable cursor ordering while an async response is pending for a random or replayed seed (with seed=-2020578588)
+     ↓ boundary insert converges before and after a pending response
+     ↓ visible delete converges before and after a pending response
+     ↓ boundary-crossing rank update converges before and after a pending response
+     ↓ rejects a reached 'held-publication' in a 'resolve' mutation history
+     ↓ rejects a reached 'held-window' in a 'resolve' mutation history
+     ↓ rejects a reached 'early-settlement' in a 'resolve' mutation history
+     ↓ rejects a reached 'callback-key' in a 'resolve' mutation history
+     ↓ rejects a reached 'callback-value' in a 'resolve' mutation history
+     ↓ rejects a reached 'final-value' in a 'resolve' mutation history
+     ↓ rejects a reached 'held-publication' in a 'reject' mutation history
+     ↓ rejects a reached 'held-window' in a 'reject' mutation history
+     ↓ rejects a reached 'early-settlement' in a 'reject' mutation history
+     ↓ rejects a reached 'callback-key' in a 'reject' mutation history
+     ↓ rejects a reached 'callback-value' in a 'reject' mutation history
+     ↓ rejects a reached 'final-value' in a 'reject' mutation history
+     ↓ rejects a reached 'wrong-rejection' in a 'reject' mutation history
+     ↓ rejects a wrong deleted payload before removing its replica row
+     ↓ revalidates a finite ordered prefix after a settled SSE insert
+     ↓ revalidates a finite ordered prefix after a settled SSE delete
+     ↓ revalidates a finite ordered prefix after a settled SSE rank update
+     ↓ retains a finite inactive prefix across shrink, SSE, and re-expansion
+     ↓ refreshes from the start when one SSE batch moves the retained prefix (asc)
+     ↓ refreshes from the start when one SSE batch moves the retained prefix (desc)
+     ↓ keeps an SSE insert that arrives during boundary refinement
+     ↓ keeps an SSE update that arrives during boundary refinement
+     ↓ keeps an SSE delete that arrives during boundary refinement
+     ↓ does not use a new row beyond finite coverage as a widening boundary
+     ↓ discovered trace: a settled rank update refreshes top-k membership
+     ↓ a rejected cursor does not treat a live insert as remote coverage
+     ↓ matches recomputation when source mutations cross a pending cursor response for a fixed seed (with seed=1660)
+     ↓ covers pending insert with a resolve response before-response deterministically
+     ↓ covers pending insert with a resolve response after-response deterministically
+     ↓ covers pending insert with a reject response before-response deterministically
+     ↓ covers pending insert with a reject response after-response deterministically
+     ↓ covers pending update with a resolve response before-response deterministically
+     ↓ covers pending update with a resolve response after-response deterministically
+     ↓ covers pending update with a reject response before-response deterministically
+     ↓ covers pending update with a reject response after-response deterministically
+     ↓ covers pending delete with a resolve response before-response deterministically
+     ↓ covers pending delete with a resolve response after-response deterministically
+     ↓ covers pending delete with a reject response before-response deterministically
+     ↓ covers pending delete with a reject response after-response deterministically
+     ↓ matches recomputation when source mutations cross a pending cursor response for a random or replayed seed (with seed=-1579880995)
+     ↓ discovered trace: retries a rejected cursor after a source and window transition
+       × retains complete windows across joined failure histories for a fixed seed (with seed=1665) 92ms
+       ↓ retains complete windows across joined failure histories for a random or replayed seed (with seed=235577011)
+     ↓ retains the settled window when a joined load fails while its child peer waits
+     ↓ matches recomputation across multi-action pending histories for a fixed seed (with seed=1664)
+     ↓ rejects partial-publication in a captured pending history
+     ↓ rejects wrong-window in a captured pending history
+     ↓ rejects early-settlement in a captured pending history
+     ↓ rejects wrong-final-value in a captured pending history
+     ↓ rejects wrong-callback-value in a captured pending history
+     ↓ rejects wrong-callback-key in a captured pending history
+     ↓ rejects retracted-publication in a captured pending history
+     ↓ matches recomputation across multi-action pending histories for a random or replayed seed (with seed=-129638999)
+     ↓ discovered trace: an in-flight request does not underfill a new window
+     ↓ discovered trace: a row moving across an offset window must refill its boundary
+     ↓ retains authoritative rows when a later window admits a prior insert
+     ↓ restores an out-of-window insert when a later offset selects it
+     ↓ restores an out-of-window rank update when a later offset selects it
+     ↓ discovered trace: inserting at an empty offset boundary refills the window
+     ↓ discovered trace: an insert before a later offset does not skip its new boundary
+     ↓ discovered trace: an async cursor loads the full offset window
+     ↓ discovered trace: an async cursor crosses an offset before filling one row
+     ↓ bounds requests for an underfilled source: 'asc', explicit key=false, filter=false
+     ↓ bounds requests for an underfilled source: 'asc', explicit key=false, filter=true
+     ↓ bounds requests for an underfilled source: 'asc', explicit key=true, filter=false
+     ↓ bounds requests for an underfilled source: 'asc', explicit key=true, filter=true
+     ↓ bounds requests for an underfilled source: 'desc', explicit key=false, filter=false
+     ↓ bounds requests for an underfilled source: 'desc', explicit key=false, filter=true
+     ↓ bounds requests for an underfilled source: 'desc', explicit key=true, filter=false
+     ↓ bounds requests for an underfilled source: 'desc', explicit key=true, filter=true
+     ↓ covers key=implicit, filter=off, insertion=forward window paths for a fixed seed (with seed=16570)
+     ↓ covers key=implicit, filter=off, insertion=forward window paths for a random or replayed seed [pagination.matrix.window-0] (with seed=13387943)
+     ↓ covers key=implicit, filter=off, insertion=forward state paths for a fixed seed (with seed=16580)
+     ↓ covers key=implicit, filter=off, insertion=forward state paths for a random or replayed seed [pagination.matrix.state-0] (with seed=-824083847)
+     ↓ covers key=implicit, filter=off, insertion=reverse window paths for a fixed seed (with seed=16571)
+     ↓ covers key=implicit, filter=off, insertion=reverse window paths for a random or replayed seed [pagination.matrix.window-1] (with seed=-115337605)
+     ↓ covers key=implicit, filter=off, insertion=reverse state paths for a fixed seed (with seed=16581)
+     ↓ covers key=implicit, filter=off, insertion=reverse state paths for a random or replayed seed [pagination.matrix.state-1] (with seed=-370686039)
+     ↓ covers key=implicit, filter=on, insertion=forward window paths for a fixed seed (with seed=16572)
+     ↓ covers key=implicit, filter=on, insertion=forward window paths for a random or replayed seed [pagination.matrix.window-2] (with seed=-1543002756)
+     ↓ covers key=implicit, filter=on, insertion=forward state paths for a fixed seed (with seed=16582)
+     ↓ covers key=implicit, filter=on, insertion=forward state paths for a random or replayed seed [pagination.matrix.state-2] (with seed=1240394269)
+     ↓ covers key=implicit, filter=on, insertion=reverse window paths for a fixed seed (with seed=16573)
+     ↓ covers key=implicit, filter=on, insertion=reverse window paths for a random or replayed seed [pagination.matrix.window-3] (with seed=-1696447749)
+     ↓ covers key=implicit, filter=on, insertion=reverse state paths for a fixed seed (with seed=16583)
+     ↓ covers key=implicit, filter=on, insertion=reverse state paths for a random or replayed seed [pagination.matrix.state-3] (with seed=-1173612345)
+     ↓ covers key=explicit, filter=off, insertion=forward window paths for a fixed seed (with seed=16574)
+     ↓ covers key=explicit, filter=off, insertion=forward window paths for a random or replayed seed [pagination.matrix.window-4] (with seed=-539809813)
+     ↓ covers key=explicit, filter=off, insertion=forward state paths for a fixed seed (with seed=16584)
+     ↓ covers key=explicit, filter=off, insertion=forward state paths for a random or replayed seed [pagination.matrix.state-4] (with seed=-290491133)
+     ↓ covers key=explicit, filter=off, insertion=reverse window paths for a fixed seed (with seed=16575)
+     ↓ covers key=explicit, filter=off, insertion=reverse window paths for a random or replayed seed [pagination.matrix.window-5] (with seed=-1062862858)
+     ↓ covers key=explicit, filter=off, insertion=reverse state paths for a fixed seed (with seed=16585)
+     ↓ covers key=explicit, filter=off, insertion=reverse state paths for a random or replayed seed [pagination.matrix.state-5] (with seed=146328152)
+     ↓ covers key=explicit, filter=on, insertion=forward window paths for a fixed seed (with seed=16576)
+     ↓ covers key=explicit, filter=on, insertion=forward window paths for a random or replayed seed [pagination.matrix.window-6] (with seed=2114459513)
+     ↓ covers key=explicit, filter=on, insertion=forward state paths for a fixed seed (with seed=16586)
+     ↓ covers key=explicit, filter=on, insertion=forward state paths for a random or replayed seed [pagination.matrix.state-6] (with seed=-848414366)
+     ↓ covers key=explicit, filter=on, insertion=reverse window paths for a fixed seed (with seed=16577)
+     ↓ covers key=explicit, filter=on, insertion=reverse window paths for a random or replayed seed [pagination.matrix.window-7] (with seed=-260023662)
+     ↓ covers key=explicit, filter=on, insertion=reverse state paths for a fixed seed (with seed=16587)
+     ↓ covers key=explicit, filter=on, insertion=reverse state paths for a random or replayed seed [pagination.matrix.state-7] (with seed=-345972808)
+     ↓ matches full recomputation across ordered windows for a fixed seed (with seed=1657)
+     ↓ matches full recomputation across ordered windows for a random or replayed seed (with seed=-710102647)
+     ↓ matches full recomputation across source and window transitions for a fixed seed (with seed=1658)
+     ↓ matches full recomputation across source and window transitions for a random or replayed seed (with seed=-1310936821)
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"pages","explicitPublicKeyOrder":false,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"pages","explicitPublicKeyOrder":false,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"pages","explicitPublicKeyOrder":true,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"pages","explicitPublicKeyOrder":true,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"widen","explicitPublicKeyOrder":false,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"widen","explicitPublicKeyOrder":false,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"widen","explicitPublicKeyOrder":true,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"asc","mode":"widen","explicitPublicKeyOrder":true,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"pages","explicitPublicKeyOrder":false,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"pages","explicitPublicKeyOrder":false,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"pages","explicitPublicKeyOrder":true,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"pages","explicitPublicKeyOrder":true,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"widen","explicitPublicKeyOrder":false,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"widen","explicitPublicKeyOrder":false,"pageSize":10}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"widen","explicitPublicKeyOrder":true,"pageSize":3}
+     ↓ fetches linear row volume while traversing settled pages: {"direction":"desc","mode":"widen","explicitPublicKeyOrder":true,"pageSize":10}
+     ↓ refills an ordered window past 1 pending optimistic 'delete' row(s)
+     ↓ refills an ordered window past 2 pending optimistic 'delete' row(s)
+     ↓ refills an ordered window past 1 pending optimistic 'move-after' row(s)
+     ↓ refills an ordered window past 2 pending optimistic 'move-after' row(s)
+     ↓ does not count 1 optimistic 'insert-before' row(s) as 'cursor' provider coverage after a +0-row window
+     ↓ does not count 1 optimistic 'insert-before' row(s) as 'offset' provider coverage after a +0-row window
+     ↓ does not count 1 optimistic 'insert-before' row(s) as 'cursor' provider coverage after a 1-row window
+     ↓ does not count 1 optimistic 'insert-before' row(s) as 'offset' provider coverage after a 1-row window
+     ↓ does not count 2 optimistic 'insert-before' row(s) as 'cursor' provider coverage after a +0-row window
+     ↓ does not count 2 optimistic 'insert-before' row(s) as 'offset' provider coverage after a +0-row window
+     ↓ does not count 2 optimistic 'insert-before' row(s) as 'cursor' provider coverage after a 1-row window
+     ↓ does not count 2 optimistic 'insert-before' row(s) as 'offset' provider coverage after a 1-row window
+     ↓ does not count 1 optimistic 'move-after' row(s) as 'cursor' provider coverage after a 1-row window
+     ↓ does not count 1 optimistic 'move-after' row(s) as 'offset' provider coverage after a 1-row window
+     ↓ does not count 2 optimistic 'move-after' row(s) as 'cursor' provider coverage after a 2-row window
+     ↓ does not count 2 optimistic 'move-after' row(s) as 'offset' provider coverage after a 2-row window
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":false,"tied":false,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":false,"tied":false,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":false,"tied":true,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":false,"tied":true,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":true,"tied":false,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":true,"tied":false,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":true,"tied":true,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"asc","explicitPublicKeyOrder":true,"tied":true,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":false,"tied":false,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":false,"tied":false,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":false,"tied":true,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":false,"tied":true,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":true,"tied":false,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":true,"tied":false,"limit":2}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":true,"tied":true,"limit":1}
+     ↓ keeps eager window membership when moving past an intervening insert: {"direction":"desc","explicitPublicKeyOrder":true,"tied":true,"limit":2}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"before-response","rank":0.5,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"before-response","rank":0.5,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"before-response","rank":100,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"before-response","rank":100,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"after-response","rank":0.5,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"after-response","rank":0.5,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"after-response","rank":100,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"asc","timing":"after-response","rank":100,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"before-response","rank":0.5,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"before-response","rank":0.5,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"before-response","rank":100,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"before-response","rank":100,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"after-response","rank":0.5,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"after-response","rank":0.5,"transport":"offset"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"after-response","rank":100,"transport":"cursor"}
+     ↓ keeps live observations separate from a settled acquisition: {"direction":"desc","timing":"after-response","rank":100,"transport":"offset"}
+     ↓ discovered trace: a rank update must refill a top-1 window
+     ↓ refills an implicit tie window when a visible row moves below it
+     ↓ keeps the last complete implicit window while background recovery resolves
+     ↓ keeps the last complete implicit window while background recovery rejects
+     ↓ refills an implicit top-one tie window after a rank update
+     ↓ refills an implicit offset tie window after a rank update
+     ↓ opens an implicit tie window from zero at the lowest public key
+     ↓ ignores an out-of-window insert when refilling after a delete
+     ↓ ignores an out-of-window rank update when refilling after a delete
+     ↓ ignores an out-of-window rank update when the visible row leaves
+     ↓ refills untouched rows when widening after an out-of-window rank update
+     ↓ rebuilds the full boundary when widening after an out-of-window rank update
+     ↓ ignores an out-of-window insert when widening a tied window
+     ↓ expands a multi-column boundary before choosing top-K
+     ↓ rejects a real provider entry hidden by a copied pre-cleanup trace
+     ↓ expands a provider tie before applying the public-key tie-breaker
+     ↓ does not derive an ordered boundary from another demand's local row
+     ↓ refines an initial locale window without trusting provider collation
+     ↓ uses one filtered full-source acquisition for custom collation ('C-01 inherited ascending scan')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-02 inherited descending scan')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-03 inherited ascending index')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-04 inherited descending index')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-05 per-order override')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-06 inherited unbounded order')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-07 explicit unbounded order')
+     ↓ uses one filtered full-source acquisition for custom collation ('C-09 output default does not override…')
+     ↓ uses the leading source custom collation when ordering a later source (C-08 multi-source inheritance)
+     ↓ inherits collection locale options through scan and auto-index ordering
+     ↓ refines an initial reference-ordered window locally
+     ↓ refines invalid Date ties with an unbounded local-order request ('asc', nulls 'first')
+     ↓ refines invalid Date ties with an unbounded local-order request ('asc', nulls 'last')
+     ↓ refines invalid Date ties with an unbounded local-order request ('desc', nulls 'first')
+     ↓ refines invalid Date ties with an unbounded local-order request ('desc', nulls 'last')
+     ↓ uses an ascending index for a bounded descending demand
+     ↓ stabilizes an on-demand window with a NaN public-key tie
+     ↓ keeps null placement and 'asc' across source refinement ('first')
+     ↓ keeps null placement and 'asc' across source refinement ('last')
+     ↓ keeps null placement and 'desc' across source refinement ('first')
+     ↓ keeps null placement and 'desc' across source refinement ('last')
+     ↓ matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed (with seed=1659)
+     ↓ matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed (with seed=-332485372)
+     ↓ keeps concurrent on-demand windows correct under forward completion
+     ↓ keeps concurrent on-demand windows correct under reverse completion
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 280 skipped (281)
+Type Errors  no errors
+   Start at  05:31:29
+   Duration  4.97s (transform 3.86s, setup 45ms, import 4.43s, tests 93ms, environment 180ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/vitest-report.json

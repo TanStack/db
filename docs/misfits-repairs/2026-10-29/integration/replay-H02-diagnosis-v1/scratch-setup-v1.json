@@ -1,0 +1,7 @@
+{
+  "scratch": "/private/tmp/replay-h02-diagnostic-mo8pxcv_",
+  "archivedCommit": "3937a73aeb3a273c95ab77b8d8dd66fc739517c5",
+  "rawDriverSha256": "56e2f2854d978826ad89747f209d4e00db50879f8e065e21ab6d5607359919c8",
+  "dependencies": "copy-on-write clone of coordinator node_modules; no shared writable installation metadata",
+  "sourceIdentity": "historical baseline source reconstruction; original early built bytes unavailable"
+}

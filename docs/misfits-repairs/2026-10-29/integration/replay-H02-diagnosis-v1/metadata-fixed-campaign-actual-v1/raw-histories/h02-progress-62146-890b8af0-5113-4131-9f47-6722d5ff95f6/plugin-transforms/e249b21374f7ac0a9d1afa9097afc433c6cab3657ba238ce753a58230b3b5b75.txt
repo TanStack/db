@@ -1,0 +1,109 @@
+import { DifferenceStreamWriter, UnaryOperator } from "../graph.js";
+import { StreamBuilder } from "../d2.js";
+import { MultiSet } from "../multiset.js";
+import {
+  TopKState,
+  handleMoveIn,
+  handleMoveOut,
+  topKBatch
+} from "./topKState.js";
+import { TopKArray, createKeyedComparator } from "./topKArray.js";
+export class GroupedTopKWithFractionalIndexOperator extends UnaryOperator {
+  #groupStates = /* @__PURE__ */ new Map();
+  #groupKeyFn;
+  #comparator;
+  #offset;
+  #limit;
+  constructor(id, inputA, output, comparator, options) {
+    super(id, inputA, output);
+    this.#groupKeyFn = options.groupKeyFn;
+    this.#limit = options.limit ?? Infinity;
+    this.#offset = options.offset ?? 0;
+    this.#comparator = createKeyedComparator(comparator);
+    options.setSizeCallback?.(() => this.#getTotalSize());
+    options.setWindowFn?.(this.#moveTopK.bind(this));
+  }
+  #getTotalSize() {
+    let size = 0;
+    for (const state of this.#groupStates.values()) {
+      size += state.size;
+    }
+    return size;
+  }
+  #getOrCreateGroupState(groupKey) {
+    let state = this.#groupStates.get(groupKey);
+    if (!state) {
+      state = new TopKState(
+        new TopKArray(this.#offset, this.#limit, this.#comparator)
+      );
+      this.#groupStates.set(groupKey, state);
+    }
+    return state;
+  }
+  #cleanupGroupIfEmpty(groupKey, state) {
+    if (state.isEmpty) {
+      this.#groupStates.delete(groupKey);
+    }
+  }
+  /**
+   * Moves the topK window for all groups based on the provided offset and limit.
+   * Any changes to the topK are sent to the output.
+   */
+  #moveTopK({ offset, limit }) {
+    if (offset !== void 0) {
+      this.#offset = offset;
+    }
+    if (limit !== void 0) {
+      this.#limit = limit;
+    }
+    const result = [];
+    let hasChanges = false;
+    for (const state of this.#groupStates.values()) {
+      const diff = state.move({ offset: this.#offset, limit: this.#limit });
+      diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result));
+      diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result));
+      if (diff.changes) {
+        hasChanges = true;
+      }
+    }
+    if (hasChanges) {
+      this.output.sendData(new MultiSet(result));
+    }
+  }
+  run() {
+    const result = [];
+    for (const [[key, value], multiplicity] of topKBatch(
+      this.inputMessages()
+    )) {
+      this.#processElement(key, value, multiplicity, result);
+    }
+    if (result.length > 0) {
+      this.output.sendData(new MultiSet(result));
+    }
+  }
+  #processElement(key, value, multiplicity, result) {
+    const groupKey = this.#groupKeyFn(key, value);
+    const state = this.#getOrCreateGroupState(groupKey);
+    const changes = state.processElement(key, value, multiplicity);
+    handleMoveIn(changes.moveIn, result);
+    handleMoveOut(changes.moveOut, result);
+    this.#cleanupGroupIfEmpty(groupKey, state);
+  }
+}
+export function groupedTopKWithFractionalIndex(comparator, options) {
+  return (stream) => {
+    const output = new StreamBuilder(
+      stream.graph,
+      new DifferenceStreamWriter()
+    );
+    const operator = new GroupedTopKWithFractionalIndexOperator(
+      stream.graph.getNextOperatorId(),
+      stream.connectReader(),
+      output.writer,
+      comparator,
+      options
+    );
+    stream.graph.addOperator(operator);
+    return output;
+  };
+}

@@ -1,0 +1,17 @@
+{
+  "invocation": {
+    "cmd": "/bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-preparation-v1/launcher-scope-default-fixed.zsh 26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the exact root-admitted fixed metadata campaign once, including its established supervisor process checks?",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 2000
+  },
+  "actualToolReturn": {
+    "chunk_id": "e190fd",
+    "wall_time_seconds": 1.001131375,
+    "session_id": 51279,
+    "original_token_count": 0,
+    "output": ""
+  }
+}

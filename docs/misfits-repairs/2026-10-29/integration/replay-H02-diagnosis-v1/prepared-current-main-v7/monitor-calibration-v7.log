@@ -1,0 +1,23 @@
+✔ detects a complete incoming diagnostic before trimming its long tail (0.367334ms)
+✔ detects every split inside the native heap marker and stays sticky (0.503917ms)
+✔ captured v6 heap bytes classify under whole, tiny and 1024-byte chunks (2.669375ms)
+✔ captured v5 inspector assertion and ordinary heap words do not classify as OOM (0.447708ms)
+✔ startup and a conflict without completed enqueue never arm progress containment (0.379333ms)
+✔ rejects enqueue before measured premise instead of arming retroactively (0.144916ms)
+✔ rejects missing physical, applied, current, scope or pending premise facts (0.196292ms)
+✔ requires completed enqueue after the exact measured key and answer versions (0.135041ms)
+✔ arms from parent enqueue observation and honors the exact containment boundary (0.071209ms)
+✔ execution disarms the progress window even if final drain observes it after cutoff (0.109333ms)
+✔ rejects duplicate premise, enqueue and execution milestones (0.062875ms)
+✔ rejects execution without matching completed enqueue or answer identity (0.06275ms)
+✔ lawful ablation control callbacks do not require or arm a conflicting premise (0.039667ms)
+✔ milestones retain only fixed scalar identity and counters as receipts grow (0.697125ms)
+✔ resource and observation failures take precedence over watchdog evidence (0.052583ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.059875

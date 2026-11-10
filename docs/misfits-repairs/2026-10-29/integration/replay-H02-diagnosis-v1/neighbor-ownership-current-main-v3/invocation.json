@@ -1,0 +1,27 @@
+{
+  "recipePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/ownership-recipe-v3.json",
+  "recipeSha256": "3061c26c3ce942d65a4e105b1d9f5ce4601425d7e2886275ccdaf4ef3a8c2de2",
+  "command": {
+    "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "-t",
+      "keeps a reacquired lease's result"
+    ],
+    "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3"
+  },
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "parentPid": 34351,
+  "proofBoundary": "on-disk identity only; no V8 loaded-source binding claimed"
+}

@@ -1,0 +1,22 @@
+{
+  "packages/db/tests/oracle-config.ts": {
+    "after": "30a7243550a2afb44ea3458b70a037a35b2c7e68de6831222acd2538784c786c",
+    "before": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908"
+  },
+  "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts": {
+    "after": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+    "before": "04673a4e1aa9ef93a01e1562c4953add348ec2df030a59f7b20b8ccf8707108e"
+  },
+  "packages/query-db-collection/tests/queued-answer-metadata-oracle.ts": {
+    "after": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+    "before": "e69dc74e78ba0838af64873a98820060d3e29399a346d14911e006960eaf3b65"
+  },
+  "packages/query-db-collection/tests/queued-answer-progress-driver.ts": {
+    "after": "48b095c899883a9afb6362e636c8ac23d998bdde9140870a49ec91bb09dcd954",
+    "before": "99cadc4a48d48fc54e00282dac44a29f99d8b0106c5a18b1eb47cbe01e349b23"
+  },
+  "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+    "after": "594b2a04511a59e862002b0eb4f93dde7d0d98a6ee0899077246c49ad6ee112b",
+    "before": "74efbfc6f60ebc6b9e368b9d8eb5ec7a715008b6d9e61898a9b6ed76727860d4"
+  }
+}

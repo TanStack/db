@@ -1,0 +1,81 @@
+{
+  "status": "Future root-authored actual-result protocol only; no runtime/result/admission evidence exists here",
+  "oneShotOrder": [
+    "universe command separately admitted",
+    "root freezes and classifies actual universe with independent review",
+    "selector command separately admitted",
+    "root freezes and classifies actual singleton with independent review",
+    "receiving command separately admitted"
+  ],
+  "classificationFields": {
+    "classifiedBy": "/root",
+    "boundedAccepted": true,
+    "newRuntimeAdmitted": false,
+    "stage": "universe OR selector",
+    "bindingSha256": "exact preparation binding",
+    "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "resultFreezeSha256": "actual result-freeze bytes",
+    "actualOuterReturnSha256": "actual tool completion return record bytes",
+    "rootAbsenceSha256": "root original identity absence record bytes",
+    "independentReviewSha256": "independent actual-result review bytes",
+    "independentActualResultAccepted": true,
+    "productPassCredit": false,
+    "receivingReachCredit": false
+  },
+  "resultFreezeFields": {
+    "bindingSha256": "exact preparation binding",
+    "sourceFreezeSha256": "exact source freeze",
+    "outputDirectory": "fixed stage output directory",
+    "assets": {
+      "every exclusive output basename": "its exact SHA256"
+    }
+  },
+  "actualOuterReturnFields": {
+    "actualOuterExitCode": 0,
+    "completionToolReturn": {
+      "exit_code": 0,
+      "otherFields": "preserve actual raw tool return, including session/completion details"
+    },
+    "outerPid": "actual outer-pre/final original PID",
+    "outerPgid": "actual outer-pre/final original PGID"
+  },
+  "absenceFields": {
+    "probes": [
+      {
+        "participant": "outer",
+        "kind": "pid",
+        "identity": "recorded original outer PID",
+        "status": "empty-ESRCH"
+      },
+      {
+        "participant": "outer",
+        "kind": "pgid",
+        "identity": "recorded original outer PGID",
+        "status": "empty-ESRCH"
+      },
+      {
+        "participant": "child",
+        "kind": "pid",
+        "identity": "recorded original child PID",
+        "status": "empty-ESRCH"
+      },
+      {
+        "participant": "child",
+        "kind": "pgid",
+        "identity": "recorded original child PGID",
+        "status": "empty-ESRCH"
+      }
+    ]
+  },
+  "enforcement": "verify.py binds fixed future paths, all preserved output bytes, outer/child return and qualification, exact original IDs, separate root bounded acceptance and independent review. It never creates classification, reviews, absence evidence or runtime admission.",
+  "receivingReviewRequirements": [
+    "actual prepared.json/history.json and worker-start.history match exact canonical program SHA",
+    "selected native display/filter name and quarter-2 source context match",
+    "actual applied source and acquisition settlements",
+    "both root/downstream full previousValue and public update comparisons",
+    "shared per-history finalizer and normal cleanup",
+    "31 declared states actually reached; no credit for names, source-derived receipts, cache quiet or timeout",
+    "external actual outer completion and original outer/inner process absence before any next command"
+  ],
+  "limits": "Classification is collection/selector calibration only. No product pass, receiving reach, production RED/GREEN, mutation kill, strict recovery or readiness credit."
+}

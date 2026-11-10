@@ -1,0 +1,19 @@
+{
+  "actualTool": "exec_command",
+  "sandbox_permissions": "require_escalated",
+  "initialChunk": "e84e86",
+  "sessionId": 26998,
+  "finalChunk": "4a9657",
+  "actualOuterExitCode": 1,
+  "initialWallTimeSeconds": 1.00364275,
+  "finalPollWallTimeSeconds": 3.806045666,
+  "initialOutput": "",
+  "finalOutput": "",
+  "normalizationApplied": false,
+  "launchAttempts": 1,
+  "preflightToolChunks": [
+    "38dfa5",
+    "84c03b"
+  ],
+  "productVerdict": "UNCLASSIFIED; independent review required"
+}

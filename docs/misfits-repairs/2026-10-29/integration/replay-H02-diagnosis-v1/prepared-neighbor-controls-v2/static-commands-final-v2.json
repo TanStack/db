@@ -1,0 +1,104 @@
+[
+  {
+    "name": "format-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--write",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.438,
+    "log": "format-final-v2.log"
+  },
+  {
+    "name": "typescript-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+      "--project",
+      "/private/tmp/h02-neighbor-v2-static-tsconfig.json"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 2.096,
+    "log": "typescript-final-v2.log"
+  },
+  {
+    "name": "pure-candidate-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.593,
+    "log": "pure-candidate-final-v2.log"
+  },
+  {
+    "name": "eslint-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+      "--config",
+      "scripts/h02-progress/eslint.config.mjs",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 4.248,
+    "log": "eslint-final-v2.log"
+  },
+  {
+    "name": "lint-changed-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "scripts/agent-lint-feedback.mjs"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 13.7,
+    "log": "lint-changed-final-v2.log"
+  },
+  {
+    "name": "prettier-final-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--check",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.364,
+    "log": "prettier-final-v2.log"
+  }
+]

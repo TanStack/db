@@ -1,0 +1,336 @@
+[
+  {
+    "label": "current-main",
+    "postRunProductionFilesUnchanged": true,
+    "productionFileCount": 511,
+    "driverUnchanged": true,
+    "runtimePackageTrees": {
+      "vitest": {
+        "scratchManifest": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json",
+        "scratchTree": {
+          "regularFileCount": 116,
+          "sha256": "126de1528302981f658b2925205ccc21d461a81251949a399178243d1b827505"
+        },
+        "authorTree": {
+          "regularFileCount": 117,
+          "sha256": "8c5d6dc5dc11f8473d2ec85869beb2e27c1220901fd53f90c81354e226d08656"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "dist/tsconfig.tmp.tsbuildinfo",
+            "scratchSha256": null,
+            "authorSha256": "9f3c47cda90b55d8723247e9ff41b2f6e27817b9d6205dd703996b71e55e49e8",
+            "classification": "generated TypeScript incremental metadata; runtime typecheck disabled"
+          },
+          {
+            "path": "node_modules/.bin/vite",
+            "scratchSha256": "3f3b7e4d67ab8bd1efda15aeaf44f5f41a4a8eecc0b73b6f8c653bfc0af322eb",
+            "authorSha256": "d1a021dba389ffa84b185768bd0e8149f7ca62c584c0b032caa6524a435488d8",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/why-is-node-running",
+            "scratchSha256": "dbdc062025c016e3d97ee275c4f863b5eb29b736ab94ed8d0247c98679ecdd76",
+            "authorSha256": "620c9fb8f0af8e92ce526a910afd47c2ace0f8c052140d93547a0ce106210a69",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "8a78798bfca3a4260e7eae8918907d4e89557d6c593a2755057270c59efd0a9a",
+        "authorPayloadSha256": "8a78798bfca3a4260e7eae8918907d4e89557d6c593a2755057270c59efd0a9a"
+      },
+      "vite": {
+        "scratchManifest": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json",
+        "scratchTree": {
+          "regularFileCount": 46,
+          "sha256": "00046fcdd28d16a20f082db242189e093502dfa8f3b1077926bb13c210df8c6e"
+        },
+        "authorTree": {
+          "regularFileCount": 46,
+          "sha256": "92d0c02ff793dbc3ca0d82b464d1ed527b412d92bbe960b12eeab0ecc9698a10"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "node_modules/.bin/esbuild",
+            "scratchSha256": "97e45e06539cc038ab117d368a9ec22d4f1a28ec93ff2c7c6f4dc33d7566c63c",
+            "authorSha256": "ac693757fd5fcefd34372bb099ad812e24d4ce80962d928a940dcc9596018a28",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/jiti",
+            "scratchSha256": "cf56de8d9331d33ee5b82c504afa1815b4db7b9bc4931053234e7458e48a049c",
+            "authorSha256": "d1844d580d7b46355234c27709770680b30c52048d1c5b3b344dea9a163e9964",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/rollup",
+            "scratchSha256": "3ef06362431e554e601e27dfd24fbf0c506f7cedef652315eebe9792f6016f50",
+            "authorSha256": "feb497151563e0e4f322f6163d2ebefd2caaf60e8646be1795580e3d38d5de26",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/sass",
+            "scratchSha256": "6ad2b0f6753a1d04293891a513f6fa57b2104cdbfef652346bf669f858883a32",
+            "authorSha256": "b08efac4cb980694db4538d95efe01333ae9d4f14d7c6148dcf2ddd5849749cb",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/terser",
+            "scratchSha256": "5d1b0d5839f0bc420d697d6a2f836bdb2ca943d1a81f5cfa3ef499bc45e9c9ec",
+            "authorSha256": "f66e3bc3a227a908a9a90b8491f1f56293b1b7b108a28b43cfa0f71428b88b71",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/tsx",
+            "scratchSha256": "1b0e306ea06ef77d15b1d4675ecc31b854d8ceb24da50ca469e0123d4a53b325",
+            "authorSha256": "5dd1f053f027e71dace355971995437ca0a63bf6549188e73357749cd99a8615",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/yaml",
+            "scratchSha256": "3df490a6f1fa9a61b660a0024a09498d9b9ec09e1812e046c6d652ffe3b497fe",
+            "authorSha256": "64c171fc74cd9c56215f37d80f90917f1c86251fca0b5867e417c986cd49b97e",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "64d959d86bd733a17c169784cff77cdfe064174b64651d25a09c6f7b3009aa3d",
+        "authorPayloadSha256": "64d959d86bd733a17c169784cff77cdfe064174b64651d25a09c6f7b3009aa3d"
+      },
+      "query-core": {
+        "scratchManifest": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json",
+        "scratchTree": {
+          "regularFileCount": 307,
+          "sha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+        },
+        "authorTree": {
+          "regularFileCount": 307,
+          "sha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+        },
+        "regularPackageFilesMatchAuthor": true,
+        "rawTreeDifferences": [],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81",
+        "authorPayloadSha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+      },
+      "jsdom": {
+        "scratchManifest": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json",
+        "scratchTree": {
+          "regularFileCount": 533,
+          "sha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+        },
+        "authorTree": {
+          "regularFileCount": 533,
+          "sha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+        },
+        "regularPackageFilesMatchAuthor": true,
+        "rawTreeDifferences": [],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293",
+        "authorPayloadSha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+      },
+      "tanstack-vite-config": {
+        "scratchManifest": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json",
+        "scratchTree": {
+          "regularFileCount": 9,
+          "sha256": "b88c88cf018591286a0cbb03eb2b652bb40db5cbb4ad3834931d718b5c131a3a"
+        },
+        "authorTree": {
+          "regularFileCount": 9,
+          "sha256": "4b1133f3e87f49311d6ee6adcf920f1e85d36a1fa168e73bb4ac7e3e705d69e3"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "node_modules/.bin/vite",
+            "scratchSha256": "8d22d9f6a2ae6082a8cc66febae99937ab63640abd26fb9c0a1b91a45fa6567c",
+            "authorSha256": "bad75aaddc5445b55bae4a7ae7590df42639a095312ed637e5746fb6c50a7bcf",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "74b01b4906c75f8cfaa90fd60c15e782a6c975b7d2b2a636f4ad652d9e8f9f6d",
+        "authorPayloadSha256": "74b01b4906c75f8cfaa90fd60c15e782a6c975b7d2b2a636f4ad652d9e8f9f6d"
+      }
+    }
+  },
+  {
+    "label": "accepted-replay",
+    "postRunProductionFilesUnchanged": true,
+    "productionFileCount": 511,
+    "driverUnchanged": true,
+    "runtimePackageTrees": {
+      "vitest": {
+        "scratchManifest": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json",
+        "scratchTree": {
+          "regularFileCount": 116,
+          "sha256": "126de1528302981f658b2925205ccc21d461a81251949a399178243d1b827505"
+        },
+        "authorTree": {
+          "regularFileCount": 117,
+          "sha256": "8c5d6dc5dc11f8473d2ec85869beb2e27c1220901fd53f90c81354e226d08656"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "dist/tsconfig.tmp.tsbuildinfo",
+            "scratchSha256": null,
+            "authorSha256": "9f3c47cda90b55d8723247e9ff41b2f6e27817b9d6205dd703996b71e55e49e8",
+            "classification": "generated TypeScript incremental metadata; runtime typecheck disabled"
+          },
+          {
+            "path": "node_modules/.bin/vite",
+            "scratchSha256": "3f3b7e4d67ab8bd1efda15aeaf44f5f41a4a8eecc0b73b6f8c653bfc0af322eb",
+            "authorSha256": "d1a021dba389ffa84b185768bd0e8149f7ca62c584c0b032caa6524a435488d8",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/why-is-node-running",
+            "scratchSha256": "dbdc062025c016e3d97ee275c4f863b5eb29b736ab94ed8d0247c98679ecdd76",
+            "authorSha256": "620c9fb8f0af8e92ce526a910afd47c2ace0f8c052140d93547a0ce106210a69",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "8a78798bfca3a4260e7eae8918907d4e89557d6c593a2755057270c59efd0a9a",
+        "authorPayloadSha256": "8a78798bfca3a4260e7eae8918907d4e89557d6c593a2755057270c59efd0a9a"
+      },
+      "vite": {
+        "scratchManifest": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json",
+        "scratchTree": {
+          "regularFileCount": 46,
+          "sha256": "00046fcdd28d16a20f082db242189e093502dfa8f3b1077926bb13c210df8c6e"
+        },
+        "authorTree": {
+          "regularFileCount": 46,
+          "sha256": "92d0c02ff793dbc3ca0d82b464d1ed527b412d92bbe960b12eeab0ecc9698a10"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "node_modules/.bin/esbuild",
+            "scratchSha256": "97e45e06539cc038ab117d368a9ec22d4f1a28ec93ff2c7c6f4dc33d7566c63c",
+            "authorSha256": "ac693757fd5fcefd34372bb099ad812e24d4ce80962d928a940dcc9596018a28",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/jiti",
+            "scratchSha256": "cf56de8d9331d33ee5b82c504afa1815b4db7b9bc4931053234e7458e48a049c",
+            "authorSha256": "d1844d580d7b46355234c27709770680b30c52048d1c5b3b344dea9a163e9964",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/rollup",
+            "scratchSha256": "3ef06362431e554e601e27dfd24fbf0c506f7cedef652315eebe9792f6016f50",
+            "authorSha256": "feb497151563e0e4f322f6163d2ebefd2caaf60e8646be1795580e3d38d5de26",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/sass",
+            "scratchSha256": "6ad2b0f6753a1d04293891a513f6fa57b2104cdbfef652346bf669f858883a32",
+            "authorSha256": "b08efac4cb980694db4538d95efe01333ae9d4f14d7c6148dcf2ddd5849749cb",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/terser",
+            "scratchSha256": "5d1b0d5839f0bc420d697d6a2f836bdb2ca943d1a81f5cfa3ef499bc45e9c9ec",
+            "authorSha256": "f66e3bc3a227a908a9a90b8491f1f56293b1b7b108a28b43cfa0f71428b88b71",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/tsx",
+            "scratchSha256": "1b0e306ea06ef77d15b1d4675ecc31b854d8ceb24da50ca469e0123d4a53b325",
+            "authorSha256": "5dd1f053f027e71dace355971995437ca0a63bf6549188e73357749cd99a8615",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          },
+          {
+            "path": "node_modules/.bin/yaml",
+            "scratchSha256": "3df490a6f1fa9a61b660a0024a09498d9b9ec09e1812e046c6d652ffe3b497fe",
+            "authorSha256": "64c171fc74cd9c56215f37d80f90917f1c86251fca0b5867e417c986cd49b97e",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "64d959d86bd733a17c169784cff77cdfe064174b64651d25a09c6f7b3009aa3d",
+        "authorPayloadSha256": "64d959d86bd733a17c169784cff77cdfe064174b64651d25a09c6f7b3009aa3d"
+      },
+      "query-core": {
+        "scratchManifest": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json",
+        "scratchTree": {
+          "regularFileCount": 307,
+          "sha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+        },
+        "authorTree": {
+          "regularFileCount": 307,
+          "sha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+        },
+        "regularPackageFilesMatchAuthor": true,
+        "rawTreeDifferences": [],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81",
+        "authorPayloadSha256": "61a98b10b1c4c0ac50a98b55cef3f92819e004a548906550841bbc13764e9e81"
+      },
+      "jsdom": {
+        "scratchManifest": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json",
+        "scratchTree": {
+          "regularFileCount": 533,
+          "sha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+        },
+        "authorTree": {
+          "regularFileCount": 533,
+          "sha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+        },
+        "regularPackageFilesMatchAuthor": true,
+        "rawTreeDifferences": [],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293",
+        "authorPayloadSha256": "e1251570fba54765e076175bbd2ba5dcf0bb17920ec9ff9f82b448bdb017c293"
+      },
+      "tanstack-vite-config": {
+        "scratchManifest": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json",
+        "authorManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json",
+        "scratchTree": {
+          "regularFileCount": 9,
+          "sha256": "b88c88cf018591286a0cbb03eb2b652bb40db5cbb4ad3834931d718b5c131a3a"
+        },
+        "authorTree": {
+          "regularFileCount": 9,
+          "sha256": "4b1133f3e87f49311d6ee6adcf920f1e85d36a1fa168e73bb4ac7e3e705d69e3"
+        },
+        "regularPackageFilesMatchAuthor": false,
+        "rawTreeDifferences": [
+          {
+            "path": "node_modules/.bin/vite",
+            "scratchSha256": "8d22d9f6a2ae6082a8cc66febae99937ab63640abd26fb9c0a1b91a45fa6567c",
+            "authorSha256": "bad75aaddc5445b55bae4a7ae7590df42639a095312ed637e5746fb6c50a7bcf",
+            "classification": "installation-path command shim; direct Node test entry bypasses these"
+          }
+        ],
+        "ownPackageRuntimePayloadsEqual": true,
+        "payloadClassification": "Own regular package files, excluding nested installation command shims and generated .tsbuildinfo; raw differences above are preserved. Not a blanket transitive/runtime-host equivalence claim.",
+        "scratchPayloadSha256": "74b01b4906c75f8cfaa90fd60c15e782a6c975b7d2b2a636f4ad652d9e8f9f6d",
+        "authorPayloadSha256": "74b01b4906c75f8cfaa90fd60c15e782a6c975b7d2b2a636f4ad652d9e8f9f6d"
+      }
+    }
+  }
+]

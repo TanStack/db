@@ -1,0 +1,71 @@
+import { EventEmitter } from "../event-emitter.js";
+export class CollectionEventsManager extends EventEmitter {
+  constructor() {
+    super();
+  }
+  setDeps(deps) {
+    this.collection = deps.collection;
+  }
+  /**
+   * Emit an event to all listeners
+   * Public API for emitting collection events
+   */
+  emit(event, eventPayload) {
+    this.emitInner(event, eventPayload);
+  }
+  emitStatusChange(status, previousStatus, isCurrent) {
+    this.emitInnerWhile(
+      `status:change`,
+      {
+        type: `status:change`,
+        collection: this.collection,
+        previousStatus,
+        status
+      },
+      isCurrent
+    );
+    if (!isCurrent()) return;
+    const eventKey = `status:${status}`;
+    this.emitInnerWhile(
+      eventKey,
+      {
+        type: eventKey,
+        collection: this.collection,
+        previousStatus,
+        status
+      },
+      isCurrent
+    );
+  }
+  emitHealthChange() {
+    this.emit(`health:change`, {
+      type: `health:change`,
+      collection: this.collection
+    });
+  }
+  emitSubscribersChange(subscriberCount, previousSubscriberCount) {
+    this.emit(`subscribers:change`, {
+      type: `subscribers:change`,
+      collection: this.collection,
+      previousSubscriberCount,
+      subscriberCount
+    });
+  }
+  emitIndexAdded(index) {
+    this.emit(`index:added`, {
+      type: `index:added`,
+      collection: this.collection,
+      index
+    });
+  }
+  emitIndexRemoved(index) {
+    this.emit(`index:removed`, {
+      type: `index:removed`,
+      collection: this.collection,
+      index
+    });
+  }
+  cleanup() {
+    this.clearListeners();
+  }
+}

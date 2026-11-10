@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-30T09:32:37.512847+00:00",
+  "verdictSha256": "0e013e7283dd1f5082bc19d1f06158167301d24614d9cd23993cc1513c48a405",
+  "checksSha256": "980b361ac661b28f913286849f1eabb83fdda4cc8574a6e5dc2c2689d93799b8",
+  "ledger": {
+    "previousRows": 86,
+    "addedRows": 3,
+    "rows": 89,
+    "previousSha256": "edc0adf2efb4f08c9a0edbf6e8508fd52ff072c9ba19fa9875935ecaa253c385",
+    "sha256": "6adef1b2cb018090b8a5b98004f39c7cb604912db1963334bbe956452155d412",
+    "appendOnlyPrefixVerified": true
+  },
+  "sourceAccepted": true,
+  "combinedAndInputAccepted": false,
+  "runtimeAdmission": false
+}

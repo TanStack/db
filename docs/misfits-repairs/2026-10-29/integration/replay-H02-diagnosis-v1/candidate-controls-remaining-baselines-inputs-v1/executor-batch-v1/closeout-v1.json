@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-30T10:02:55.044427+00:00",
+  "status": "batch stopped at ordinal3 receiving-instrument failure; remaining13 not invoked",
+  "rootAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "nativeInvocationCount": 2,
+  "resultFreezes": [
+    {
+      "id": "inline-held-window",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-held-window-result-freeze-v1.json",
+      "sha256": "578b8ca87c283a0767fa3783f2d46f3e67dac59786d30ef642dad36c26b4d485",
+      "assetsMatched": 1975,
+      "actualOuterExitCode": 0,
+      "parentTestChildExitCode": 0
+    },
+    {
+      "id": "inline-source-failed-peer",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-source-failed-peer-result-freeze-v1.json",
+      "sha256": "029a8eb1cf46e59d84cdf6d52cb7f56837b962b829922672e76630df26b49957",
+      "assetsMatched": 1975,
+      "actualOuterExitCode": 1,
+      "parentTestChildExitCode": 1
+    }
+  ],
+  "totalResultAssetsRehashed": 3950,
+  "remainingUnrun": 13,
+  "allUnrunOutputLeavesAbsent": true,
+  "inputFreezeAnd53PacketEntriesUnchanged": true,
+  "heldWindowIndependentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-held-window-actual-independent-review-v1.md",
+    "sha256": "b855ed8a3114d6fa317ed77845c5f66164ff39c190642a7c82ee93cbb5796245",
+    "verdict": "bounded baseline GREEN only"
+  },
+  "sourceFailedPeerIndependentDiagnosis": "pending; primary positive-held-provider-answer premise and native kill EPERM preserved",
+  "exactPnpmChangedLintCompletion": {
+    "chunk_id": "ac929d",
+    "wall_time_seconds": 2.0209e-05,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "slot2Returned": true,
+  "nativeActive": false,
+  "automaticReruns": 0,
+  "resourceIncreases": 0,
+  "productionEdits": 0,
+  "gitInstallPublishingCanonicalOperations": 0,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "actualHelperNoActiveOperationNeighbor": "UNREACHED"
+}

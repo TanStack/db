@@ -1,0 +1,1088 @@
+import { deepEquals } from "../utils";
+import { SortedMap } from "../SortedMap";
+import { enrichRowWithVirtualProps } from "../virtual-props.js";
+import {
+  DuplicateTransactionIdError,
+  SyncQueueInvariantError,
+  SyncTransactionAbortedError
+} from "../errors.js";
+export function truncatesSourceKey(transaction, key) {
+  const kept = transaction.preserveHydrationSeedKeys;
+  return transaction.truncate === true && (!kept || transaction.sourceTruncate === true && !kept.has(key));
+}
+export function automaticRowMetadataWrite(operation) {
+  if (operation.metadata !== void 0 && operation.type !== `delete`) {
+    return { type: `set`, value: operation.metadata };
+  }
+  return operation.type === `update` ? void 0 : { type: `delete` };
+}
+export class CollectionStateManager {
+  /**
+   * Creates a new CollectionState manager
+   */
+  constructor(config) {
+    this.pendingSyncedTransactions = [];
+    this.pendingSyncedProjection = {
+      states: /* @__PURE__ */ new Map(),
+      truncated: false,
+      sourceKeys: /* @__PURE__ */ new Set()
+    };
+    this.syncedMetadata = /* @__PURE__ */ new Map();
+    this.syncedCollectionMetadata = /* @__PURE__ */ new Map();
+    this.hydrationSeedKeys = /* @__PURE__ */ new Set();
+    this.hydratedKeys = /* @__PURE__ */ new Set();
+    this.hasAppliedAdapterTruncate = false;
+    /** Held seeds that the applied adapter truncate kept (decision 20). */
+    this.adapterTruncateKeptKeys = /* @__PURE__ */ new Set();
+    // Optimistic state tracking - make public for testing
+    this.optimisticUpserts = /* @__PURE__ */ new Map();
+    this.optimisticDeletes = /* @__PURE__ */ new Set();
+    // A completed transaction's optimistic row is held only while a queued sync
+    // transaction touches its key, so the drop and that sync transaction
+    // publish together.
+    // The newest completed transaction owns a held key; no row means a delete.
+    // Whether a wrapping sync, such as persistence, holds a committed sync
+    // transaction for the key that it has not handed to this Collection yet.
+    // Such a transaction holds settled optimistic rows like a queued one.
+    this.isDeferredSyncKey = () => false;
+    // Those committed transactions themselves, for hydration seed authority.
+    this.getStagedSyncTransactions = () => [];
+    this.heldOptimisticRows = /* @__PURE__ */ new Map();
+    /**
+     * Tracks Collection attribution for applied source rows. A same-key local
+     * mutation can make an independent source write appear 'local'; this map
+     * does not identify the source client. Optimistic rows are separately 'local'.
+     * Used for the $origin virtual property.
+     */
+    this.rowOrigins = /* @__PURE__ */ new Map();
+    /**
+     * Tracks keys of pending or persisting local mutations for source-write attribution.
+     * A same-key source write can receive 'local' even when a peer supplied it.
+     */
+    this.pendingLocalChanges = /* @__PURE__ */ new Set();
+    // A successful mutation attributes only the sync writes committed before its
+    // optimistic state dropped: those held at its completion boundary. Active or
+    // failed mutations must not add to, or erase a sibling's entry in, this set.
+    this.pendingLocalOrigins = /* @__PURE__ */ new Set();
+    // Keyed by row key, not row object: adding a WeakMap entry for each
+    // published row cost more than the copy it saves. Sync writes, deletes,
+    // and cleanup drop a key's entry.
+    this.virtualPropsCache = /* @__PURE__ */ new Map();
+    // Cached size for performance
+    this.size = 0;
+    // State used for computing the change events
+    // Hidden keys are captured as undefined so a later recompute cannot become
+    // the baseline for a sync commit that must publish that key's change.
+    this.preSyncVisibleState = /* @__PURE__ */ new Map();
+    this.preSyncVirtualState = /* @__PURE__ */ new Map();
+    this.recentlySyncedKeys = /* @__PURE__ */ new Set();
+    this.hasReceivedFirstCommit = false;
+    this.isCommittingSyncTransactions = false;
+    this.isDrainingSyncTransactions = false;
+    this.syncRunGeneration = 0;
+    this.isLocalOnly = false;
+    /**
+     * Attempts to commit pending synced transactions if there are no active transactions
+     * This method processes operations from pending transactions and applies them to the synced data
+     */
+    this.commitPendingTransactions = () => {
+      if (this.isDrainingSyncTransactions) return;
+      this.isDrainingSyncTransactions = true;
+      let failed = false;
+      let firstError;
+      try {
+        let result;
+        do {
+          result = this.commitNextPendingTransactionBatch();
+          if (result.failure && !failed) {
+            failed = true;
+            firstError = result.failure.error;
+          }
+        } while (result.processed);
+      } finally {
+        this.isDrainingSyncTransactions = false;
+      }
+      if (failed) throw firstError;
+    };
+    this.config = config;
+    this.transactions = new SortedMap(
+      (a, b) => a.compareCreatedAt(b)
+    );
+    this.syncedData = new SortedMap(config.compare);
+  }
+  setDeps(deps) {
+    this.collection = deps.collection;
+    this.lifecycle = deps.lifecycle;
+    this.changes = deps.changes;
+    this.indexes = deps.indexes;
+    this._events = deps.events;
+  }
+  /**
+   * Snapshot virtual properties from the current or supplied prior state.
+   * A row with an optimistic write is local and pending; otherwise it keeps
+   * the source row's attribution. Local-only rows are always local without pending writes.
+   *
+   * This is local mutation status, not backend confirmation: `$hasPendingWrites: false` means the
+   * row is not currently affected by an optimistic transaction in this
+   * collection's visible state.
+   */
+  getVirtualPropsSnapshotForState(key, state = this) {
+    const hasOptimisticChange = !this.isLocalOnly && (state.optimisticUpserts.has(key) || state.optimisticDeletes.has(key));
+    return {
+      $hasPendingWrites: hasOptimisticChange,
+      $origin: this.isLocalOnly || hasOptimisticChange ? "local" : state.rowOrigins.get(key) ?? "remote",
+      $key: key,
+      $collectionId: this.collection.id
+    };
+  }
+  snapshotRowOriginsForKeys(keys) {
+    const rowOrigins = /* @__PURE__ */ new Map();
+    for (const key of keys) {
+      const origin = this.rowOrigins.get(key);
+      if (origin !== void 0) {
+        rowOrigins.set(key, origin);
+      }
+    }
+    return rowOrigins;
+  }
+  enrichWithVirtualPropsSnapshot(row, virtualProps) {
+    const existingRow = row;
+    const hasPendingWrites = existingRow.$hasPendingWrites ?? virtualProps.$hasPendingWrites;
+    const origin = existingRow.$origin ?? virtualProps.$origin;
+    const resolvedKey = existingRow.$key ?? virtualProps.$key;
+    const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId;
+    const cached = this.virtualPropsCache.get(resolvedKey);
+    if (cached && cached.row === row && cached.hasPendingWrites === hasPendingWrites && cached.origin === origin && cached.collectionId === collectionId) {
+      return cached.enriched;
+    }
+    const enriched = {
+      ...row,
+      $hasPendingWrites: hasPendingWrites,
+      $origin: origin,
+      $key: resolvedKey,
+      $collectionId: collectionId
+    };
+    this.virtualPropsCache.set(resolvedKey, {
+      row,
+      hasPendingWrites,
+      origin,
+      collectionId,
+      enriched
+    });
+    return enriched;
+  }
+  clearOriginTrackingState() {
+    this.virtualPropsCache.clear();
+    this.rowOrigins.clear();
+    this.pendingLocalChanges.clear();
+    this.pendingLocalOrigins.clear();
+  }
+  /**
+   * Enriches a row with virtual properties using the "add-if-missing" pattern.
+   * If the row already has virtual properties (from an upstream collection),
+   * they are preserved. Otherwise, new values are computed.
+   */
+  enrichWithVirtualProps(row, key) {
+    return this.enrichWithVirtualPropsSnapshot(
+      row,
+      this.getVirtualPropsSnapshotForState(key)
+    );
+  }
+  /**
+   * Visible entries whose stored row passes `prefilter`, enriched with virtual
+   * properties. Rows that fail are never enriched.
+   */
+  *entriesPassing(prefilter) {
+    const rows = this.optimisticUpserts.size === 0 && this.optimisticDeletes.size === 0 ? this.syncedData : this.entries();
+    for (const [key, row] of rows) {
+      if (prefilter(row)) yield [key, this.enrichWithVirtualProps(row, key)];
+    }
+  }
+  /**
+   * Creates a change message with virtual properties.
+   * Uses the "add-if-missing" pattern so that pass-through from upstream
+   * collections works correctly.
+   */
+  enrichChangeMessage(change) {
+    const { __virtualProps } = change;
+    const enrichedPreviousValue = change.previousValue ? this.enrichWithVirtualPropsSnapshot(
+      change.previousValue,
+      __virtualProps?.previousValue ?? this.getVirtualPropsSnapshotForState(change.key)
+    ) : void 0;
+    const enrichedValue = this.enrichWithVirtualPropsSnapshot(
+      change.value,
+      __virtualProps?.value ?? this.getVirtualPropsSnapshotForState(change.key)
+    );
+    if (change.type === `delete`) this.virtualPropsCache.delete(change.key);
+    return {
+      key: change.key,
+      type: change.type,
+      value: enrichedValue,
+      previousValue: enrichedPreviousValue,
+      metadata: change.metadata
+    };
+  }
+  /**
+   * Get the current value for a key enriched with virtual properties.
+   */
+  getWithVirtualProps(key) {
+    const value = this.get(key);
+    if (value === void 0) {
+      return void 0;
+    }
+    return this.enrichWithVirtualProps(value, key);
+  }
+  /**
+   * Read a key from the current optimistic layer, or a supplied prior layer.
+   * Both layers fall back to the current synced rows.
+   */
+  get(key, optimisticUpserts = this.optimisticUpserts, optimisticDeletes = this.optimisticDeletes) {
+    if (optimisticDeletes.has(key)) {
+      return void 0;
+    }
+    return optimisticUpserts.get(key) ?? this.syncedData.get(key);
+  }
+  /**
+   * Check if a key exists in the collection (virtual derived state)
+   */
+  has(key) {
+    const { optimisticDeletes, optimisticUpserts, syncedData } = this;
+    if (optimisticDeletes.has(key)) {
+      return false;
+    }
+    return optimisticUpserts.has(key) || syncedData.has(key);
+  }
+  /**
+   * Get all keys (virtual derived state)
+   */
+  *keys() {
+    const { syncedData, optimisticDeletes, optimisticUpserts } = this;
+    for (const key of syncedData.keys()) {
+      if (!optimisticDeletes.has(key)) {
+        yield key;
+      }
+    }
+    for (const key of optimisticUpserts.keys()) {
+      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
+        yield key;
+      }
+    }
+  }
+  /**
+   * Get all values (virtual derived state)
+   */
+  *values() {
+    for (const key of this.keys()) {
+      const value = this.get(key);
+      if (value !== void 0) {
+        yield value;
+      }
+    }
+  }
+  /**
+   * Get all entries (virtual derived state)
+   */
+  *entries() {
+    for (const key of this.keys()) {
+      const value = this.get(key);
+      if (value !== void 0) {
+        yield [key, value];
+      }
+    }
+  }
+  /**
+   * Get all entries (virtual derived state)
+   */
+  [Symbol.iterator]() {
+    return this.entries();
+  }
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  forEach(callbackfn) {
+    let index = 0;
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++);
+    }
+  }
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  map(callbackfn) {
+    const result = [];
+    let index = 0;
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++));
+    }
+    return result;
+  }
+  /**
+   * Lets a wrapping sync report which keys have committed sync transactions
+   * it has not handed to this Collection yet.
+   */
+  setDeferredSyncKeys(isDeferred, getStaged = () => []) {
+    this.isDeferredSyncKey = isDeferred;
+    this.getStagedSyncTransactions = getStaged;
+  }
+  /**
+   * Recompute optimistic state from active transactions
+   */
+  recomputeOptimisticState(triggeredByUserAction = false) {
+    if (this.isCommittingSyncTransactions && !triggeredByUserAction) {
+      return;
+    }
+    const previousState = new Map(this.optimisticUpserts);
+    const previousDeletes = new Set(this.optimisticDeletes);
+    const previousRowOrigins = this.rowOrigins;
+    const pendingSyncKeys = /* @__PURE__ */ new Set();
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed) continue;
+      for (const operation of transaction.operations) {
+        pendingSyncKeys.add(operation.key);
+      }
+    }
+    const isPendingSync = (key) => pendingSyncKeys.has(key) || this.isDeferredSyncKey(key);
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state !== `completed`) continue;
+      for (const mutation of transaction.mutations) {
+        if (mutation.collection !== this.collection || !isPendingSync(mutation.key))
+          continue;
+        this.pendingLocalOrigins.add(mutation.key);
+        if (!mutation.optimistic) continue;
+        const held = this.heldOptimisticRows.get(mutation.key);
+        if (held && held.owner.compareCreatedAt(transaction) > 0) continue;
+        this.heldOptimisticRows.set(mutation.key, {
+          owner: transaction,
+          row: mutation.type === `delete` ? void 0 : mutation.modified
+        });
+      }
+    }
+    this.optimisticUpserts.clear();
+    this.optimisticDeletes.clear();
+    this.pendingLocalChanges.clear();
+    this.overlayHeldAndActive(isPendingSync);
+    this.size = this.calculateSize();
+    const events = [];
+    this.collectOptimisticChanges(
+      previousState,
+      previousDeletes,
+      previousRowOrigins,
+      events
+    );
+    const filteredEvents = triggeredByUserAction ? events : events.filter((event) => !this.recentlySyncedKeys.has(event.key));
+    if (filteredEvents.length > 0) this.indexes.updateIndexes(filteredEvents);
+    this.changes.emitEvents(filteredEvents, triggeredByUserAction);
+  }
+  /**
+   * Tracks `transaction`. Returns `false` when this Collection already tracks
+   * it. A different unsettled transaction with the same id is a contract
+   * violation: ids are unique.
+   */
+  trackTransaction(transaction) {
+    const tracked = this.transactions.get(transaction.id);
+    if (tracked === transaction) return false;
+    if (tracked && tracked.state !== `completed` && tracked.state !== `failed`)
+      throw new DuplicateTransactionIdError(transaction.id);
+    this.transactions.set(transaction.id, transaction);
+    transaction.collections.add(this.collection);
+    return true;
+  }
+  /**
+   * Overlay held settled rows, then still-active transactions. Given which
+   * keys have a committed sync transaction that has not applied, first end
+   * every other hold and attribution; a deferred one can be dropped without
+   * applying.
+   */
+  overlayHeldAndActive(isPendingSync) {
+    if (isPendingSync) {
+      for (const key of this.heldOptimisticRows.keys()) {
+        if (!isPendingSync(key)) this.heldOptimisticRows.delete(key);
+      }
+      for (const key of this.pendingLocalOrigins) {
+        if (!isPendingSync(key)) this.pendingLocalOrigins.delete(key);
+      }
+    }
+    for (const [key, { row }] of this.heldOptimisticRows) {
+      if (row === void 0) this.optimisticDeletes.add(key);
+      else this.optimisticUpserts.set(key, row);
+    }
+    this.overlayActiveTransactions();
+  }
+  /**
+   * Overlay still-active optimistic mutations on the current layers and
+   * record their keys as pending local changes for $origin tracking.
+   *
+   * A settled transaction leaves `transactions` here, by its own entry. A
+   * recompute calls this after it records held rows, and a sync commit calls
+   * it after it skips those recomputes.
+   */
+  overlayActiveTransactions() {
+    for (const [id, transaction] of this.transactions) {
+      if (transaction.state === `completed` || transaction.state === `failed`) {
+        this.transactions.delete(id, true);
+        continue;
+      }
+      if (this.lifecycle.hasStartedCleanup()) continue;
+      for (const mutation of transaction.mutations) {
+        if (mutation.collection !== this.collection) continue;
+        this.pendingLocalChanges.add(mutation.key);
+        if (!mutation.optimistic) continue;
+        if (mutation.type === `delete`) {
+          this.optimisticUpserts.delete(mutation.key);
+          this.optimisticDeletes.add(mutation.key);
+        } else {
+          this.optimisticUpserts.set(mutation.key, mutation.modified);
+          this.optimisticDeletes.delete(mutation.key);
+        }
+      }
+    }
+  }
+  /**
+   * Calculate the current size based on synced data and optimistic changes
+   */
+  calculateSize() {
+    let size = this.syncedData.size;
+    for (const key of this.optimisticDeletes) {
+      if (this.syncedData.has(key) && !this.optimisticUpserts.has(key)) size--;
+    }
+    for (const key of this.optimisticUpserts.keys()) {
+      if (!this.syncedData.has(key)) size++;
+    }
+    return size;
+  }
+  /**
+   * Collect events for optimistic changes
+   */
+  collectOptimisticChanges(previousUpserts, previousDeletes, previousRowOrigins, events) {
+    const allKeys = /* @__PURE__ */ new Set([
+      ...previousUpserts.keys(),
+      ...this.optimisticUpserts.keys(),
+      ...previousDeletes,
+      ...this.optimisticDeletes
+    ]);
+    for (const key of allKeys) {
+      const currentValue = this.get(key);
+      const previousValue = this.get(key, previousUpserts, previousDeletes);
+      const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
+        rowOrigins: previousRowOrigins,
+        optimisticUpserts: previousUpserts,
+        optimisticDeletes: previousDeletes
+      });
+      const nextVirtualProps = this.getVirtualPropsSnapshotForState(key);
+      if (previousValue !== void 0 && currentValue === void 0) {
+        events.push({
+          type: `delete`,
+          key,
+          value: previousValue,
+          __virtualProps: {
+            value: previousVirtualProps
+          }
+        });
+      } else if (previousValue === void 0 && currentValue !== void 0) {
+        events.push({
+          type: `insert`,
+          key,
+          value: currentValue,
+          __virtualProps: {
+            value: nextVirtualProps
+          }
+        });
+      } else if (previousValue !== void 0 && currentValue !== void 0 && (!deepEquals(previousValue, currentValue) || previousVirtualProps.$origin !== nextVirtualProps.$origin || previousVirtualProps.$hasPendingWrites !== nextVirtualProps.$hasPendingWrites)) {
+        events.push({
+          type: `update`,
+          key,
+          value: currentValue,
+          previousValue,
+          __virtualProps: {
+            value: nextVirtualProps,
+            previousValue: previousVirtualProps
+          }
+        });
+      }
+    }
+  }
+  /** Build once per output flush; queued membership excludes optimistic edits. */
+  createSyncedKeyLookup() {
+    if (this.pendingSyncedTransactions.length === 0)
+      return (key) => this.syncedData.has(key);
+    const queued = /* @__PURE__ */ new Map();
+    let truncated = false;
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed) continue;
+      if (transaction.truncate) {
+        queued.clear();
+        truncated = true;
+      }
+      for (const operation of transaction.operations) {
+        queued.set(operation.key, operation.type !== `delete`);
+      }
+    }
+    return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key));
+  }
+  enableHydrationAuthorityTracking() {
+    this.appliedAdapterKeys ??= /* @__PURE__ */ new Map();
+  }
+  getProjectedSyncedKeyState(projection, key) {
+    const state = projection.states.get(key);
+    if (state !== void 0) return state;
+    if (projection.truncated) return { exists: false, value: void 0 };
+    return {
+      exists: this.syncedData.has(key),
+      value: this.syncedData.get(key)
+    };
+  }
+  /**
+   * The synced row once every accepted sync transaction applies. A queued
+   * transaction is accepted before it is visible, so a direct write must
+   * read this rather than `syncedData`.
+   */
+  getAcceptedSyncedRow(key) {
+    return this.getProjectedSyncedKeyState(this.pendingSyncedProjection, key).value;
+  }
+  /**
+   * Accept a committed transaction in commit order: after every accepted
+   * transaction and ahead of every open one. A transaction begun inside an
+   * open one is independent, so when it commits first it also applies, and
+   * the source reads it, beneath that open transaction. A seed, such as a
+   * DbClient hydration chunk, is accepted the same way, so an open source
+   * transaction's `commit()` still targets its own writes.
+   */
+  acceptSyncTransaction(transaction) {
+    const queue = this.pendingSyncedTransactions;
+    const index = queue.indexOf(transaction);
+    if (index !== -1) queue.splice(index, 1);
+    const open = queue.findIndex((pending) => !pending.committed);
+    const position = open === -1 ? queue.length : open;
+    queue.splice(position, 0, transaction);
+    if (position !== index) this.refreshPendingSyncedProjection();
+    this.commitPendingTransactions();
+  }
+  /** A retired sync run's open transaction can never commit. */
+  discardOpenSyncTransactions() {
+    const committed = this.pendingSyncedTransactions.filter(
+      (transaction) => transaction.committed
+    );
+    if (committed.length === this.pendingSyncedTransactions.length) return;
+    this.pendingSyncedTransactions = committed;
+    this.refreshPendingSyncedProjection();
+  }
+  /** Whether the newest sync transaction is still open for writes. */
+  hasOpenSyncTransaction() {
+    return this.pendingSyncedTransactions.at(-1)?.committed === false;
+  }
+  /** Whether an accepted sync transaction is not yet visible. */
+  hasHeldSyncTransaction() {
+    return this.pendingSyncedTransactions.some(
+      (transaction) => transaction.committed
+    );
+  }
+  /**
+   * Every synced row once every accepted sync transaction applies: the
+   * baseline a diffing adapter writes against, also during a reload. Inside
+   * an open snapshot or truncate, only that transaction's writes.
+   */
+  *acceptedSyncedEntries() {
+    const { states, truncated } = this.pendingSyncedProjection;
+    if (!truncated) {
+      for (const entry of this.syncedData.entries()) {
+        if (!states.has(entry[0])) yield entry;
+      }
+    }
+    for (const [key, state] of states) {
+      if (state.exists) yield [key, state.value];
+    }
+  }
+  classifyProjectedInsert(projection, key, value) {
+    const current = this.getProjectedSyncedKeyState(projection, key);
+    if (!current.exists) return `insert`;
+    if (this.hydrationSeedKeys.has(key) && !projection.sourceKeys.has(key))
+      return `insert`;
+    if (current.value !== void 0 && deepEquals(current.value, value)) {
+      return `update`;
+    }
+    return `duplicate`;
+  }
+  /**
+   * A partial update merges over the row before it. An insert names the
+   * whole row, even as an equal re-insert, and replaces it.
+   */
+  mergesOverRow(operation) {
+    return operation.type === `update` && operation.originalSyncType !== `insert` && (this.config.sync.rowUpdateMode || `partial`) === `partial`;
+  }
+  /** Classify an adapter insert against retained and queued source state. */
+  classifyPendingSyncedInsert(key, value) {
+    return this.classifyProjectedInsert(
+      this.pendingSyncedProjection,
+      key,
+      value
+    );
+  }
+  applyPendingSyncOperation(projection, operation) {
+    const key = operation.key;
+    if (operation.type === `delete`) {
+      projection.states.set(key, { exists: false, value: void 0 });
+    } else if (this.mergesOverRow(operation)) {
+      const current = this.getProjectedSyncedKeyState(projection, key);
+      projection.states.set(key, {
+        exists: true,
+        // Spread defines own fields; assignment would run a `__proto__` setter.
+        value: { ...current.value, ...operation.value }
+      });
+    } else {
+      projection.states.set(key, { exists: true, value: operation.value });
+    }
+  }
+  /**
+   * Extend the queued projection after admitting one sync operation. A key
+   * its transaction keeps as a seed's is no source write, as in the rebuild.
+   */
+  stagePendingSyncOperation(operation, preserved) {
+    this.applyPendingSyncOperation(this.pendingSyncedProjection, operation);
+    if (!preserved)
+      this.pendingSyncedProjection.sourceKeys.add(operation.key);
+  }
+  rebuildAutomaticRowMetadataWrites(transaction) {
+    const explicit = transaction.explicitRowMetadataWrites;
+    const writes = transaction.rowMetadataWrites;
+    for (const operation of transaction.operations)
+      writes.delete(operation.key);
+    for (const [key, last] of explicit) writes.set(key, last.write);
+    transaction.operations.forEach((operation, position) => {
+      const key = operation.key;
+      if (position < (explicit.get(key)?.position ?? 0)) return;
+      const metadataWrite = automaticRowMetadataWrite(operation);
+      if (metadataWrite) writes.set(key, metadataWrite);
+    });
+  }
+  /**
+   * Rebuild the queued projection after truncate, application, or an
+   * accepted transaction changes queue history. An accepted transaction keeps
+   * the operation kinds it was accepted with, even when it commits ahead of
+   * an open transaction it began inside: its insert names the whole row. An
+   * open transaction's inserts follow the rows before it, so it can become
+   * invalid when a later transaction begun inside it commits first; it then
+   * holds an invalidation error that its commit returns.
+   */
+  rebuildPendingSyncedProjection() {
+    const projection = {
+      states: /* @__PURE__ */ new Map(),
+      truncated: false,
+      sourceKeys: /* @__PURE__ */ new Set()
+    };
+    const acceptedSourceKeys = /* @__PURE__ */ new Set();
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (transaction.invalidationError !== void 0) continue;
+      const before = transaction.committed ? void 0 : {
+        states: new Map(projection.states),
+        truncated: projection.truncated,
+        sourceKeys: new Set(projection.sourceKeys)
+      };
+      if (transaction.truncate) {
+        projection.states = /* @__PURE__ */ new Map();
+        projection.truncated = true;
+      }
+      let invalidKey;
+      for (const operation of transaction.operations) {
+        const key = operation.key;
+        if (!transaction.committed && operation.originalSyncType === `insert` && operation.type !== `delete` && !(this.hydrationSeedKeys.has(key) && projection.sourceKeys.has(key) && !acceptedSourceKeys.has(key))) {
+          const disposition = this.classifyProjectedInsert(
+            projection,
+            key,
+            operation.value
+          );
+          if (disposition === `duplicate`) {
+            invalidKey = key;
+            break;
+          }
+          operation.type = disposition;
+        }
+        this.applyPendingSyncOperation(projection, operation);
+        if (!transaction.preserveHydrationSeedKeys?.has(key)) {
+          projection.sourceKeys.add(key);
+          if (transaction.committed) acceptedSourceKeys.add(key);
+        }
+      }
+      if (invalidKey !== void 0) {
+        Object.assign(projection, before);
+        transaction.invalidationError = transaction.duplicateKeyError?.(invalidKey) ?? new SyncTransactionAbortedError();
+        continue;
+      }
+      if (!transaction.committed)
+        this.rebuildAutomaticRowMetadataWrites(transaction);
+    }
+    this.pendingSyncedProjection = projection;
+  }
+  /** Rebuild after truncate, application, or an accepted seed. */
+  refreshPendingSyncedProjection() {
+    this.rebuildPendingSyncedProjection();
+  }
+  hasPersistingTransaction() {
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `persisting`) return true;
+    }
+    return false;
+  }
+  commitNextPendingTransactionBatch() {
+    const syncRunGeneration = this.syncRunGeneration;
+    const hasPersistingTransaction = this.hasPersistingTransaction();
+    const committedSyncedTransactions = [];
+    const uncommittedSyncedTransactions = [];
+    let hasTruncateSync = false;
+    let truncateMarksReady = false;
+    let layoutChanged = false;
+    for (const t of this.pendingSyncedTransactions) {
+      if (t.committed) {
+        committedSyncedTransactions.push(t);
+        layoutChanged ||= t.layoutChanged;
+        if (t.truncate) {
+          hasTruncateSync = true;
+          truncateMarksReady = t.truncateMarkReady !== false;
+        }
+      } else {
+        uncommittedSyncedTransactions.push(t);
+      }
+    }
+    if (committedSyncedTransactions.length === 0) {
+      return { processed: false };
+    }
+    if (!hasPersistingTransaction || hasTruncateSync) {
+      const previousLayout = layoutChanged ? [...this.keys()] : void 0;
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions;
+      const deferOrder = committedSyncedTransactions.reduce(
+        (count, transaction) => count + transaction.operations.length,
+        0
+      ) >= 512;
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applicationStarted = true;
+      }
+      this.isCommittingSyncTransactions = true;
+      const changedKeys = /* @__PURE__ */ new Set();
+      const firstSyncOperations = /* @__PURE__ */ new Map();
+      for (const transaction of committedSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          const key = operation.key;
+          changedKeys.add(key);
+          if (!firstSyncOperations.has(key))
+            firstSyncOperations.set(key, operation);
+        }
+        for (const [key] of transaction.rowMetadataWrites) {
+          changedKeys.add(key);
+        }
+      }
+      const previousRowOrigins = this.snapshotRowOriginsForKeys(changedKeys);
+      const previousOptimisticUpserts = new Map(this.optimisticUpserts);
+      const previousOptimisticDeletes = new Set(this.optimisticDeletes);
+      let currentVisibleState = this.preSyncVisibleState;
+      if (currentVisibleState.size === 0) {
+        currentVisibleState = /* @__PURE__ */ new Map();
+        for (const key of changedKeys) {
+          const currentValue = this.get(key);
+          if (currentValue !== void 0) {
+            currentVisibleState.set(key, currentValue);
+          }
+        }
+      }
+      const events = [];
+      let reappliedKeys;
+      if (hasTruncateSync) {
+        for (const [key, value] of this.entries()) {
+          events.push({
+            type: `delete`,
+            key,
+            value: this.enrichWithVirtualPropsSnapshot(
+              value,
+              this.getVirtualPropsSnapshotForState(key)
+            )
+          });
+        }
+      }
+      for (const transaction of committedSyncedTransactions) {
+        if (transaction.truncate) {
+          this.syncedData.clear();
+          const kept = transaction.sourceTruncate ? transaction.preserveHydrationSeedKeys : void 0;
+          if (!transaction.preserveHydrationSeedKeys || kept) {
+            for (const keys of [
+              this.syncedMetadata,
+              this.hydrationSeedKeys,
+              this.hydratedKeys,
+              this.appliedAdapterKeys ?? /* @__PURE__ */ new Set()
+            ])
+              for (const key of keys.keys())
+                if (!kept?.has(key)) keys.delete(key);
+            if (this.appliedAdapterKeys) {
+              this.hasAppliedAdapterTruncate = true;
+              this.adapterTruncateKeptKeys = new Set(kept);
+            }
+          }
+          this.virtualPropsCache.clear();
+          this.rowOrigins.clear();
+          this.pendingLocalOrigins.clear();
+          for (const key of changedKeys) {
+            currentVisibleState.delete(key);
+          }
+          this._events.emit(`truncate`, {
+            type: `truncate`,
+            collection: this.collection
+          });
+        }
+        const localKeys = /* @__PURE__ */ new Set();
+        for (const operation of transaction.operations) {
+          const key = operation.key;
+          const origin = this.isLocalOnly || this.pendingLocalChanges.has(key) || this.pendingLocalOrigins.has(key) || localKeys.has(key) ? "local" : "remote";
+          if (origin === `local`) localKeys.add(key);
+          this.virtualPropsCache.delete(key);
+          if (operation.type === `delete`) {
+            this.syncedData.delete(key, deferOrder);
+            this.syncedMetadata.delete(key);
+            this.rowOrigins.delete(key);
+          } else {
+            this.syncedData.set(
+              key,
+              this.mergesOverRow(operation) ? { ...this.syncedData.get(key), ...operation.value } : operation.value,
+              deferOrder
+            );
+            this.rowOrigins.set(key, origin);
+          }
+          this.pendingLocalChanges.delete(key);
+          this.pendingLocalOrigins.delete(key);
+          if (!this.isDeferredSyncKey(key)) this.heldOptimisticRows.delete(key);
+          if (!transaction.preserveHydrationSeedKeys?.has(key)) {
+            this.hydrationSeedKeys.delete(key);
+            this.hydratedKeys.delete(key);
+            if (operation.type === `delete`)
+              this.appliedAdapterKeys?.set(key, true);
+            else if (this.appliedAdapterKeys?.get(key))
+              this.appliedAdapterKeys.set(key, false);
+          }
+        }
+        for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+          if (!transaction.preserveHydrationSeedKeys?.has(key) && !this.appliedAdapterKeys?.has(key))
+            this.appliedAdapterKeys?.set(key, false);
+          if (metadataWrite.type === `delete`) {
+            this.syncedMetadata.delete(key);
+            continue;
+          }
+          this.syncedMetadata.set(key, metadataWrite.value);
+        }
+        for (const [
+          key,
+          metadataWrite
+        ] of transaction.collectionMetadataWrites) {
+          if (metadataWrite.type === `delete`) {
+            this.syncedCollectionMetadata.delete(key);
+            continue;
+          }
+          this.syncedCollectionMetadata.set(key, metadataWrite.value);
+        }
+      }
+      this.syncedData.restoreOrder();
+      this.refreshPendingSyncedProjection();
+      this.optimisticUpserts.clear();
+      this.optimisticDeletes.clear();
+      this.isCommittingSyncTransactions = false;
+      this.overlayHeldAndActive();
+      if (hasTruncateSync) {
+        for (const [key, value] of this.optimisticUpserts) {
+          events.push({ type: `insert`, key, value });
+        }
+        reappliedKeys = new Set(this.optimisticUpserts.keys());
+      }
+      for (const key of changedKeys) {
+        if (reappliedKeys?.has(key)) continue;
+        const firstSyncOperation = firstSyncOperations.get(key);
+        const syncPreviousValue = firstSyncOperation?.type === `update` && currentVisibleState.get(key) === firstSyncOperation.value ? firstSyncOperation.previousValue : void 0;
+        const previousVisibleValue = !hasTruncateSync && !previousOptimisticUpserts.has(key) && !previousOptimisticDeletes.has(key) && syncPreviousValue !== void 0 ? syncPreviousValue : currentVisibleState.get(key);
+        const newVisibleValue = this.get(key);
+        if (previousVisibleValue === void 0) {
+          if (newVisibleValue === void 0) continue;
+          events.push({ type: `insert`, key, value: newVisibleValue });
+          continue;
+        }
+        const previousVirtualProps = this.preSyncVirtualState.get(key) ?? this.getVirtualPropsSnapshotForState(key, {
+          rowOrigins: previousRowOrigins,
+          optimisticUpserts: previousOptimisticUpserts,
+          optimisticDeletes: previousOptimisticDeletes
+        });
+        const withPreviousVirtualProps = (value) => enrichRowWithVirtualProps(
+          value,
+          key,
+          this.collection.id,
+          () => previousVirtualProps.$hasPendingWrites,
+          () => previousVirtualProps.$origin
+        );
+        if (newVisibleValue === void 0) {
+          events.push({
+            type: `delete`,
+            key,
+            value: withPreviousVirtualProps(previousVisibleValue)
+          });
+          continue;
+        }
+        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key);
+        if (previousVirtualProps.$hasPendingWrites !== nextVirtualProps.$hasPendingWrites || previousVirtualProps.$origin !== nextVirtualProps.$origin || !deepEquals(previousVisibleValue, newVisibleValue)) {
+          events.push({
+            type: `update`,
+            key,
+            value: newVisibleValue,
+            previousValue: withPreviousVirtualProps(previousVisibleValue)
+          });
+        }
+      }
+      this.size = this.calculateSize();
+      if (events.length > 0) {
+        this.indexes.updateIndexes(events);
+      }
+      let failure;
+      const capture = (step) => {
+        try {
+          step();
+        } catch (error) {
+          failure ??= { error };
+        }
+      };
+      const visibleLayoutChanged = previousLayout !== void 0 && (previousLayout.length !== this.size || [...this.keys()].some((key, index) => key !== previousLayout[index]));
+      let emitted = false;
+      const emit = () => {
+        emitted = true;
+        capture(
+          () => this.changes.emitEvents(events, true, visibleLayoutChanged)
+        );
+      };
+      if (truncateMarksReady && this.lifecycle.status !== `ready`)
+        capture(() => this.lifecycle.markReady(emit));
+      if (!emitted) emit();
+      if (hasTruncateSync && this.lifecycle.status === `ready`)
+        capture(() => this.lifecycle.completeReload());
+      if (this.syncRunGeneration === syncRunGeneration) {
+        this.preSyncVisibleState.clear();
+        this.preSyncVirtualState.clear();
+        Promise.resolve().then(() => {
+          if (this.syncRunGeneration === syncRunGeneration) {
+            this.recentlySyncedKeys.clear();
+          }
+        });
+        this.hasReceivedFirstCommit = true;
+      }
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applied.resolve();
+      }
+      return { processed: true, failure };
+    }
+    return { processed: false };
+  }
+  /**
+   * Abandons the open last sync transaction before acceptance. Only
+   * `commit(signal)` with an aborted signal reaches this, so no other
+   * transaction can depend on the one canceled.
+   */
+  cancelPendingSyncedTransaction(transaction, reason = new SyncTransactionAbortedError()) {
+    if (transaction.committed || this.pendingSyncedTransactions.at(-1) !== transaction)
+      throw new SyncQueueInvariantError(
+        `only the open last sync transaction can be canceled`
+      );
+    this.pendingSyncedTransactions.pop();
+    const canceledKeys = /* @__PURE__ */ new Set();
+    for (const operation of transaction.operations) {
+      canceledKeys.add(operation.key);
+    }
+    transaction.applied.reject(reason);
+    this.rebuildPendingSyncedProjection();
+    const remainingPendingKeys = /* @__PURE__ */ new Set();
+    for (const pending of this.pendingSyncedTransactions) {
+      if (pending.invalidationError !== void 0) continue;
+      for (const operation of pending.operations) {
+        remainingPendingKeys.add(operation.key);
+      }
+    }
+    for (const key of canceledKeys) {
+      if (!remainingPendingKeys.has(key)) {
+        this.recentlySyncedKeys.delete(key);
+        this.preSyncVisibleState.delete(key);
+        this.preSyncVirtualState.delete(key);
+      }
+    }
+    if (this.pendingSyncedTransactions.length === 0) {
+      this.preSyncVisibleState.clear();
+      this.preSyncVirtualState.clear();
+      this.recentlySyncedKeys.clear();
+      this.changes.emitEvents([], true);
+    } else {
+      this.recomputeOptimisticState(false);
+    }
+  }
+  /**
+   * Capture visible state for keys that will be affected by pending sync operations
+   * This must be called BEFORE onTransactionStateChange clears optimistic state
+   */
+  capturePreSyncVisibleState() {
+    if (this.pendingSyncedTransactions.length === 0) return;
+    const syncedKeys = /* @__PURE__ */ new Set();
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed) continue;
+      for (const operation of transaction.operations) {
+        syncedKeys.add(operation.key);
+      }
+      for (const key of transaction.rowMetadataWrites.keys()) {
+        syncedKeys.add(key);
+      }
+    }
+    for (const key of syncedKeys) {
+      this.recentlySyncedKeys.add(key);
+    }
+    for (const key of syncedKeys) {
+      if (!this.preSyncVisibleState.has(key)) {
+        const currentValue = this.get(key);
+        this.preSyncVisibleState.set(key, currentValue);
+        if (currentValue !== void 0) {
+          this.preSyncVirtualState.set(
+            key,
+            this.getVirtualPropsSnapshotForState(key)
+          );
+        }
+      }
+    }
+  }
+  /**
+   * Trigger a recomputation when transactions change
+   * This method should be called by the Transaction class when state changes
+   */
+  onTransactionStateChange() {
+    const hasPersistingTransaction = this.hasPersistingTransaction();
+    this.changes.shouldBatchEvents = this.pendingSyncedTransactions.some(
+      (transaction) => transaction.committed && (!hasPersistingTransaction || transaction.truncate)
+    );
+    if (this.changes.shouldBatchEvents) this.capturePreSyncVisibleState();
+    this.recomputeOptimisticState(false);
+  }
+  /**
+   * Clean up the collection by stopping sync and clearing data
+   * This can be called manually or automatically by garbage collection
+   */
+  cleanup() {
+    this.syncRunGeneration++;
+    for (const transaction of this.pendingSyncedTransactions) {
+      transaction.applied.reject(new SyncTransactionAbortedError());
+    }
+    this.syncedData.clear();
+    this.syncedMetadata.clear();
+    this.syncedCollectionMetadata.clear();
+    this.optimisticUpserts.clear();
+    this.optimisticDeletes.clear();
+    this.heldOptimisticRows.clear();
+    this.hydrationSeedKeys.clear();
+    this.hydratedKeys.clear();
+    this.appliedAdapterKeys?.clear();
+    this.hasAppliedAdapterTruncate = false;
+    this.adapterTruncateKeptKeys.clear();
+    this.clearOriginTrackingState();
+    this.isLocalOnly = false;
+    this.localOnlyDirectWrite = void 0;
+    this.size = 0;
+    this.pendingSyncedTransactions = [];
+    this.refreshPendingSyncedProjection();
+    this.preSyncVisibleState.clear();
+    this.preSyncVirtualState.clear();
+    this.recentlySyncedKeys.clear();
+    this.hasReceivedFirstCommit = false;
+  }
+}

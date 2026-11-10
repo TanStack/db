@@ -1,0 +1,75 @@
+from pathlib import Path
+import datetime, errno, hashlib, json, os, shutil, subprocess, sys
+H=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1')
+D=H/'candidate-controls-remaining-baselines-inputs-v1'; K=D/'executor-batch-v1'; cell_id=sys.argv[1]
+hash=lambda p:hashlib.sha256(p.read_bytes()).hexdigest();load=lambda p:json.loads(p.read_text())
+def save(p,x):
+ p.parent.mkdir(parents=True,exist_ok=True)
+ if p.exists():raise RuntimeError(f'refuse overwrite {p}')
+ p.write_text(json.dumps(x,indent=2)+'\n')
+assert hash(D/'root-serial-batch-admission-v1.json')=='cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919'
+ad=load(D/'root-serial-batch-admission-v1.json');item=next(c for c in ad['exactCommands'] if c['id']==cell_id);recipe_path=Path(item['recipe']['path']);recipe=load(recipe_path);out=Path(recipe['outputDirectory']);actual=load(out/'executor-actual-tool-return-v1.json');outcome=load(out/'outcome.json');invocation=load(out/'invocation.json');child=load(out/'child-process.json');failures=[]
+def require(condition,label):
+ if not condition:failures.append(label)
+require(actual['actualCompletion'].get('exit_code')==0,'actual outer tool exit is not zero')
+require(hash(recipe_path)==item['recipe']['sha256'],'recipe differs from exact root admission')
+require(hash(out/'recipe.json')==hash(recipe_path),'captured recipe differs')
+require(hash(out/'source-freeze.json')==ad['sourceFreezeSha256'],'captured source freeze differs')
+require(hash(out/'baseline-program.json')==recipe['programSha256'],'captured program differs')
+require(invocation['recipeSha256']==item['recipe']['sha256'],'invocation recipe identity differs')
+require(invocation['command']['bindingProfile']=='completion-baseline-v1','captured parent profile differs')
+for key,expected in [('exitCode',0),('signal',None),('heap',False),('identityMatched',True),('remainingGroup',0),('cleanupErrors',0)]:require(outcome.get(key)==expected,f'outer outcome {key} differs')
+require(not outcome.get('trigger') and not outcome.get('observationError'),'outer operational trigger/observation error')
+require(hash(out/'worker.stdout.log')==outcome['stdoutSha256'] and hash(out/'worker.stderr.log')==outcome['stderrSha256'],'outer raw-stream hash differs')
+# Copy, hash and read back every receiver artifact. This helper never imports a product module.
+program=load(Path(recipe['programFile']));copy_records=[];receiver_facts=[];registrations=outcome.get('registeredReceivingGroups',[]);require(len(registrations)==1,'expected one registered native receiving invocation')
+for index,group in enumerate(registrations):
+ src=Path(group['directory']);target=out/('receiving-artifacts' if index==0 else f'receiving-artifacts-{index+1}')
+ require(not target.exists(),'receiver evidence target already exists')
+ if target.exists():raise RuntimeError('refuse overwrite receiver evidence')
+ symlinks=[str(p) for p in src.rglob('*') if p.is_symlink()];require(not symlinks,'unexpected receiver artifact symlink')
+ before={str(p.relative_to(src)):hash(p) for p in src.rglob('*') if p.is_file() and not p.is_symlink()};shutil.copytree(src,target)
+ after={str(p.relative_to(target)):hash(p) for p in target.rglob('*') if p.is_file() and not p.is_symlink()};require(before==after,'native copy inventory/readback differs');require(all(hash(src/p)==v for p,v in before.items()),'native source changed during copying')
+ supervisor=load(target/'supervisor.json');binding=load(target/'binding-verification.json');events=[json.loads(l) for l in (target/'receipts.jsonl').read_text().splitlines() if l];phases=lambda p:[e for e in events if e.get('phase')==p]
+ require(supervisor.get('phase')=='final-with-binding','supervisor final phase missing')
+ supout=supervisor['outcome'];require(supout.get('reason')=='exited' and supout.get('exitCode')==0 and supout.get('signal') is None,'native receiving did not exit normally with zero')
+ require(not supout.get('cleanupErrors') and not supervisor.get('latestGroupRows'),'native cleanup failure or remaining rows')
+ require(binding.get('status')=='bound' and binding.get('bindingProfile')=='completion-baseline-v1' and not binding.get('failures'),'strict completion source binding failed')
+ require([e.get('sequence') for e in events]==list(range(1,len(events)+1)),'receipt sequence gap')
+ require(len(phases('worker-start'))==1 and phases('worker-start')[0].get('mode')=='baseline-constituent','worker identity missing or duplicated')
+ require(len(phases('worker-cleaned'))==1,'positive worker-cleaned missing/duplicated')
+ require(not phases('worker-error'),'worker error present')
+ expected_epochs=[e['id'] for e in program['publicationEpochs']];require([e['epoch'] for e in phases('completion-baseline-epoch-start')]==expected_epochs,'authored epoch starts differ');require([e['epoch'] for e in phases('completion-baseline-epoch-end')]==expected_epochs,'authored epoch ends differ')
+ expected_cuts=[s['boundary'] for s in program['steps'] if s['kind']=='baseline-observe'];require([e['boundary'] for e in phases('completion-baseline-cut')]==expected_cuts,'authored observation cuts differ')
+ expected_actions=sum(s['kind']=='semantic' for s in program['steps']);require(len(phases('completion-baseline-action'))==expected_actions,'authored semantic action count differs')
+ require(load(target/'history.json')==program,'actual native history differs from selected program')
+ receiver_facts.append({'originalDirectory':str(src),'copiedDirectory':str(target),'nativeFiles':len(before),'allCopiedBytesReadBack':before==after,'receiptCount':len(events),'epochs':len(expected_epochs),'cuts':len(expected_cuts),'semanticActions':expected_actions,'workerCleaned':len(phases('worker-cleaned')),'nativeExitCode':supout.get('exitCode'),'bindingStatus':binding.get('status'),'bindingProfile':binding.get('bindingProfile')})
+ copy_records.append({'source':str(src),'target':str(target),'files':before,'count':len(before),'readBackMatches':before==after})
+save(out/'executor-receiving-copy-readback-v1.json',{'copies':copy_records,'symlinkPolicy':'No symlink expected; files are copied and read back as exact bytes.'})
+# Post-return source identity is a disk check, not parent V8 attestation.
+f=load(Path(recipe['sourceFreeze']));W=Path(f['worktree']);source_count=0;payload_count=0
+for name in ['productionFiles','instrumentFiles','sharedInstrumentFiles']:
+ for p,v in f[name].items():require(hash(W/p)==v,f'post-return source differs: {p}');source_count+=1
+for pkg in f['packages'].values():
+ for p,v in pkg['regularPayloadFilesMap'].items():require(hash(Path(pkg['resolved'])/p)==v,f'post-return payload differs: {p}');payload_count+=1
+require(hash(Path(f['node']['executable']))==f['node']['sha256'],'selected Node differs')
+require(hash(W/'pnpm-lock.yaml')==f['lockfiles']['repoPnpmLock'] and hash(W/'node_modules/.pnpm/lock.yaml')==f['lockfiles']['installedPnpmLock'],'lockfile differs')
+require(all((W/k).is_symlink()==v['isSymlink'] and str((W/k).resolve())==v['resolved'] for k,v in f['dependencyReuseLinks'].items()),'dependency reuse links differ')
+require(hash(D/'input-freeze-v1.json')==ad['inputFreeze']['sha256'] and hash(D/'input-packet-sha256-v1.json')==ad['inputPacket']['sha256'],'input freeze/packet differs')
+require(all(hash(D/p)==v for p,v in load(D/'input-packet-sha256-v1.json').items()),'input packet file differs')
+save(out/'executor-post-return-identity-v1.json',{'sourceFilesMatched':source_count,'payloadFilesMatched':payload_count,'nodeTwoLocksFourLinksMatched':True,'inputPacketMatched':True,'proofBoundary':'on-disk identity only; no parent V8 attestation','failuresAtIdentityCheckpoint':list(failures)})
+# Escalated ps plus zero-signal probes inspect only named original identities and groups.
+ps=subprocess.run(['/bin/ps','-ax','-o','pid=,pgid=,rss='],capture_output=True,text=True,check=True);rows=[tuple(map(int,l.split())) for l in ps.stdout.splitlines() if l.strip()];groups=sorted(set([child['originalPgid']]+[g['pgid'] for g in registrations]));pids=sorted(set([invocation['parentPid'],child['pid']]+[g[k] for g in registrations for k in ['pid','parentPid']]));group_rows=[list(r) for r in rows if r[1] in groups];probes=[]
+for kind,values in [('pid',pids),('pgid',groups)]:
+ for value in values:
+  try:
+   (os.kill if kind=='pid' else os.killpg)(value,0);result='present'
+  except OSError as error:result='ESRCH' if error.errno==errno.ESRCH else f'errno:{error.errno}'
+  probes.append({'kind':kind,'value':value,'result':result});require(result=='ESRCH',f'named original {kind} {value} not ESRCH')
+require(not group_rows,'post-return owned group rows remain')
+save(out/'executor-process-absence-v1.json',{'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'psExitCode':ps.returncode,'namedPids':pids,'namedGroups':groups,'remainingNamedGroupRows':group_rows,'zeroSignalProbes':probes,'limits':'Named original identities and owned groups only; no escaped/unregistered descendant census or PID/PGID reuse proof.'})
+summary={'cellId':cell_id,'ordinal':item['ordinal'],'rootBatchAdmissionSha256':hash(D/'root-serial-batch-admission-v1.json'),'actualOuterExitCode':actual['actualCompletion'].get('exit_code'),'actualToolCompletionChunk':actual['actualCompletion'].get('chunk_id'),'parentTestChildExitCode':outcome.get('exitCode'),'receivers':receiver_facts,'operationalAndTestChecksPassed':not failures,'failures':failures,'independentActualReviewRequired':True,'classification':'pending independent actual-result review; no product verdict by collector','noAutomaticRerun':True,'noCanonicalImport':True,'candidateRaw20':'all UNREACHED','state14':'proposed; not adopted'}
+save(out/'executor-cell-summary-v1.json',summary)
+files={str(p.relative_to(D)):hash(p) for p in out.rglob('*') if p.is_file()};freeze={**summary,'files':files,'assetCount':len(files),'originalOutputDirectory':str(out),'helperSha256':hash(Path(__file__))};result=D/f'{cell_id}-result-freeze-v1.json';save(result,freeze);assert all(hash(D/p)==v for p,v in files.items())
+print(json.dumps({'cellId':cell_id,'resultFreeze':str(result),'resultFreezeSha256':hash(result),'assetCount':len(files),'operationalAndTestChecksPassed':not failures,'actualOuterExitCode':summary['actualOuterExitCode'],'parentTestChildExitCode':summary['parentTestChildExitCode'],'receivers':receiver_facts,'failures':failures},indent=2))
+if failures:sys.exit(1)

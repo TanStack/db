@@ -1,0 +1,38 @@
+{
+  "campaign": {
+    "displayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+    "multiplier": 1,
+    "numRuns": 8,
+    "property": "query.queued-answer-metadata.scope.default",
+    "suppliedSeed": null
+  },
+  "exactExecCommand": {
+    "cmd": "/bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/launcher-scope-default-unseeded.zsh a95dc1d31f59c4c6c39b44864a8f528dcc93583b361eb3f62a62ca4db7e27e34",
+    "sandbox_permissions": "require_escalated",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1"
+  },
+  "independentAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-preparation-independent-audit-v1.json",
+    "sha256": "8e7ed2b588e2dc032b46981417fe5690e91b488a92a60f86fe3d93013d84b1c5"
+  },
+  "maxInvocations": 1,
+  "nativeLaunches": 0,
+  "newRuntimeAdmitted": false,
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-scope-default-v1",
+  "packetPins": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/binding.json": "a95dc1d31f59c4c6c39b44864a8f528dcc93583b361eb3f62a62ca4db7e27e34",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/first-command.json": "edf6678933aa512bdcf6ca69ec38322d7a816a63960f93d0b9fb1133082c1eea",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/packet-manifest.json": "001d61d33d25af42ab5afb0c178840eb3f4ccdb9b14c71b8c43a0ca1a121d7f2",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/report.md": "923b1a50c61f4a1669f1de498a72dd885f62ae4233d064b0f47f53d215f0c770"
+  },
+  "requiredEvidence": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/evidence-requirements.json",
+  "review": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-preparation-independent-review-v1.md",
+    "sha256": "e3066d7a6022d9c4268033e0edcb283a04a28d56814f8dadee413ced31a07f5b"
+  },
+  "slot": 4,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "status": "INDEPENDENTLY REVIEWED CONCRETE PROPOSAL; UNADMITTED",
+  "stop": "After one actual invocation on any outcome. Preserve every original/shrink failure, seed/path/error if supplied, separate actual outer completion and child outcomes. No retry/replay/later lane or mutation admitted.",
+  "successSeedLimit": "Fast-check internal chosen seed may remain unavailable on success; no new product promise required."
+}

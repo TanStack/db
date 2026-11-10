@@ -1,0 +1,71 @@
+{
+  "status": "PURE INSTRUMENT/SETUP + STATIC ONLY; no receiving invoked",
+  "typescript": {
+    "exitCode": 0,
+    "log": "typescript-v5.log",
+    "heapMiB": 384
+  },
+  "eslint": {
+    "exitCode": 0,
+    "logs": [
+      "eslint-mjs-v5.log",
+      "eslint-receiving-v5.log",
+      "eslint-ts-support-v5.log"
+    ],
+    "rules": "all repository rules preserved; same config and 1536 MiB heap per partition",
+    "priorAttempt": {
+      "exitCode": 134,
+      "log": "eslint-v5.log",
+      "classification": "tooling heap exhaustion; full rules rerun by file groups at same limit"
+    }
+  },
+  "oracleLint": {
+    "exitCode": 0,
+    "log": "lint-changed-v5.log",
+    "command": "node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs"
+  },
+  "transportAndVerifier": {
+    "exitCode": 0,
+    "transportPassed": 30,
+    "verifierPassed": 17,
+    "log": "transport-verifier-v5.log",
+    "highVolume": "4096 receipts >1 MiB before first drain; 280000-byte multibyte payload; final receipt; exact raw bytes and observations"
+  },
+  "sharedChecker": {
+    "exitCode": 0,
+    "passed": 10,
+    "log": "checker-v5.log"
+  },
+  "rootSetup": {
+    "exitCode": 0,
+    "passed": 2,
+    "log": "root-setup-final-v5.log",
+    "expectedRootInput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v4/source-freeze-v4.json",
+    "pureObservationDirectory": "root-setup-calibration",
+    "priorAttempt": {
+      "exitCode": 1,
+      "log": "root-setup-v5.log",
+      "classification": "missing required calibration environment; no product/receiving execution"
+    }
+  },
+  "productionEdits": 0,
+  "receivingInvocations": 0,
+  "queryInvocations": 0,
+  "modelChanges": 0,
+  "grammarChanges": 0,
+  "budgetChanges": 0,
+  "counts": {
+    "production": 511,
+    "instrument": 19,
+    "shared": 11,
+    "materialPackages": 7
+  },
+  "prettier": {
+    "exitCode": 0,
+    "log": "prettier-v5.log"
+  },
+  "launcherSyntax": {
+    "exitCode": 0,
+    "log": "launcher-syntax-v5.log"
+  }
+}

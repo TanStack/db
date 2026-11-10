@@ -1,0 +1,19 @@
+{
+  "status": "UNADMITTED and UNEXECUTED; independent concrete review and separate root selector admission required",
+  "kind": "Exact scope/default positive quarter2 singleton discovery only",
+  "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "argv": [
+    "-I",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-preparation-v2/run.py",
+    "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "bindingSha256": "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "acceptedFreshUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "maxInvocations": 1,
+  "executionRequirement": "Known ps sandbox restriction requires actual exec_command sandbox_permissions=require_escalated after root admission",
+  "success": "Actual outer0/qualified/native0 and exactly one intended scope/default quarter2 display name/module; original recorded IDs absent",
+  "after": "Stop and preserve complete outputs/actual tool return/original IDs absence/fullsource recheck; independent actual review and root classification before separate receiving admission"
+}

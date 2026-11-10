@@ -1,0 +1,62 @@
+{
+  "status": "PURE SETUP + STATIC ONLY; receiving not invoked",
+  "typescript": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=384 node_modules/typescript/bin/tsc -p scripts/h02-progress/tsconfig.json --pretty false",
+    "log": "typescript-v4.log"
+  },
+  "eslint": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/eslint.config.mjs scripts/h02-progress/*.ts scripts/h02-progress/*.mjs packages/query-db-collection/tests/queued-answer-progress*.ts packages/query-db-collection/tests/queued-answer-root-setup-probe.ts packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "log": "eslint-final-v4.log"
+  },
+  "oracleLint": {
+    "exitCode": 0,
+    "command": "node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+    "log": "lint-changed-final-v4.log"
+  },
+  "rootSetupCalibration": {
+    "exitCode": 0,
+    "passed": 2,
+    "failed": 0,
+    "log": "root-setup-calibration-v4.log",
+    "config": "scripts/h02-progress/root-setup-calibration.config.ts",
+    "selectedTestFile": "scripts/h02-progress/root-setup-calibration.test.ts",
+    "sourceFreezeEnvironmentReference": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v3/source-freeze-v3.json",
+    "sourceFreezeUse": "expected worktree string only; modified v4 source identity is separately captured and frozen",
+    "limits": "pure setup helpers; no receiving invocation or production/Query import",
+    "command": "env -u NODE_OPTIONS -u NODE_PATH -u H02_PROGRESS_BINDING_DIR -u H02_PROGRESS_WORKER_HISTORY -u H02_PROGRESS_SELECTED_ROOT H02_PROGRESS_SOURCE_FREEZE=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v3/source-freeze-v3.json H02_ROOT_SETUP_CALIBRATION_DIR=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v4/root-setup-calibration /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 node_modules/vitest/vitest.mjs run --config scripts/h02-progress/root-setup-calibration.config.ts scripts/h02-progress/root-setup-calibration.test.ts --reporter=verbose"
+  },
+  "carriedCalibrationEvidence": {
+    "verifier": {
+      "passed": 12,
+      "log": "verifier-calibration-v2.log",
+      "rerun": false,
+      "reason": "verifier and fixture bytes unchanged"
+    },
+    "sharedChecker": {
+      "passed": 10,
+      "log": "checker-v3.log",
+      "rerun": false,
+      "reason": "model/checker/fixture bytes unchanged"
+    }
+  },
+  "launcherSyntax": {
+    "command": "/bin/zsh -n launcher-v4.zsh",
+    "status": "passed",
+    "exitCode": 0
+  },
+  "productionEdits": 0,
+  "receivingInvocationsInThisSuccessor": 0,
+  "queryInvocations": 0,
+  "modelChanges": 0,
+  "grammarChanges": 0,
+  "budgetChanges": 0,
+  "preservedCounts": {
+    "production": 511,
+    "shared": 11,
+    "instrument": 17,
+    "materialPackages": 7
+  },
+  "priorRunLimit": "v3 had1selected outer setup failure and0receiving histories; first sandbox failure had0Node/receiving executions"
+}

@@ -1,0 +1,194 @@
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 37)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 35)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+}
+
+ RUN  v4.1.12 /private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection
+
+{"event":1,"phase":"test-start","heapUsed":64704728}
+{"event":2,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":64745912}
+{"event":3,"phase":"markers-created","heapUsed":64841088}
+{"event":4,"phase":"source-created","heapUsed":64868200}
+{"event":5,"phase":"live-created","heapUsed":65548160}
+{"event":6,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":65921784}
+{"event":7,"phase":"acquisition","acquisitionCount":1,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":66042096}
+{"event":8,"phase":"key","owner":0,"ownerCount":1,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":0,"heapUsed":66361208}
+{"event":9,"phase":"fetch","keys":[1,2],"requestCount":1,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":66216840}
+{"event":10,"phase":"acquisition","acquisitionCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":66388592}
+{"event":11,"phase":"key","owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":66392848}
+{"event":12,"phase":"fetch","keys":[2],"requestCount":2,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":66642480}
+{"event":13,"phase":"subscribed","heapUsed":66597008}
+{"event":14,"phase":"preload-start","heapUsed":66597816}
+{"event":15,"phase":"unload","owner":1,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":66771192}
+{"event":16,"phase":"key","owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":66776800}
+{"event":17,"phase":"acquisition","acquisitionCount":3,"owner":0,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67157664}
+{"event":18,"phase":"key","owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":67162016}
+{"event":19,"phase":"fetch","keys":[3],"requestCount":3,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":67327680}
+{"event":20,"phase":"acquisition","acquisitionCount":4,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67273656}
+{"event":21,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":67277904}
+{"event":22,"phase":"fetch","keys":[3],"requestCount":4,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67433360}
+{"event":23,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":67900008}
+{"event":24,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67904160}
+{"event":25,"phase":"acquisition","acquisitionCount":5,"owner":0,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67833664}
+{"event":26,"phase":"key","owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":67837952}
+{"event":27,"phase":"fetch","keys":[4],"requestCount":5,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":68036584}
+{"event":28,"phase":"acquisition","acquisitionCount":6,"owner":1,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68085680}
+{"event":29,"phase":"key","owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":67964608}
+{"event":30,"phase":"fetch","keys":[4],"requestCount":6,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":67998088}
+{"event":31,"phase":"unload","owner":1,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":68277456}
+{"event":32,"phase":"key","owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":68281848}
+{"event":33,"phase":"acquisition","acquisitionCount":7,"owner":0,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68971944}
+{"event":34,"phase":"key","owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":68976424}
+{"event":35,"phase":"fetch","keys":[5],"requestCount":7,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":68587648}
+{"event":36,"phase":"acquisition","acquisitionCount":8,"owner":1,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68707504}
+{"event":37,"phase":"key","owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":68711816}
+{"event":38,"phase":"fetch","keys":[5],"requestCount":8,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68695712}
+{"event":39,"phase":"unload","owner":1,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":69055736}
+{"event":40,"phase":"key","owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69059952}
+{"event":41,"phase":"preload-settled","acquisitionCount":8,"requestCount":8,"owners":2,"cacheCount":8,"heapUsed":69252768}
+{"event":42,"phase":"reload-start","heapUsed":69253936}
+{"event":43,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":69346496}
+{"event":44,"phase":"reload-called","heapUsed":69361016}
+{"event":45,"phase":"acquisition","acquisitionCount":9,"owner":0,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69705656}
+{"event":46,"phase":"key","owner":0,"ownerCount":2,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":69710248}
+{"event":47,"phase":"fetch","keys":[1,2],"requestCount":9,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":69746560}
+{"event":48,"phase":"acquisition","acquisitionCount":10,"owner":0,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69769240}
+{"event":49,"phase":"key","owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":69773544}
+{"event":50,"phase":"fetch","keys":[3],"requestCount":10,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":69807312}
+{"event":51,"phase":"acquisition","acquisitionCount":11,"owner":0,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69818680}
+{"event":52,"phase":"key","owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":69822992}
+{"event":53,"phase":"fetch","keys":[4],"requestCount":11,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":69602688}
+{"event":54,"phase":"acquisition","acquisitionCount":12,"owner":0,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69613408}
+{"event":55,"phase":"key","owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":69617728}
+{"event":56,"phase":"fetch","keys":[5],"requestCount":12,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69653360}
+{"event":57,"phase":"reload-initial-flush-settled","heapUsed":69661664}
+{"event":58,"phase":"release-turn","turn":0,"heapUsed":69662720}
+{"event":59,"phase":"release-answer","keys":[1,2],"heapUsed":69664152}
+{"event":60,"phase":"release-flush-settled","turn":0,"heapUsed":69751448}
+{"event":61,"phase":"release-turn","turn":1,"heapUsed":69752232}
+{"event":62,"phase":"release-answer","keys":[3],"heapUsed":69753048}
+{"event":63,"phase":"acquisition","acquisitionCount":13,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":69860640}
+{"event":64,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69864968}
+{"event":65,"phase":"fetch","keys":[3],"requestCount":13,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":69925448}
+{"event":66,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":70184664}
+{"event":67,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70188880}
+{"event":68,"phase":"acquisition","acquisitionCount":14,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":70452432}
+{"event":69,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70456760}
+{"event":70,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":70996576}
+{"event":71,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71022256}
+{"event":72,"phase":"acquisition","acquisitionCount":15,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":70899824}
+{"event":73,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":70904152}
+{"event":74,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":71160440}
+{"event":75,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71164656}
+{"event":76,"phase":"acquisition","acquisitionCount":16,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":71382640}
+{"event":77,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71386968}
+{"event":78,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":71605096}
+{"event":79,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":71609344}
+{"event":80,"phase":"acquisition","acquisitionCount":17,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72096280}
+{"event":81,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72100608}
+{"event":82,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72047360}
+{"event":83,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72051576}
+{"event":84,"phase":"acquisition","acquisitionCount":18,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72299016}
+{"event":85,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72303344}
+{"event":86,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72505272}
+{"event":87,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72509520}
+{"event":88,"phase":"acquisition","acquisitionCount":19,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":72724864}
+{"event":89,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72729192}
+{"event":90,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":72926544}
+{"event":91,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":72930760}
+{"event":92,"phase":"acquisition","acquisitionCount":20,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":73381864}
+{"event":93,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73386192}
+{"event":94,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":73377584}
+{"event":95,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73381800}
+{"event":96,"phase":"acquisition","acquisitionCount":21,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":73617928}
+{"event":97,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73622256}
+{"event":98,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74019360}
+{"event":99,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":73838472}
+{"event":100,"phase":"acquisition","acquisitionCount":22,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74043072}
+{"event":101,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74047408}
+{"event":102,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74264288}
+{"event":103,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74268504}
+{"event":104,"phase":"acquisition","acquisitionCount":23,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74474360}
+{"event":105,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74478696}
+{"event":106,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":74682952}
+{"event":107,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74687168}
+{"event":108,"phase":"acquisition","acquisitionCount":24,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":74890936}
+{"event":109,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":74895272}
+{"event":110,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75090232}
+{"event":111,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75094448}
+{"event":112,"phase":"acquisition","acquisitionCount":25,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":75712664}
+{"event":113,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75717000}
+{"event":114,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75520832}
+{"event":115,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75525048}
+{"event":116,"phase":"acquisition","acquisitionCount":26,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":75727024}
+{"event":117,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75731360}
+{"event":118,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":75934064}
+{"event":119,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":75938280}
+{"event":120,"phase":"acquisition","acquisitionCount":27,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":76141512}
+{"event":121,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76145848}
+{"event":122,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":76343112}
+{"event":123,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76347248}
+{"event":124,"phase":"acquisition","acquisitionCount":28,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":76549360}
+{"event":125,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76553616}
+{"event":126,"phase":"unload","owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":76752920}
+{"event":127,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":76757056}
+{"event":128,"phase":"acquisition","acquisitionCount":29,"owner":1,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":76959456}
+H02_EVENT_LIMIT_REACHED

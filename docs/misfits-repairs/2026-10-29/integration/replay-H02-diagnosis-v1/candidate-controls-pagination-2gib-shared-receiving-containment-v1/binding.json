@@ -1,0 +1,39 @@
+{
+  "status": "PREPARED ONLY; separate exact root admission required",
+  "python": {
+    "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+  },
+  "supervisor": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-containment-preparation-v1/supervisor-2gib.py",
+    "sha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+    "reuse": "threshold-only successor: original run_one process control unchanged; configure report qualifier and UNSET only"
+  },
+  "proposedCommand": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/proposed-primary-fixed-red-command-v1.json",
+    "sha256": "4bcd806ceb130d742d7672d85ad606ebf79b31465c8ef2343f77fdf6cd684680"
+  },
+  "sourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+    "sha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193"
+  },
+  "ps": {
+    "path": "/bin/ps",
+    "sha256": "16d273739778797145fd22cba76113d2aaa99c759313d56ef87ed56a16bca083"
+  },
+  "files": {
+    "launch.py": "c0d06cba44016995d26517e0461a1c6acdbcdc9354ec973cf3a67199750702a0",
+    "run-recipe.json": "df774ef8fea7fa499b1afd78fa14bd916777c2b3a2df2430ba15799335197fb7",
+    "supplemental-tool-inputs.json": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50"
+  },
+  "actualLaunchRequires": "require_escalated on actual Python invocation; no launcher permission inference from prior ps preflight",
+  "runtimeInvocations": 0,
+  "runtimeProbeInvocations": 0,
+  "productVerdict": "UNCLASSIFIED",
+  "toolchainRecovery": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/root-shared-toolchain-recovery-qualification-v1.json",
+    "sha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+    "scope": "ROOT accepted recovery for unaffected exact-binding work; no generic runtime authority"
+  }
+}

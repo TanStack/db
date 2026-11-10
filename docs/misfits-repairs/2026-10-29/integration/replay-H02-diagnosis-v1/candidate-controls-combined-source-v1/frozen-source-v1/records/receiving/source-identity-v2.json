@@ -1,0 +1,44 @@
+{
+  "at": "2026-10-30T08:22:48.251572+00:00",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "initialInventory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-preparation-v1/initial-copied-inventory.json",
+  "initialInventorySha256": "85d859af3b2f46cfd89876203a953040432bbcf12cfd1bf4f1343aa4f3baff6b",
+  "groups": {
+    "productionFiles": {
+      "total": 511,
+      "unchanged": 511,
+      "changed": []
+    },
+    "instrumentFiles": {
+      "total": 34,
+      "unchanged": 33,
+      "changed": [
+        {
+          "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+          "original": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+          "current": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e"
+        }
+      ]
+    },
+    "sharedInstrumentFiles": {
+      "total": 18,
+      "unchanged": 18,
+      "changed": []
+    }
+  },
+  "ownSources": {
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts": "bfdd331b3459168184c31e3d8fc219ad5a580fb0af870dadf851db388858d1d3",
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts": "4816305d73e96c55d109c5807a91cadd9fbe90257a4b70b0554e626ebe2a8dce",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts": "d0a1e76c56b86d49d8abd55e9d26bf53be392ac6fdf530af7a48d189eaf4c96c",
+    "packages/query-db-collection/tests/queued-answer-completion-driver.ts": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts": "1ee4156048a0e61c2efd73378433d3e99a99fa7e0aa0b8801eef1b94078b9992",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+    "scripts/h02-progress/completion-tsconfig.json": "1767c6ce1c2a4411549d8debc6501835aadd95c3600ae96710b6f738ebb3f89f",
+    "scripts/h02-progress/completion-eslint.config.mjs": "a4837103c5a8a5d203c031003eecbd20ecd7724c547f7f09394badf1336ab5b4",
+    "scripts/h02-progress/completion-receiving.config.ts": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+    "scripts/h02-progress/completion-parent.config.ts": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+    "scripts/h02-progress/completion-parent.mjs": "405d762f1bbd6c492e4d30913b7fc5ad47fbc58909b008e0a87145dc783eb9f7"
+  }
+}

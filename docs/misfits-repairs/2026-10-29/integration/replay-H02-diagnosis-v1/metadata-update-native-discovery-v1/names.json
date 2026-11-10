@@ -1,0 +1,82 @@
+[
+  {
+    "name": "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks metadata 'subscription' 'authored'",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  },
+  {
+    "name": "queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts"
+  }
+]

@@ -1,0 +1,702 @@
+--- /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts	2026-10-29 23:13:27
++++ /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/source/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts	2026-10-29 23:40:10
+@@ -13,6 +13,12 @@
+ import { dirname, resolve } from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ import {
++  createHeapDiagnostic,
++  createPostEnqueueMonitor,
++  postEnqueueWindowMs,
++  selectSupervisorReason,
++} from '../../../scripts/h02-progress/receiving-monitor.mjs'
++import {
+   checkReceiptFault,
+   checkReceiptWriter,
+   createReceiptReader,
+@@ -98,7 +104,12 @@
+       stdoutPath,
+       stderrPath,
+     },
+-    limits: { wallMs: 20_000, groupRssBytes: 1024 ** 3, nodeHeapMiB: 384 },
++    limits: {
++      wallMs: 20_000,
++      groupRssBytes: 1024 ** 3,
++      nodeHeapMiB: 384,
++      postEnqueueWindowMs,
++    },
+   }
+   writeFileSync(
+     resolve(directory, `prepared.json`),
+@@ -142,7 +153,9 @@
+   const start = Date.now()
+   let maxSampledGroupRssBytes = 0
+   let latestGroupRows: Array<string> = []
+-  let stderrTail = ``
++  const heapDiagnostic = createHeapDiagnostic()
++  const postEnqueue = createPostEnqueueMonitor()
++  let watchdogTrigger: string | undefined
+   let killAttempted = false
+   let receivingExited = false
+   const save = (phase: string) =>
+@@ -157,6 +170,9 @@
+           maxSampledGroupRssBytes,
+           latestGroupRows,
+           killAttempted,
++          watchdogTrigger,
++          heapDiagnosticDetected: heapDiagnostic.detected(),
++          postEnqueue: postEnqueue.snapshot(),
+           outcome,
+         },
+         null,
+@@ -173,9 +189,17 @@
+       .split(`\n`)
+       .filter((line) => Number(line.trim().split(/\s+/)[1]) === child.pid)
+   }
+-  const kill = (reason: ProgressOutcome[`reason`]) => {
++  const kill = (
++    reason: ProgressOutcome[`reason`],
++    trigger: string = reason,
++  ) => {
++    outcome.reason = selectSupervisorReason(
++      outcome.reason,
++      reason,
++      heapDiagnostic.detected(),
++    )
+     if (killAttempted || child.pid === undefined) return
+-    outcome.reason = reason
++    watchdogTrigger = trigger
+     killAttempted = true
+     save(`before-kill`)
+     try {
+@@ -191,6 +215,7 @@
+   }
+   const reader = createReceiptReader(logPath, (receipt) => {
+     try {
++      postEnqueue.observe(receipt, performance.now())
+       if (receipt.phase === `query-key-callback`) outcome.keyCallbacks++
+       if (receipt.phase === `actual-key-prefix` && receipt.valid !== true)
+         outcome.prefixViolations++
+@@ -247,15 +272,13 @@
+   child.stdout.on(`data`, (data: Buffer) => diagnostic(stdoutFd, data))
+   child.stderr.on(`data`, (data: Buffer) => {
+     diagnostic(stderrFd, data)
+-    stderrTail = (stderrTail + data.toString(`utf8`)).slice(-4000)
+-    if (
+-      /FATAL ERROR:.*heap|Allocation failed - JavaScript heap out of memory/.test(
+-        stderrTail,
+-      )
+-    )
+-      outcome.reason = `heap`
++    if (heapDiagnostic.feed(data.toString(`utf8`))) outcome.reason = `heap`
+   })
+   const interval = setInterval(() => {
++    // A large captured receipt prefix must not postpone an already armed cut.
++    // Final drain still observes any execution receipt written before the kill.
++    if (!receivingExited && postEnqueue.expired(performance.now()))
++      kill(`wall`, `post-enqueue-window`)
+     try {
+       reader.drain()
+       checkReceiptFault(logPath)
+@@ -270,6 +293,8 @@
+       )
+       maxSampledGroupRssBytes = Math.max(maxSampledGroupRssBytes, rss)
+       if (rss > command.limits.groupRssBytes) kill(`rss`)
++      else if (postEnqueue.expired(performance.now()))
++        kill(`wall`, `post-enqueue-window`)
+       else if (Date.now() - start > command.limits.wallMs) kill(`wall`)
+       save(`monitoring`)
+     } catch (error) {
+--- /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source/scripts/h02-progress/checker-calibration.test.ts	2026-10-29 23:13:27
++++ /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/source/scripts/h02-progress/checker-calibration.test.ts	2026-10-29 23:40:10
+@@ -1,11 +1,13 @@
+ import { describe, expect, it } from 'vitest'
+ import {
++  checkQueuedAnswerProgress,
+   createProgressReceiptCheck,
+   modelProgressValue,
+   queuedAnswerExample,
+ } from '../../packages/query-db-collection/tests/queued-answer-progress-oracle.js'
+ import type {
+   ProgressHistory,
++  ProgressOutcome,
+   ProgressReceipt,
+   ProgressRow,
+ } from '../../packages/query-db-collection/tests/queued-answer-progress-oracle.js'
+@@ -58,6 +60,61 @@
+   for (const receipt of receipts) observe(receipt)
+ }
+ 
++// These authored supervisor results calibrate the unchanged judgment's failure
++// categories. A contained prefix is not a current-main execution witness.
++const containedOutcome = (
++  reason: ProgressOutcome[`reason`],
++  executed = false,
++): ProgressOutcome => ({
++  reason,
++  exitCode: null,
++  signal: `SIGKILL`,
++  bindingStatus: `bound`,
++  receipts: [
++    { phase: `conflicting-cache-premise`, sequence: 214 },
++    { phase: `answer-queued`, sequence: 216, enqueueReturned: true },
++    ...(executed ? [{ phase: `answer-executed`, sequence: 300 }] : []),
++  ],
++  keyCallbacks: 1,
++  prefixViolations: 0,
++  warnings: 0,
++  cleanupErrors: [],
++  logPath: `authored-pure-calibration`,
++})
++
++describe(`pure queued-progress failure classification`, () => {
++  it(`identifies watchdog noncompletion only after measured premise and enqueue`, () => {
++    expect(() =>
++      checkQueuedAnswerProgress(history, containedOutcome(`wall`)),
++    ).toThrow(`bounded queued-answer progress failure after reached premise`)
++    const startup = { ...containedOutcome(`wall`), receipts: [] }
++    expect(() => checkQueuedAnswerProgress(history, startup)).toThrow(
++      `unmet premise or setup`,
++    )
++  })
++
++  it(`does not classify a callback observed during final drain as noncompletion`, () => {
++    expect(() =>
++      checkQueuedAnswerProgress(history, containedOutcome(`wall`, true)),
++    ).toThrow(`runtime after callback`)
++  })
++
++  it(`preserves resource termination as a separate instrument failure`, () => {
++    for (const reason of [`rss`, `heap`] as const)
++      expect(() =>
++        checkQueuedAnswerProgress(history, containedOutcome(reason)),
++      ).toThrow(`resource termination; no progress verdict`)
++  })
++
++  it(`preserves a recording failure ahead of a watchdog progress judgment`, () => {
++    const outcome = containedOutcome(`wall`)
++    outcome.primaryObservationError = `original receipt read failure`
++    expect(() => checkQueuedAnswerProgress(history, outcome)).toThrow(
++      `original receipt read failure`,
++    )
++  })
++})
++
+ describe(`pure progress receipt comparison calibration`, () => {
+   it(`accepts complete prior-to-final publication after provider releases`, () => {
+     expect(() => check(lawful)).not.toThrow()
+--- /dev/null	2026-10-29 23:40:10
++++ /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/source/scripts/h02-progress/receiving-monitor.mjs	2026-10-29 23:40:10
+@@ -0,0 +1,213 @@
++import { isDeepStrictEqual } from 'node:util'
++
++export const postEnqueueWindowMs = 1000
++
++/** @typedef {'exited' | 'wall' | 'rss' | 'heap' | 'observation'} SupervisorReason */
++/** @typedef {import('../../packages/query-db-collection/tests/queued-answer-progress-oracle.js').ProgressReceipt} Receipt */
++
++// Resource and instrument failure cannot become queued-progress evidence when
++// a later watchdog fires. Keep the first kill trigger separately in the parent.
++/**
++ * @param {SupervisorReason} current
++ * @param {SupervisorReason} next
++ * @param {boolean} heapDetected
++ * @returns {SupervisorReason}
++ */
++export function selectSupervisorReason(current, next, heapDetected) {
++  if (heapDetected || current === `heap` || next === `heap`) return `heap`
++  if (current === `rss` || next === `rss`) return `rss`
++  if (current === `observation` || next === `observation`) return `observation`
++  if (current === `wall` || next === `wall`) return `wall`
++  return `exited`
++}
++
++/** Diagnostic storage is bounded. Scan the entire incoming chunk before trimming. */
++export function createHeapDiagnostic() {
++  let tail = ``
++  let heap = false
++  return {
++    /** @param {string} text */
++    feed(text) {
++      const incoming = tail + text
++      heap ||=
++        /FATAL ERROR:.*heap|Allocation failed - JavaScript heap out of memory/.test(
++          incoming,
++        )
++      tail = incoming.slice(-4000)
++      return heap
++    },
++    detected: () => heap,
++  }
++}
++
++/** @param {unknown} value @returns {value is number} */
++const positive = (value) =>
++  typeof value === `number` && Number.isSafeInteger(value) && value > 0
++/** @param {unknown} value @returns {value is number} */
++const count = (value) =>
++  typeof value === `number` && Number.isSafeInteger(value) && value >= 0
++/** @param {unknown} value @returns {Record<string, unknown>} */
++const fields = (value) =>
++  typeof value === `object` && value !== null
++    ? /** @type {Record<string, unknown>} */ (value)
++    : {}
++
++// Validate the driver's measured receipt, not a second ownership model. The
++// source-bound driver remains responsible for reading actual current Queries.
++/** @param {Receipt} receipt */
++function conflictIdentity(receipt) {
++  const observed = fields(receipt.observed)
++  const cached = fields(receipt.cached)
++  const sibling = fields(receipt.emptySibling)
++  const answer = fields(sibling.answer)
++  if (
++    !positive(receipt.sequence) ||
++    !Number.isFinite(receipt.pivot) ||
++    typeof receipt.cut !== `string` ||
++    ![
++      `held-queryFn-registration`,
++      `existing-pending-before-acquisition`,
++    ].includes(receipt.cut) ||
++    typeof receipt.pendingAtom !== `string` ||
++    !Array.isArray(receipt.pendingKey) ||
++    JSON.stringify(receipt.pendingKey) !== receipt.pendingAtom ||
++    !Array.isArray(sibling?.key) ||
++    JSON.stringify(sibling.key) !== sibling.atom ||
++    sibling.atom === receipt.pendingAtom ||
++    !positive(cached?.version) ||
++    cached.backendVersion !== 0 ||
++    !isDeepStrictEqual(cached.rows, [receipt.pivot]) ||
++    !positive(answer?.version) ||
++    answer.version <= cached.version ||
++    answer.backendVersion !== 1 ||
++    !isDeepStrictEqual(answer.rows, []) ||
++    observed?.pending !== true ||
++    observed.aborted !== false ||
++    !isDeepStrictEqual(observed.pendingScope, [receipt.pivot]) ||
++    !isDeepStrictEqual(observed.siblingScope, [receipt.pivot]) ||
++    !positive(observed.pendingOwner) ||
++    !positive(observed.siblingOwner) ||
++    observed.pendingOwner === observed.siblingOwner ||
++    !count(observed.pendingStartCount) ||
++    observed.pendingActualCount !== observed.pendingStartCount ||
++    observed.pendingStatus !== `success` ||
++    observed.pendingFetchStatus !== `fetching` ||
++    !count(observed.siblingStartCount) ||
++    !count(observed.siblingActualCount) ||
++    observed.siblingActualCount <= observed.siblingStartCount ||
++    observed.siblingStatus !== `success` ||
++    !isDeepStrictEqual(observed.siblingRows, []) ||
++    observed.physicalQueriesCurrent !== true ||
++    !positive(observed.pendingPhysicalQuery) ||
++    observed.pendingPhysicalQuery !== observed.currentPhysicalQuery ||
++    !positive(observed.siblingPhysicalQuery) ||
++    observed.siblingPhysicalQuery !== observed.siblingAnswerPhysicalQuery ||
++    observed.pendingPhysicalQuery === observed.siblingPhysicalQuery
++  )
++    throw new Error(`invalid measured conflict receipt`)
++  return {
++    sequence: receipt.sequence,
++    atom: receipt.pendingAtom,
++    cachedVersion: cached.version,
++    emptyVersion: answer.version,
++  }
++}
++
++/**
++ * These fixed-storage milestones belong to the parent instrument. They add no
++ * receiving-thread allocation, yield, graph cap or product scheduling rule.
++ * Parent observation time starts containment only after measured conflict and
++ * completed host enqueue. Callback execution disarms this progress window.
++ */
++export function createPostEnqueueMonitor() {
++  /** @type {ReturnType<typeof conflictIdentity> | undefined} */
++  let premise
++  /** @type {number | undefined} */
++  let queuedSequence
++  /** @type {number | undefined} */
++  let queuedAtMs
++  /** @type {number | undefined} */
++  let executedSequence
++  let receiptCount = 0
++  let acquisitionCount = 0
++  let releaseCount = 0
++  let lastSequence = 0
++  /** @type {string | undefined} */
++  let lastPhase
++  return {
++    /** @param {Receipt} receipt @param {number} nowMs */
++    observe(receipt, nowMs) {
++      receiptCount++
++      if (typeof receipt.sequence === `number`) lastSequence = receipt.sequence
++      lastPhase = receipt.phase
++      if (receipt.phase === `acquisition-attempt`) acquisitionCount++
++      if (receipt.phase === `acquisition-release`) releaseCount++
++      if (receipt.phase === `conflicting-cache-premise`) {
++        if (premise) throw new Error(`duplicate measured conflict receipt`)
++        premise = conflictIdentity(receipt)
++      }
++      if (
++        receipt.phase === `answer-queued` &&
++        receipt.kind === `resolving-conflict`
++      ) {
++        if (
++          !premise ||
++          queuedSequence !== undefined ||
++          !positive(receipt.sequence) ||
++          receipt.sequence <= premise.sequence ||
++          receipt.atom !== premise.atom ||
++          JSON.stringify(receipt.key) !== premise.atom ||
++          receipt.cachedVersion !== premise.cachedVersion ||
++          receipt.emptyVersion !== premise.emptyVersion ||
++          typeof receipt.scheduler !== `string` ||
++          ![`microtask`, `timer`].includes(receipt.scheduler) ||
++          receipt.enqueueReturned !== true ||
++          !Number.isFinite(nowMs)
++        )
++          throw new Error(`invalid resolving enqueue receipt`)
++        queuedSequence = receipt.sequence
++        queuedAtMs = nowMs
++      }
++      if (
++        receipt.phase === `answer-executed` &&
++        receipt.kind === `resolving-conflict`
++      ) {
++        if (
++          !premise ||
++          queuedSequence === undefined ||
++          executedSequence !== undefined ||
++          !positive(receipt.sequence) ||
++          receipt.sequence <= queuedSequence ||
++          receipt.atom !== premise.atom ||
++          JSON.stringify(receipt.key) !== premise.atom ||
++          receipt.cachedVersion !== premise.cachedVersion ||
++          receipt.emptyVersion !== premise.emptyVersion
++        )
++          throw new Error(`invalid resolving execution receipt`)
++        executedSequence = receipt.sequence
++      }
++    },
++    /** @param {number} nowMs */
++    expired(nowMs) {
++      return (
++        queuedAtMs !== undefined &&
++        executedSequence === undefined &&
++        nowMs - queuedAtMs >= postEnqueueWindowMs
++      )
++    },
++    snapshot() {
++      return {
++        postEnqueueWindowMs,
++        conflictSequence: premise?.sequence,
++        queuedSequence,
++        queuedAtParentMonotonicMs: queuedAtMs,
++        executedSequence,
++        receiptCount,
++        acquisitionCount,
++        releaseCount,
++        lastSequence,
++        lastPhase,
++      }
++    },
++  }
++}
+--- /dev/null	2026-10-29 23:40:10
++++ /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/source/scripts/h02-progress/receiving-monitor.test.mjs	2026-10-29 23:40:10
+@@ -0,0 +1,297 @@
++import { strict as assert } from 'node:assert'
++import { createHash } from 'node:crypto'
++import { readFileSync } from 'node:fs'
++import { test } from 'node:test'
++import {
++  createHeapDiagnostic,
++  createPostEnqueueMonitor,
++  postEnqueueWindowMs,
++  selectSupervisorReason,
++} from './receiving-monitor.mjs'
++
++// Pure instrument calibration. No provider, production graph or receiving
++// invocation runs. Captured diagnostics are immutable prior-run inputs.
++const premise = () => ({
++  sequence: 214,
++  phase: `conflicting-cache-premise`,
++  cut: `held-queryFn-registration`,
++  pivot: 3,
++  pendingAtom: `["h02-progress-markers",2,[3]]`,
++  pendingKey: [`h02-progress-markers`, 2, [3]],
++  cached: { version: 4, backendVersion: 0, rows: [3] },
++  emptySibling: {
++    atom: `["h02-progress-markers",1,[3]]`,
++    key: [`h02-progress-markers`, 1, [3]],
++    answer: { version: 10, backendVersion: 1, rows: [] },
++  },
++  observed: {
++    pending: true,
++    aborted: false,
++    pendingScope: [3],
++    siblingScope: [3],
++    pendingOwner: 2,
++    siblingOwner: 1,
++    pendingStartCount: 1,
++    pendingActualCount: 1,
++    pendingStatus: `success`,
++    pendingFetchStatus: `fetching`,
++    siblingStartCount: 0,
++    siblingActualCount: 1,
++    siblingStatus: `success`,
++    siblingRows: [],
++    physicalQueriesCurrent: true,
++    pendingPhysicalQuery: 4,
++    currentPhysicalQuery: 4,
++    siblingPhysicalQuery: 10,
++    siblingAnswerPhysicalQuery: 10,
++  },
++})
++const queued = () => ({
++  sequence: 216,
++  phase: `answer-queued`,
++  kind: `resolving-conflict`,
++  atom: `["h02-progress-markers",2,[3]]`,
++  key: [`h02-progress-markers`, 2, [3]],
++  cachedVersion: 4,
++  emptyVersion: 10,
++  scheduler: `microtask`,
++  enqueueReturned: true,
++})
++const executed = () => ({
++  ...queued(),
++  phase: `answer-executed`,
++  sequence: 300,
++})
++const armed = () => {
++  const monitor = createPostEnqueueMonitor()
++  monitor.observe(premise(), 20_000)
++  monitor.observe(queued(), 20_001)
++  return monitor
++}
++const heapText = `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory`
++
++test(`detects a complete incoming diagnostic before trimming its long tail`, () => {
++  const input = `${heapText}\n${`x`.repeat(8000)}`
++  assert.equal(
++    /Allocation failed - JavaScript heap out of memory/.test(
++      input.slice(-4000),
++    ),
++    false,
++  )
++  assert.equal(createHeapDiagnostic().feed(input), true)
++})
++
++test(`detects every split inside the native heap marker and stays sticky`, () => {
++  for (let split = 1; split < heapText.length; split++) {
++    const detector = createHeapDiagnostic()
++    detector.feed(heapText.slice(0, split))
++    assert.equal(detector.feed(heapText.slice(split)), true)
++    assert.equal(detector.feed(`ordinary later diagnostics`.repeat(500)), true)
++    assert.equal(detector.detected(), true)
++  }
++})
++
++test(`captured v6 heap bytes classify under whole, tiny and 1024-byte chunks`, () => {
++  const file = process.env.H02_PROGRESS_V6_STDERR
++  assert.ok(file, `H02_PROGRESS_V6_STDERR must name the frozen raw diagnostic`)
++  const bytes = readFileSync(file)
++  assert.equal(
++    createHash(`sha256`).update(bytes).digest(`hex`),
++    `9bd25bc081ade65c74934beeb7deba2323c5f836bf73b758940cbcaa4178aa7c`,
++  )
++  for (const size of [bytes.length, 1024, 1]) {
++    const detector = createHeapDiagnostic()
++    for (let offset = 0; offset < bytes.length; offset += size)
++      detector.feed(bytes.subarray(offset, offset + size).toString(`utf8`))
++    assert.equal(detector.detected(), true)
++  }
++})
++
++test(`captured v5 inspector assertion and ordinary heap words do not classify as OOM`, () => {
++  const file = process.env.H02_PROGRESS_V5_STDERR
++  assert.ok(file, `H02_PROGRESS_V5_STDERR must name the frozen raw diagnostic`)
++  const text = readFileSync(file, `utf8`)
++  assert.match(text, /Assertion failed|Check failed|CHECK/i)
++  const detector = createHeapDiagnostic()
++  detector.feed(text)
++  detector.feed(`the ordinary heap has available space`)
++  assert.equal(detector.detected(), false)
++})
++
++test(`startup and a conflict without completed enqueue never arm progress containment`, () => {
++  const monitor = createPostEnqueueMonitor()
++  monitor.observe({ sequence: 1, phase: `worker-start` }, 0)
++  assert.equal(monitor.expired(10 ** 9), false)
++  monitor.observe(premise(), 10 ** 9)
++  assert.equal(monitor.expired(2 * 10 ** 9), false)
++})
++
++test(`rejects enqueue before measured premise instead of arming retroactively`, () => {
++  const monitor = createPostEnqueueMonitor()
++  assert.throws(
++    () => monitor.observe(queued(), 100),
++    /invalid resolving enqueue/,
++  )
++  assert.equal(monitor.expired(10 ** 9), false)
++})
++
++test(`rejects missing physical, applied, current, scope or pending premise facts`, () => {
++  const mutations = [
++    (receipt) => {
++      receipt.observed.pending = false
++    },
++    (receipt) => {
++      receipt.observed.aborted = true
++    },
++    (receipt) => {
++      receipt.observed.currentPhysicalQuery = 99
++    },
++    (receipt) => {
++      receipt.observed.siblingAnswerPhysicalQuery = 99
++    },
++    (receipt) => {
++      receipt.observed.physicalQueriesCurrent = false
++    },
++    (receipt) => {
++      receipt.observed.siblingActualCount = 0
++    },
++    (receipt) => {
++      receipt.observed.pendingActualCount = 2
++    },
++    (receipt) => {
++      receipt.observed.siblingOwner = 2
++    },
++    (receipt) => {
++      receipt.observed.pendingScope = [2]
++    },
++    (receipt) => {
++      receipt.emptySibling.answer.rows = [3]
++    },
++  ]
++  for (const mutate of mutations) {
++    const monitor = createPostEnqueueMonitor()
++    const receipt = premise()
++    mutate(receipt)
++    assert.throws(
++      () => monitor.observe(receipt, 100),
++      /invalid measured conflict/,
++    )
++    assert.equal(monitor.expired(10 ** 9), false)
++  }
++})
++
++test(`requires completed enqueue after the exact measured key and answer versions`, () => {
++  for (const change of [
++    { enqueueReturned: false },
++    { atom: `other` },
++    { key: [`other`] },
++    { cachedVersion: 5 },
++    { emptyVersion: 11 },
++    { sequence: 213 },
++    { scheduler: `inline` },
++  ]) {
++    const monitor = createPostEnqueueMonitor()
++    monitor.observe(premise(), 100)
++    assert.throws(
++      () => monitor.observe({ ...queued(), ...change }, 101),
++      /invalid resolving enqueue/,
++    )
++    assert.equal(monitor.expired(10 ** 9), false)
++  }
++})
++
++test(`arms from parent enqueue observation and honors the exact containment boundary`, () => {
++  const monitor = armed()
++  assert.equal(monitor.expired(20_001 + postEnqueueWindowMs - 1), false)
++  assert.equal(monitor.expired(20_001 + postEnqueueWindowMs), true)
++  assert.equal(monitor.snapshot().queuedAtParentMonotonicMs, 20_001)
++})
++
++test(`execution disarms the progress window even if final drain observes it after cutoff`, () => {
++  const monitor = armed()
++  assert.equal(monitor.expired(30_000), true)
++  monitor.observe(executed(), 30_001)
++  assert.equal(monitor.expired(40_000), false)
++  assert.equal(monitor.snapshot().executedSequence, 300)
++})
++
++test(`rejects duplicate premise, enqueue and execution milestones`, () => {
++  const monitor = armed()
++  assert.throws(
++    () => monitor.observe(premise(), 20_002),
++    /duplicate measured conflict/,
++  )
++  assert.throws(
++    () => monitor.observe(queued(), 20_002),
++    /invalid resolving enqueue/,
++  )
++  monitor.observe(executed(), 20_003)
++  assert.throws(
++    () => monitor.observe(executed(), 20_004),
++    /invalid resolving execution/,
++  )
++})
++
++test(`rejects execution without matching completed enqueue or answer identity`, () => {
++  const monitor = createPostEnqueueMonitor()
++  assert.throws(
++    () => monitor.observe(executed(), 100),
++    /invalid resolving execution/,
++  )
++  for (const change of [
++    { atom: `other` },
++    { emptyVersion: 11 },
++    { sequence: 215 },
++  ])
++    assert.throws(
++      () => armed().observe({ ...executed(), ...change }, 20_002),
++      /invalid resolving execution/,
++    )
++})
++
++test(`lawful ablation control callbacks do not require or arm a conflicting premise`, () => {
++  const monitor = createPostEnqueueMonitor()
++  monitor.observe(
++    { sequence: 1, phase: `answer-queued`, kind: `lawful-control` },
++    100,
++  )
++  monitor.observe(
++    { sequence: 2, phase: `answer-executed`, kind: `lawful-control` },
++    101,
++  )
++  assert.equal(monitor.expired(10 ** 9), false)
++})
++
++test(`milestones retain only fixed scalar identity and counters as receipts grow`, () => {
++  const monitor = armed()
++  const fields = Object.keys(monitor.snapshot()).sort()
++  for (let index = 0; index < 20_000; index++)
++    monitor.observe(
++      {
++        sequence: 217 + index,
++        phase: index % 2 ? `acquisition-attempt` : `acquisition-release`,
++      },
++      20_002,
++    )
++  const snapshot = monitor.snapshot()
++  assert.deepEqual(Object.keys(snapshot).sort(), fields)
++  assert.equal(snapshot.receiptCount, 20_002)
++  assert.equal(snapshot.acquisitionCount, 10_000)
++  assert.equal(snapshot.releaseCount, 10_000)
++  assert.equal(snapshot.lastSequence, 20_216)
++  assert.ok(
++    Object.values(snapshot).every(
++      (value) =>
++        value === undefined || [`number`, `string`].includes(typeof value),
++    ),
++  )
++})
++
++test(`resource and observation failures take precedence over watchdog evidence`, () => {
++  for (const prior of [`heap`, `rss`, `observation`])
++    assert.equal(selectSupervisorReason(prior, `wall`, false), prior)
++  for (const next of [`heap`, `rss`, `observation`])
++    assert.equal(selectSupervisorReason(`wall`, next, false), next)
++  assert.equal(selectSupervisorReason(`observation`, `wall`, true), `heap`)
++  assert.equal(selectSupervisorReason(`exited`, `wall`, false), `wall`)
++})

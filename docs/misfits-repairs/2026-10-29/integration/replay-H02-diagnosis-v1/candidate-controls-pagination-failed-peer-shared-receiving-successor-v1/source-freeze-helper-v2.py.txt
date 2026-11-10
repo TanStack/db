@@ -1,0 +1,68 @@
+import copy,difflib,hashlib,json,shutil
+from datetime import datetime,timezone
+from pathlib import Path
+r=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items')
+w=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1')
+h=r/'docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1'
+p=h/'candidate-controls-pagination-failed-peer-source-preparation-v1'
+s=h/'candidate-controls-source-failed-peer-checkpoint-successor-v1'
+q=h/'candidate-controls-pagination-failed-peer-shared-receiving-successor-v1'
+sha=lambda file:hashlib.sha256(Path(file).read_bytes()).hexdigest()
+def write(name,data):
+ file=q/name;assert not file.exists(),file;file.parent.mkdir(parents=True,exist_ok=True);file.write_text(json.dumps(data,indent=2)+'\n')
+old=json.loads((p/'source-freeze-v1.json').read_text())
+newfiles=['packages/db/tests/query/pagination-window-publication-oracle.ts']
+assert not set(newfiles).intersection(old['sourceBindings'])
+current={file:sha(w/file) for file in [*old['sourceBindings'],*newfiles]}
+deltas={f:{'before':d,'after':current[f]} for f,d in old['sourceBindings'].items() if current[f]!=d}
+expected={'docs/contributing/oracle-coverage.md','packages/db/tests/query/pagination-oracle.property.test.ts','packages/query-db-collection/tests/queued-answer-completion-attachments.ts','packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts','packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts','packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts','packages/query-db-collection/tests/queued-answer-completion-fixture.ts','packages/query-db-collection/tests/queued-answer-completion-oracle.ts'}
+assert set(deltas)==expected,deltas
+for file,digest in old['productionFiles'].items():assert current[file]==digest
+assert len(old['productionFiles'])==511
+copies={f:d for f,d in current.items() if f not in old['productionFiles']}
+for file,digest in copies.items():
+ target=q/'sources'/file;assert not target.exists();target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(w/file,target);assert sha(target)==digest
+for file in expected:
+ before=q/'before'/file;assert sha(before)==deltas[file]['before'],file
+ patch=''.join(difflib.unified_diff(before.read_text().splitlines(True),(w/file).read_text().splitlines(True),fromfile='before/'+file,tofile='after/'+file))
+ target=q/'patches'/(file+'.patch');target.parent.mkdir(parents=True,exist_ok=True);assert not target.exists();target.write_text(patch)
+count=0
+for package in old['packages'].values():
+ root=Path(package['resolved']);assert sha(root/'package.json')==package['packageJsonSha256']
+ for file,digest in package['regularPayloadFilesMap'].items():assert sha(root/file)==digest,(root,file);count+=1
+assert sha(old['node']['executable'])==old['node']['sha256']
+for link,fact in old['dependencyReuseLinks'].items():assert (w/link).is_symlink()==fact['isSymlink'];assert str((w/link).resolve())==fact['resolved']
+assert sha(w/'pnpm-lock.yaml')==old['lockfiles']['repoPnpmLock']
+assert sha(w/'node_modules/.pnpm/lock.yaml')==old['lockfiles']['installedPnpmLock']
+tools=json.loads((q/'static-tool-identity-before-v1.json').read_text())
+for name,pkg in tools['packages'].items():
+ for file,digest in pkg['regularPayloadFilesMap'].items():assert sha(Path(pkg['resolved'])/file)==digest,(name,file)
+for file,digest in tools['prettier']['regularPayloadFilesMap'].items():assert sha(Path(tools['prettier']['resolved'])/file)==digest,('prettier',file)
+write('static-tool-identity-after-v1.json',{'beforeSha256':sha(q/'static-tool-identity-before-v1.json'),'unchanged':True,'node':old['node'],'eslintPayloadFiles':len(tools['packages']['eslint']['regularPayloadFilesMap']),'typescriptPayloadFiles':len(tools['packages']['typescript']['regularPayloadFilesMap']),'prettierPayloadFiles':len(tools['prettier']['regularPayloadFilesMap']),'sourceFeedbackScriptSha256':sha(w/'scripts/agent-lint-feedback.mjs'),'reportFeedbackScriptSha256':sha(r/'scripts/agent-lint-feedback.mjs'),'gitBufferPreloadSha256':sha('/tmp/misfits-lint-git-buffer-v1.mjs')})
+priorchecks={}
+for manifest,key in [(p/'packet-sha256-v1.json',None),(s/'packet-sha256-v1.json',None),(s/'inline-source-failed-peer-result-freeze-v1.json','files')]:
+ data=json.loads(manifest.read_text());entries=data[key] if key else data
+ for file,digest in entries.items():assert sha(manifest.parent/file)==digest,(manifest,file)
+ priorchecks[str(manifest)]={'sha256':sha(manifest),'entriesRehashed':len(entries)}
+shared={f:current[f] for f in old['sharedInstrumentFiles']}
+instruments={f:d for f,d in copies.items() if f not in shared}
+freeze={'at':datetime.now(timezone.utc).isoformat(),'status':'source-only shared full-child/nonthrowing receiving preparation; no runtime admitted','worktree':str(w),'base':old['base'],'priorSourceFreeze':str(p/'source-freeze-v1.json'),'priorSourceFreezeSha256':sha(p/'source-freeze-v1.json'),'priorPrimaryOperationalStopResult':str(h/'candidate-controls-pagination-failed-peer-primary-red-runtime-v1/result-freeze-v1.json'),'priorPrimaryOperationalStopResultSha256':sha(h/'candidate-controls-pagination-failed-peer-primary-red-runtime-v1/result-freeze-v1.json'),'sourceBindings':current,'sourceBindingCount':len(current),'productionFiles':old['productionFiles'],'productionCount':511,'instrumentFiles':instruments,'sharedInstrumentFiles':shared,'sourceCopies':copies,'sourceCopyRoot':str(q/'sources'),'oldBindingDeltas':deltas,'newBindings':{f:current[f] for f in newfiles},'node':old['node'],'packages':old['packages'],'lockfiles':old['lockfiles'],'dependencyReuseLinks':old['dependencyReuseLinks'],'dependencyPayloadFilesRehashed':count,'priorPacketsRehashed':priorchecks,'staticToolIdentityBeforeSha256':sha(q/'static-tool-identity-before-v1.json'),'staticToolIdentityAfterSha256':sha(q/'static-tool-identity-after-v1.json'),'bindingProfile':'source-only; completion-baseline-v1 proposed separately; exact admission still required','runtime':0,'reaches':'all successor reaches UNREACHED','candidateRaw20':'UNREACHED','state14':'proposed, not adopted','actualHelperNoActivePublicOperation':'UNREACHED and separately required','metadata':'separately owned; no credit transferred','requiredReportWorktreeExactLint':'PENDING ROOT; direct supplemental attempt failed with git ENOBUFS before lint; no scope narrowed'}
+write('source-freeze-v1.json',freeze)
+command=json.loads((p/'proposed-primary-red-command-v1.json').read_text())
+command['sourceFreeze']=str(q/'source-freeze-v1.json');command['sourceFreezeSha256']=sha(q/'source-freeze-v1.json')
+command['assertionCheckpoint']='exact original failed applied-load error handled as lastSubsetError; classify original peer as pending or observably AbortError-retired; shared full-child retained snapshot comparison for every captured callback and current read before peer release/window wait'
+command['runtimeAdmission']='NOT ADMITTED; new exact-source independent review plus separate2GiB operational packet and root admission required'
+write('proposed-primary-fixed-red-command-v1.json',command)
+replay=copy.deepcopy(command)
+replay['args']=[arg.replace('for a fixed seed','for a random or replayed seed') for arg in replay['args']]
+replay['environment']={'TANSTACK_DB_ORACLE_RUNS_MULTIPLIER':'1','TANSTACK_DB_ORACLE_PROPERTY':'pagination.joined-window-failure','TANSTACK_DB_ORACLE_SEED':'<actual FastCheck-reported seed>','TANSTACK_DB_ORACLE_PATH':'<actual FastCheck-reported path>'}
+replay['requiredUnsetEnvironment']=['TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH']
+replay['campaign']='TEMPLATE ONLY: explicit random-or-replayed leaf selector excludes all older unwrapped tests; fill actual seed/path from admitted primary failure and freeze a new exact recipe before replay'
+write('proposed-primary-random-replay-template-v1.json',replay)
+oldrecipe=json.loads((s/'frozen-inputs-v1/recipes/inline-source-failed-peer.json').read_text())
+for schedule in ['failure-first','success']:
+ recipe=copy.deepcopy(oldrecipe);program=q/'frozen-inputs-v1/programs'/('inline-window-'+schedule+'.json')
+ recipe.update({'sourceFreeze':str(q/'source-freeze-v1.json'),'sourceFreezeSha256':sha(q/'source-freeze-v1.json'),'programFile':str(program),'programSha256':sha(program),'gate':'source-failed-peer' if schedule=='failure-first' else 'held-window','outputDirectory':str(q/'proposed-runtime-output-v1'/('inline-window-'+schedule))})
+ write('frozen-inputs-v1/recipes/inline-window-'+schedule+'.json',recipe)
+write('proposed-receiving-command-inputs-v1.json',{'runtimeAdmission':'NOT ADMITTED; exact independent review and root admission required; recipe constructor equality not executed','proposals':[{'schedule':s,'recipe':str(q/'frozen-inputs-v1/recipes'/('inline-window-'+s+'.json')),'recipeSha256':sha(q/'frozen-inputs-v1/recipes'/('inline-window-'+s+'.json')),'executable':old['node']['executable'],'args':[str(w/'scripts/h02-progress/completion-parent.mjs'),str(q/'frozen-inputs-v1/recipes'/('inline-window-'+s+'.json'))]} for s in ['failure-first','success']],'successRequirement':'same-source actual successful neighbor must calibrate shared recorder/comparison before production','limits':'unchanged receiving outer60s/384MiB/1GiB and child20s/384MiB/1GiB; numerical bounds are operational only; separate2GiB proposal applies only to primary containment','laterRealSettlementRetry':'OPEN under primary pagination owner'})
+print(json.dumps({'freezeSha256':sha(q/'source-freeze-v1.json'),'sourceBindings':len(current),'productionUnchanged':511,'sourceCopies':len(copies),'changedPriorBindings':list(deltas),'newBindings':newfiles,'dependencyPayloadFilesRehashed':count,'priorPacketsRehashed':priorchecks},indent=2))

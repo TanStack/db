@@ -1,0 +1,21 @@
+{
+  "moduleUrl": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+  "moduleFilename": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+  "moduleDirname": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests",
+  "locationHref": "http://localhost:3000/",
+  "globalIsNodeURL": false,
+  "literal": "http://localhost:3000/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "indirectGlobal": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/",
+  "nodeLiteral": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/",
+  "nodeIndirect": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/",
+  "resolvedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "fixture": {
+    "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+    "url": "/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+    "evaluated": true,
+    "originalSha256": "7fc098f239803bbd02a17190e812c14c44b62784b6db7c9d85b535ba965a3a71",
+    "codeSha256": "5ed1dc8ea55dd64dc929f14e84f1baf13b03f4ceaf238f8a806aa8a31ea3460a"
+  },
+  "scope": "pure setup fixture; no receiving or product evidence"
+}

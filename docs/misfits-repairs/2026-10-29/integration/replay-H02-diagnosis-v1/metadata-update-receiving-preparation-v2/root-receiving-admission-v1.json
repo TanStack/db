@@ -1,0 +1,18 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/evaluate_metadata_external",
+  "reservedHeavySlot": 4,
+  "admittedRuntime": true,
+  "maxInvocations": 1,
+  "firstCommandSha256": "569f116625ccc99fb75efc27934eb256ab82d602e698d8489a5be714a09d0a6c",
+  "packetManifestSha256": "d019dfef5829b69817bcd8ae5c50c22aafc9ece643bac3ed816cb6169c82830a",
+  "bindingSha256": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+  "independentReviewSha256": "5ad0e22a0eab0e695f3ebb2b9a1ba4ad24404b0b7193ce4d9da7894b56c08c50",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "executionRequirement": "Actual exec_command sandbox_permissions=require_escalated; unchanged direct shell and supervisor. Track actual outer completion independently; test60s is not a hard outer watchdog.",
+  "after": "Stop on any outcome; unique actual identity selection only, preserve complete raw inner/outer/provenance plus fresh source recheck and original recorded outer/leader/writer absence. Independent actual review and root classification before any next command. No retry, next lane, mutant, install, Git/PR action or canonical import.",
+  "limits": "stable metadata/direct eager source-sync receiver only; childPid group-targeting without persisted initial getpgid; child binding does not establish parent checker compiled bytes/invocation",
+  "canonicalImport": false,
+  "publishing": false
+}

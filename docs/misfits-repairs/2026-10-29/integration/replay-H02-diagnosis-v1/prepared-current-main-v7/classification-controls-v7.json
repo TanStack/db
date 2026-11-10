@@ -1,0 +1,47 @@
+{
+  "kind": "static recipe classification controls; no receiving execution",
+  "gate": {
+    "requiredFirstKillTrigger": "post-enqueue-window",
+    "requiredReason": "wall",
+    "requiredBindingStatus": "bound",
+    "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+    "excluded": [
+      "matching execution receipt including final drain",
+      "resource termination",
+      "observation failure",
+      "unresolved source binding"
+    ],
+    "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+    "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+  },
+  "controls": [
+    {
+      "name": "total cap before queued window",
+      "enqueueObservedAtMs": 19990,
+      "totalWallObservedAtMs": 20100,
+      "elapsedQueuedMs": 110,
+      "watchdogTrigger": "wall",
+      "verdict": "total-runtime containment; no progress verdict"
+    },
+    {
+      "name": "complete queued window",
+      "elapsedQueuedMs": 1000,
+      "watchdogTrigger": "post-enqueue-window",
+      "otherRequiredConditions": "all satisfied",
+      "verdict": "eligible bounded queued-answer progress RED under accepted plan"
+    },
+    {
+      "name": "execution found in final drain",
+      "elapsedQueuedMs": 1000,
+      "watchdogTrigger": "post-enqueue-window",
+      "finalDrainExecution": true,
+      "verdict": "no unexecuted-answer progress RED; assess runtime after callback"
+    },
+    {
+      "name": "heap after first window trigger",
+      "watchdogTrigger": "post-enqueue-window",
+      "reason": "heap",
+      "verdict": "resource termination; no progress verdict"
+    }
+  ]
+}

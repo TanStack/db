@@ -1,0 +1,102 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources
+
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'scope' 'default'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'scope' 'authored'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'subscription' 'default'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'subscription' 'authored'
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 2,
+  counts: {
+    'initial-root': 1,
+    'initial-downstream': 1,
+    'nonempty-prior': 1,
+    'reload-started': 1,
+    'positive-held-provider-read': 1,
+    'held-root': 1,
+    'held-downstream': 1,
+    'completed-enqueue': 1,
+    'answer-executed': 1,
+    'callback-root': 1,
+    'callback-downstream': 1,
+    'selected-upstream-metadata': 1,
+    'messages-root': 1,
+    'messages-downstream': 1,
+    'final-root': 1,
+    'final-downstream': 1,
+    'worker-cleaned': 1,
+    'reload-baseline-compared': 1,
+    'followup-started': 1,
+    'source-applied': 1,
+    'followup-acquisitions-settled': 1,
+    'followup-retained-key-root': 1,
+    'followup-messages-root': 1,
+    'followup-final-root': 1,
+    'followup-update-root': 1,
+    'followup-previous-value-root': 1,
+    'followup-retained-key-downstream': 1,
+    'followup-messages-downstream': 1,
+    'followup-final-downstream': 1,
+    'followup-update-downstream': 1,
+    'followup-previous-value-downstream': 1
+  }
+}
+
+ × packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2 2458ms
+   → every reload callback publishes one complete snapshot without regression: expected [ { id: 3, rank: 35, markers: [] } ] to deeply equal [ { id: 3, rank: 30, markers: [] } ]
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2
+AssertionError: every reload callback publishes one complete snapshot without regression: expected [ { id: 3, rank: 35, markers: [] } ] to deeply equal [ { id: 3, rank: 30, markers: [] } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": 3,
+      "markers": [],
+-     "rank": 30,
++     "rank": 35,
+    },
+  ]
+
+ ❯ checkReplayPublication packages/db/tests/query/load-subset-retained-publication-oracle.ts:17:25
+     15|   label: string,
+     16| ) {
+     17|   expect(actual, label).toEqual(expected)
+       |                         ^
+     18| }
+     19|
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.ts:341:5
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:518:43
+ ❯ run packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts:74:5
+ ❯ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts:101:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 19 skipped (20)
+   Start at  04:43:11
+   Duration  2.97s (transform 72ms, setup 33ms, import 99ms, tests 2.46s, environment 298ms)
+

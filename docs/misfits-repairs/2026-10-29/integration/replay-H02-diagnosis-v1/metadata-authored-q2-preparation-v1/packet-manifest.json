@@ -1,0 +1,31 @@
+{
+  "kind": "Immutable source-only exact authored q2 outer preparation",
+  "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "bindingSha256": "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c",
+  "members": {
+    "authority.json": "f4a7f76a35a61dd041846a38428ff2180632a2a7d1d547b1420255302f69b8ed",
+    "recipe.json": "2045c371633cde0fbba7ad496a8d582886faf79a3107fc7790515ef2f32b30c3",
+    "launcher-scope-authored-q2.zsh": "233435391e2e70fd5a7e1d8f294823ec602998daf8fe46f5653b12bdc386119f",
+    "verify.py": "70a872a8a559367fadc283c01e64e0864c13854cdf85258d3a272f53e0d28fda",
+    "evidence-requirements.json": "56618c44a965e78cbc75ce48b476061775c07df0e425233c0a8d825a26746819",
+    "title-evidence.json": "8b8287bff07546edcac0dc493ab8ec4cd8967b184e51854879469caad59fc526",
+    "binding.json": "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c",
+    "first-command.json": "ab46c417199a7ddb1c7eb82f1f21de78962eee59c61cb6912c87d4ed1508c887",
+    "report.md": "85439605407120529ecb5fa8d344c0fc1c796726dc18e35a1c44ff396b086f69",
+    "static-audit-initial-failure.json": "21decfd2e885886b6ea6440be791f0f991b271ebf61cb2d3681d606dda4a30b0",
+    "static-results.json": "210384875cb22dc5b1d36513d0c4d8cf58feaaecd2ed1f71cef57805718ed236"
+  },
+  "selectedRecipe": "followup-scope-authored-q2",
+  "selectedHistoryCount": 1,
+  "declaredStates": 31,
+  "actualNativeRuns": 0,
+  "actualMutants": 0,
+  "sourceEdits": 0,
+  "runtimeAdmission": false,
+  "independentReview": "Pending root coordination",
+  "rootOwnsLint": true,
+  "F01CorrectionFreezeSha256": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4",
+  "limits": "Bounded source-only audit, not actual receiving evidence. First valid divergence stays final; no metadata invocation credit for earlier ordinary full-current previous-row rejection. Source/dependency prior gates remain unexecuted here."
+}

@@ -1,0 +1,18 @@
+{
+  "actualGetpgid": 99756,
+  "actualPsReturncode": 0,
+  "actualPsStderr": "",
+  "atMonotonicNs": 229089027353416,
+  "getpgidError": null,
+  "kind": "actual outer lifecycle observation after initial exec session return",
+  "limits": "Actual observation time only, not a reconstructed launch-time receipt. Detached inner group initial identity limits remain.",
+  "matchingOriginalGroupRows": [
+    "  241 99770 99756     32 /bin/ps -axo pid=,pgid=,rss=,args=",
+    "99756  2346 99756 117344 /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs run --config scripts/h02-progress/vitest.config.ts packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose --silent=false -t ^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$",
+    "99769 99756 99756  23168 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@esbuild+darwin-arm64@0.28.1/node_modules/@esbuild/darwin-arm64/bin/esbuild --service=0.28.1 --ping",
+    "99770 99756 99756 212272 /Users/kyle.mathews/.n/bin/node --experimental-import-meta-resolve --require /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/suppress-warnings.cjs --conditions node --conditions development --max-old-space-size=384 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/workers/forks.js"
+  ],
+  "originalLauncherRecord": "99756 99756   2480 /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-preparation-v1/launcher-scope-default-unseeded.zsh a95dc1d31f59c4c6c39b44864a8f528dcc93583b361eb3f62a62ca4db7e27e34\n",
+  "originalPgid": 99756,
+  "originalPid": 99756
+}

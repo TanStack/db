@@ -1,0 +1,10 @@
+import childProcess from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
+const originalExecFileSync = childProcess.execFileSync
+childProcess.execFileSync = function (file, args, options) {
+  const adjusted = file === 'git'
+    ? { ...options, maxBuffer: Math.max(options?.maxBuffer ?? 0, 8 * 1024 * 1024) }
+    : options
+  return originalExecFileSync.call(this, file, args, adjusted)
+}
+syncBuiltinESMExports()

@@ -1,0 +1,121 @@
+{
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH"
+  ],
+  "outcomes": [
+    {
+      "name": "eslint-mjs-v7",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "scripts/h02-progress/bindings-calibration.test.mjs",
+        "scripts/h02-progress/eslint.config.mjs",
+        "scripts/h02-progress/verify-bindings.mjs",
+        "scripts/h02-progress/receipt-transport.mjs",
+        "scripts/h02-progress/receipt-transport.test.mjs",
+        "scripts/h02-progress/startup-inspector.mjs",
+        "scripts/h02-progress/startup-inspector.test.mjs",
+        "scripts/h02-progress/receiving-monitor.mjs",
+        "scripts/h02-progress/receiving-monitor.test.mjs"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "eslint-driver-v7",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "packages/query-db-collection/tests/queued-answer-progress-driver.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "eslint-ts-support-v7",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+        "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+        "packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+        "scripts/h02-progress/calibration.config.ts",
+        "scripts/h02-progress/root-setup-calibration.config.ts",
+        "scripts/h02-progress/root-setup-calibration.test.ts",
+        "scripts/h02-progress/source-binding.setup.ts",
+        "scripts/h02-progress/vitest.config.ts",
+        "scripts/h02-progress/witness-premise.ts",
+        "scripts/h02-progress/witness-calibration.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "eslint-model-and-calibration-v7",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+        "scripts/h02-progress/checker-calibration.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "lint-changed-v7",
+      "args": [
+        "--max-old-space-size=1536",
+        "scripts/agent-lint-feedback.mjs"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "prettier-v7",
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+        "--check",
+        "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+        "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+        "packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+        "scripts/h02-progress/bindings-calibration.test.mjs",
+        "scripts/h02-progress/calibration.config.ts",
+        "scripts/h02-progress/checker-calibration.test.ts",
+        "scripts/h02-progress/eslint.config.mjs",
+        "scripts/h02-progress/root-setup-calibration.config.ts",
+        "scripts/h02-progress/root-setup-calibration.test.ts",
+        "scripts/h02-progress/source-binding.setup.ts",
+        "scripts/h02-progress/tsconfig.json",
+        "scripts/h02-progress/verify-bindings.mjs",
+        "scripts/h02-progress/vitest.config.ts",
+        "scripts/h02-progress/receipt-transport.mjs",
+        "scripts/h02-progress/receipt-transport.test.mjs",
+        "scripts/h02-progress/witness-premise.ts",
+        "scripts/h02-progress/witness-calibration.config.ts",
+        "scripts/h02-progress/startup-inspector.mjs",
+        "scripts/h02-progress/startup-inspector.test.mjs",
+        "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts",
+        "scripts/h02-progress/receiving-monitor.mjs",
+        "scripts/h02-progress/receiving-monitor.test.mjs"
+      ],
+      "exitCode": 0,
+      "signal": null
+    }
+  ]
+}

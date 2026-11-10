@@ -1,0 +1,255 @@
+--- a/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ b/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -598,7 +598,14 @@
+         reason: `provider answer held during event`,
+       })
+   })
+-  const downstreamSubscription = downstream.subscribeChanges(() => {})
++  // The downstream recorder supplies observations to the same publication law.
++  // It computes no expected value and preserves every delivered payload.
++  const downstreamSubscription = downstream.subscribeChanges((changes) => {
++    emit(`downstream-change`, {
++      changes,
++      rows: copyRows(downstream.toArray),
++    })
++  })
+   try {
+     await live.preload()
+     await downstream.preload()
+@@ -616,6 +623,15 @@
+       emit(`reload-rejected`, { message: String(error) }),
+     )
+     await hostTurn()
++    // This is a held-provider cut, before this driver releases any replay
++    // answer. A positive pending count is a measured premise, not a delay.
++    const heldProviderAnswers = pending.filter(({ pending: waiting }) => waiting).length
++    emit(heldProviderAnswers > 0 ? `retained-publication` : `provider-hold-unreached`, {
++      reason: `provider-hold-before-release`,
++      rows: readLive(),
++      downstream: copyRows(downstream.toArray),
++      pendingProviderAnswers: heldProviderAnswers,
++    })
+     const strict =
+       history.includes &&
+       history.window &&
+--- a/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
++++ b/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
+@@ -5224,6 +5224,17 @@
+   it.each(reacquisitionHistories)(
+     `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peers $peers, rows $rows)`,
+     async (history) => {
++      // Reach records these existing real-QueryClient cuts per finite history.
++      // The owner/result model and every product comparison stay unchanged.
++      const reach = createOracleReach(`query.reacquisition-neighbor`, [
++        `older-release-held`,
++        `cached-reacquisition-held`,
++        `older-release-published`,
++        `refetch-outcome-settled`,
++        `all-peers-released`,
++        `final-lease-released`,
++      ], { replaying: false })
++      reach.beginHistory()
+       const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
+       const detail = categorySubset(`detail`)
+       const peerSubsets = [
+@@ -5240,7 +5251,7 @@
+       const persistence = createDeferred<void>()
+       const refetch = createDeferred<Array<Item>>()
+       void refetch.promise.catch(() => undefined)
+-      const { collection, queryFn } = createOwnershipFixture({
++      const { collection, queryClient, queryFn } = createOwnershipFixture({
+         id,
+         results: [leaseResult, ...peerSubsets.map(() => [shared])],
+         staleTime: history.staleTime,
+@@ -5265,6 +5276,10 @@
+       })
+ 
+       await collection._sync.loadSubset(detail)
++      const detailQueries = queryClient.getQueryCache().getAll()
++      if (detailQueries.length !== 1)
++        throw new Error(`exact cached detail Query premise not reached`)
++      const cachedDetailQuery = detailQueries[0]!
+       for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
+       mutation.mutate(() => collection.insert(blocker))
+       cleanups.push(async () => {
+@@ -5281,10 +5296,17 @@
+           collection._state.pendingSyncedTransactions.length,
+         ).toBeGreaterThan(pendingBefore),
+       )
++      reach.reach(`older-release-held`)
++      const cachedBefore = queryClient.getQueryCache().getAll().includes(cachedDetailQuery) &&
++        cachedDetailQuery.state.status === `success` &&
++        Array.isArray(cachedDetailQuery.state.data) &&
++        cachedDetailQuery.state.data.some((item: Item) => item.id === shared.id)
++      if (!cachedBefore) throw new Error(`cached reacquisition premise not reached`)
+       const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+       void reacquired.catch(() => undefined)
+       await settleTurn()
+       const held = rows(collection)
++      reach.reach(`cached-reacquisition-held`)
+ 
+       if (history.settles === `while-held`) {
+         settleRefetch()
+@@ -5294,6 +5316,7 @@
+       await mutation.when(`settled`)
+       await settleTurn()
+       const published = rows(collection)
++      reach.reach(`older-release-published`)
+ 
+       if (history.settles === `after-publication`) {
+         settleRefetch()
+@@ -5301,12 +5324,14 @@
+       }
+       await reacquired.catch(() => undefined)
+       const settled = rows(collection)
++      reach.reach(`refetch-outcome-settled`)
+ 
+       for (const peer of peerSubsets) {
+         collection._sync.unloadSubset(peer)
+         await settleTurn()
+       }
+       const peerReleased = rows(collection)
++      reach.reach(`all-peers-released`)
+ 
+       collection._sync.unloadSubset(detail)
+       await settleTurn()
+@@ -5319,6 +5344,12 @@
+         released: rows(collection),
+         queryCalls: queryFn.mock.calls.length,
+       }).toEqual(modelReacquisition(history))
++      reach.reach(`final-lease-released`)
++      reach.assertReached()
++      console.info(`H02 ownership neighbor reach`, {
++        history,
++        counts: Object.fromEntries(reach.counts()),
++      })
+     },
+   )
+ 
+--- a/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
++++ b/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
+@@ -0,0 +1,101 @@
++import { describe, it } from 'vitest'
++import { createOracleReach } from '../../db/tests/oracle-reach.js'
++import { checkReplayPublication } from '../../db/tests/query/load-subset-retained-publication-oracle.js'
++import {
++  checkQueuedAnswerProgress,
++  createProgressReceiptCheck,
++  modelProgressValue,
++  queuedAnswerExample,
++} from './queued-answer-progress-oracle.js'
++import { receiveProgressHistory } from './queued-answer-progress-supervisor.js'
++import type { ProgressHistory } from './queued-answer-progress-oracle.js'
++
++/**
++ * Finite pre-edit receiving controls reuse the existing law, model, driver and
++ * comparison. This ordinary runner defines no new oracle or expected answer.
++ * Declared counts are finite-path reach, not generated coverage or universal
++ * closure. No environment selector disables a reach check.
++ *
++ * A strict nonempty replay can reproduce the known bounded progress RED before
++ * final publication. A separate scope-key control can finish and test retained
++ * and final values without claiming the conflicting subscription-key path did.
++ * Each path needs separate root admission; registration authorizes no runtime.
++ */
++const paths: Array<{
++  name: string
++  history: ProgressHistory
++  states: Array<string>
++}> = [
++  {
++    name: 'nonempty conflicting replay',
++    history: { ...queuedAnswerExample, nonemptyPrior: true },
++    states: [
++      'nonempty-prior', 'held-provider-read', 'conflicting-cache-premise',
++      'completed-enqueue', 'answer-executed', 'final-publication', 'worker-cleaned',
++    ],
++  },
++  {
++    name: 'nonempty scope-key publication',
++    history: { ...queuedAnswerExample, cacheIdentity: 'scope', nonemptyPrior: true },
++    states: [
++      'nonempty-prior', 'held-provider-read', 'completed-enqueue',
++      'answer-executed', 'root-change', 'downstream-change',
++      'final-publication', 'worker-cleaned',
++    ],
++  },
++  {
++    name: 'literal true initial cut',
++    history: { kind: 'sync-initial', keyShift: 0, rankScale: 10 },
++    states: [ 'literal-true-establishing-receipt', 'subscriber-return-before-preload', 'final-publication', 'worker-cleaned' ],
++  },
++  {
++    name: 'ordinary synchronous mutation cut',
++    history: { kind: 'sync-mutation', keyShift: 0, rankScale: 10 },
++    states: [ 'ordinary-mutation-return-before-host-turn', 'final-publication', 'worker-cleaned' ],
++  },
++]
++
++describe('queued-answer receiving neighbors', () => {
++  it.each(paths)('checks receiving neighbor $name', async ({ name, history, states }) => {
++    const reach = createOracleReach('query.queued-answer-neighbor/' + name, states, { replaying: false })
++    reach.beginHistory()
++    const rootCheck = createProgressReceiptCheck(history)
++    const downstreamCheck = createProgressReceiptCheck(history)
++    const mark = (state: string) => { if (states.includes(state)) reach.reach(state) }
++    try {
++      const outcome = await receiveProgressHistory(history, (receipt) => {
++        rootCheck(receipt)
++        if (history.kind === 'query') {
++          if (receipt.phase === 'downstream-change') {
++            downstreamCheck({ ...receipt, phase: 'public-change' })
++            mark('downstream-change')
++          } else if (['reload-start', 'cleanup-start'].includes(receipt.phase)) {
++            downstreamCheck(receipt)
++          } else if (receipt.phase === 'final-publication') {
++            downstreamCheck({ ...receipt, rows: receipt.downstream as typeof receipt.rows })
++          }
++          if (receipt.phase === 'initial-publication' && receipt.rows && receipt.rows.length > 0) mark('nonempty-prior')
++          if (receipt.phase === 'retained-publication' && receipt.reason === 'provider-hold-before-release' && typeof receipt.pendingProviderAnswers === 'number' && receipt.pendingProviderAnswers > 0) {
++            checkReplayPublication(receipt.downstream, modelProgressValue(history, false), 'held downstream retains the same complete prior snapshot')
++            mark('held-provider-read')
++          }
++          if (receipt.phase === 'public-change') mark('root-change')
++          if (receipt.phase === 'conflicting-cache-premise') mark('conflicting-cache-premise')
++          if (receipt.phase === 'answer-queued' && receipt.enqueueReturned === true) mark('completed-enqueue')
++          if (receipt.phase === 'answer-executed') mark('answer-executed')
++        } else {
++          if (receipt.phase === 'source-establishing-receipt' && receipt.literalTrue === true) mark('literal-true-establishing-receipt')
++          if (receipt.phase === 'immediate-publication' && history.kind === 'sync-initial' && receipt.cut === 'subscriber-return-before-preload') mark('subscriber-return-before-preload')
++          if (receipt.phase === 'immediate-publication' && history.kind === 'sync-mutation') mark('ordinary-mutation-return-before-host-turn')
++        }
++        if (receipt.phase === 'final-publication') mark('final-publication')
++        if (receipt.phase === 'worker-cleaned') mark('worker-cleaned')
++      })
++      checkQueuedAnswerProgress(history, outcome)
++      reach.assertReached()
++    } finally {
++      // Preserve partial reach when a known progress RED precedes later cuts.
++      console.info('H02 finite neighbor reach', { name, counts: Object.fromEntries(reach.counts()) })
++    }
++  }, 60_000)
++})
+--- a/scripts/h02-progress/ownership-neighbor.config.ts
++++ b/scripts/h02-progress/ownership-neighbor.config.ts
+@@ -0,0 +1,20 @@
++import { resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { defineConfig } from 'vitest/config'
++
++// A finite existing real-QueryClient owner, selected by its exact test name.
++// This path does not claim the H02 progress driver's V8/receipt binding.
++const root = fileURLToPath(new URL('../../', import.meta.url))
++export default defineConfig({
++  root,
++  resolve: { alias: [
++    { find: /^@tanstack\/db$/, replacement: resolve(root, 'packages/db/src/index.ts') },
++    { find: /^@tanstack\/db-ivm$/, replacement: resolve(root, 'packages/db-ivm/src/index.ts') },
++  ] },
++  test: {
++    include: ['packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts'],
++    environment: 'jsdom', pool: 'forks', maxWorkers: 1, fileParallelism: false,
++    execArgv: ['--max-old-space-size=384'],
++    typecheck: { enabled: false }, coverage: { enabled: false }, testTimeout: 20_000,
++  },
++})

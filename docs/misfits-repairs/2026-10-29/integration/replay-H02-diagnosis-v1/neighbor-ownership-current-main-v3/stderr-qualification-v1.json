@@ -1,0 +1,94 @@
+{
+  "status": "full stderr classified; no extra bytes or blocks",
+  "bytes": 13504,
+  "sha256": "361183448cce15213ac5fa470158ff71b73cc53f50b7b30866dbc5d1fb0f2f68",
+  "blocks": 12,
+  "classification": "Expected intentionally rejected stale refetch diagnostics; all12 exact task names/history IDs and three stack lines match the unchanged rejection driver. No other stderr.",
+  "histories": [
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 0,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 0,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 0,
+      "rows": 2
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 0,
+      "rows": 2
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 1,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 1,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 1,
+      "rows": 2
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 1,
+      "rows": 2
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 2,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 2,
+      "rows": 1
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "while-held",
+      "peers": 2,
+      "rows": 2
+    },
+    {
+      "staleTime": 0,
+      "refetch": "rejects",
+      "settles": "after-publication",
+      "peers": 2,
+      "rows": 2
+    }
+  ],
+  "limits": "Diagnostic path/stack evidence, not V8 byte binding."
+}

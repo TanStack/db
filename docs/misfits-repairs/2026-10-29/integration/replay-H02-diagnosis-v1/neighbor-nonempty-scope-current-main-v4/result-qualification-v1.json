@@ -1,0 +1,68 @@
+{
+  "status": "Finite nonempty scope-key payload publication control passed with all eight measured reaches; independent root result acceptance pending",
+  "finiteHistories": 1,
+  "nativePassed": 1,
+  "nativeSkipped": 4,
+  "actualHistory": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "scope",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "nativeNameCapture": "Successful verbose name/finally console suppressed by unchanged default reporter. Frozen calibrated exact selector plus one-pass/four-skip native summary and actual raw worker history identify this singleton; no captured verbose task-name claim.",
+  "rawReceipts": 176,
+  "allEightReachCounts": {
+    "nonempty-prior": 1,
+    "held-provider-read": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 1,
+    "downstream-change": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "rawMetadataPreserved": true,
+  "liveSharedPayloadAndEventComparisonsPassed": true,
+  "binding": {
+    "status": "bound",
+    "bindings": 648,
+    "failures": [],
+    "startupSealed": true,
+    "inspectorDisconnectedBeforeHistory": true,
+    "inventories": [
+      "evaluated-pre-history.json",
+      "evaluated-driver-start.json",
+      "evaluated-final-publication.json",
+      "evaluated-after-all.json"
+    ],
+    "limits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+  },
+  "operational": {
+    "outerExitCode": 0,
+    "childExitCode": 0,
+    "signal": null,
+    "reason": "exited",
+    "killAttempted": false,
+    "heap": false,
+    "observationError": null,
+    "cleanupErrors": [],
+    "remainingGroupRows": [],
+    "elapsedMs": 2319,
+    "maxSampledGroupRssBytes": 443777024,
+    "outerPid": 88862,
+    "outerPgid": 88862,
+    "childPid": 88884,
+    "childOriginalPgid": 88884,
+    "rootAbsenceReceiptSha256": "7e3c91b1c4aa47f6a7ca7afd1e89c614573cedae0d28d17eab7113a41f610f09"
+  },
+  "sourceIdentityAfter": {
+    "sourceMapEntries": 563,
+    "namedPackagePayloadFiles": 2544,
+    "nodeLocksAndReuseLinksMatched": true
+  },
+  "limits": "One finite scope-key nonempty path; no conflicting-subscription cache progress result, generated closure, exact compiler key law, temporal virtual-metadata coherence or candidate reach. Prior V3failure remains immutable; no next invocation/retry/production edit admitted."
+}

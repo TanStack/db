@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-30T13:07:14.171717+00:00",
+  "finding": "H02-COMPILER-STOP-SIGNAL-REENTRANCY",
+  "fullReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-source-independent-review-v1.md",
+    "sha256": "5bd1c92895b308d912b7560954dc8dd2d7d1f782595863cae38b41808b92a47f"
+  },
+  "reviewFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-source-review-freeze-v1.json",
+    "sha256": "f129c97f4234d18207d4616c528e7037b51f6d4ea5a7f5cc3e419de33b83b608"
+  },
+  "originalPacket": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v1/packet-manifest-v1.json",
+    "sha256": "77ecb1a906d4712663622962fcf3db3dee522484118c536a308ec6f046ff4ba0"
+  },
+  "originalWrapper": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v1/contain-compiler-v1.py.txt",
+    "sha256": "424612a8f21c68feebe4920cd859da5800c818eede4ca6b3fd2e9c0ac9fa08e9"
+  },
+  "correctedWrapper": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v2/contain-compiler-v1.py.txt",
+    "sha256": "b6eb889598747265dd83b023d1e07f63beba4da3002df56947becca9bee772e4"
+  },
+  "onlyExecutableTextDelta": {
+    "line": 108,
+    "before": "stop_lock = threading.Lock()",
+    "after": "stop_lock = threading.RLock()",
+    "reversingThisLineRestoresOriginalBytes": true
+  },
+  "reason": "A main-thread signal handler reenters stop() synchronously. RLock permits the same owner to reacquire it, so that handler can reach the unchanged killpg and release rather than waiting for its own outer stop critical section. Different threads remain serialized. This removes the single reported internal deadlock path without a new signal framework.",
+  "missingPriorCheck": "The v1 lightweight audit checked spawn/stop/signal presence but did not compose handler re-entry with the stop critical section. Focused source review now checks the lock primitive and unchanged synchronous handler together.",
+  "contractDeltaOnly": [
+    "wrapper.path",
+    "wrapper.sha256"
+  ],
+  "toolProposalDeltaOnly": [
+    "contract.path",
+    "contract.sha256",
+    "argv[4] wrapper pathname",
+    "argv[5] contract pathname",
+    "argv[6] contract SHA",
+    "arguments.cmd exact shell command"
+  ],
+  "allOtherContractAndToolFieldsIdentical": true,
+  "VCompilerArgvConfigAndLimitsIdentical": true,
+  "originalSixManifestMembersRehashedUnchanged": true,
+  "smallBoundRefsAndOriginalCopyStreamsMatched": true,
+  "outputRootAbsent": true,
+  "fullCorpusOrToolPayloadCensus": false,
+  "execution": 0,
+  "importsOfWrapperOrTargetOrConfig": 0,
+  "syntaxCompilation": 0,
+  "compilerInvocations": 0,
+  "processProbes": 0,
+  "materialization": 0,
+  "limits": "Focused source correction only. No signal timing, process containment, compiler outcome, hard real-time, escaped-group, sink-fidelity or product proof. Independent actual-copy acceptance and separate ROOT exact compiler admission remain required.",
+  "laterArtifactLint": "PENDING ROOT"
+}

@@ -1,0 +1,2998 @@
+{
+  "label": "accepted-replay",
+  "composition": {
+    "label": "accepted-replay",
+    "root": "/private/tmp/h02-accepted-replay-bg5dj7ue",
+    "base": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+    "patchSha256": "d2da68a7310a91445497792eee3df29737bea7ff6b3c8a3d9261ab01ecb07760",
+    "patchApplyCheck": 0,
+    "patchPreimages": {
+      "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "packages/db/src/query/live/collection-config-builder.ts": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+      "packages/db/src/query/live/collection-subscriber.ts": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+      "packages/db/src/types.ts": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "packages/db/tests/oracle-config.ts": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908",
+      "packages/db/tests/oracle-replay-manifest.ts": "d59149f7dbf7d5ca11271c49ce24746389d3581d9d807dd0f241b86fae654483",
+      "packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts": "27f76be612a3058235953e5b984b77ba9274f1aab073035543161b71d4d14e48",
+      "packages/db/tests/query/load-subset-retained-publication-oracle.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-failed-sibling-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-pending-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-query-support.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-refinement-query.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-window-failure-query-oracle.test.ts": null
+    },
+    "productionIdentity": "d7fa2b44615b883fcc3da8971c45da8848e1a6921e4ff2e7f2c2983eec6f3ae0",
+    "matchesAccepted511FileProductionEnvelope": true,
+    "driverSha256": "18deeffebe73ebe94f94d5fdcfd8f2c8fc700d97286e990e14075326b7c6d066",
+    "aliasConfigSha256": "00751e94a37aeeec96bdad7fd300a3a092a1fc0efc45f9e2e4a2ddaf16542cb6",
+    "runtime": {
+      "vitest": {
+        "version": "4.1.12",
+        "sha256": "e5a6d55e103f04929442595df0f641f128b02fd706ff01474c094863b44511d0",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json"
+      },
+      "vite": {
+        "version": "7.3.7",
+        "sha256": "aae1f593c0e6f320989b60af6e90f8ed4ea5137e5a0b9db663f9b0088333eb3c",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json"
+      },
+      "query-core": {
+        "version": "5.90.20",
+        "sha256": "b1873c254b19d21a717c047a580c483e053b3233a123ca04a03eacf1b5b58beb",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json"
+      },
+      "jsdom": {
+        "version": "27.4.0",
+        "sha256": "e8f4906ea5beba475daa5736d0158f1770092c46718dd04aa2bfe2190808bb7e",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json"
+      },
+      "tanstack-vite-config": {
+        "version": "0.4.3",
+        "sha256": "e4fb7de5d887b9f89735b3f54197ab773ab4cec5815c51e4bb613a789a9c12b7",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json"
+      }
+    },
+    "receivingPath": "exact archived source composition with explicit DB/db-ivm source aliases; no builds; dependency clone fixed to historical diagnostic clone",
+    "node": "v24.19.0",
+    "originalViteConfigSha256": "e6d6e5657d63d276caf31f3208aa8cfe42411b3db7cced8f8dd9b544b6790f17",
+    "materialTestInputHashes": {
+      "packages/db/tests/reference-expression-oracle.ts": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "packages/db/tests/utils.ts": "d08f778d9f40f813ef57e6479fa6219fecee71ec7981e2cae90a3ea4938e96c3",
+      "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "packages/query-db-collection/package.json": "831b2604979ace0fc524a2860a83ddfb4626eb4283ac38947bfc1edb8701a7a5",
+      "packages/db/package.json": "f70a15504d3bb6ea6dac3658838c774e896f94e65468e248eb387b3e713684bf",
+      "packages/db-ivm/package.json": "0c13f25c570090f92158a931f4fb20b0626d2e9b1235ca5ec6fcc4a1a50aad1a"
+    },
+    "runtimeManifestHashesMatchHistoricalDependencyClone": {
+      "vitest": true,
+      "vite": true,
+      "query-core": true,
+      "jsdom": true,
+      "tanstack-vite-config": true
+    },
+    "architectureSameAsFullyReadHistoricalVersion": true
+  },
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-current-impact-v1.test.ts"
+  ],
+  "cwd": "/private/tmp/h02-accepted-replay-bg5dj7ue/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "at": "2026-10-29T22:51:03.934940+00:00",
+  "status": "finished",
+  "caps": {
+    "heapMiBPerNode": 384,
+    "groupRssBytes": 1073741824,
+    "wallSeconds": 20,
+    "primitiveEvents": 128
+  },
+  "maximumGroupRssBytes": 595476480,
+  "samples": 16,
+  "termination": "event-cap",
+  "killAttempts": [
+    {
+      "reason": "event-cap",
+      "group": 68531,
+      "outcome": "sent"
+    }
+  ],
+  "monitorErrors": [],
+  "elapsedSeconds": 2.229,
+  "pid": 68531,
+  "pgid": 68531,
+  "lastGroupRows": [
+    {
+      "pid": 68531,
+      "pgid": 68531,
+      "rss": 387137536,
+      "stat": "Ss"
+    },
+    {
+      "pid": 68535,
+      "pgid": 68531,
+      "rss": 28786688,
+      "stat": "S"
+    },
+    {
+      "pid": 68541,
+      "pgid": 68531,
+      "rss": 179552256,
+      "stat": "S"
+    }
+  ],
+  "exitCode": -9,
+  "remainingGroupRows": [],
+  "primitiveEventCount": 128,
+  "events": [
+    {
+      "event": 1,
+      "phase": "test-start",
+      "elapsedMs": 0.013874999999984539,
+      "heapUsed": 64681712
+    },
+    {
+      "event": 2,
+      "phase": "key-prefix",
+      "elapsedMs": 0.8886660000000575,
+      "subscriptionPresent": false,
+      "signalPresent": false,
+      "wherePresent": false,
+      "orderPresent": false,
+      "heapUsed": 64723808
+    },
+    {
+      "event": 3,
+      "phase": "markers-created",
+      "elapsedMs": 1.3872499999999945,
+      "heapUsed": 64819480
+    },
+    {
+      "event": 4,
+      "phase": "source-created",
+      "elapsedMs": 1.5623750000000882,
+      "heapUsed": 64846776
+    },
+    {
+      "event": 5,
+      "phase": "live-created",
+      "elapsedMs": 6.410291000000029,
+      "heapUsed": 65533976
+    },
+    {
+      "event": 6,
+      "phase": "key-prefix",
+      "elapsedMs": 9.460290999999984,
+      "subscriptionPresent": false,
+      "signalPresent": false,
+      "wherePresent": false,
+      "orderPresent": false,
+      "heapUsed": 65920104
+    },
+    {
+      "event": 7,
+      "phase": "acquisition",
+      "elapsedMs": 10.700458000000026,
+      "acquisitionCount": 1,
+      "keys": [
+        1,
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 66039560
+    },
+    {
+      "event": 8,
+      "phase": "acquisition-state",
+      "elapsedMs": 10.727375000000052,
+      "acquisitionCount": 1,
+      "marker3Present": false,
+      "queryStates": [],
+      "heapUsed": 66042600
+    },
+    {
+      "event": 9,
+      "phase": "key",
+      "elapsedMs": 10.901124999999979,
+      "owner": 0,
+      "ownerCount": 1,
+      "keys": [
+        1,
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 0,
+      "heapUsed": 66421376
+    },
+    {
+      "event": 10,
+      "phase": "fetch",
+      "elapsedMs": 11.950375000000008,
+      "keys": [
+        1,
+        2
+      ],
+      "requestCount": 1,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 1,
+      "heapUsed": 66226088
+    },
+    {
+      "event": 11,
+      "phase": "acquisition",
+      "elapsedMs": 13.098833000000013,
+      "acquisitionCount": 2,
+      "keys": [
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 66514640
+    },
+    {
+      "event": 12,
+      "phase": "acquisition-state",
+      "elapsedMs": 13.129791000000068,
+      "acquisitionCount": 2,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 66399520
+    },
+    {
+      "event": 13,
+      "phase": "key",
+      "elapsedMs": 13.142958000000021,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 1,
+      "heapUsed": 66403904
+    },
+    {
+      "event": 14,
+      "phase": "fetch",
+      "elapsedMs": 13.251791000000026,
+      "keys": [
+        2
+      ],
+      "requestCount": 2,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 2,
+      "heapUsed": 66725768
+    },
+    {
+      "event": 15,
+      "phase": "subscribed",
+      "elapsedMs": 13.821875000000091,
+      "heapUsed": 66602944
+    },
+    {
+      "event": 16,
+      "phase": "preload-start",
+      "elapsedMs": 13.82891600000005,
+      "heapUsed": 66603896
+    },
+    {
+      "event": 17,
+      "phase": "unload",
+      "elapsedMs": 14.975708000000054,
+      "owner": 1,
+      "keys": [
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 66781320
+    },
+    {
+      "event": 18,
+      "phase": "unload-state",
+      "elapsedMs": 14.989125000000058,
+      "marker3Present": false,
+      "heapUsed": 66783368
+    },
+    {
+      "event": 19,
+      "phase": "key",
+      "elapsedMs": 15.025040999999987,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 2,
+      "heapUsed": 66789104
+    },
+    {
+      "event": 20,
+      "phase": "acquisition",
+      "elapsedMs": 16.64133300000003,
+      "acquisitionCount": 3,
+      "owner": 0,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 67167104
+    },
+    {
+      "event": 21,
+      "phase": "acquisition-state",
+      "elapsedMs": 16.672041000000036,
+      "acquisitionCount": 3,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 67169968
+    },
+    {
+      "event": 22,
+      "phase": "key",
+      "elapsedMs": 16.68450000000007,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 2,
+      "heapUsed": 67174648
+    },
+    {
+      "event": 23,
+      "phase": "fetch",
+      "elapsedMs": 16.813000000000102,
+      "keys": [
+        3
+      ],
+      "requestCount": 3,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 3,
+      "heapUsed": 67483920
+    },
+    {
+      "event": 24,
+      "phase": "acquisition",
+      "elapsedMs": 16.97029100000009,
+      "acquisitionCount": 4,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 67286776
+    },
+    {
+      "event": 25,
+      "phase": "acquisition-state",
+      "elapsedMs": 16.982291000000032,
+      "acquisitionCount": 4,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 67289680
+    },
+    {
+      "event": 26,
+      "phase": "key",
+      "elapsedMs": 16.99112500000001,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 3,
+      "heapUsed": 67294408
+    },
+    {
+      "event": 27,
+      "phase": "fetch",
+      "elapsedMs": 17.08708300000012,
+      "keys": [
+        3
+      ],
+      "requestCount": 4,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 4,
+      "heapUsed": 67577328
+    },
+    {
+      "event": 28,
+      "phase": "unload",
+      "elapsedMs": 17.526957999999922,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 67904584
+    },
+    {
+      "event": 29,
+      "phase": "unload-state",
+      "elapsedMs": 17.53645800000004,
+      "marker3Present": true,
+      "heapUsed": 67905768
+    },
+    {
+      "event": 30,
+      "phase": "key",
+      "elapsedMs": 17.544083,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 4,
+      "heapUsed": 67909904
+    },
+    {
+      "event": 31,
+      "phase": "acquisition",
+      "elapsedMs": 18.25395800000001,
+      "acquisitionCount": 5,
+      "owner": 0,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 67855464
+    },
+    {
+      "event": 32,
+      "phase": "acquisition-state",
+      "elapsedMs": 18.27741600000013,
+      "acquisitionCount": 5,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        }
+      ],
+      "heapUsed": 67859704
+    },
+    {
+      "event": 33,
+      "phase": "key",
+      "elapsedMs": 18.287541000000147,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 4,
+      "heapUsed": 68002336
+    },
+    {
+      "event": 34,
+      "phase": "fetch",
+      "elapsedMs": 18.379415999999992,
+      "keys": [
+        4
+      ],
+      "requestCount": 5,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 5,
+      "heapUsed": 68037776
+    },
+    {
+      "event": 35,
+      "phase": "acquisition",
+      "elapsedMs": 18.503124999999955,
+      "acquisitionCount": 6,
+      "owner": 1,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 68090392
+    },
+    {
+      "event": 36,
+      "phase": "acquisition-state",
+      "elapsedMs": 18.514249999999947,
+      "acquisitionCount": 6,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 68094816
+    },
+    {
+      "event": 37,
+      "phase": "key",
+      "elapsedMs": 18.524041000000125,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 5,
+      "heapUsed": 67998272
+    },
+    {
+      "event": 38,
+      "phase": "fetch",
+      "elapsedMs": 18.59666600000014,
+      "keys": [
+        4
+      ],
+      "requestCount": 6,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 6,
+      "heapUsed": 68031936
+    },
+    {
+      "event": 39,
+      "phase": "unload",
+      "elapsedMs": 18.88954100000001,
+      "owner": 1,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 68285328
+    },
+    {
+      "event": 40,
+      "phase": "unload-state",
+      "elapsedMs": 18.897541000000047,
+      "marker3Present": true,
+      "heapUsed": 68286800
+    },
+    {
+      "event": 41,
+      "phase": "key",
+      "elapsedMs": 18.909000000000106,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 6,
+      "heapUsed": 68291176
+    },
+    {
+      "event": 42,
+      "phase": "acquisition",
+      "elapsedMs": 19.37112500000012,
+      "acquisitionCount": 7,
+      "owner": 0,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 68780888
+    },
+    {
+      "event": 43,
+      "phase": "acquisition-state",
+      "elapsedMs": 19.385833000000048,
+      "acquisitionCount": 7,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        }
+      ],
+      "heapUsed": 68786392
+    },
+    {
+      "event": 44,
+      "phase": "key",
+      "elapsedMs": 19.39541600000007,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 6,
+      "heapUsed": 68791800
+    },
+    {
+      "event": 45,
+      "phase": "fetch",
+      "elapsedMs": 19.464750000000095,
+      "keys": [
+        5
+      ],
+      "requestCount": 7,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 7,
+      "heapUsed": 68631648
+    },
+    {
+      "event": 46,
+      "phase": "acquisition",
+      "elapsedMs": 19.5707910000001,
+      "acquisitionCount": 8,
+      "owner": 1,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 68697352
+    },
+    {
+      "event": 47,
+      "phase": "acquisition-state",
+      "elapsedMs": 19.57987500000013,
+      "acquisitionCount": 8,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 68880336
+    },
+    {
+      "event": 48,
+      "phase": "key",
+      "elapsedMs": 19.592374999999947,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 7,
+      "heapUsed": 68892040
+    },
+    {
+      "event": 49,
+      "phase": "fetch",
+      "elapsedMs": 19.651833000000124,
+      "keys": [
+        5
+      ],
+      "requestCount": 8,
+      "holding": false,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 68748280
+    },
+    {
+      "event": 50,
+      "phase": "unload",
+      "elapsedMs": 19.922207999999955,
+      "owner": 1,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 69076352
+    },
+    {
+      "event": 51,
+      "phase": "unload-state",
+      "elapsedMs": 19.929665999999997,
+      "marker3Present": true,
+      "heapUsed": 69077536
+    },
+    {
+      "event": 52,
+      "phase": "key",
+      "elapsedMs": 19.936165999999957,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 69081736
+    },
+    {
+      "event": 53,
+      "phase": "preload-settled",
+      "elapsedMs": 20.767499999999927,
+      "acquisitionCount": 8,
+      "requestCount": 8,
+      "owners": 2,
+      "cacheCount": 8,
+      "heapUsed": 69306944
+    },
+    {
+      "event": 54,
+      "phase": "reload-start",
+      "elapsedMs": 20.776875000000018,
+      "heapUsed": 69308328
+    },
+    {
+      "event": 55,
+      "phase": "key-prefix",
+      "elapsedMs": 21.318250000000035,
+      "subscriptionPresent": false,
+      "signalPresent": false,
+      "wherePresent": false,
+      "orderPresent": false,
+      "heapUsed": 69401128
+    },
+    {
+      "event": 56,
+      "phase": "reload-called",
+      "elapsedMs": 21.3715830000001,
+      "heapUsed": 69415832
+    },
+    {
+      "event": 57,
+      "phase": "acquisition",
+      "elapsedMs": 21.47554100000002,
+      "acquisitionCount": 9,
+      "owner": 0,
+      "keys": [
+        1,
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 69718168
+    },
+    {
+      "event": 58,
+      "phase": "acquisition-state",
+      "elapsedMs": 21.484541000000036,
+      "acquisitionCount": 9,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        }
+      ],
+      "heapUsed": 69722016
+    },
+    {
+      "event": 59,
+      "phase": "key",
+      "elapsedMs": 21.493416000000025,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        1,
+        2
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 4,
+      "heapUsed": 69727216
+    },
+    {
+      "event": 60,
+      "phase": "fetch",
+      "elapsedMs": 21.567833000000064,
+      "keys": [
+        1,
+        2
+      ],
+      "requestCount": 9,
+      "holding": true,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 5,
+      "heapUsed": 69763584
+    },
+    {
+      "event": 61,
+      "phase": "acquisition",
+      "elapsedMs": 21.64866600000005,
+      "acquisitionCount": 10,
+      "owner": 0,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 69785656
+    },
+    {
+      "event": 62,
+      "phase": "acquisition-state",
+      "elapsedMs": 21.658249999999953,
+      "acquisitionCount": 10,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 69790016
+    },
+    {
+      "event": 63,
+      "phase": "key",
+      "elapsedMs": 21.665915999999925,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 5,
+      "heapUsed": 69795096
+    },
+    {
+      "event": 64,
+      "phase": "fetch",
+      "elapsedMs": 21.744750000000067,
+      "keys": [
+        3
+      ],
+      "requestCount": 10,
+      "holding": true,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 6,
+      "heapUsed": 69829048
+    },
+    {
+      "event": 65,
+      "phase": "acquisition",
+      "elapsedMs": 21.77125000000001,
+      "acquisitionCount": 11,
+      "owner": 0,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 69840608
+    },
+    {
+      "event": 66,
+      "phase": "acquisition-state",
+      "elapsedMs": 21.782458000000133,
+      "acquisitionCount": 11,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 69845336
+    },
+    {
+      "event": 67,
+      "phase": "key",
+      "elapsedMs": 21.790333000000146,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        4
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 6,
+      "heapUsed": 69850584
+    },
+    {
+      "event": 68,
+      "phase": "fetch",
+      "elapsedMs": 21.84508299999993,
+      "keys": [
+        4
+      ],
+      "requestCount": 11,
+      "holding": true,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 7,
+      "heapUsed": 69673640
+    },
+    {
+      "event": 69,
+      "phase": "acquisition",
+      "elapsedMs": 21.867541000000074,
+      "acquisitionCount": 12,
+      "owner": 0,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 69684552
+    },
+    {
+      "event": 70,
+      "phase": "acquisition-state",
+      "elapsedMs": 21.87570800000003,
+      "acquisitionCount": 12,
+      "marker3Present": true,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 69689568
+    },
+    {
+      "event": 71,
+      "phase": "key",
+      "elapsedMs": 21.885874999999942,
+      "owner": 0,
+      "ownerCount": 2,
+      "keys": [
+        5
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 7,
+      "heapUsed": 69694984
+    },
+    {
+      "event": 72,
+      "phase": "fetch",
+      "elapsedMs": 21.941166000000067,
+      "keys": [
+        5
+      ],
+      "requestCount": 12,
+      "holding": true,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 69732008
+    },
+    {
+      "event": 73,
+      "phase": "reload-initial-flush-settled",
+      "elapsedMs": 22.023374999999987,
+      "heapUsed": 69745920
+    },
+    {
+      "event": 74,
+      "phase": "release-turn",
+      "elapsedMs": 22.031750000000102,
+      "turn": 0,
+      "heapUsed": 69747360
+    },
+    {
+      "event": 75,
+      "phase": "release-answer",
+      "elapsedMs": 22.041458000000148,
+      "keys": [
+        1,
+        2
+      ],
+      "heapUsed": 69749000
+    },
+    {
+      "event": 76,
+      "phase": "release-flush-settled",
+      "elapsedMs": 23.474541000000045,
+      "turn": 0,
+      "heapUsed": 69833272
+    },
+    {
+      "event": 77,
+      "phase": "release-turn",
+      "elapsedMs": 23.481666000000132,
+      "turn": 1,
+      "heapUsed": 69834240
+    },
+    {
+      "event": 78,
+      "phase": "release-answer",
+      "elapsedMs": 23.485875000000078,
+      "keys": [
+        3
+      ],
+      "heapUsed": 69835240
+    },
+    {
+      "event": 79,
+      "phase": "acquisition",
+      "elapsedMs": 23.847332999999935,
+      "acquisitionCount": 13,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 70396384
+    },
+    {
+      "event": 80,
+      "phase": "acquisition-state",
+      "elapsedMs": 23.859290999999985,
+      "acquisitionCount": 13,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 69963992
+    },
+    {
+      "event": 81,
+      "phase": "key",
+      "elapsedMs": 23.867040999999972,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 69969560
+    },
+    {
+      "event": 82,
+      "phase": "fetch",
+      "elapsedMs": 24.008749999999964,
+      "keys": [
+        3
+      ],
+      "requestCount": 13,
+      "holding": true,
+      "subscriptionPresent": false,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 70017032
+    },
+    {
+      "event": 83,
+      "phase": "microtask-completion-armed",
+      "elapsedMs": 24.01587500000005,
+      "heapUsed": 70018568
+    },
+    {
+      "event": 84,
+      "phase": "unload",
+      "elapsedMs": 24.35095799999999,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 70280800
+    },
+    {
+      "event": 85,
+      "phase": "unload-state",
+      "elapsedMs": 24.358124999999973,
+      "marker3Present": true,
+      "heapUsed": 70281984
+    },
+    {
+      "event": 86,
+      "phase": "key",
+      "elapsedMs": 24.363665999999967,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 70286184
+    },
+    {
+      "event": 87,
+      "phase": "acquisition",
+      "elapsedMs": 24.712208000000146,
+      "acquisitionCount": 14,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 70555984
+    },
+    {
+      "event": 88,
+      "phase": "acquisition-state",
+      "elapsedMs": 24.726666000000023,
+      "acquisitionCount": 14,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 70561688
+    },
+    {
+      "event": 89,
+      "phase": "key",
+      "elapsedMs": 24.73416599999996,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 70567272
+    },
+    {
+      "event": 90,
+      "phase": "unload",
+      "elapsedMs": 25.016208000000006,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 70768976
+    },
+    {
+      "event": 91,
+      "phase": "unload-state",
+      "elapsedMs": 25.023957999999993,
+      "marker3Present": true,
+      "heapUsed": 71078928
+    },
+    {
+      "event": 92,
+      "phase": "key",
+      "elapsedMs": 25.03016600000001,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71083128
+    },
+    {
+      "event": 93,
+      "phase": "acquisition",
+      "elapsedMs": 25.300333000000137,
+      "acquisitionCount": 15,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 71018224
+    },
+    {
+      "event": 94,
+      "phase": "acquisition-state",
+      "elapsedMs": 25.312374999999975,
+      "acquisitionCount": 15,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 71023928
+    },
+    {
+      "event": 95,
+      "phase": "key",
+      "elapsedMs": 25.319791000000123,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71029512
+    },
+    {
+      "event": 96,
+      "phase": "unload",
+      "elapsedMs": 25.624874999999975,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 71291080
+    },
+    {
+      "event": 97,
+      "phase": "unload-state",
+      "elapsedMs": 25.633583000000044,
+      "marker3Present": true,
+      "heapUsed": 71292264
+    },
+    {
+      "event": 98,
+      "phase": "key",
+      "elapsedMs": 25.63975000000005,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71296464
+    },
+    {
+      "event": 99,
+      "phase": "acquisition",
+      "elapsedMs": 25.88220799999999,
+      "acquisitionCount": 16,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 71517320
+    },
+    {
+      "event": 100,
+      "phase": "acquisition-state",
+      "elapsedMs": 25.893790999999965,
+      "acquisitionCount": 16,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 71523024
+    },
+    {
+      "event": 101,
+      "phase": "key",
+      "elapsedMs": 25.900833000000148,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71528608
+    },
+    {
+      "event": 102,
+      "phase": "unload",
+      "elapsedMs": 26.151833000000124,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 71746336
+    },
+    {
+      "event": 103,
+      "phase": "unload-state",
+      "elapsedMs": 26.160583000000088,
+      "marker3Present": true,
+      "heapUsed": 71747520
+    },
+    {
+      "event": 104,
+      "phase": "key",
+      "elapsedMs": 26.167875000000095,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71751752
+    },
+    {
+      "event": 105,
+      "phase": "acquisition",
+      "elapsedMs": 26.39416600000004,
+      "acquisitionCount": 17,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 71973448
+    },
+    {
+      "event": 106,
+      "phase": "acquisition-state",
+      "elapsedMs": 26.404749999999922,
+      "acquisitionCount": 17,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 71979152
+    },
+    {
+      "event": 107,
+      "phase": "key",
+      "elapsedMs": 26.41216600000007,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 71984736
+    },
+    {
+      "event": 108,
+      "phase": "unload",
+      "elapsedMs": 26.645582999999988,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 72188192
+    },
+    {
+      "event": 109,
+      "phase": "unload-state",
+      "elapsedMs": 26.65274999999997,
+      "marker3Present": true,
+      "heapUsed": 72189376
+    },
+    {
+      "event": 110,
+      "phase": "key",
+      "elapsedMs": 26.658249999999953,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 72193576
+    },
+    {
+      "event": 111,
+      "phase": "acquisition",
+      "elapsedMs": 27.04558300000008,
+      "acquisitionCount": 18,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 72459632
+    },
+    {
+      "event": 112,
+      "phase": "acquisition-state",
+      "elapsedMs": 27.06549999999993,
+      "acquisitionCount": 18,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 72465336
+    },
+    {
+      "event": 113,
+      "phase": "key",
+      "elapsedMs": 27.07883300000003,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 72470920
+    },
+    {
+      "event": 114,
+      "phase": "unload",
+      "elapsedMs": 27.410708000000113,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 72851968
+    },
+    {
+      "event": 115,
+      "phase": "unload-state",
+      "elapsedMs": 27.422958000000108,
+      "marker3Present": true,
+      "heapUsed": 72853184
+    },
+    {
+      "event": 116,
+      "phase": "key",
+      "elapsedMs": 27.43170800000007,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 72857416
+    },
+    {
+      "event": 117,
+      "phase": "acquisition",
+      "elapsedMs": 27.673999999999978,
+      "acquisitionCount": 19,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 72908928
+    },
+    {
+      "event": 118,
+      "phase": "acquisition-state",
+      "elapsedMs": 27.686500000000024,
+      "acquisitionCount": 19,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 72914640
+    },
+    {
+      "event": 119,
+      "phase": "key",
+      "elapsedMs": 27.69487500000014,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 72920224
+    },
+    {
+      "event": 120,
+      "phase": "unload",
+      "elapsedMs": 27.92425000000003,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 73119608
+    },
+    {
+      "event": 121,
+      "phase": "unload-state",
+      "elapsedMs": 27.932625000000144,
+      "marker3Present": true,
+      "heapUsed": 73120888
+    },
+    {
+      "event": 122,
+      "phase": "key",
+      "elapsedMs": 27.94408300000009,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 73125088
+    },
+    {
+      "event": 123,
+      "phase": "acquisition",
+      "elapsedMs": 28.176375000000007,
+      "acquisitionCount": 20,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 73364296
+    },
+    {
+      "event": 124,
+      "phase": "acquisition-state",
+      "elapsedMs": 28.186541000000034,
+      "acquisitionCount": 20,
+      "marker3Present": false,
+      "queryStates": [
+        {
+          "owner": 1,
+          "keys": [
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 1,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "fetching",
+          "rowIds": [
+            3
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            4
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            4
+          ]
+        },
+        {
+          "owner": 1,
+          "keys": [
+            5
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            5
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            1,
+            2
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": [
+            1
+          ]
+        },
+        {
+          "owner": 0,
+          "keys": [
+            3
+          ],
+          "status": "success",
+          "fetchStatus": "idle",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            4
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        },
+        {
+          "owner": 0,
+          "keys": [
+            5
+          ],
+          "status": "pending",
+          "fetchStatus": "fetching",
+          "rowIds": []
+        }
+      ],
+      "heapUsed": 73370008
+    },
+    {
+      "event": 125,
+      "phase": "key",
+      "elapsedMs": 28.19358299999999,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": false,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 73375592
+    },
+    {
+      "event": 126,
+      "phase": "unload",
+      "elapsedMs": 28.399625000000015,
+      "owner": 1,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "heapUsed": 73580168
+    },
+    {
+      "event": 127,
+      "phase": "unload-state",
+      "elapsedMs": 28.406750000000102,
+      "marker3Present": true,
+      "heapUsed": 73581368
+    },
+    {
+      "event": 128,
+      "phase": "key",
+      "elapsedMs": 28.413375000000087,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 73585568
+    }
+  ]
+}

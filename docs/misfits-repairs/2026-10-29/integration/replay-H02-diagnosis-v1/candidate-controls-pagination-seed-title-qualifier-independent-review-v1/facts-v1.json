@@ -1,0 +1,79 @@
+{
+  "verdict": "ACCEPT exact instrument-title component and bounded pure calibration; no native admission",
+  "packetManifestSha256": "0a2f48c30e4477ed3cd7355db8abb5d3c43ed378cb9772683608b4268be9d904",
+  "packetMembers": 8,
+  "packetMemberBytes": 34993,
+  "inputBindingsChecked": 14,
+  "originalNMembers": 10,
+  "originalActualMembers": 16,
+  "originalMembersUnchangedBeforeAfter": 26,
+  "onlyRecipeChange": "expectedOutput.title",
+  "title": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+  "cliSelector": "retains complete windows across joined failure histories for a fixed seed",
+  "outputPathRemainsConsumedHistoricalPath": true,
+  "extractedFunctionNames": [
+    "capture_report",
+    "digest",
+    "read_json",
+    "require"
+  ],
+  "launcherImported": false,
+  "configModelTestImports": 0,
+  "nativeExecutions": 0,
+  "cases": [
+    {
+      "case": "original raw and old base-title recipe",
+      "outcome": "REJECTED",
+      "comparisonError": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "original raw and exact seed-title recipe",
+      "outcome": "CAPTURED_FAILED_ASSERTION",
+      "capture": {
+        "sha256": "1fc0f3b2588d3a09cb0101f8995a3180bbecf6ba3be44a345780f49a98d65646",
+        "bytes": 3413917,
+        "selectedStatus": "failed",
+        "selectedFullName": "pagination recomputation oracle joined window failure for a fixed seed retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+        "selectedTitle": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+        "testResultFiles": 1,
+        "reportSuccess": false,
+        "productVerdict": "UNCLASSIFIED"
+      }
+    },
+    {
+      "case": "wrong seed",
+      "outcome": "REJECTED",
+      "comparisonError": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "wrong ancestry",
+      "outcome": "REJECTED",
+      "comparisonError": "selected campaign ancestry changed"
+    },
+    {
+      "case": "missing selected",
+      "outcome": "REJECTED",
+      "comparisonError": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "second executed",
+      "outcome": "REJECTED",
+      "comparisonError": "report does not identify exactly the selected executed fixed campaign"
+    }
+  ],
+  "historicalOutcomes": {
+    "actualOuterExit": 1,
+    "childExit": 1,
+    "outerReport": null,
+    "reportCaptureSecondaryPreserved": true
+  },
+  "limits": [
+    "No general schema/status/module hardening",
+    "No product outcome reclassification or runtime GREEN",
+    "No future operational source/output rebinding or admission",
+    "Historical N10/actual16 and U8 remain untouched"
+  ],
+  "writes": [
+    "Additive independent facts only; temporary mutation JSON removed"
+  ]
+}

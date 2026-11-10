@@ -1,0 +1,33 @@
+{
+  "status": "Every original finite runner reach reconstructed once from complete raw receipts",
+  "history": {
+    "kind": "sync-initial",
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "counts": {
+    "literal-true-establishing-receipt": 1,
+    "subscriber-return-before-preload": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "receiptSequences": {
+    "literal-true-establishing-receipt": [
+      2
+    ],
+    "subscriber-return-before-preload": [
+      3
+    ],
+    "final-publication": [
+      4
+    ],
+    "worker-cleaned": [
+      5
+    ]
+  },
+  "reloadStartSequences": [],
+  "cleanupStartSequences": [],
+  "rawReceiptCount": 5,
+  "rawReceiptSha256": "c989fcd56413f03531300d33b6deef792c8868966f2e18d3dcad3f3a6f67a8b9",
+  "basis": "Exact unchanged source runner predicates and reload-start to cleanup-start event cut; normal native test passed its original assertReached. No console output or independent model result is invented by this static trace audit."
+}

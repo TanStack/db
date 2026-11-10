@@ -1,0 +1,126 @@
+import { codedMessage, devBuild } from "./error-message";
+export class EventEmitter {
+  constructor() {
+    this.listeners = /* @__PURE__ */ new Map();
+    this.onceCallbacks = /* @__PURE__ */ new WeakMap();
+  }
+  /**
+   * Subscribe to an event
+   * @param event - Event name to listen for
+   * @param callback - Function to call when event is emitted
+   * @returns Unsubscribe function
+   */
+  on(event, callback) {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, /* @__PURE__ */ new Map());
+    }
+    const listeners = this.listeners.get(event);
+    const registered = callback;
+    let registration = listeners.get(registered);
+    if (!registration) {
+      registration = {};
+      listeners.set(registered, registration);
+    }
+    return () => {
+      const current = this.listeners.get(event);
+      if (current?.get(registered) === registration) {
+        current.delete(registered);
+      }
+    };
+  }
+  /**
+   * Subscribe to an event once (automatically unsubscribes after first emission)
+   * @param event - Event name to listen for
+   * @param callback - Function to call when event is emitted
+   * @returns Unsubscribe function
+   */
+  once(event, callback) {
+    let unsubscribe = () => {
+    };
+    const listener = (eventPayload) => {
+      unsubscribe();
+      callback(eventPayload);
+    };
+    this.onceCallbacks.set(
+      listener,
+      callback
+    );
+    unsubscribe = this.on(event, listener);
+    return unsubscribe;
+  }
+  /**
+   * Unsubscribe from an event
+   * @param event - Event name to stop listening for
+   * @param callback - Function to remove
+   */
+  off(event, callback) {
+    const listeners = this.listeners.get(event);
+    if (!listeners) return;
+    for (const listener of listeners.keys()) {
+      if (listener === callback || this.onceCallbacks.get(listener) === callback) {
+        listeners.delete(listener);
+      }
+    }
+  }
+  /**
+   * Wait for an event to be emitted
+   * @param event - Event name to wait for
+   * @param timeout - Optional timeout in milliseconds
+   * @returns Promise that resolves with the event payload
+   */
+  waitFor(event, timeout) {
+    return new Promise((resolve, reject) => {
+      let timeoutId;
+      const unsubscribe = this.on(event, (eventPayload) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = void 0;
+        }
+        resolve(eventPayload);
+        unsubscribe();
+      });
+      if (timeout) {
+        timeoutId = setTimeout(() => {
+          timeoutId = void 0;
+          unsubscribe();
+          reject(
+            new Error(
+              devBuild() && process.env.NODE_ENV !== `production` ? `Timeout waiting for event ${String(event)}` : codedMessage(98, { event })
+            )
+          );
+        }, timeout);
+      }
+    });
+  }
+  /**
+   * Emit an event to all listeners
+   * @param event - Event name to emit
+   * @param eventPayload - Event payload
+   * @internal For use by subclasses - subclasses should wrap this with a public emit if needed
+   */
+  emitInner(event, eventPayload) {
+    this.emitInnerWhile(event, eventPayload, () => true);
+  }
+  /** Emit until a reentrant callback invalidates the event being delivered. */
+  emitInnerWhile(event, eventPayload, isCurrent) {
+    const listeners = this.listeners.get(event);
+    if (!listeners) return;
+    for (const [listener, registration] of [...listeners]) {
+      if (!isCurrent()) break;
+      if (this.listeners.get(event)?.get(listener) !== registration) continue;
+      try {
+        listener(eventPayload);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+  /**
+   * Clear all listeners
+   */
+  clearListeners() {
+    this.listeners.clear();
+  }
+}

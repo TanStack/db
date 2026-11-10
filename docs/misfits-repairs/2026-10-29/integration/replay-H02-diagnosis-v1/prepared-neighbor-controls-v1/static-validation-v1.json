@@ -1,0 +1,25 @@
+{
+  "syntaxParsed": 4,
+  "typecheckDiagnosticCount": 0,
+  "typecheckScope": "all current H02 instruments plus proposed progress driver, new neighbor runner and ownership config; ownership primary-owner overlay syntax parsed only",
+  "formatterExitCode": 0,
+  "productionAndConsumedV7InputsMatched": true,
+  "sourceOverlayApplied": false,
+  "receivingInvocations": 0,
+  "fullIntegrationTypecheck": {
+    "exitCode": 0,
+    "nodeHeapMiB": 1536,
+    "log": "typescript-full-1536-v1.log",
+    "toolCompletionChunk": "8260b8",
+    "scope": "includes full ownership overlay",
+    "earlier384MiBHeapExhaustionPreserved": true,
+    "typeOnlySpecResolution": "existing installed @standard-schema/spec1.1.0 declaration path mapped only in static mirror; no install or live change"
+  },
+  "mirrorEslint": {
+    "commands": 4,
+    "passed": 4,
+    "unchangedOrdinaryWarnings": 2,
+    "record": "lint-mirror-commands-v1.json",
+    "initialStdinAttemptPreserved": true
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "recipePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-held-window.json",
+  "recipeSha256": "3c5a479f46ade8f48ba5fe07cc0035c3ee8743b481be783fca835ae11f879412",
+  "freezePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/source-freeze-v3.json",
+  "freezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "recipeSnapshot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window/recipe.json",
+  "freezeSnapshot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window/source-freeze.json",
+  "programSnapshot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window/baseline-program.json",
+  "command": {
+    "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "bindingProfile": "completion-baseline-v1",
+    "args": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/completion-parent.config.ts",
+      "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "-t",
+      "checks a selected baseline constituent through the shared judgment"
+    ],
+    "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/runtime-output-v1/inline-held-window",
+    "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/programs/inline-held-window.json",
+    "programSha256": "a4f1a52748536423af49b5f9c346128c64c95ea88f8fa9bbdaff384224aeca14",
+    "receivingArgs": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/completion-receiving.config.ts",
+      "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+    ]
+  },
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "parentPid": 59903,
+  "proofBoundary": "on-disk identity only; no V8 loaded-source binding claimed"
+}

@@ -1,0 +1,25 @@
+{
+  "acceptedFreshUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "acceptedFreshUniverseResultFreezeSha256": "da91882f1c06b924a8956be32d668d74ac9268dee9b78916821407e861573c5e",
+  "dependencyReuseLinks": 4,
+  "files": {
+    "calibrate.py": "b314bb86021d52aa861d235dae7fd9a4f71f992774b12d8be21eb0b3d4b39ad5",
+    "recipes.json": "f33433085cda8e1d2dcf0253a576327b9e246d34623c3a6e83f64a72d5651537",
+    "run.py": "3580f0f6b16a9ea3802360cd79f7de771e4f1813005630bbf625c7c8a4439224",
+    "verify.py": "fde777b817463a6abdae8482b96cbd206518a2dad986d70c43b27dcfeb413307"
+  },
+  "namedDependencyOwnPayloads": 2544,
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalSourceFiles": 573,
+  "previousPreparationBindingSha256": "86ccd3bf644d96f43e726f1e805c4b8850754707b7bb88c48ccd802cd90bd7b9",
+  "productionFiles": 511,
+  "reusedSourceFiles": 588,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceRefreezes": 0,
+  "status": "SOURCE-ONLY exact scope/default quarter2 selector discovery; new root admission required",
+  "success": "Fresh selector actual outer0/qualified/native0, one exact intended name/module, complete actual evidence; receiving requires separate review and admission"
+}

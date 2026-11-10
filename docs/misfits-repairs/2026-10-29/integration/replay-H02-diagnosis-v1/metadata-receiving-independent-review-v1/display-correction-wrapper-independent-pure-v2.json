@@ -1,0 +1,137 @@
+{
+  "calibrationSourceSha256": "ff3fb0d763da1ac0fccb93ad308e09ff1acb3ef39907aeee81e698f77b402d10",
+  "capturedUniverseReusedWithoutRerun": true,
+  "checks": [
+    {
+      "label": "captured-display-schema-qualifies-with-original-stop-preserved",
+      "result": {
+        "actualOriginalOuterExitCode": 1,
+        "capturedJsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+        "displayQualification": {
+          "count": 4,
+          "jsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+          "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+          "names": [
+            "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+            "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+            "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+            "queued-answer metadata receiving > checks metadata 'subscription' 'authored'"
+          ],
+          "stderrEmpty": true
+        },
+        "filterSelectionCredit": false,
+        "originalChildExitCode": 0,
+        "originalStopPreserved": true,
+        "status": "Existing captured bytes qualify under corrected DISPLAY schema only; no rerun",
+        "stopFreezeSha256": "1c47fe8e1526411ac238b86d91ba844aea5ec9237af39b64a55886a08e0872d8"
+      }
+    },
+    {
+      "error": "wrong native list names",
+      "label": "old-conflated-display-expectation-rejected"
+    },
+    {
+      "label": "remaining-shape-pure-success",
+      "order": 1
+    },
+    {
+      "error": "wrong native list names",
+      "label": "wrong-language-display-rejected",
+      "order": 1
+    },
+    {
+      "label": "remaining-shape-pure-success",
+      "order": 2
+    },
+    {
+      "error": "wrong native list names",
+      "label": "wrong-language-display-rejected",
+      "order": 2
+    },
+    {
+      "label": "remaining-shape-pure-success",
+      "order": 3
+    },
+    {
+      "error": "wrong native list names",
+      "label": "wrong-language-display-rejected",
+      "order": 3
+    },
+    {
+      "label": "remaining-shape-pure-success",
+      "order": 4
+    },
+    {
+      "error": "wrong native list names",
+      "label": "wrong-language-display-rejected",
+      "order": 4
+    },
+    {
+      "label": "remaining-shape-pure-success",
+      "order": 5
+    },
+    {
+      "calledOrders": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "failureOrder": null,
+      "label": "remaining-outer-stop"
+    },
+    {
+      "calledOrders": [
+        1
+      ],
+      "failureOrder": 1,
+      "label": "remaining-outer-stop"
+    },
+    {
+      "calledOrders": [
+        1,
+        2
+      ],
+      "failureOrder": 2,
+      "label": "remaining-outer-stop"
+    },
+    {
+      "calledOrders": [
+        1,
+        2,
+        3
+      ],
+      "failureOrder": 3,
+      "label": "remaining-outer-stop"
+    },
+    {
+      "calledOrders": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "failureOrder": 4,
+      "label": "remaining-outer-stop"
+    },
+    {
+      "calledOrders": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "failureOrder": 5,
+      "label": "remaining-outer-stop"
+    }
+  ],
+  "filterSelectionStillNativelyUnvalidated": true,
+  "nativeListRuns": 0,
+  "nativeProcessProbes": 0,
+  "nativeSubprocesses": 0,
+  "originalActualOuterExitCode": 1,
+  "resumeSourceSha256": "e61810be857648c136300d1d859bbd27fd48d6378ec3e6749422a1fa1912e101",
+  "status": "PASS: pure stdlib qualifier/wrapper only"
+}

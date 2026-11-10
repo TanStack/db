@@ -1,0 +1,37 @@
+{
+  "kind": "Independent source-only root omission preparation review freeze",
+  "reviewedPreparationSha256": "71c1a266b201df6d3498973c193c464c36cbc31794db922526ed625a9785fcf3",
+  "reviewedNextInvocationSha256": "6ebed7e45159ebe306d7e54754467f2de150a48f6e11d0ddffec24ca6ab08794",
+  "members": {
+    "metadata-root-omission-preparation-v1-independent-inventory.json": {
+      "sha256": "d4337bbd378aeb9bfafe4bacdaf776ab890ecb336f36a78fa0e2f9458fc8c575",
+      "bytes": 79267
+    },
+    "metadata-root-omission-preparation-v1-independent-audit.json": {
+      "sha256": "1e640e517b0068a3cd773ad61dc9c37dd18f01903f2ad3ae3de22b876d2bf516",
+      "bytes": 1194176
+    },
+    "metadata-root-omission-preparation-v1-audit-correction.json": {
+      "sha256": "dfd91c8b7837bf68b8d9aaf22169dd890fdb81f7090491bb68d98e7c5c50f10b",
+      "bytes": 761
+    },
+    "metadata-root-omission-preparation-v1-independent-ledger.json": {
+      "sha256": "08197e6d4eb511e20ab5ea29f130a7ead252fb0af19f72ecd9a067df5ddf9d87",
+      "bytes": 18305
+    },
+    "metadata-root-omission-preparation-v1-independent-review.md": {
+      "sha256": "d22ce61aa019bbe2d19dfa8b7459791c32c08099cd7c98f4e26b689d176b01a1",
+      "bytes": 9146
+    }
+  },
+  "sourceChecks": 3222,
+  "effectiveSupportedChecks": 3220,
+  "openFindings": [
+    "OMIT-SOURCE-F01",
+    "OMIT-SOURCE-F02"
+  ],
+  "subjectExecution": false,
+  "subjectEdits": false,
+  "runtimeAdmission": false,
+  "rootOwnsLint": true
+}

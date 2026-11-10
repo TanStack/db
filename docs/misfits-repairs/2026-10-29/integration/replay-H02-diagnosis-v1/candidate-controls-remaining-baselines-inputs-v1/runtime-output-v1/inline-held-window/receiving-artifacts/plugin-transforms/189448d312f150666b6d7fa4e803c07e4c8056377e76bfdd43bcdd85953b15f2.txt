@@ -1,0 +1,62 @@
+export function createRuntimeReferenceIdentityFactory() {
+  const referenceIds = /* @__PURE__ */ new WeakMap();
+  let localSymbolIds;
+  let registeredSymbolIds;
+  let namespace;
+  let sequence = 0;
+  const getReferenceId = (ids, key) => {
+    let referenceId = ids.get(key);
+    if (referenceId === void 0) {
+      referenceId = ++sequence;
+      ids.set(key, referenceId);
+    }
+    return referenceId;
+  };
+  return (value) => {
+    namespace ??= createRuntimeReferenceNamespace();
+    let referenceId;
+    if (typeof value === `symbol`) {
+      const registeredKey = Symbol.keyFor(value);
+      if (registeredKey === void 0) {
+        localSymbolIds ??= createLocalSymbolIdStore();
+        referenceId = getReferenceId(localSymbolIds, value);
+      } else {
+        registeredSymbolIds ??= /* @__PURE__ */ new Map();
+        referenceId = getReferenceId(registeredSymbolIds, registeredKey);
+      }
+    } else {
+      referenceId = getReferenceId(referenceIds, value);
+    }
+    return [`runtimeReference`, namespace, referenceId];
+  };
+}
+function createLocalSymbolIdStore() {
+  const weakIds = /* @__PURE__ */ new WeakMap();
+  const probe = /* @__PURE__ */ Symbol();
+  try {
+    weakIds.set(probe, 0);
+    if (weakIds.get(probe) === 0) return weakIds;
+  } catch {
+  }
+  return /* @__PURE__ */ new Map();
+}
+let runtimeReferenceIdentityFactory;
+export function getRuntimeReferenceIdentity(value) {
+  runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory();
+  return runtimeReferenceIdentityFactory(value);
+}
+export function getStringCollationIdentity(options) {
+  return options?.stringSort === `custom` ? {
+    ...options,
+    compare: getRuntimeReferenceIdentity(options.compare)
+  } : options;
+}
+function createRuntimeReferenceNamespace() {
+  const randomValues = new Uint32Array(4);
+  const runtimeCrypto = Reflect.get(globalThis, `crypto`);
+  if (typeof runtimeCrypto?.getRandomValues === `function`) {
+    runtimeCrypto.getRandomValues(randomValues);
+    return Array.from(randomValues, (value) => value.toString(36)).join(`-`);
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}

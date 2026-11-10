@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-30T12:29:04.062110+00:00",
+  "allChecksPassed": true,
+  "SsealedMembersUnchanged": 120,
+  "inactiveCopies": 85,
+  "unchangedCopiesFromS": 84,
+  "onlyChangedCopy": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+  "onlyChangeComment": true,
+  "commentReversalRestoresExactSDriver": true,
+  "guardOriginalPeerSharedJudgmentWriterAndOrderUnchanged": true,
+  "activeW596Unchanged": true,
+  "qualificationClaim": "The helper suppresses direct diagnostic capture exceptions and best-effort logs them separately. Receipt-sink failures remain operational faults under unchanged transport/teardown; this packet claims no unconditional preservation of the original terminal error.",
+  "diagnosticFaultWitnessUnexecuted": true,
+  "newRuntimeOrCalibrationOrCompileOrDiscovery": 0
+}

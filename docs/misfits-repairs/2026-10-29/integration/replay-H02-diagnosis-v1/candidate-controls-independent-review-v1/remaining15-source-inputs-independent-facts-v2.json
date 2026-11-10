@@ -1,0 +1,424 @@
+{
+  "at": "2026-10-30T09:53:58.272993+00:00",
+  "mode": "static read/hash/JSON input and preserved evidence audit only; no constructors/compiler/JS/model/pure/testcollection/native/runtime mutants/process probes/Git",
+  "inputFreezeSha256": "7a819f08e33cd635c6479ba6f38c7d9471f322f38f60762b121be3e9859aa852",
+  "inputPacketSha256": "0365e49182e79b8f6f7a2592bfacfd0c029699691a20cf5c28f5dc701344d4d9",
+  "inputFreezeFiles": 52,
+  "inputPacketEntries": 53,
+  "combinedPacketEntries": 275,
+  "postLintPacketEntries": 5,
+  "historicalResolvedEntries": {
+    "freeze": 45,
+    "packet": 46
+  },
+  "archiveEntries": 8,
+  "failedResultAssets": 1974,
+  "successfulFirstResultFiles": 1974,
+  "currentSources": 584,
+  "dependencyPayloads": 2544,
+  "Node": 1,
+  "locks": 2,
+  "reuseLinks": 4,
+  "all15": [
+    {
+      "id": "inline-held-window",
+      "ordinal": 2,
+      "profile": "inline",
+      "gate": "held-window",
+      "programSha256": "a4f1a52748536423af49b5f9c346128c64c95ea88f8fa9bbdaff384224aeca14",
+      "recipeSha256": "3c5a479f46ade8f48ba5fe07cc0035c3ee8743b481be783fca835ae11f879412",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 3,
+      "semanticActionCount": 4,
+      "publicCuts": [
+        "held-window",
+        "completed-window"
+      ],
+      "sourceAnswerRequirements": [
+        "answer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "inline-source-failed-peer",
+      "ordinal": 3,
+      "profile": "inline",
+      "gate": "source-failed-peer",
+      "programSha256": "c5eef9f5c5bdce78790002f0a753684c6dfb3e42fb4b68f0b0b7d5fcbd07e9e7",
+      "recipeSha256": "6a9ed9c54037bea6067dd707c2b17ac79b958bf6d66bad403cb8e94d2d6964a0",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 4,
+      "semanticActionCount": 5,
+      "publicCuts": [
+        "held-window",
+        "source-failed-peer",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [
+        "peer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "inline-subscriber-tail",
+      "ordinal": 4,
+      "profile": "inline",
+      "gate": "subscriber-tail",
+      "programSha256": "914ddf88432ac3c18a0f9621575ffe0b883151aeff0cc745a509f041451d385e",
+      "recipeSha256": "ea984438319ca08456680af5b88dc537cb8c3858e65fc3d67f1a6f8363a8c8df",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 2,
+      "semanticActionCount": 4,
+      "publicCuts": [
+        "installed-tail-exception"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "inline-initial-status-tail",
+      "ordinal": 5,
+      "profile": "inline",
+      "gate": "initial-status-tail",
+      "programSha256": "bdb40ead30c4433ef5c6041e2a132eb9970f93d02bb907eb0dee35d9da18c00f",
+      "recipeSha256": "52fcadd7458181286bff851aee5c3c16dda16bfc0943b4b6fd77352a569a9f41",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 1,
+      "semanticActionCount": 7,
+      "publicCuts": [
+        "installed-tail-exception"
+      ],
+      "sourceAnswerRequirements": [
+        "answer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "inline-graph-failure",
+      "ordinal": 6,
+      "profile": "inline",
+      "gate": "graph-failure",
+      "programSha256": "2494ffa940f123db9db1619705dc26c24b97264866d11d72b674c4e91e00bcac",
+      "recipeSha256": "fe12004d3f0c44caf0053b8728c98eea1aca66ab4a5924342ce6007aa85357bb",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 2,
+      "semanticActionCount": 3,
+      "publicCuts": [
+        "graph-exception"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "inline-cleanup-abandonment",
+      "ordinal": 7,
+      "profile": "inline",
+      "gate": "cleanup-abandonment",
+      "programSha256": "8eb47f148c9ffc526aa737a26ea2d5ddc8ccec6b8aa0f7c9bf93da25e568aa6a",
+      "recipeSha256": "a7a01c92d332603237ff2a67812843fc1da544894cda69ef20875881af20e4a6",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 2,
+      "epochCount": 4,
+      "semanticActionCount": 8,
+      "publicCuts": [
+        "held-output",
+        "cleanup-abandoned",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-park-root",
+      "ordinal": 8,
+      "profile": "facade",
+      "gate": "park-root",
+      "programSha256": "bb078ea74a5cd7c21fea9678107b6f21e71a3e4b1e2dba9dcdddacd0fee027e7",
+      "recipeSha256": "c2823d692f40a23dfc6db308fcd9ecb8977e12339dcfe21bc775fc8f32e90696",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 3,
+      "semanticActionCount": 6,
+      "publicCuts": [
+        "held-output",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-park-facade",
+      "ordinal": 9,
+      "profile": "facade",
+      "gate": "park-facade",
+      "programSha256": "c87cc051e46ede58682e267a6b65469772d214a91b7a5c5bde3535787180cd2b",
+      "recipeSha256": "496ffabac576ef2c97e6a908088f6c68f8742cbdb7adedfa7d14b433a2f790fe",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 3,
+      "semanticActionCount": 6,
+      "publicCuts": [
+        "held-output",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-facade-rollback",
+      "ordinal": 10,
+      "profile": "facade",
+      "gate": "facade-rollback",
+      "programSha256": "d449a1e50a72403b35a17e3183660ecb3c66b79483df70f840c4fae94c5feb6c",
+      "recipeSha256": "09109793fe7c193ee96a09a5d2ea5e663f972bb40da647f9168a15c7b0d09745",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 4,
+      "semanticActionCount": 18,
+      "publicCuts": [
+        "facade-rollback",
+        "public-state",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-held-window",
+      "ordinal": 11,
+      "profile": "facade",
+      "gate": "held-window",
+      "programSha256": "2f966572ebe037d8fc07d1cf226adc8d4b577e726edfdd06dfedc165d13e2cea",
+      "recipeSha256": "0d249e568b36e82d7feb39cdf28bf4884525b864c7651be64b986db73f2e0e64",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 3,
+      "semanticActionCount": 10,
+      "publicCuts": [
+        "held-window",
+        "completed-window"
+      ],
+      "sourceAnswerRequirements": [
+        "answer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-source-failed-peer",
+      "ordinal": 12,
+      "profile": "facade",
+      "gate": "source-failed-peer",
+      "programSha256": "e5e9dc72d8f81e4f75511760d19835743ba2e32721c1b91097c90d5cb0e0b585",
+      "recipeSha256": "5b3904cbd51e05f0052c607b59f79270e9ab7213aca93443bfa239c2e025c8ce",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 4,
+      "semanticActionCount": 5,
+      "publicCuts": [
+        "held-window",
+        "source-failed-peer",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [
+        "peer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-subscriber-tail",
+      "ordinal": 13,
+      "profile": "facade",
+      "gate": "subscriber-tail",
+      "programSha256": "16fc514809d5e797f0ff07333bea236a5c83fa8abe6ee235499c0f86c5462009",
+      "recipeSha256": "066b43f44f196400803fc1ccfd3b94c3d4202dbec96493c906861804e774f541",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 2,
+      "semanticActionCount": 10,
+      "publicCuts": [
+        "installed-tail-exception"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-initial-status-tail",
+      "ordinal": 14,
+      "profile": "facade",
+      "gate": "initial-status-tail",
+      "programSha256": "7282b5c22a9e0262ebe92fe344604a095f56f2feb74688bbe2c371473f432be8",
+      "recipeSha256": "3428c9cf19a2bba11e0011e3bb4fea66b64f4dd69ecfcb27c7ba282f4e0029d0",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 1,
+      "semanticActionCount": 13,
+      "publicCuts": [
+        "installed-tail-exception"
+      ],
+      "sourceAnswerRequirements": [
+        "answer"
+      ],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-graph-failure",
+      "ordinal": 15,
+      "profile": "facade",
+      "gate": "graph-failure",
+      "programSha256": "2b51496fc62c28598847ee835e10aae53f7e38a97ca6ba73143b22e9dabcbbf4",
+      "recipeSha256": "745074f0f45829b6c5c5d021a32ea274d54f360071fb28d3a153f75646f54758",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 1,
+      "epochCount": 2,
+      "semanticActionCount": 3,
+      "publicCuts": [
+        "graph-exception"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    },
+    {
+      "id": "facade-cleanup-abandonment",
+      "ordinal": 16,
+      "profile": "facade",
+      "gate": "cleanup-abandonment",
+      "programSha256": "2e746277de5a64e56a923a1d9a29c9102f5fb3b718d356c8a6062cef989d7ecd",
+      "recipeSha256": "494b9bf24ed226accab76f63c961f67cf8993fe403eb85d22468aa1102086a38",
+      "onlyRecipeChanges": [
+        "bindingProfile",
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "fixtureConstructions": 2,
+      "epochCount": 4,
+      "semanticActionCount": 14,
+      "publicCuts": [
+        "held-output",
+        "cleanup-abandoned",
+        "public-state"
+      ],
+      "sourceAnswerRequirements": [],
+      "freshOutputLeafAbsent": true,
+      "runtimeAdmission": false
+    }
+  ],
+  "profileCounts": {
+    "inline": 6,
+    "facade": 9
+  },
+  "fixturesIfAllAdmitted": 17,
+  "firstActualReviewSha256": "fff79e37fba837244a11410ca5a7ecf219ba62ccd16029e5942aef96d319a797",
+  "rootClassification": "required separately; this reviewer does not create or infer root classification",
+  "newBatchAdmission": "required separately, must pin root exact-result classification and this source-only review; no runtime admission here",
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "actualHelperNoActiveOperationNeighbor": "required and UNREACHED",
+  "errors": [],
+  "allChecksPass": true,
+  "newRuntimeExecutions": 0
+}

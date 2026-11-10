@@ -1,0 +1,122 @@
+{
+  "candidates": [
+    {
+      "bindingStatus": "bound",
+      "bytes": 31372571,
+      "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+      "directoryParentPid": 52323,
+      "files": 1948,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 0,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 10,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "matches": true,
+      "mode": 16832,
+      "path": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-52323-4c4ed15c-4fc7-4558-8062-16b3ec66b06f",
+      "receiptCount": 206,
+      "receiptWriterPid": 52441,
+      "sourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "supervisorLeaderPid": 52405,
+      "supervisorOutcome": {
+        "bindingStatus": "bound",
+        "cleanupErrors": [],
+        "exitCode": 0,
+        "keyCallbacks": 23,
+        "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-52323-4c4ed15c-4fc7-4558-8062-16b3ec66b06f/receipts.jsonl",
+        "prefixViolations": 0,
+        "reason": "exited",
+        "signal": null,
+        "warnings": 0
+      },
+      "supervisorPhase": "final-with-binding",
+      "workerStart": {
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+        "execPath": "/Users/kyle.mathews/.n/bin/node",
+        "h02": true,
+        "history": {
+          "cacheIdentity": "scope",
+          "includes": true,
+          "keyShift": 0,
+          "kind": "query",
+          "metadataFollowupQuarter": 2,
+          "metadataKeys": "default",
+          "nonemptyPrior": true,
+          "rankScale": 10,
+          "scheduler": "microtask",
+          "window": true
+        },
+        "phase": "worker-start",
+        "sequence": 1
+      }
+    }
+  ],
+  "receivingPreparationBindingSha256": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+  "selected": {
+    "bindingStatus": "bound",
+    "bytes": 31372571,
+    "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+    "directoryParentPid": 52323,
+    "files": 1948,
+    "history": {
+      "cacheIdentity": "scope",
+      "includes": true,
+      "keyShift": 0,
+      "kind": "query",
+      "metadataFollowupQuarter": 2,
+      "metadataKeys": "default",
+      "nonemptyPrior": true,
+      "rankScale": 10,
+      "scheduler": "microtask",
+      "window": true
+    },
+    "matches": true,
+    "mode": 16832,
+    "path": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-52323-4c4ed15c-4fc7-4558-8062-16b3ec66b06f",
+    "receiptCount": 206,
+    "receiptWriterPid": 52441,
+    "sourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+    "supervisorLeaderPid": 52405,
+    "supervisorOutcome": {
+      "bindingStatus": "bound",
+      "cleanupErrors": [],
+      "exitCode": 0,
+      "keyCallbacks": 23,
+      "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-52323-4c4ed15c-4fc7-4558-8062-16b3ec66b06f/receipts.jsonl",
+      "prefixViolations": 0,
+      "reason": "exited",
+      "signal": null,
+      "warnings": 0
+    },
+    "supervisorPhase": "final-with-binding",
+    "workerStart": {
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/sources",
+      "execPath": "/Users/kyle.mathews/.n/bin/node",
+      "h02": true,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 0,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 10,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "phase": "worker-start",
+      "sequence": 1
+    }
+  },
+  "selectionRule": "canonical program/history/source and prepared/supervisor/receipt-writer records, never first-new/mtime",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "status": "UNIQUE ACTUAL INNER IDENTITY MATCH; no result verdict"
+}

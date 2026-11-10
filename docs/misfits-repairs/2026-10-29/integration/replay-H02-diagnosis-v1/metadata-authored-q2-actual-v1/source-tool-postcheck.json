@@ -1,0 +1,16 @@
+{
+  "externalPins": 32,
+  "limit": "No transitive host/native/dist equivalence, application imports or fresh compiler result.",
+  "namedOwnPayloadHashes": 2544,
+  "namedPackageMaps": 9,
+  "productionMembers": 511,
+  "python": {
+    "path": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "resolved": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+  },
+  "reuseLinks": 4,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceMembers": 589,
+  "status": "All existing bound source/tools/packages/locks/preparation/external hashes match"
+}

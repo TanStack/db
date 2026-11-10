@@ -1,0 +1,15 @@
+{
+  "change": "Only four universe expected DISPLAY suffixes quarter 0 become quarter +0; no argv/filter/count/module/source/supervisor/limits changes",
+  "files": {
+    "calibrate.py": "76a580203840650def8fe5d5814f551c58543899c6674439dd48ef011d0ec814",
+    "check.py": "bc4c9bccff2917e8fa7aebe495c209d22040ef7ca83d325e1b4183ff723aad66",
+    "corrected-universe-recipe.json": "9165f918ea443103ae87ce15af2fd75c9741cf1848c500b1b11004943b2cee0d"
+  },
+  "newRuntimeAdmitted": false,
+  "originalBindingSha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65",
+  "originalNativeChildExitCode": 0,
+  "originalObservedOuterExitCode": 1,
+  "originalResultFreezeSha256": "6c2794c3b81b56cb2501013dc07e9cf9740f576bc6c06d8db7580a035ea01bb6",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "status": "Captured display expectation correction only; no native launcher or runtime admission"
+}

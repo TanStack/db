@@ -1,0 +1,33 @@
+{
+  "recordedBy": "/root/evaluate_metadata_external",
+  "status": "ACTUAL OUTER TEST FAILURE preserved independently of receiving child exit0; classification pending",
+  "actualOuterExitCode": 1,
+  "initialToolReturn": {
+    "chunk_id": "c0f37a",
+    "wall_time_seconds": 1.001018625,
+    "session_id": 23604,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "completionToolReturn": {
+    "chunk_id": "8e0978",
+    "wall_time_seconds": 0.000005917,
+    "exit_code": 1,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "outerPid": 52259,
+  "outerPgid": 52259,
+  "receivingParentPid": 52323,
+  "originalReceivingLeaderPid": 52405,
+  "originalReceiptWriterPid": 52441,
+  "receivingChildExitCode": 0,
+  "rootAdmissionSha256": "f76e6494649de37b01543151c6621f516184594b4a7bd96a2da2ddd009def5e6",
+  "nativeInvocationsThisAdmission": 1,
+  "observedSelectedTestOutcome": "1 failed, 19 skipped; old final reload-callback check expected rank30 and observed follow-up rank35",
+  "metadataReachCounters": 31,
+  "metadataPerHistoryFinishCompleted": false,
+  "retry": false,
+  "nextLaneAdmitted": false,
+  "productRedGreenCredit": false
+}

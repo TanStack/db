@@ -1,0 +1,139 @@
+
+<--- Last few GCs --->
+
+[10213:0x98d40c000]     3004 ms: Scavenge (interleaved) 380.1 (385.2) -> 378.4 (385.9) MB, pooled: 0 MB, 1.92 / 0.00 ms  (average mu = 0.313, current mu = 0.276) allocation failure; 
+[10213:0x98d40c000]     3049 ms: Mark-Compact (reduce) 380.4 (386.4) -> 377.3 (382.7) MB, pooled: 0 MB, 41.42 / 0.00 ms  (+ 0.0 ms in 29 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 45 ms) (average mu = 0.285, current
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x1022459f4 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Users/kyle.mathews/.n/bin/node]
+ 2: 0x1024c0000 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Users/kyle.mathews/.n/bin/node]
+ 3: 0x10271f4b4 v8::internal::Heap::stack() [/Users/kyle.mathews/.n/bin/node]
+ 4: 0x102722888 v8::internal::Heap::HasLowYoungGenerationAllocationRate() [/Users/kyle.mathews/.n/bin/node]
+ 5: 0x102733a7c v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/Users/kyle.mathews/.n/bin/node]
+ 6: 0x102733350 void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/Users/kyle.mathews/.n/bin/node]
+ 7: 0x1030e7be0 PushAllRegistersAndIterateStack [/Users/kyle.mathews/.n/bin/node]
+ 8: 0x10271d1b8 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/Users/kyle.mathews/.n/bin/node]
+ 9: 0x102711ec4 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/Users/kyle.mathews/.n/bin/node]
+10: 0x1026f35a4 v8::internal::Factory::NewFillerObject(int, v8::internal::AllocationAlignment, v8::internal::AllocationType, v8::internal::AllocationOrigin) [/Users/kyle.mathews/.n/bin/node]
+11: 0x102b82d9c v8::internal::Runtime_AllocateInYoungGeneration(int, unsigned long*, v8::internal::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+12: 0x1031da234 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/Users/kyle.mathews/.n/bin/node]
+13: 0x103228a80 Builtins_CreateShallowObjectLiteral [/Users/kyle.mathews/.n/bin/node]
+14: 0x126d7f660 
+15: 0x126d7fcb8 
+16: 0x1261327cc 
+17: 0x126416274 
+18: 0x126982508 
+19: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+20: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+21: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+22: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+23: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+24: 0x103209e60 Builtins_ArrayMap [/Users/kyle.mathews/.n/bin/node]
+25: 0x126538ec8 
+26: 0x126c768b0 
+27: 0x126c76b64 
+28: 0x126ce417c 
+29: 0x1269f2b18 
+30: 0x126b54fd8 
+31: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+32: 0x1269f2e38 
+33: 0x126b54fd8 
+34: 0x12651e388 
+35: 0x126518c18 
+36: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+37: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+38: 0x103209e60 Builtins_ArrayMap [/Users/kyle.mathews/.n/bin/node]
+39: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+40: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+41: 0x12649498c 
+42: 0x1262dfa0c 
+43: 0x1269f40d4 
+44: 0x126b54fd8 
+45: 0x12651e388 
+46: 0x126517cac 
+47: 0x126517f0c 
+48: 0x1265183b0 
+49: 0x1260b12cc 
+50: 0x126518b50 
+51: 0x126528f44 
+52: 0x1264937b0 
+53: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+54: 0x12649498c 
+55: 0x1262dfa0c 
+56: 0x1269f40d4 
+57: 0x126b54fd8 
+58: 0x12651e388 
+59: 0x126517cac 
+60: 0x126517f0c 
+61: 0x1262e1230 
+62: 0x1260b10e0 
+63: 0x1262fc47c 
+64: 0x1269f7b44 
+65: 0x1262fc644 
+66: 0x1262fc860 
+67: 0x1262f1d20 
+68: 0x126485dac 
+69: 0x1267b2340 
+70: 0x126caaa98 
+71: 0x1262fbbd0 
+72: 0x1262f95b8 
+73: 0x1262c2124 
+74: 0x1267b2340 
+75: 0x126caaa98 
+76: 0x126971f54 
+77: 0x1267bc0d0 
+78: 0x1269726f0 
+79: 0x1267a73e4 
+80: 0x126972984 
+81: 0x126972b6c 
+82: 0x1265673c0 
+83: 0x126972ce8 
+84: 0x1269393e0 
+85: 0x126a43a04 
+86: 0x1261360b0 
+87: 0x126d170b8 
+88: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+89: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+90: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+91: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+92: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+93: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+94: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+95: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+96: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+97: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+98: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+99: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+100: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+101: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+102: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+103: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+104: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+105: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+106: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+107: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+108: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+109: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+110: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+111: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+112: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+113: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+114: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+115: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+116: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+117: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+118: 0x10313cbec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+119: 0x10313a8cc Builtins_JSEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+120: 0x10313a570 Builtins_JSEntry [/Users/kyle.mathews/.n/bin/node]
+121: 0x1026636d8 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/kyle.mathews/.n/bin/node]
+122: 0x10266303c v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::DirectHandle<v8::internal::Object>, v8::internal::DirectHandle<v8::internal::Object>, v8::base::Vector<v8::internal::DirectHandle<v8::internal::Object> const>) [/Users/kyle.mathews/.n/bin/node]
+123: 0x1024d79c0 v8::Function::Call(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*) [/Users/kyle.mathews/.n/bin/node]
+124: 0x102215610 node::builtins::BuiltinLoader::CompileAndCall(v8::Local<v8::Context>, char const*, node::Realm*) [/Users/kyle.mathews/.n/bin/node]
+125: 0x1022f9f94 node::Realm::ExecuteBootstrapper(char const*) [/Users/kyle.mathews/.n/bin/node]
+126: 0x1021eeda4 node::StartExecution(node::Environment*, char const*) [/Users/kyle.mathews/.n/bin/node]
+127: 0x1021eecf8 node::StartExecution(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfoWithModule const&)>) [/Users/kyle.mathews/.n/bin/node]
+128: 0x1021298a0 node::LoadEnvironment(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfoWithModule const&)>, std::__1::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>) [/Users/kyle.mathews/.n/bin/node]
+129: 0x1022a0774 node::NodeMainInstance::Run() [/Users/kyle.mathews/.n/bin/node]
+130: 0x1021f27e0 node::Start(int, char**) [/Users/kyle.mathews/.n/bin/node]
+131: 0x18fdd44e4 start [/usr/lib/dyld]

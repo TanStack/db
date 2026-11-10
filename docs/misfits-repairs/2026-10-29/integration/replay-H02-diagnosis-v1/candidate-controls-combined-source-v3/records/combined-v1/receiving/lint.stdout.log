@@ -1,0 +1,7 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts
+  129:5   error  Unnecessary conditional, value is always falsy   @typescript-eslint/no-unnecessary-condition
+  144:29  error  Unnecessary conditional, value is always truthy  @typescript-eslint/no-unnecessary-condition
+
+✖ 2 problems (2 errors, 0 warnings)
+

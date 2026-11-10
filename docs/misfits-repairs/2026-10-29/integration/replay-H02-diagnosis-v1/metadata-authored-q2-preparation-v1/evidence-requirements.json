@@ -1,0 +1,94 @@
+{
+  "scope": "One existing-v3 followup-scope-authored-q2 fixed receiving singleton only. No generated campaign, retries, replay or next recipe.",
+  "successfulHistoryCount": 1,
+  "history": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "scope",
+    "metadataKeys": "authored",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10,
+    "metadataFollowupQuarter": 2
+  },
+  "parentSelection": {
+    "filter": "^queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2$",
+    "title": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+    "selectedPassedTests": 1,
+    "expectedSkippedTests": 19,
+    "reporter": "Unchanged verbose and silent=false; preserve complete outer-vitest.log. No zero-test or unexpected-title GREEN.",
+    "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources"
+  },
+  "artifactAttribution": {
+    "passiveBaseline": "Use the inherited prelaunch candidate inventory. Never select by mtime or first new directory.",
+    "selection": "Exactly one raw receiving UUID directory must agree with actual recorded parent PID, frozen source, canonical selected history, prepared.json historyPath/directory, worker-start.history, supervisor target identity, receipt writer identity and logPath. Preserve all attributable original attempts, including failures; stop if extra, missing or ambiguous.",
+    "failure": "Keep actual first error, every raw artifact and separate cleanup/observer diagnostics. No automatic retry or substitute path."
+  },
+  "reach": {
+    "states": [
+      "initial-root",
+      "initial-downstream",
+      "nonempty-prior",
+      "reload-started",
+      "positive-held-provider-read",
+      "held-root",
+      "held-downstream",
+      "completed-enqueue",
+      "answer-executed",
+      "callback-root",
+      "callback-downstream",
+      "selected-upstream-metadata",
+      "messages-root",
+      "messages-downstream",
+      "final-root",
+      "final-downstream",
+      "worker-cleaned",
+      "reload-baseline-compared",
+      "followup-started",
+      "source-applied",
+      "followup-acquisitions-settled",
+      "followup-retained-key-root",
+      "followup-messages-root",
+      "followup-final-root",
+      "followup-update-root",
+      "followup-previous-value-root",
+      "followup-retained-key-downstream",
+      "followup-messages-downstream",
+      "followup-final-downstream",
+      "followup-update-downstream",
+      "followup-previous-value-downstream"
+    ],
+    "perHistory": "All 31 states at exactly 1 in the one authored-key q2 history; back console counts with the unique raw trace. Source count is not actual reach.",
+    "perHistoryFinish": "Exact unchanged run() calls checkQueuedAnswerProgress then metadata.finish(); the selected pass and source order supply the existing invocation assumption. No dedicated runtime finish/assert receipt is invented.",
+    "publicCheckpoints": "Initial publication; positive provider-held reload; completed reload baseline with exact root/downstream current rows/entries and deltas; source applied receipt; every actual follow-up acquisition settlement; actual root/downstream same-key rank30-to35 callback reads/complete value/previousValue; final followup-publication, ready outputs and normal worker-cleaned."
+  },
+  "sourceBinding": "Each original artifact needs bindingStatus bound, exact frozen source/tools/maps and actual evaluated/V8/callback-path evidence with inherited limits. Evaluation/compilation alone is not execution. No source was copied or refrozen.",
+  "currentRunIdentity": "Record actual sourceId/rootId/downstreamId with keyLane authored; require uniqueness and actual root/downstream authored metadata keys. Do not assume incidental output IDs. This is unchanged pre-M01 driver evidence.",
+  "identityAndCleanup": [
+    "Reuse unchanged inner20s/1GiB sampled group RSS/384MiB heap/post-enqueue1000ms supervisor. No guardian or timeout redesign.",
+    "Keep actual initial exec/session/final completion separately from the single receiving child's original result. Capture outer PID/PGID and receiving-parent PPID/PGID while live when available; do not reconstruct absent launch receipts.",
+    "Record detached leader and receipt-writer identities from original raw artifacts. Root owns actual outer lifecycle/containment/completion; 60000ms Vitest timeout is not a hard outer watchdog.",
+    "After actual completion, check original recorded PIDs and target groups absent through the separately admitted existing ps/signal-zero procedure; preserve current-run limits. No quiet-log cleanup inference.",
+    "Normal successful singleton requires worker-cleaned and no kill/observer/cleanup error; an observer failure is not product RED or GREEN."
+  ],
+  "rawPreservation": [
+    "Actual outer invocation/session/chunks/final completion with exact exit, separately from actual receiving-child exit.",
+    "Complete outer log, exclusive output directory, launcher-process and source-prelaunch records.",
+    "All original attributable history/prepared/receipt/stdout/stderr/supervisor/source-binding/evaluated/V8/loader/verification artifacts, including failed attempts.",
+    "Immutable originals/capture inventory with lengths and hashes; no overwritten or recreated primary evidence."
+  ],
+  "inheritedEvidenceLimits": [
+    "Stable output metadata/direct eager source-sync through a real QueryClient graph only; this authored q2 singleton remains unexecuted.",
+    "No deterministic M01 driver ID change or source successor; current-run actual root/downstream/source IDs must be recorded and distinct, not inferred from allocation order.",
+    "Default fixed/unseeded campaigns are separate qualified evidence. This singleton supplies no authored generated/no-op/subscription/conflicting-cache progress/changing-fetched-metadata/framework evidence.",
+    "No dedicated UUID-console ordinal or finish/assert receipt; parent invocation/finalizer source-order assumption remains.",
+    "No new parent-checker V8 proof or initial inner getpgid proof; retain actual current-run parent/outer identity evidence and qualify missing observations.",
+    "Native coverage/typecheck disabled; separate prior exact-byte standalone noEmit evidence only.",
+    "No actual hostile production mutant, production repair, progress repair, bug-class closure or PR-readiness credit.",
+    "Nine named own-package maps/2544 own payloads do not prove full transitive host/native/dist equivalence.",
+    "Prior v2 observer failure, raw predecessor diagnostics and independent lexical-path audit correction remain preserved."
+  ],
+  "actualEvidenceNow": "None. Source-only packet requires independent review and separate exact root admission."
+}

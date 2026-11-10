@@ -1,0 +1,90 @@
+{"calibration":"accepts exact approved production and instrument bindings","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"retains unevaluated optional instrument without execution credit","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"accepts required module evaluated at a later inventory cut","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects outside-root production","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /authored-outside/packages/db/src/index.ts","outside/stale or unapproved package module: /authored-outside/packages/db/src/index.ts","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects stale dist substitution","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-HztOE6/authored-source/packages/db/dist/index.js","outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-HztOE6/authored-source/packages/db/dist/index.js","required evaluated receiving source missing: packages/db/src/index.ts"]}
+{"calibration":"rejects an unapproved package helper","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-gT8GYy/authored-source/packages/db/tests/unapproved-helper.ts","outside/stale or unapproved package module: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-gT8GYy/authored-source/packages/db/tests/unapproved-helper.ts"]}
+{"calibration":"rejects changed frozen original bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["changed frozen source: packages/db/src/index.ts"]}
+{"calibration":"rejects wrong actual original-byte metadata","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong actual original bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","wrong actual original bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects changed retained loader bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","wrong retained transformed bytes: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects V8 bytes without exact loader body","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","no exact transformed-to-V8 binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects a required path that never evaluated","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"]}
+{"calibration":"rejects transform-only evidence without actual registry bindings","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving source missing: packages/db/src/index.ts","required evaluated receiving source missing: packages/db-ivm/src/index.ts","required evaluated receiving source missing: packages/query-db-collection/src/query.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts","required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts","required evaluated receiving instrument missing: packages/db/tests/reference-expression-oracle.ts","required evaluated receiving instrument missing: scripts/h02-progress/source-binding.setup.ts","required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs","required evaluated receiving instrument missing: scripts/h02-progress/startup-inspector.mjs","required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"does not interpret stdout or stderr as raw receipts","authoredInputsOnly":true,"exitCode":0,"status":"bound","failures":[]}
+{"calibration":"rejects raw receipt sequence gaps","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: invalid receipt envelope or sequence after 1","actual empty-options key callback missing","no actual key observations","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects truncated raw receipt tails","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: truncated final receipt: 299 bytes","positive current DB/db-ivm source stack missing"]}
+{"calibration":"rejects a writer fault beside a complete raw prefix","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receipt transport: Error: receipt writer fault: {\"message\":\"authored fault\"}"]}
+{"calibration":"requires actual evaluation of the new receipt transport module","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs"]}
+{"calibration":"requires the startup source seal","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal missing or unreadable: Error: ENOENT: no such file or directory, open '/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-verifier-calibration-WIVV9M/authored-run/binding-seal.json'","receiving module lacks sealed startup binding: packages/db/src/index.ts","receiving module lacks sealed startup binding: packages/db-ivm/src/index.ts","receiving module lacks sealed startup binding: packages/query-db-collection/src/query.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-driver.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/query/load-subset-retained-publication-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/reference-expression-oracle.ts","receiving module lacks sealed startup binding: scripts/h02-progress/source-binding.setup.ts","receiving module lacks sealed startup binding: scripts/h02-progress/receipt-transport.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/startup-inspector.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts","receiving module lacks sealed startup binding: packages/db/src/index.ts","receiving module lacks sealed startup binding: packages/db-ivm/src/index.ts","receiving module lacks sealed startup binding: packages/query-db-collection/src/query.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-driver.ts","receiving module lacks sealed startup binding: packages/query-db-collection/tests/queued-answer-progress-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/query/load-subset-retained-publication-oracle.ts","receiving module lacks sealed startup binding: packages/db/tests/reference-expression-oracle.ts","receiving module lacks sealed startup binding: scripts/h02-progress/source-binding.setup.ts","receiving module lacks sealed startup binding: scripts/h02-progress/receipt-transport.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/startup-inspector.mjs","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts"]}
+{"calibration":"rejects a false inspector disconnection claim","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"requires the skip-all-pauses acknowledgement","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"requires exact pre-history registry bytes","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["startup source seal or inspector acknowledgements invalid"]}
+{"calibration":"rejects a module absent from the sealed source binding","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts","receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts"]}
+{"calibration":"rejects an otherwise bound module first observed after startup sealing","authoredInputsOnly":true,"exitCode":1,"status":"binding-unresolved","failures":["receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts"]}
+✔ accepts exact approved production and instrument bindings (169.948417ms)
+✔ retains unevaluated optional instrument without execution credit (167.014666ms)
+✔ accepts required module evaluated at a later inventory cut (161.741458ms)
+✔ rejects outside-root production (164.018583ms)
+✔ rejects stale dist substitution (162.67625ms)
+✔ rejects an unapproved package helper (160.155833ms)
+✔ rejects changed frozen original bytes (163.669458ms)
+✔ rejects wrong actual original-byte metadata (159.960042ms)
+✔ rejects changed retained loader bytes (163.962708ms)
+✔ rejects V8 bytes without exact loader body (168.261333ms)
+✔ rejects a required path that never evaluated (175.413833ms)
+✔ rejects transform-only evidence without actual registry bindings (164.441708ms)
+✔ does not interpret stdout or stderr as raw receipts (159.455875ms)
+✔ rejects raw receipt sequence gaps (155.121458ms)
+✔ rejects truncated raw receipt tails (157.5245ms)
+✔ rejects a writer fault beside a complete raw prefix (163.573583ms)
+✔ requires actual evaluation of the new receipt transport module (172.882ms)
+✔ requires the startup source seal (167.815166ms)
+✔ rejects a false inspector disconnection claim (165.129625ms)
+✔ requires the skip-all-pauses acknowledgement (164.836834ms)
+✔ requires exact pre-history registry bytes (159.810292ms)
+✔ rejects a module absent from the sealed source binding (163.483791ms)
+✔ rejects an otherwise bound module first observed after startup sealing (166.973625ms)
+✔ writes exact ordered payloads through partial synchronous writes (2.974625ms)
+✔ binds the raw path to the existing supervisor directory (0.532416ms)
+✔ retains a large raw stream and a multibyte receipt larger than the read chunk (28.740333ms)
+✔ decodes UTF-8 across every byte boundary and consumes each receipt once (1.564625ms)
+✔ a live drain stops at its captured byte boundary (1.157666ms)
+✔ holds a live partial line until a later drain completes it (1.047584ms)
+✔ missing live file is pending but a missing final file fails (0.63875ms)
+✔ rejects gap (0.889958ms)
+✔ rejects duplicate (0.94525ms)
+✔ rejects reversed (0.881ms)
+✔ rejects wrong envelope (0.859791ms)
+✔ rejects missing phase (0.831209ms)
+✔ rejects blank line (0.829417ms)
+✔ rejects malformed JSON (0.905916ms)
+✔ rejects invalid UTF-8 (0.80275ms)
+✔ rejects truncated final line (0.776792ms)
+✔ rejects empty final stream (0.73075ms)
+✔ rejects a file that shrinks after a completed drain (1.483917ms)
+✔ preserves the first read failure and never replays its prefix (0.894ms)
+✔ rejects replacement of the raw file after a live drain (1.205125ms)
+✔ zero-progress reads cannot spin or silently omit the captured prefix (0.722333ms)
+✔ preserves a partial-write failure and forbids later appends (1.284042ms)
+✔ a failed new line is detected even when the raw prefix is well formed (1.383292ms)
+✔ writer failure survives failure of its own diagnostic write (0.805667ms)
+✔ close failure remains a recorded instrument failure (1.152875ms)
+✔ zero-progress writes cannot spin (0.99475ms)
+✔ worker error reporting and its diagnostic cannot replace the original error (0.060875ms)
+✔ driver and worker-error reporter use the same sink and sequence (1.468416ms)
+✔ missing writer metadata fails closed (0.652916ms)
+✔ pure decoder rejects a corrupt supplied receipt without a product judgment (0.035125ms)
+✔ acknowledges passive policy and disconnects before a history could start (0.642125ms)
+✔ fails closed when Debugger.setSkipAllPauses is not acknowledged (0.075708ms)
+✔ fails closed when Debugger.enable is not acknowledged (0.044542ms)
+✔ fails closed when Debugger.disable is not acknowledged (0.057167ms)
+✔ does not seal when source binding fails (0.071917ms)
+✔ installed Node acknowledges startup policy, disable and disconnect (26.847666ms)
+ℹ tests 59
+ℹ suites 0
+ℹ pass 59
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4049.96125

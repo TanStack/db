@@ -1,0 +1,23 @@
+{
+  "admissionSha256": "bced374c51614dbd911257589df9bec8a2bc58bb3be7bd6928c46c5d04966a87",
+  "initial": {
+    "chunk_id": "46d907",
+    "wall_time_seconds": 1.002540084,
+    "session_id": 31238,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "actualCompletion": {
+    "chunk_id": "5a6619",
+    "wall_time_seconds": 0.0000185,
+    "exit_code": 1,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "actualOuterExitCode": 1,
+  "actualInvocationPermission": "sandbox_permissions=require_escalated",
+  "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -I -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/launch.py --execute-exact-one 73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "maxInvocations": 1,
+  "retryAuthorized": false,
+  "progressionAuthorized": false
+}

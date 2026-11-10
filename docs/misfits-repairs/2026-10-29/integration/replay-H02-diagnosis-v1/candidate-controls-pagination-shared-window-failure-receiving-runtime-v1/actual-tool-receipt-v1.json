@@ -1,0 +1,52 @@
+{
+  "schema": "h02-actual-tool-receipt-v1",
+  "slot": 2,
+  "invocationCount": 1,
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "actualExecCommand": {
+    "sandbox_permissions": "require_escalated",
+    "yield_time_ms": 1000,
+    "initialChunkId": "3be14d",
+    "sessionId": 90331,
+    "completionTool": "write_stdin",
+    "finalChunkId": "d1dc4d",
+    "exitCode": 1
+  },
+  "shellRedirection": {
+    "stdout": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stdout.log",
+    "stderr": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stderr.log"
+  },
+  "receiptProvenance": "Observed actual tool initial/session/final identifiers and completion retained through context compaction. This record transcribes known fields; it does not reconstruct omitted tool wall times or lexical shell quoting. Exact executable, argv, cwd and stream redirections are retained.",
+  "outerStreams": {
+    "outer.stdout.log": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stdout.log",
+      "bytes": 1667,
+      "sha256": "ec2bb1aef0dc8392b42907bec59c782a8ce46b39ddf501779813cc47a39d66eb"
+    },
+    "outer.stderr.log": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "parentCommandOutcome": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/parent-raw/outcome.json",
+    "sha256": "ad5bf44fcaa8ce8617c6659a162008dcc61e120ec3adf81802fdc6bc145c549a",
+    "exitCode": 1,
+    "signal": null
+  },
+  "innerCommandOutcome": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/inner-raw/supervisor.json",
+    "sha256": "937d7d847204a692a3ec17d571fa95ec77a3dae0f9ee227934c70c12ddb0f746",
+    "exitCode": 1,
+    "signal": null
+  },
+  "retry": false,
+  "normalization": false,
+  "successRun": false
+}

@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-30T05:45:56.022853+00:00",
+  "admittedBy": "/root",
+  "canonicalInvocations": 1,
+  "slot": 2,
+  "workerCount": 1,
+  "packet": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/packet-sha256-v7.json",
+  "packetSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+  "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/recipes-v7.json",
+  "recipeSha256": "65c8dc8d30196508c2af090fc675699f5b60b2b5685ce2c657d957610ad0a8bc",
+  "launcherSha256": "ea64c0ef3974ce9be100a800f3c236378c56f8f6c792b89712c9859964921252",
+  "sourceFreezeSha256": "005344d82c3cfeb401da49dc9f70005a3048a47e793f9656462605cead6b3f17",
+  "independentReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7-independent-static-acceptance-v1.md",
+  "independentReviewSha256": "0698396efe8821e6ca94b595f1344627e08dd70c351ae0e791affdd4b7e26502",
+  "progressVerdictGate": {
+    "requiredFirstKillTrigger": "post-enqueue-window",
+    "requiredReason": "wall",
+    "requiredBindingStatus": "bound",
+    "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+    "excluded": [
+      "matching execution receipt including final drain",
+      "resource termination",
+      "observation failure",
+      "unresolved source binding"
+    ],
+    "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+    "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+  },
+  "limits": "Exact one canonical v7 receiving invocation only. Freeze raw outputs and STOP. No retry, generated campaign, production/model/grammar edits, commit or publication. Neighbor receiving gates required before production edits. Resource/observation/total-runtime wall are not qualified progress RED."
+}

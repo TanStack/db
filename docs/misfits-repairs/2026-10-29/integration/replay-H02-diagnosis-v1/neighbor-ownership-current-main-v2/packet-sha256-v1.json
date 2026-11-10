@@ -1,0 +1,75 @@
+{
+  "format": "relative-path bytes SHA256; excludes this manifest only",
+  "members": 17,
+  "bytes": 409843,
+  "files": {
+    "child-process.json": {
+      "bytes": 63,
+      "sha256": "7314f41142a3ba3223a6c148c262e03bfb4227882bfd0c395bbd511c3594dff4"
+    },
+    "final-group-before-cleanup.json": {
+      "bytes": 41,
+      "sha256": "9f8672ce6c15d3ab7bf07cd748b69736016ab4a511b43788f5e00afce15cf940"
+    },
+    "final-group.json": {
+      "bytes": 41,
+      "sha256": "9f8672ce6c15d3ab7bf07cd748b69736016ab4a511b43788f5e00afce15cf940"
+    },
+    "handoff-v1.md": {
+      "bytes": 917,
+      "sha256": "e303d6ec1799d33d56cb52fa1158aab13d161e1bde3593c1382c020160b5f2a3"
+    },
+    "identity-after.json": {
+      "bytes": 101,
+      "sha256": "a6c62eb9e571d2d11744a4dcc5ec25258ecf6137df593612810cb7d2ab803665"
+    },
+    "identity-before.json": {
+      "bytes": 101,
+      "sha256": "a6c62eb9e571d2d11744a4dcc5ec25258ecf6137df593612810cb7d2ab803665"
+    },
+    "invocation.json": {
+      "bytes": 1469,
+      "sha256": "37d80b0ca9c7f1a5ffa14e0bb6599c6f266400df120ffb5b8da25006749d7d84"
+    },
+    "outcome.json": {
+      "bytes": 702,
+      "sha256": "2a8886f729a2b524e55c8301eab978db73d483a031a0d96c1bcdabb49721c1d4"
+    },
+    "parent-process.txt": {
+      "bytes": 236,
+      "sha256": "ef9caad04b74ef9017cd07172413db8b1734071b8a440a4ffdf888f0af9301f4"
+    },
+    "parent.stdout-stderr.log": {
+      "bytes": 646,
+      "sha256": "624151752afa8d0a55447f4091dc2927c2faecd392620e2095706ad16a8c2598"
+    },
+    "result-qualification-v1.json": {
+      "bytes": 2383,
+      "sha256": "6cbae5527e20100689fb804488df0b13226b2c2fcb46f30d19512e1a5713b110"
+    },
+    "root-admission-v1.json": {
+      "bytes": 2113,
+      "sha256": "3bd1b74daa3e9ed8542bd8c79222c62f02c9aacc6bc044e370f97f56875a85c6"
+    },
+    "root-process-absence-v1.json": {
+      "bytes": 386,
+      "sha256": "396271b99fe12ace147afd0249ba4c7a6e7f176a07e335a28c65065ff2f05294"
+    },
+    "source-freeze.json": {
+      "bytes": 399646,
+      "sha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51"
+    },
+    "supplemental-shared-vitest-cache-after-command.json": {
+      "bytes": 708,
+      "sha256": "c111e330eb60d5713ae2927381b406ca52896124a9467776c37c597b106df66b"
+    },
+    "worker.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "worker.stdout.log": {
+      "bytes": 290,
+      "sha256": "fa75a503e8b9c6f0a799ac6bb9f1775c393134e55d56f62ec2a4f283e42fa1ff"
+    }
+  }
+}

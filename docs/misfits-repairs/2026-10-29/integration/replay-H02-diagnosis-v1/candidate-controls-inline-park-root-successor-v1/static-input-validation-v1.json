@@ -1,0 +1,35 @@
+{
+  "programSha256": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+  "sameBytesAsHistoricalProgram": true,
+  "recipeSha256": "75c504604c01c690dda2794de17a12691f598d200bc8dc3368826692c65fa10c",
+  "onlyRecipeChanges": [
+    "bindingProfile",
+    "outputDirectory",
+    "programFile",
+    "sourceFreeze",
+    "sourceFreezeSha256"
+  ],
+  "allOtherRecipeValuesUnchanged": true,
+  "bindingProfileLiteral": "completion-baseline-v1",
+  "sourceFreezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "sourcePacketSha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+  "sourceCopiesMatched": 73,
+  "liveSourceMapsMatched": {
+    "production": 511,
+    "instrument": 50,
+    "shared": 23
+  },
+  "dependencyPayloadFilesMatched": 2544,
+  "outputParentExists": true,
+  "outputLeafAbsent": true,
+  "constructorCalls": 0,
+  "compilerCalls": 0,
+  "modelHistories": 0,
+  "generatedSamples": 0,
+  "testCollection": 0,
+  "receiving": 0,
+  "runtimeMutants": 0,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "runtimeAdmission": false
+}

@@ -1,0 +1,221 @@
+{
+  "novelCandidates": [
+    {
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 0,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "authored",
+        "nonemptyPrior": true,
+        "rankScale": 10,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "path": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b",
+      "status": "exact source and complete canonical history; further identity checks required"
+    }
+  ],
+  "passiveBaseline": {
+    "members": {
+      "h02-progress-11701-6f0e34c7-6dc3-45ba-b081-0ed38e8294fa": {
+        "device": 16777230,
+        "inode": 181384372,
+        "mode": 16832,
+        "mtimeNs": 1793344193883222677
+      },
+      "h02-progress-12597-0bfca332-02d3-4a3e-ae3c-d9020dec2025": {
+        "device": 16777230,
+        "inode": 181592032,
+        "mode": 16832,
+        "mtimeNs": 1793358966066400893
+      },
+      "h02-progress-20633-d384358b-6aa5-482e-8318-de6761eea5e0": {
+        "device": 16777230,
+        "inode": 181252557,
+        "mode": 16832,
+        "mtimeNs": 1793335900392401223
+      },
+      "h02-progress-32195-86505012-ae4c-4926-bdfc-e55322154dbf": {
+        "device": 16777230,
+        "inode": 181466621,
+        "mode": 16832,
+        "mtimeNs": 1793349634573351457
+      },
+      "h02-progress-45951-408d1149-afc1-4d0a-b8c5-f697cd7e1df8": {
+        "device": 16777230,
+        "inode": 181472317,
+        "mode": 16832,
+        "mtimeNs": 1793350037325288841
+      },
+      "h02-progress-49739-8ac54aea-1c29-4636-b0b7-b0e05884c9b0": {
+        "device": 16777230,
+        "inode": 181363120,
+        "mode": 16832,
+        "mtimeNs": 1793342915851693925
+      },
+      "h02-progress-51466-def540e9-34ad-4a83-a641-37d2874417ec": {
+        "device": 16777230,
+        "inode": 181476947,
+        "mode": 16832,
+        "mtimeNs": 1793350263697477047
+      },
+      "h02-progress-52323-4c4ed15c-4fc7-4558-8062-16b3ec66b06f": {
+        "device": 16777230,
+        "inode": 181569047,
+        "mode": 16832,
+        "mtimeNs": 1793356994579448975
+      },
+      "h02-progress-55974-2286865c-3099-4b34-99e7-92360743935c": {
+        "device": 16777230,
+        "inode": 181412484,
+        "mode": 16832,
+        "mtimeNs": 1793345222504047523
+      },
+      "h02-progress-59450-0a415b48-7f9d-4862-aa95-46bfae5ea6bc": {
+        "device": 16777230,
+        "inode": 181416823,
+        "mode": 16832,
+        "mtimeNs": 1793345317518439750
+      },
+      "h02-progress-59795-755286a4-4dcd-4082-ac7f-c5019b206482": {
+        "device": 16777230,
+        "inode": 181481666,
+        "mode": 16832,
+        "mtimeNs": 1793350572703758861
+      },
+      "h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc": {
+        "device": 16777230,
+        "inode": 181420988,
+        "mode": 16832,
+        "mtimeNs": 1793345354615476081
+      },
+      "h02-progress-62146-01e1a0cf-6721-4d20-813b-146c2948b974": {
+        "device": 16777230,
+        "inode": 181605041,
+        "mode": 16832,
+        "mtimeNs": 1793360556922074880
+      },
+      "h02-progress-62146-0c212e4b-d360-4db2-a818-cb3b1f632fd5": {
+        "device": 16777230,
+        "inode": 181607163,
+        "mode": 16832,
+        "mtimeNs": 1793360559277442858
+      },
+      "h02-progress-62146-1cc8d244-859a-46dd-b33d-71fb2463fa89": {
+        "device": 16777230,
+        "inode": 181611409,
+        "mode": 16832,
+        "mtimeNs": 1793360564025028552
+      },
+      "h02-progress-62146-33e8a2db-b575-4f0b-a0d2-c578365de82a": {
+        "device": 16777230,
+        "inode": 181609287,
+        "mode": 16832,
+        "mtimeNs": 1793360561670828029
+      },
+      "h02-progress-62146-7dce3e49-5f2d-470c-8f27-368a9ba5d8a6": {
+        "device": 16777230,
+        "inode": 181617779,
+        "mode": 16832,
+        "mtimeNs": 1793360571091531945
+      },
+      "h02-progress-62146-890b8af0-5113-4131-9f47-6722d5ff95f6": {
+        "device": 16777230,
+        "inode": 181613539,
+        "mode": 16832,
+        "mtimeNs": 1793360566379025034
+      },
+      "h02-progress-62146-d00d92ca-46b8-4495-a5d8-6155960ef3cc": {
+        "device": 16777230,
+        "inode": 181619899,
+        "mode": 16832,
+        "mtimeNs": 1793360573459395183
+      },
+      "h02-progress-62146-e149308a-0c6b-47fc-a217-caa5989142f9": {
+        "device": 16777230,
+        "inode": 181615658,
+        "mode": 16832,
+        "mtimeNs": 1793360568740078915
+      },
+      "h02-progress-66781-157a8912-0d3a-4f1f-8007-dc76944ea611": {
+        "device": 16777230,
+        "inode": 181278053,
+        "mode": 16832,
+        "mtimeNs": 1793339190352709387
+      },
+      "h02-progress-75052-d4614e00-b2d1-4620-a0c7-cc7eebbd6509": {
+        "device": 16777230,
+        "inode": 181263810,
+        "mode": 16832,
+        "mtimeNs": 1793337404639957223
+      },
+      "h02-progress-78277-400166e4-a247-400b-87ca-a6bc9bee6116": {
+        "device": 16777230,
+        "inode": 181236762,
+        "mode": 16877,
+        "mtimeNs": 1793334551279149999
+      },
+      "h02-progress-88883-9900f05d-10e6-4fba-8ae2-1ea2e7e221bc": {
+        "device": 16777230,
+        "inode": 181374470,
+        "mode": 16832,
+        "mtimeNs": 1793343796042301808
+      },
+      "h02-progress-99770-080e45f4-5839-4360-821f-e34f795fbc9e": {
+        "device": 16777230,
+        "inode": 181649289,
+        "mode": 16832,
+        "mtimeNs": 1793361926323830096
+      },
+      "h02-progress-99770-1ebab393-4787-4e62-a9c6-60ca0671b141": {
+        "device": 16777230,
+        "inode": 181655657,
+        "mode": 16832,
+        "mtimeNs": 1793361933539370611
+      },
+      "h02-progress-99770-4520166f-d602-4275-b4a4-273ba745a3a9": {
+        "device": 16777230,
+        "inode": 181659906,
+        "mode": 16832,
+        "mtimeNs": 1793361938362845757
+      },
+      "h02-progress-99770-5cd22b6c-6d58-43e8-8e0a-7d8a9d728ec4": {
+        "device": 16777230,
+        "inode": 181657780,
+        "mode": 16832,
+        "mtimeNs": 1793361935980781855
+      },
+      "h02-progress-99770-612881a1-52be-4fbc-b6fe-7c30d64c4566": {
+        "device": 16777230,
+        "inode": 181653534,
+        "mode": 16832,
+        "mtimeNs": 1793361931188440022
+      },
+      "h02-progress-99770-74a104da-3d53-4dc6-9bf5-a0d2458bdd49": {
+        "device": 16777230,
+        "inode": 181651411,
+        "mode": 16832,
+        "mtimeNs": 1793361928826481636
+      },
+      "h02-progress-99770-7ca6f4c7-66da-4ab3-89a9-519f7eb65c60": {
+        "device": 16777230,
+        "inode": 181662031,
+        "mode": 16832,
+        "mtimeNs": 1793361940715153092
+      },
+      "h02-progress-99770-e8d0d186-a3e5-4ff7-a399-ac2467cd22bf": {
+        "device": 16777230,
+        "inode": 181664152,
+        "mode": 16832,
+        "mtimeNs": 1793361943083938204
+      }
+    },
+    "selectionRequired": "Unique canonical history/program/sourcefreeze and prepared/supervisor/receipt-writer identity agreement; never first new directory or mtime; stop if ambiguous",
+    "status": "PASSIVE PRELAUNCH CANDIDATES ONLY; no artifact selected",
+    "temporaryRoot": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T"
+  },
+  "rule": "Novelty filters candidates only. No directory iteration order or mtime identity inference."
+}

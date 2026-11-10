@@ -1,0 +1,23 @@
+{
+  "method": "offline JSON transformations matching constructCompletionWindowReceivingProgram; no TypeScript/model/production import executed; constructor equality awaits independent review or specifically admitted pure verification",
+  "programs": [
+    {
+      "schedule": "failure-first",
+      "sourceProgram": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/programs/inline-source-failed-peer.json",
+      "sourceProgramSha256": "c5eef9f5c5bdce78790002f0a753684c6dfb3e42fb4b68f0b0b7d5fcbd07e9e7",
+      "program": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-failure-first.json",
+      "programSha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "steps": 7,
+      "epochs": 3
+    },
+    {
+      "schedule": "success",
+      "sourceProgram": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/programs/inline-held-window.json",
+      "sourceProgramSha256": "a4f1a52748536423af49b5f9c346128c64c95ea88f8fa9bbdaff384224aeca14",
+      "program": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-success.json",
+      "programSha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "steps": 7,
+      "epochs": 3
+    }
+  ]
+}

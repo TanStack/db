@@ -1,0 +1,24 @@
+{
+  "actualAuditCommand": "/opt/homebrew/opt/python@3.14/bin/python3.14 -I -B audit-pagination-failed-peer-rss-actual-v1.py",
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1",
+  "actualToolReturn": {
+    "chunk_id": "a77f01",
+    "wall_time_seconds": 0.948642292,
+    "exit_code": 0,
+    "original_token_count": 128
+  },
+  "stdoutFields": {
+    "facts": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/pagination-failed-peer-rss-actual-independent-facts-v1.json",
+    "factsSha256": "f266a2cc48993d2581e6becf23d7edb37f08bd22dfdcc3ab6150c34737c57b6d",
+    "resultAssets": 13,
+    "resultBytes": 37846,
+    "sourcePacket": 105,
+    "currentSourceDriftCount": 4,
+    "uniquePackageRoots": 255,
+    "uniquePayloadFiles": 11974,
+    "errors": []
+  },
+  "auditScript": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-pagination-failed-peer-rss-actual-v1.py",
+  "auditScriptSha256": "53c2a454af40b68fc56f485c164caf3db5cc1fc45656b12446b36bc8f2decf8d",
+  "mode": "Independent static filesystem/hash/source/JSON audit; no bound program imports, product/model/test/native run or process probe."
+}

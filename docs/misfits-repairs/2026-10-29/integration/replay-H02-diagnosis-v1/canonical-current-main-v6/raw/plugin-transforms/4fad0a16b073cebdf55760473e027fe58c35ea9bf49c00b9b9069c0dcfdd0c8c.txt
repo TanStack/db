@@ -1,0 +1,699 @@
+import {
+  filter,
+  groupBy,
+  groupByOperators,
+  map,
+  serializeValue
+} from "@tanstack/db-ivm";
+import {
+  ConditionalSelect,
+  Func,
+  PropRef,
+  getHavingExpression,
+  isExpressionLike
+} from "../ir.js";
+import { isRefProxy } from "../builder/ref-proxy-identity.js";
+import { deepEquals, isTemporal } from "../../utils.js";
+import { normalizedKey } from "../../utils/comparison.js";
+import {
+  AggregateFunctionNotInSelectError,
+  NonAggregateExpressionNotInGroupByError,
+  UnknownHavingExpressionTypeError,
+  UnsupportedAggregateFunctionError
+} from "../../errors.js";
+import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+  getParentContextValue
+} from "../equality-value-identity.js";
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate
+} from "./evaluators.js";
+import {
+  INCLUDES_PUBLIC_KEY,
+  attachRouteMetadata,
+  getNamespacedRouteMetadata,
+  stripInternalCallbackMetadata
+} from "./route-metadata.js";
+const RAW_REPRESENTATIVE = /* @__PURE__ */ Symbol(`raw_group_representative`);
+function createInternalGroupFields(groupCount, selectClause) {
+  const aliases = Object.keys(selectClause ?? {});
+  let prefix = `__tanstack_group_`;
+  while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`;
+  return {
+    virtual: `${prefix}virtual`,
+    route: `${prefix}route`,
+    exactInputs: `${prefix}exact_inputs`,
+    correlationIdentity: `${prefix}correlation_identity`,
+    parentContextIdentity: `${prefix}parent_context_identity`,
+    singleGroup: `${prefix}single_group`,
+    aggregatePrefix: `${prefix}aggregate_`,
+    groupKeys: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_${i}`
+    ),
+    groupValues: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}value_${i}`
+    ),
+    groupKeyRefs: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_ref_${i}`
+    )
+  };
+}
+function createPublicGroupKey(values) {
+  const identities = values.map(getEqualityValueIdentity);
+  if (identities.length === 1) {
+    const identity = identities[0];
+    if (typeof identity === `string` || typeof identity === `number`) {
+      return identity;
+    }
+    if (identity == null || typeof identity !== `object` && typeof identity !== `function` && typeof identity !== `symbol`) {
+      return normalizedKey(typeof identity, String(identity));
+    }
+  }
+  return serializeValue(identities);
+}
+function attachPublicGroupKey(row, publicKey) {
+  const keyedRow = row;
+  keyedRow[INCLUDES_PUBLIC_KEY] = publicKey;
+}
+function createRepresentative(value, identity) {
+  const representative = {
+    key: serializeValue(identity)
+  };
+  Object.defineProperty(representative, RAW_REPRESENTATIVE, { value });
+  return representative;
+}
+function exactValueKey(value, rowKey, valueIdentity) {
+  if (Object.is(value, -0)) return [1, ``, ``];
+  if (value === null || typeof value !== `object`) {
+    return [0, ``, valueIdentity.exact(value)];
+  }
+  return [2, exactObjectTag(value), rowKey];
+}
+function exactObjectTag(value) {
+  if (value instanceof Date) return `Date`;
+  if (isTemporal(value)) return value[Symbol.toStringTag];
+  if (typeof Buffer !== `undefined` && value instanceof Buffer) return `Buffer`;
+  return value instanceof Uint8Array ? `Uint8Array` : `Object`;
+}
+function getRepresentative(values) {
+  let selected;
+  for (const [candidate, multiplicity] of values) {
+    if (multiplicity <= 0) continue;
+    if (selected === void 0 || candidate.key < selected.key) {
+      selected = candidate;
+    }
+  }
+  return selected;
+}
+function unwrapRepresentative(value) {
+  return value?.[RAW_REPRESENTATIVE];
+}
+function addCorrelationRouteIdentityToGroupKey(key, row, mainSource, fields, valueIdentity) {
+  const route = getNamespacedRouteMetadata(row, mainSource);
+  key[fields.correlationIdentity] = valueIdentity.equality(
+    route?.correlationKey
+  );
+  if (route?.parentContext != null) {
+    key[fields.parentContextIdentity] = getParentContextIdentity(
+      route.parentContext
+    );
+  }
+}
+function addCorrelationRouteAggregate(aggregates, mainSource, fields, valueIdentity) {
+  aggregates[fields.route] = {
+    preMap: ([, row]) => {
+      const route = getNamespacedRouteMetadata(row, mainSource);
+      return createRepresentative(route, [
+        valueIdentity.exact(route?.correlationKey),
+        valueIdentity.exact(route?.parentContext)
+      ]);
+    },
+    reduce: getRepresentative,
+    postMap: unwrapRepresentative
+  };
+}
+function getGroupRoute(aggregatedRow, fields) {
+  return aggregatedRow[fields.route];
+}
+function getCorrelationRouteIdentity(aggregatedRow, fields) {
+  return getGroupRoute(aggregatedRow, fields)?.parentContext == null ? aggregatedRow[fields.correlationIdentity] : [
+    aggregatedRow[fields.correlationIdentity],
+    aggregatedRow[fields.parentContextIdentity]
+  ];
+}
+function getGroupEvaluationRow(row, fields, selected = row.$selected) {
+  return {
+    ...getParentContextValue(getGroupRoute(row, fields)?.parentContext),
+    $selected: selected
+  };
+}
+function getRowVirtualMetadata(row) {
+  let hasPendingWrites = false;
+  let hasLocal = false;
+  for (const [alias, value] of Object.entries(row)) {
+    if (alias === `$selected`) continue;
+    if (value === null || typeof value !== `object`) continue;
+    const asRecord = value;
+    const hasPendingWritesProp = `$hasPendingWrites` in asRecord;
+    const hasOriginProp = `$origin` in asRecord;
+    if (!hasPendingWritesProp && !hasOriginProp) {
+      continue;
+    }
+    if (asRecord.$hasPendingWrites === true) {
+      hasPendingWrites = true;
+    }
+    if (asRecord.$origin === `local`) {
+      hasLocal = true;
+    }
+  }
+  return {
+    hasPendingWrites,
+    hasLocal
+  };
+}
+export function processGroupBy(pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses, selectClause, fnHavingClauses, aggregateCollectionId, mainSource, sanitizeCallbackRows = false) {
+  const fields = createInternalGroupFields(groupByClause.length, selectClause);
+  const virtualAggregates = {
+    [fields.virtual]: {
+      preMap: ([, row]) => getRowVirtualMetadata(row),
+      reduce: (values) => {
+        const group = {
+          hasPendingWrites: false,
+          hasLocal: false
+        };
+        for (const [metadata, multiplicity] of values) {
+          if (multiplicity <= 0) continue;
+          if (metadata.hasPendingWrites) group.hasPendingWrites = true;
+          if (metadata.hasLocal) group.hasLocal = true;
+        }
+        return group;
+      }
+    }
+  };
+  if (mainSource) {
+    addCorrelationRouteAggregate(
+      virtualAggregates,
+      mainSource,
+      fields,
+      valueIdentity
+    );
+  }
+  const singleGroup = groupByClause.length === 0;
+  if (selectClause) {
+    for (const [alias, expr] of Object.entries(selectClause)) {
+      if (lacksGroupValue(alias, expr, isSourceRef, groupByClause))
+        throw new NonAggregateExpressionNotInGroupByError(
+          alias.startsWith(SPREAD_SENTINEL) ? `...${spreadPath(alias)}` : alias
+        );
+    }
+  }
+  const compiledGroupByExpressions = groupByClause.map(
+    (e) => compileExpression(e)
+  );
+  const keyExtractor = ([, row]) => {
+    const namespacedRow = singleGroup ? row : { ...row };
+    if (!singleGroup) delete namespacedRow.$selected;
+    const key = singleGroup ? { [fields.singleGroup]: true } : {};
+    for (let i = 0; i < groupByClause.length; i++) {
+      const compiledExpr = compiledGroupByExpressions[i];
+      const value = compiledExpr(namespacedRow);
+      key[fields.groupKeys[i]] = valueIdentity.equality(value);
+    }
+    if (mainSource) {
+      addCorrelationRouteIdentityToGroupKey(
+        key,
+        row,
+        mainSource,
+        fields,
+        valueIdentity
+      );
+    }
+    return key;
+  };
+  const aggregates = virtualAggregates;
+  const wrappedAggExprs = {};
+  const aggCounter = { value: 0 };
+  for (let i = 0; i < compiledGroupByExpressions.length; i++) {
+    const compiledExpr = compiledGroupByExpressions[i];
+    aggregates[fields.groupValues[i]] = {
+      preMap: ([rowKey, row]) => {
+        const value = compiledExpr(row);
+        return createRepresentative(
+          value,
+          exactValueKey(value, rowKey, valueIdentity)
+        );
+      },
+      reduce: getRepresentative,
+      postMap: unwrapRepresentative
+    };
+  }
+  const exactInputs = [];
+  const addAggregate = (alias, aggExpr) => {
+    aggregates[alias] = getAggregateFunction(aggExpr);
+    const name = aggExpr.name.toLowerCase();
+    if (name === `min` || name === `max`) {
+      exactInputs.push(minMaxInput(compileExpression(aggExpr.args[0])));
+    }
+  };
+  if (selectClause) {
+    for (const [alias, expr] of Object.entries(selectClause)) {
+      if (expr.type === `agg`) {
+        addAggregate(alias, expr);
+      } else {
+        const { transformed, extracted } = extractAndReplaceAggregates(
+          expr,
+          aggCounter,
+          fields.aggregatePrefix
+        );
+        for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
+          addAggregate(syntheticAlias, aggExpr);
+        }
+        wrappedAggExprs[alias] = compileGroupedSelectValue(
+          replaceGroupByRefsInSelectValue(
+            transformed,
+            groupByClause,
+            fields.groupKeyRefs
+          )
+        );
+      }
+    }
+  }
+  if (exactInputs.length > 0) {
+    aggregates[fields.exactInputs] = {
+      preMap: (entry) => exactInputs.map(
+        (input) => exactValueKey(input(entry), entry[0], valueIdentity)
+      ),
+      reduce: () => void 0
+    };
+  }
+  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates));
+  pipeline = pipeline.pipe(
+    map(([, aggregatedRow]) => {
+      const finalResults = {};
+      if (selectClause) {
+        for (const [alias, expr] of Object.entries(selectClause)) {
+          finalResults[alias] = expr.type === `agg` ? aggregatedRow[alias] : void 0;
+        }
+        evaluateWrappedAggregates(
+          finalResults,
+          aggregatedRow,
+          wrappedAggExprs,
+          fields
+        );
+      } else {
+        for (let i = 0; i < groupByClause.length; i++) {
+          finalResults[`__key_${i}`] = aggregatedRow[fields.groupValues[i]];
+        }
+      }
+      const route = mainSource ? getGroupRoute(aggregatedRow, fields) : void 0;
+      const correlationKey = route?.correlationKey;
+      const correlationRoute = mainSource ? getCorrelationRouteIdentity(aggregatedRow, fields) : void 0;
+      const keyParts = [];
+      const publicKeyParts = [];
+      for (let i = 0; i < groupByClause.length; i++) {
+        keyParts.push(aggregatedRow[fields.groupKeys[i]]);
+        publicKeyParts.push(aggregatedRow[fields.groupValues[i]]);
+      }
+      if (correlationRoute !== void 0) {
+        keyParts.push(correlationRoute);
+      }
+      const finalKey = singleGroup ? correlationRoute !== void 0 ? `single_group_${serializeValue(correlationRoute)}` : `single_group` : keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts);
+      const publicKey = singleGroup ? `single_group` : createPublicGroupKey(publicKeyParts);
+      const resultRow = {
+        ...aggregatedRow,
+        $selected: finalResults
+      };
+      const virtual = aggregatedRow[fields.virtual];
+      resultRow.$hasPendingWrites = virtual?.hasPendingWrites ?? false;
+      resultRow.$origin = virtual?.hasLocal ? `local` : `remote`;
+      resultRow.$key = publicKey;
+      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId;
+      if (mainSource && correlationKey !== void 0) {
+        attachPublicGroupKey(resultRow, publicKey);
+        attachRouteMetadata(
+          resultRow,
+          correlationKey,
+          route?.parentContext ?? null
+        );
+      }
+      return [mainSource ? finalKey : publicKey, resultRow];
+    })
+  );
+  if (havingClauses && havingClauses.length > 0) {
+    for (const havingClause of havingClauses) {
+      const havingExpression = getHavingExpression(havingClause);
+      if (lacksGroupValue(``, havingExpression, isSourceRef, groupByClause))
+        throw new NonAggregateExpressionNotInGroupByError(`HAVING`);
+      const transformedHavingClause = replaceGroupByRefsInExpression(
+        replaceAggregatesByRefs(havingExpression, selectClause || {}),
+        groupByClause,
+        fields.groupKeyRefs
+      );
+      const compiledHaving = compileExpression(transformedHavingClause);
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          let selected = row.$selected;
+          if (fields.groupKeyRefs.length > 0) {
+            const withKeys = { ...selected };
+            fields.groupKeyRefs.forEach((ref, i) => {
+              withKeys[ref] = row[fields.groupValues[i]];
+            });
+            selected = withKeys;
+          }
+          const namespacedRow = getGroupEvaluationRow(row, fields, selected);
+          const result = compiledHaving(namespacedRow);
+          return singleGroup ? toBooleanPredicate(result) : result;
+        })
+      );
+    }
+  }
+  if (fnHavingClauses && fnHavingClauses.length > 0) {
+    for (const fnHaving of fnHavingClauses) {
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          const namespacedRow = getGroupEvaluationRow(row, fields);
+          const callbackRow = sanitizeCallbackRows ? stripInternalCallbackMetadata(namespacedRow) : namespacedRow;
+          return toBooleanPredicate(fnHaving(callbackRow));
+        })
+      );
+    }
+  }
+  return pipeline;
+}
+const SPREAD_SENTINEL = `__SPREAD_SENTINEL__`;
+function spreadPath(key) {
+  const rest = key.slice(SPREAD_SENTINEL.length);
+  const idIndex = rest.lastIndexOf(`__`);
+  return idIndex >= 0 ? rest.slice(0, idIndex) : rest;
+}
+function lacksGroupValue(key, value, isSourceRef, groupKeys) {
+  if (key.startsWith(SPREAD_SENTINEL)) return true;
+  if (groupKeys.some((groupKey) => expressionsEqual(value, groupKey)))
+    return false;
+  if (isConditionalSelect(value))
+    return value.branches.some(
+      (branch) => lacksGroupValue(``, branch.condition, isSourceRef, groupKeys) || lacksGroupValue(``, branch.value, isSourceRef, groupKeys)
+    ) || lacksGroupValue(``, value.defaultValue, isSourceRef, groupKeys);
+  if (isExpressionLike(value)) {
+    const node = value;
+    if (node.type === `ref`) return isSourceRef(node);
+    if (node.type === `func`)
+      return node.args.some(
+        (arg) => lacksGroupValue(``, arg, isSourceRef, groupKeys)
+      );
+    return false;
+  }
+  if (!isNestedSelectObject(value)) return false;
+  return Object.entries(value).some(
+    ([childKey, child]) => lacksGroupValue(childKey, child, isSourceRef, groupKeys)
+  );
+}
+function expressionsEqual(expr1, expr2) {
+  if (!expr1 || !expr2) return false;
+  if (expr1.type !== expr2.type) return false;
+  switch (expr1.type) {
+    case `ref`:
+      if (expr1.bindingId !== expr2.bindingId) return false;
+      if (!expr1.path || !expr2.path) return false;
+      if (expr1.path.length !== expr2.path.length) return false;
+      return expr1.path.every(
+        (segment, i) => segment === expr2.path[i]
+      );
+    case `val`:
+      return typeof expr1.value === `number` ? Object.is(expr1.value, expr2.value) : deepEquals(expr1.value, expr2.value);
+    case `func`:
+      return expr1.name === expr2.name && expr1.args?.length === expr2.args?.length && (expr1.args || []).every(
+        (arg, i) => expressionsEqual(arg, expr2.args[i])
+      );
+    case `agg`:
+      return expr1.name === expr2.name && expr1.args?.length === expr2.args?.length && (expr1.args || []).every(
+        (arg, i) => expressionsEqual(arg, expr2.args[i])
+      );
+    default:
+      return false;
+  }
+}
+function minMaxInput(compiledExpr) {
+  return ([, namespacedRow]) => {
+    const value = compiledExpr(namespacedRow);
+    if (typeof value === `number` || typeof value === `string` || typeof value === `bigint` || value instanceof Date) {
+      return value;
+    }
+    return value != null ? Number(value) : 0;
+  };
+}
+function getAggregateFunction(aggExpr) {
+  const compiledExpr = compileExpression(aggExpr.args[0]);
+  const valueExtractor = ([, namespacedRow]) => {
+    const value = compiledExpr(namespacedRow);
+    if (typeof value === `number`) {
+      return value;
+    }
+    return value != null ? Number(value) : 0;
+  };
+  const valueExtractorForMinMax = minMaxInput(compiledExpr);
+  const rawValueExtractor = ([, namespacedRow]) => {
+    return compiledExpr(namespacedRow);
+  };
+  const { sum, count, avg, min, max } = groupByOperators;
+  switch (aggExpr.name.toLowerCase()) {
+    case `sum`:
+      return sum(valueExtractor);
+    case `count`:
+      return count(rawValueExtractor);
+    case `avg`:
+      return avg(valueExtractor);
+    case `min`:
+      return min(valueExtractorForMinMax);
+    case `max`:
+      return max(valueExtractorForMinMax);
+    default:
+      throw new UnsupportedAggregateFunctionError(aggExpr.name);
+  }
+}
+export function replaceAggregatesByRefs(havingExpr, selectClause, resultAlias = `$selected`) {
+  switch (havingExpr.type) {
+    case `agg`: {
+      const aggExpr = havingExpr;
+      for (const [alias, selectExpr] of Object.entries(selectClause)) {
+        if (selectExpr.type === `agg` && aggregatesEqual(aggExpr, selectExpr)) {
+          return new PropRef([resultAlias, alias], resultAlias);
+        }
+      }
+      throw new AggregateFunctionNotInSelectError(aggExpr.name);
+    }
+    case `func`: {
+      const funcExpr = havingExpr;
+      const transformedArgs = funcExpr.args.map(
+        (arg) => replaceAggregatesByRefs(arg, selectClause)
+      );
+      return new Func(funcExpr.name, transformedArgs);
+    }
+    case `ref`:
+      return havingExpr;
+    case `val`:
+      return havingExpr;
+    default:
+      throw new UnknownHavingExpressionTypeError(havingExpr.type);
+  }
+}
+function evaluateWrappedAggregates(finalResults, aggregatedRow, wrappedAggExprs, fields) {
+  for (const key of Object.keys(aggregatedRow)) {
+    if (key.startsWith(fields.aggregatePrefix)) {
+      finalResults[key] = aggregatedRow[key];
+    }
+  }
+  for (let i = 0; i < fields.groupKeyRefs.length; i++) {
+    finalResults[fields.groupKeyRefs[i]] = aggregatedRow[fields.groupValues[i]];
+  }
+  const evaluationRow = getGroupEvaluationRow(
+    aggregatedRow,
+    fields,
+    finalResults
+  );
+  for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
+    finalResults[alias] = evaluator(evaluationRow);
+  }
+  for (const key of Object.keys(finalResults)) {
+    if (key.startsWith(fields.aggregatePrefix) || fields.groupKeyRefs.includes(key)) {
+      delete finalResults[key];
+    }
+  }
+}
+function extractAndReplaceAggregates(expr, counter, aggregatePrefix) {
+  if (expr.type === `agg`) {
+    const alias = `${aggregatePrefix}${counter.value++}`;
+    return {
+      transformed: new PropRef([`$selected`, alias], `$selected`),
+      extracted: { [alias]: expr }
+    };
+  }
+  if (expr.type === `func`) {
+    const allExtracted = {};
+    const newArgs = expr.args.map((arg) => {
+      const result = extractAndReplaceAggregates(arg, counter, aggregatePrefix);
+      Object.assign(allExtracted, result.extracted);
+      return result.transformed;
+    });
+    return {
+      transformed: new Func(expr.name, newArgs),
+      extracted: allExtracted
+    };
+  }
+  if (isConditionalSelect(expr)) {
+    const allExtracted = {};
+    const branches = expr.branches.map((branch) => {
+      const condition = extractAndReplaceAggregates(
+        branch.condition,
+        counter,
+        aggregatePrefix
+      );
+      const value = extractAndReplaceAggregates(
+        branch.value,
+        counter,
+        aggregatePrefix
+      );
+      Object.assign(allExtracted, condition.extracted, value.extracted);
+      return {
+        condition: condition.transformed,
+        value: value.transformed
+      };
+    });
+    const defaultValue = expr.defaultValue === void 0 ? void 0 : extractAndReplaceAggregates(
+      expr.defaultValue,
+      counter,
+      aggregatePrefix
+    );
+    if (defaultValue) {
+      Object.assign(allExtracted, defaultValue.extracted);
+    }
+    return {
+      transformed: new ConditionalSelect(branches, defaultValue?.transformed),
+      extracted: allExtracted
+    };
+  }
+  if (isNestedSelectObject(expr)) {
+    const allExtracted = {};
+    const transformed = {};
+    for (const [key, value] of Object.entries(expr)) {
+      const result = extractAndReplaceAggregates(
+        value,
+        counter,
+        aggregatePrefix
+      );
+      Object.assign(allExtracted, result.extracted);
+      transformed[key] = result.transformed;
+    }
+    return { transformed, extracted: allExtracted };
+  }
+  return { transformed: expr, extracted: {} };
+}
+function replaceGroupByRefsInSelectValue(value, groupByClause, groupKeyRefs) {
+  if (isConditionalSelect(value)) {
+    return new ConditionalSelect(
+      value.branches.map((branch) => ({
+        condition: replaceGroupByRefsInExpression(
+          branch.condition,
+          groupByClause,
+          groupKeyRefs
+        ),
+        value: replaceGroupByRefsInSelectValue(
+          branch.value,
+          groupByClause,
+          groupKeyRefs
+        )
+      })),
+      value.defaultValue === void 0 ? void 0 : replaceGroupByRefsInSelectValue(
+        value.defaultValue,
+        groupByClause,
+        groupKeyRefs
+      )
+    );
+  }
+  if (isNestedSelectObject(value)) {
+    const transformed = {};
+    for (const [key, entry] of Object.entries(value)) {
+      transformed[key] = replaceGroupByRefsInSelectValue(
+        entry,
+        groupByClause,
+        groupKeyRefs
+      );
+    }
+    return transformed;
+  }
+  if (!isExpressionLike(value)) {
+    return value;
+  }
+  if (value.type === `includesSubquery` || value.type === `agg`) {
+    return value;
+  }
+  return replaceGroupByRefsInExpression(value, groupByClause, groupKeyRefs);
+}
+function replaceGroupByRefsInExpression(expr, groupByClause, groupKeyRefs) {
+  const groupIndex = groupByClause.findIndex(
+    (groupExpr) => expressionsEqual(expr, groupExpr)
+  );
+  if (groupIndex !== -1)
+    return new PropRef([`$selected`, groupKeyRefs[groupIndex]], `$selected`);
+  if (expr.type === `func`) {
+    return new Func(
+      expr.name,
+      expr.args.map(
+        (arg) => replaceGroupByRefsInExpression(arg, groupByClause, groupKeyRefs)
+      )
+    );
+  }
+  return expr;
+}
+function compileGroupedSelectValue(value) {
+  if (isConditionalSelect(value)) {
+    return compileGroupedConditionalSelect(value);
+  }
+  if (isNestedSelectObject(value)) {
+    return compileGroupedSelectObject(value);
+  }
+  if (!isExpressionLike(value)) {
+    return () => value;
+  }
+  return compileExpression(value);
+}
+function compileGroupedSelectObject(obj) {
+  const entries = Object.entries(obj).map(
+    ([key, value]) => [key, compileGroupedSelectValue(value)]
+  );
+  return (row) => {
+    const result = {};
+    for (const [key, value] of entries) result[key] = value(row);
+    return result;
+  };
+}
+function compileGroupedConditionalSelect(conditional) {
+  const branches = conditional.branches.map((branch) => ({
+    condition: compileExpression(branch.condition),
+    value: compileGroupedSelectValue(branch.value)
+  }));
+  const defaultValue = conditional.defaultValue === void 0 ? void 0 : compileGroupedSelectValue(conditional.defaultValue);
+  return (row) => {
+    for (const branch of branches) {
+      if (isCaseWhenConditionTrue(branch.condition(row))) {
+        return branch.value(row);
+      }
+    }
+    return defaultValue !== void 0 ? defaultValue(row) : null;
+  };
+}
+function isNestedSelectObject(value) {
+  return value != null && typeof value === `object` && !Array.isArray(value) && !isRefProxy(value) && !isExpressionLike(value);
+}
+function isConditionalSelect(value) {
+  return value instanceof ConditionalSelect || value != null && typeof value === `object` && value.type === `conditionalSelect`;
+}
+function aggregatesEqual(agg1, agg2) {
+  return agg1.name === agg2.name && agg1.args.length === agg2.args.length && agg1.args.every((arg, i) => expressionsEqual(arg, agg2.args[i]));
+}

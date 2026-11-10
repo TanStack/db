@@ -1,0 +1,17 @@
+{
+  "frozen-own-source-v3/records/final-source-identity-check-v3.json": "b5c7d54f3795f5589567a46ec15aa1bfaa51de6708d32ad7174821df9247d79a",
+  "frozen-own-source-v3/records/own-packet-sha256-v2.json": "e06189395339c18560b3196c1e172489f005de91db96b6a51d1aad7bcde11d84",
+  "frozen-own-source-v3/records/own-source-freeze-v2.json": "f5a06b11f530bba5891bfe875fb31919b96a7563c5280e4907e03057d0d72bbc",
+  "frozen-own-source-v3/records/own-static-pure-checks-v3.json": "ff70b6bdbf4ca7d72646d0b6dd9b74f4fe47d13105c823eb41cccfdc64232e7b",
+  "frozen-own-source-v3/records/own-v2-to-v3.diff": "5f625bee0eed65b6bccd6864e7d1465a6948fe5b754f13cae04d2c5b198fc4dc",
+  "frozen-own-source-v3/records/preserved-original-semantics.json": "2aaa76475c065cc99ae4e31351f5d47f1d656ede0810461332ff7a76d9d95073",
+  "frozen-own-source-v3/records/pure-checker-calibration-v3.json": "783680c3d453273a8da58319ac8893c0dddbfecb058e37a36d47269a2349fe38",
+  "frozen-own-source-v3/records/queued-progress-vs-completion-scope-v1.md": "aac6d0c03874595622e5e170cdb502e0cb9e0ff611c72e8588d35bd0ffb5b132",
+  "frozen-own-source-v3/records/source-report-v3.md": "40e10c2160fa5a5bf824af266dce2537cca288ca13c40fe3d5c55639f4eae91a",
+  "frozen-own-source-v3/sources/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+  "frozen-own-source-v3/sources/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts": "5e1902e7ea02b8f11521c8ef5cc5b63c426fe3b92b50174e5c755be9b3c892fc",
+  "frozen-own-source-v3/sources/packages/query-db-collection/tests/queued-answer-completion-oracle.ts": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec",
+  "frozen-own-source-v3/sources/packages/query-db-collection/tests/queued-answer-progress-oracle.ts": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e",
+  "frozen-own-source-v3/sources/scripts/h02-progress/completion-checker-controls.ts": "e65fa3ed827b1c1eb3db2da64dc9328a09b9eb83db89a428c5f6f523317522de",
+  "own-source-freeze-v3.json": "ac3dd9a3f35e6e6118f4daefc32b496a199edea121cafa6ffc11b327f6d04705"
+}

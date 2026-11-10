@@ -1,0 +1,36 @@
+{
+  "originals": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/packet-sha256-v3.json": {
+      "sha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+      "entriesChecked": 275
+    },
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/input-packet-sha256-v1.json": {
+      "sha256": "da70aad067b328d48e400beda1bacb14b34cebbafee4c3cae2dd4ddcbfce36e5",
+      "entriesChecked": 16
+    },
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/input-packet-sha256-v1.json": {
+      "sha256": "0365e49182e79b8f6f7a2592bfacfd0c029699691a20cf5c28f5dc701344d4d9",
+      "entriesChecked": 53
+    },
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-held-window-result-freeze-v1.json": {
+      "sha256": "578b8ca87c283a0767fa3783f2d46f3e67dac59786d30ef642dad36c26b4d485",
+      "resultAssetsChecked": 1975
+    },
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-source-failed-peer-result-freeze-v1.json": {
+      "sha256": "029a8eb1cf46e59d84cdf6d52cb7f56837b962b829922672e76630df26b49957",
+      "resultAssetsChecked": 1975
+    }
+  },
+  "sourceEntriesChecked": 584,
+  "unchangedProduction": 511,
+  "changed": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "before": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+      "after": "9237bde4da2d85ba933d3eee1ad11929c747196c7d3d5580a3b2cd2bad08cc3c"
+    }
+  ],
+  "unchangedOtherSources": 583,
+  "allFrozenSourceCopies": 73,
+  "noNativeRuntime": true
+}

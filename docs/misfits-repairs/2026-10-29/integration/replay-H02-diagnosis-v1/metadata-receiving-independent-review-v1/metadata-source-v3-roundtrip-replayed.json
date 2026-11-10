@@ -1,0 +1,1448 @@
+{
+  "status": "source/static/pure calibration only; no new native registration or receiving execution",
+  "authority": "metadata-update-receiving-root-classification-v2.json",
+  "binding": {
+    "rawReceiptsSha256": "3258c0c7cd4a60e31c8119bd034677bcec1b6f40da68c0ed773da2e08accbce6",
+    "rawReceipts": 206,
+    "oldSupervisorSha256": "49a221be1f01db107b1d85218a48fdc3a30c3a6b233e5b119ec61925f1675772",
+    "newSupervisorSha256": "97aa5a63419a33d7d220dde14e81e5227f3e04a010da7a023ecc915777e09efc",
+    "newSelectorSha256": "ccf2e05f14d280839eaa718a1cdbc9c89a003c3b532688c9f5b7b81111bd8735",
+    "exactParentRunSourceSha256": "1783fd17c78fbb6c9d6fbd7d6ce094535f7bb3d2841627a6feb531c85312432a",
+    "parentRuntimeModuleSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+    "oldSelectedReceipts": 21,
+    "newSelectedReceipts": 23
+  },
+  "historical": {
+    "accepted": false,
+    "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+    "stats": {
+      "beginHistory": 1,
+      "observed": 206,
+      "observationErrors": [],
+      "outcomeStarted": 1,
+      "outcomePassed": 0,
+      "finishAttempted": 0,
+      "finishPassed": 0
+    },
+    "states": [
+      "initial-root",
+      "initial-downstream",
+      "nonempty-prior",
+      "reload-started",
+      "held-root",
+      "held-downstream",
+      "positive-held-provider-read",
+      "completed-enqueue",
+      "answer-executed",
+      "callback-root",
+      "callback-downstream",
+      "selected-upstream-metadata",
+      "final-root",
+      "final-downstream",
+      "messages-root",
+      "messages-downstream",
+      "reload-baseline-compared",
+      "followup-started",
+      "source-applied",
+      "followup-acquisitions-settled",
+      "followup-update-root",
+      "followup-previous-value-root",
+      "followup-retained-key-root",
+      "followup-messages-root",
+      "followup-final-root",
+      "followup-update-downstream",
+      "followup-previous-value-downstream",
+      "followup-retained-key-downstream",
+      "followup-messages-downstream",
+      "followup-final-downstream",
+      "worker-cleaned"
+    ]
+  },
+  "corrected": {
+    "accepted": true,
+    "stats": {
+      "beginHistory": 1,
+      "observed": 206,
+      "observationErrors": [],
+      "outcomeStarted": 1,
+      "outcomePassed": 1,
+      "finishAttempted": 1,
+      "finishPassed": 1
+    },
+    "states": [
+      "initial-root",
+      "initial-downstream",
+      "nonempty-prior",
+      "reload-started",
+      "held-root",
+      "held-downstream",
+      "positive-held-provider-read",
+      "completed-enqueue",
+      "answer-executed",
+      "callback-root",
+      "callback-downstream",
+      "selected-upstream-metadata",
+      "final-root",
+      "final-downstream",
+      "messages-root",
+      "messages-downstream",
+      "reload-baseline-compared",
+      "followup-started",
+      "source-applied",
+      "followup-acquisitions-settled",
+      "followup-update-root",
+      "followup-previous-value-root",
+      "followup-retained-key-root",
+      "followup-messages-root",
+      "followup-final-root",
+      "followup-update-downstream",
+      "followup-previous-value-downstream",
+      "followup-retained-key-downstream",
+      "followup-messages-downstream",
+      "followup-final-downstream",
+      "worker-cleaned"
+    ]
+  },
+  "rejected": 50,
+  "faults": [
+    {
+      "name": "root/omitted-callback",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:192:85)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:182:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/missing-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n-     previousValue: {\n-       '$collectionId': 'live-query-1',\n-       '$hasPendingWrites': false,\n-       '$key': '[3,null]',\n-       '$origin': 'remote',\n-       id: 3,\n-       markers: [],\n-       rank: 30\n-     },\n      type: 'update',\n      value: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:183:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n-     previousValue: {\n-       '$collectionId': 'live-query-1',\n-       '$hasPendingWrites': false,\n-       '$key': '[3,null]',\n-       '$origin': 'remote',\n-       id: 3,\n-       markers: [],\n-       rank: 30\n-     },\n      type: 'update',\n      value: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/current-row-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    id: 3,\n    markers: [],\n+   rank: 35\n-   rank: 30\n  }\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:227:97)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:184:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    id: 3,\n    markers: [],\n+   rank: 35\n-   rank: 30\n  }\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/stale-prior-window-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   id: 4,\n-   id: 3,\n    markers: [],\n+   rank: 40\n-   rank: 30\n  }\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:227:97)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:187:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   id: 4,\n-   id: 3,\n    markers: [],\n+   rank: 40\n-   rank: 30\n  }\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/wrong-previousValue-$key",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n+       '$key': 'wrong',\n-       '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n      },\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n+       '$key': 'wrong',\n-       '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n      },\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/wrong-previousValue-$collectionId",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n+       '$collectionId': 'wrong',\n-       '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n+       '$collectionId': 'wrong',\n-       '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/wrong-previousValue-$hasPendingWrites",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n+       '$hasPendingWrites': 'wrong',\n-       '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n+       '$hasPendingWrites': 'wrong',\n-       '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/wrong-previousValue-$origin",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n+       '$origin': 'wrong',\n-       '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n      },\n      type: 'update',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-1',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n+       '$origin': 'wrong',\n-       '$origin': 'remote',\n        id: 3,\n        markers: [],\n        rank: 30\n      },\n      type: 'update',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/stale-followup-publication",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at checkProgressValue (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:139:81)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:169:9)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:193:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/stale-callback-read",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:234:81)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:197:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(value > expected)\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "root/wrong-reload-baseline",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at checkProgressValue (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:139:81)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:169:9)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:198:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up precedes the compared reload baseline",
+          "Error: follow-up source acceptance is invalid",
+          "Error: follow-up source receipt did not apply once",
+          "Error: follow-up acquisition did not reach applied settlement",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up output/acquisition cut is unsettled",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: reload baseline publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/omitted-callback",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:192:85)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:17:17)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:182:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/missing-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n-     previousValue: {\n-       '$collectionId': 'live-query-2',\n-       '$hasPendingWrites': false,\n-       '$key': '[3,null]',\n-       '$origin': 'remote',\n-       id: 3,\n-       markers: [],\n-       observedCollectionId: 'live-query-1',\n-       observedKey: '[3,null]',\n-       observedOrigin: 'remote',\n-       observedPending: false,\n-       rank: 30\n-     },\n      type: 'update',\n      value: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:183:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n-     previousValue: {\n-       '$collectionId': 'live-query-2',\n-       '$hasPendingWrites': false,\n-       '$key': '[3,null]',\n-       '$origin': 'remote',\n-       id: 3,\n-       markers: [],\n-       observedCollectionId: 'live-query-1',\n-       observedKey: '[3,null]',\n-       observedOrigin: 'remote',\n-       observedPending: false,\n-       rank: 30\n-     },\n      type: 'update',\n      value: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/current-row-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    id: 3,\n    markers: [],\n+   rank: 35\n-   rank: 30\n  }\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:227:97)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:13:17)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:184:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    id: 3,\n    markers: [],\n+   rank: 35\n-   rank: 30\n  }\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/stale-prior-window-previousValue",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   id: 4,\n-   id: 3,\n    markers: [],\n+   rank: 40\n-   rank: 30\n  }\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:227:97)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:13:17)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:187:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   id: 4,\n-   id: 3,\n    markers: [],\n+   rank: 40\n-   rank: 30\n  }\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/wrong-previousValue-$key",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n+       '$key': 'wrong',\n-       '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n        observedKey: '[3,null]',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n+       '$key': 'wrong',\n-       '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n        observedKey: '[3,null]',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/wrong-previousValue-$collectionId",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n+       '$collectionId': 'wrong',\n-       '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n+       '$collectionId': 'wrong',\n-       '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/wrong-previousValue-$hasPendingWrites",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n+       '$hasPendingWrites': 'wrong',\n-       '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n+       '$hasPendingWrites': 'wrong',\n-       '$hasPendingWrites': false,\n        '$key': '[3,null]',\n        '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/wrong-previousValue-$origin",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n+       '$origin': 'wrong',\n-       '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n        observedKey: '[3,null]',\n        observedOrigin: 'remote',\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkMetadataPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:92:83)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:359:90)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:192:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      key: '[3,null]',\n      previousValue: {\n        '$collectionId': 'live-query-2',\n        '$hasPendingWrites': false,\n        '$key': '[3,null]',\n+       '$origin': 'wrong',\n-       '$origin': 'remote',\n        id: 3,\n        markers: [],\n        observedCollectionId: 'live-query-1',\n        observedKey: '[3,null]',\n        observedOrigin: 'remote',\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/stale-followup-publication",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at checkProgressValue (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:142:85)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:169:9)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:193:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/stale-callback-read",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:234:81)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:13:17)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:197:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(value > expected)\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "downstream/wrong-reload-baseline",
+      "error": "Error: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n\n    at Object.toEqual (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:33:33)\n    at checkReplayPublication (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:20:41)\n    at checkProgressValue (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:142:85)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:169:9)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:198:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up precedes the compared reload baseline",
+          "Error: follow-up source acceptance is invalid",
+          "Error: follow-up source receipt did not apply once",
+          "Error: follow-up acquisition did not reach applied settlement",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up output/acquisition cut is unsettled",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: reload baseline publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/final-publication",
+      "error": "Error: Error: follow-up precedes the compared reload baseline\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:177:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:11:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: follow-up precedes the compared reload baseline",
+          "Error: follow-up source acceptance is invalid",
+          "Error: follow-up source receipt did not apply once",
+          "Error: follow-up acquisition did not reach applied settlement",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up output/acquisition cut is unsettled",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: reload baseline publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/followup-start",
+      "error": "Error: Error: follow-up source acceptance is invalid\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:249:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: follow-up source acceptance is invalid",
+          "Error: follow-up source receipt did not apply once",
+          "Error: follow-up acquisition did not reach applied settlement",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+          "Error: follow-up output/acquisition cut is unsettled",
+          "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 30\n-     rank: 35\n    }\n  ]\n",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/followup-publication",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/followup-source-accepted",
+      "error": "Error: Error: follow-up source receipt did not apply once\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:254:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: follow-up source receipt did not apply once",
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/followup-source-applied",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/followup-settled",
+      "error": "Error: Error: metadata final observation stage is invalid\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:345:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:210:9",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "omitted/worker-cleaned",
+      "error": "Error: metadata worker cleanup was not observed",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 205,
+        "observationErrors": [],
+        "outcomeStarted": 1,
+        "outcomePassed": 1,
+        "finishAttempted": 1,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "entire-followup-omitted",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:211:7",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 182,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "followup-and-cleanup-omitted-without-reach-assertion",
+      "error": "Error: declared follow-up publication was not compared",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 161,
+        "observationErrors": [],
+        "outcomeStarted": 1,
+        "outcomePassed": 1,
+        "finishAttempted": 1,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "postrun-only-stale-followup-callback",
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "postrun-only-omitted-followup-start",
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    {\n      id: 3,\n      markers: [],\n+     rank: 35\n-     rank: 30\n    }\n  ]\n",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "postrun-only-missing-final-checkpoint",
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n\nfalse !== true\n",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 206,
+        "observationErrors": [],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/default/2/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 12,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/default/2/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 20,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/default/0/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 12,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/default/0/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 18,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/authored/2/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 12,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/authored/2/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 20,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/authored/0/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 12,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/scope/authored/0/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 18,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/default/2/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 13,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/default/2/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 21,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/default/0/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 13,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/default/0/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 19,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/authored/2/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 13,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/authored/2/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 21,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/authored/0/omitted-stage",
+      "error": "Error: Error: declared follow-up publication was not compared\n    at requireComparedPublications (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:206:19)\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:403:13)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:248:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 13,
+        "observationErrors": [
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    },
+    {
+      "name": "neighbor/subscription/authored/0/unsettled-acquisition",
+      "error": "Error: Error: follow-up output/acquisition cut is unsettled\n    at observe (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:268:23)\n    at eval (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:21:13)\n    at receiveProgressHistory (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:126:15)\n    at run (eval at evaluate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:51:3), <anonymous>:10:31)\n    at roundtrip (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:137:11)\n    at reject (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:173:24)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-selector-roundtrip-controls.mjs:249:11",
+      "stats": {
+        "beginHistory": 1,
+        "observed": 19,
+        "observationErrors": [
+          "Error: follow-up output/acquisition cut is unsettled",
+          "Error: metadata final observation stage is invalid",
+          "Error: declared follow-up publication was not compared"
+        ],
+        "outcomeStarted": 1,
+        "outcomePassed": 0,
+        "finishAttempted": 0,
+        "finishPassed": 0
+      }
+    }
+  ],
+  "neighbors": [
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default"
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored"
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default"
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored"
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default",
+        "metadataFollowupQuarter": 2
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-update-root",
+        "followup-previous-value-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-update-downstream",
+        "followup-previous-value-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default",
+        "metadataFollowupQuarter": 0
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-noop-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-noop-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored",
+        "metadataFollowupQuarter": 2
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-update-root",
+        "followup-previous-value-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-update-downstream",
+        "followup-previous-value-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored",
+        "metadataFollowupQuarter": 0
+      },
+      "states": [
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-noop-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-noop-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default",
+        "metadataFollowupQuarter": 2
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-update-root",
+        "followup-previous-value-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-update-downstream",
+        "followup-previous-value-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "default",
+        "metadataFollowupQuarter": 0
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-noop-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-noop-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored",
+        "metadataFollowupQuarter": 2
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-update-root",
+        "followup-previous-value-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-update-downstream",
+        "followup-previous-value-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    },
+    {
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "subscription",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataKeys": "authored",
+        "metadataFollowupQuarter": 0
+      },
+      "states": [
+        "conflicting-cache-premise",
+        "initial-root",
+        "initial-downstream",
+        "nonempty-prior",
+        "reload-started",
+        "held-root",
+        "held-downstream",
+        "positive-held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "callback-root",
+        "callback-downstream",
+        "selected-upstream-metadata",
+        "final-root",
+        "final-downstream",
+        "messages-root",
+        "messages-downstream",
+        "reload-baseline-compared",
+        "followup-started",
+        "source-applied",
+        "followup-acquisitions-settled",
+        "followup-noop-root",
+        "followup-retained-key-root",
+        "followup-messages-root",
+        "followup-final-root",
+        "followup-noop-downstream",
+        "followup-retained-key-downstream",
+        "followup-messages-downstream",
+        "followup-final-downstream",
+        "worker-cleaned"
+      ],
+      "finishPassed": 1
+    }
+  ],
+  "equivalentCurrentMetadataAccepted": 2,
+  "limits": "Strict Node assertions replace Vitest assertions. Actual outcome host/provenance fields are captured premises. Pure corruption controls are no new host or production evidence. Metadata omissions/full previousValue and finish are judged on realtime raw receipts; the retained post-run payload checker is not a second metadata checker. Changing-metadata sensitivity, fresh native receiving and production closure remain unestablished."
+}

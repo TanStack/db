@@ -1,0 +1,197 @@
+{
+  "schema": "h02-exact-first-native-failure-tool-v1",
+  "status": "FROZEN SOURCE-ONLY READY FOR DIRECT REVIEW; one first failure only if ROOT separately admits",
+  "tool": "exec_command",
+  "arguments": {
+    "cmd": "exec /bin/sh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-first-failure-invocation-v1/launch-one-failure-v1.sh.txt",
+    "shell": "/bin/sh",
+    "login": false,
+    "workdir": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the separately admitted single qualified H02 failure receiving constituent under its reviewed owned-group containment, preserving separate complete raw streams.",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 10000
+  },
+  "maxInvocations": 1,
+  "launcher": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-first-failure-invocation-v1/launch-one-failure-v1.sh.txt",
+    "sha256": "4254ab308162ab7223e2fa5dedeee61e4db20dd534a30a5fd68c17061fe853b5"
+  },
+  "launchTools": [
+    {
+      "path": "/bin/sh",
+      "sha256": "68c831f7c8468a09979fa812f3cab7b2043a42101160a526a20a09719db342fa"
+    },
+    {
+      "path": "/bin/mkdir",
+      "sha256": "4efbbcc42e090850b20ee26db11be6bedeb7bc2760b4a5e3dd80d4056dfd8e83"
+    }
+  ],
+  "existingVProposal": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/proposed-exact-inline-window-failure-first-command-v1.json",
+    "sha256": "156c553a128f7ec9bde4b1c148b3162ec9b63d2aab1939eccbe989179f7cd19f"
+  },
+  "existingVManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/packet-manifest-v1.json",
+    "sha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5"
+  },
+  "node": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "version": "v24.19.0",
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "nativeSupervisorArgv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.mjs",
+    "/private/tmp/h02-qualified-peer-receiving-v1/control/recipes/inline-window-failure-first.json"
+  ],
+  "nativeSupervisorCwd": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+  "recipe": {
+    "path": "/private/tmp/h02-qualified-peer-receiving-v1/control/recipes/inline-window-failure-first.json",
+    "sha256": "03297e00e2683be4d22c9add73770ef5503bb639fefcb8f5645948a3758a365f"
+  },
+  "program": {
+    "path": "/private/tmp/h02-qualified-peer-receiving-v1/control/programs/inline-window-failure-first.json",
+    "sha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937"
+  },
+  "sourceBinding": {
+    "path": "/private/tmp/h02-qualified-peer-receiving-v1/control/source-freeze-v1.json",
+    "sha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca"
+  },
+  "namedSelectedBindingsMatched": [
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.mjs",
+      "sha256": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.config.ts",
+      "sha256": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-receiving.config.ts",
+      "sha256": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/vitest.config.ts",
+      "sha256": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/source-binding.setup.ts",
+      "sha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/verify-bindings.mjs",
+      "sha256": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/receipt-transport.mjs",
+      "sha256": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/receiving-monitor.mjs",
+      "sha256": "1bb6427d29290e12270a09140d36584f3cd3ab8e5bde37cef1f00eb921f8d338"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "sha256": "4a4ef825b3b255e5c2c777d086d767727d740e361a2925ead9c6bd6a6b04db5c"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sha256": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "sha256": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "sha256": "c95d63bf25ae1361452d9c788a25e6bc7d0a94f825601707531c8e7e2ac6f76a"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "sha256": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e"
+    }
+  ],
+  "sourceOrRecipeOrProgramDelta": "NONE. Existing reviewed copied bytes and commands reused directly. Only source-artifact launcher/tool pins added; V output namespace unchanged and absent.",
+  "compilerPrerequisite": {
+    "review": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-independent-review-v2.md",
+      "sha256": "14f67a518a832cfdafcac8d1bcfacef0bfa82eca2675c771cb42ca56344505fa"
+    },
+    "freeze": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-review-freeze-v2.json",
+      "sha256": "922a5489be7b637371269c36e84d0c7afa097b636ec31bff696f39a85f179669"
+    },
+    "actualTool": {
+      "initial": "a64e48",
+      "session": 78242,
+      "final": "af83ec",
+      "outerExitCode": 0,
+      "compilerPid": 30153,
+      "compilerExitCode": 0,
+      "resolvedInputs": 653,
+      "fixedInputMap": 12586
+    },
+    "authority": "Accepted compiler-only gate supplies a prerequisite, never native admission."
+  },
+  "outputRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1",
+  "outerStdout": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stdout.log",
+  "outerStderr": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stderr.log",
+  "parentCommandOutput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/parent-command",
+  "rawStreamAccount": "Launcher exclusively creates the fresh outer directory, enables noclobber and execs the unchanged Node supervisor with separate full stdout/stderr files. The supervisor writes its independent parent-command subtree containing raw parent-test/receiving streams, receipt trace and ownership/evaluated/source/lifecycle evidence. Preserve every file and actual initial/session/final tool responses; API output can be empty because direct outer streams are redirected.",
+  "failurePreservation": "Existing root or log causes prelaunch refusal; partial fresh root/logs remain. No overwrite, merge, normalization, deletion, retry or automatic success. Preserve prelaunch errors in actual API output when capture is not established. No unconditional receipt/error fidelity is claimed.",
+  "budgets": {
+    "outerWallMs": 60000,
+    "outerNodeHeapMiB": 384,
+    "aggregateOwnedGroupsRssBytes": 1073741824,
+    "innerWallMs": 20000,
+    "innerNodeHeapMiB": 384,
+    "innerGroupRssBytes": 1073741824,
+    "coverage": false,
+    "runtimeTypecheck": false,
+    "innerConfiguredTestTimeoutMs": 300000
+  },
+  "budgetMeaning": "Unchanged reviewed parent-test/receiving operational limits, not numerical product deadlines. The outer Node monitoring launcher has its existing default heap;384MiB is the frozen spawned test/receiving Node command limit. No compiler45s policy transfers.",
+  "comparison": {
+    "program": "inline source-failed-peer; failure-first; held-window then first handled-failure barrier",
+    "epochs": [
+      "initialization",
+      "1:held-window",
+      "2:source-failed-peer"
+    ],
+    "exactSharedJudgments": [
+      "complete callback interval replica/delivery comparison",
+      "atomic retained-window callback reads",
+      "root and downstream retained-window snapshots at firstFailureBarrier",
+      "checkCompletionBaselineObservation(model, observation)"
+    ],
+    "firstFailurePremise": "Exact failed answer identity and unchanged strict original-peer binding guard; original peer may remain pending or be observably retired. First cut precedes releasing peer or awaiting the entire window operation.",
+    "physicalMarker": "Local checkpoint marker remains distinct from later complete cut; unchanged active-epoch guard rejects premature cuts.",
+    "expectedOutcome": "Not prescribed. A clean compatible observation passes this failure constituent; a source-bound semantic mismatch at the authored valid checkpoint can establish a bounded product-law RED only after independent actual classification."
+  },
+  "progressLaw": {
+    "authority": "Accepted H02-CONDITIONAL-QUEUED-PROGRESS, receipt e12e53f13adc3ee9d393501deb588e26d8a0aae1c9bb9191b86fb71cd634e142, preserved queued-answer-progress-oracle opening law/limits.",
+    "promise": "A finite backend answer already queued in the host must get a turn. Cached observer ownership and atomic publication remain separate laws.",
+    "classification": "Only actual exact premise/queued/executed receipts can establish the corresponding bounded host account. Watchdog expiry is bounded non-completion evidence, not a product deadline or proof of infinite execution. This baseline failure constituent does not replace real-host continuation coverage."
+  },
+  "reachClassification": {
+    "intendedBaseline": "Existing-law held-window and source-failed-peer first failure checkpoints, including exact public callback/root/downstream observations. Credit only after actual evidence confirms each boundary.",
+    "candidateRaw20": "Baseline reaches never populate the20 candidate states; all remain UNREACHED unless separately witnessed.",
+    "actualHelperNoActivePublicOperation": "No new reach claim; state14 remains proposed/unadopted.",
+    "remaining": "Success through the same recorder remains separate, as do later settlement/retry, hostile product calibration and wider closure."
+  },
+  "classificationRules": {
+    "operational": "Source/setup/guard-premise/snapshot diagnostic/sink/transport/observer/resource/ownership/cleanup/exit fault grants no product RED, retry, success or native-continuation authority. Freeze original errors and raw order.",
+    "semantic": "Retain the independent parent mismatch together with the exact valid physical cut, unchanged identity/ownership premises and complete child/cleanup facts; ROOT/independent actual review must classify. Do not infer product failure from exit code alone.",
+    "pass": "One operationally clean constituent pass only; no success neighbor, raw20, ordinary runtime-typecheck or closure credit."
+  },
+  "sinkQualification": "The helper suppresses direct diagnostic capture exceptions and best-effort logs them separately. Receipt-sink failures remain operational faults under unchanged transport/teardown; this packet claims no unconditional preservation of the original terminal error.",
+  "successAdmission": false,
+  "runtimeExecuted": false,
+  "broadCensus": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

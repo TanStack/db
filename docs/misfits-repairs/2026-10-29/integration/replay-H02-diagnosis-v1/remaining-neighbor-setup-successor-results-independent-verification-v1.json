@@ -1,0 +1,575 @@
+{
+  "kind": "Independent frozen actual-result aggregate audit; Python standard-library only",
+  "verdict": "Accept three finite setup-successor baseline controls; no broader closure or next admission",
+  "indexSha256": "5ed361b1d77104cf2c9607b985927149a99b451bc4505368e75356cd76be17a2",
+  "batchAdmissionSha256": "e0b7cd93993c94945eacca81d4a88feed66ba7419e1f07074a953dbd387690af",
+  "results": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "manifestSha256": "4ad0c8551f954565af76d54022ef7cc7e9ed0360c88cd80cf1490ef6b2ab91d3",
+      "members": 1961,
+      "bytes": 31279956,
+      "childArchiveMembers": 1945,
+      "childArchiveBytes": 30426630,
+      "qualificationSha256": "a342019217e4a20a2e01082feff0a6d45692dcf9ef1f1f0c80797f09476e389b",
+      "admissionSha256": "544fdb0a9f57820313b13fd9faa2ffd0f81f24c40e4b7c153071af1627df906c",
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": false,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "actualReceiptCount": 213,
+      "rawReceiptSha256": "901e0ba156d49cc53b46806973d58c385008783ff51bce27484f803f4107127d",
+      "reconstructedReachSequences": {
+        "empty-prior": [
+          109
+        ],
+        "held-provider-read": [
+          165
+        ],
+        "completed-enqueue": [
+          180
+        ],
+        "answer-executed": [
+          181
+        ],
+        "root-change": [
+          190
+        ],
+        "downstream-change": [
+          191
+        ],
+        "final-publication": [
+          192
+        ],
+        "worker-cleaned": [
+          213
+        ]
+      },
+      "sharedModel": {
+        "prior": [],
+        "final": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          }
+        ]
+      },
+      "reconstructedSnapshotComparisons": [
+        {
+          "sequence": 109,
+          "phase": "initial-publication",
+          "payload": []
+        },
+        {
+          "sequence": 165,
+          "phase": "retained-publication",
+          "payload": []
+        },
+        {
+          "sequence": 192,
+          "phase": "final-publication",
+          "payload": [
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            }
+          ]
+        }
+      ],
+      "reconstructedEventComparisons": [
+        {
+          "sequence": 190,
+          "lane": "root",
+          "rawOrderedChanges": [
+            {
+              "type": "insert",
+              "payload": {
+                "id": 3,
+                "rank": 30,
+                "markers": []
+              }
+            }
+          ],
+          "callbackPayload": [
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            }
+          ]
+        },
+        {
+          "sequence": 191,
+          "lane": "downstream",
+          "rawOrderedChanges": [
+            {
+              "type": "insert",
+              "payload": {
+                "id": 3,
+                "rank": 30,
+                "markers": []
+              }
+            }
+          ],
+          "callbackPayload": [
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            }
+          ]
+        }
+      ],
+      "rawMetadataValueCount": 6,
+      "bindingCount": 648,
+      "bindingInventories": {
+        "evaluated-after-all.json": 162,
+        "evaluated-driver-start.json": 162,
+        "evaluated-final-publication.json": 162,
+        "evaluated-pre-history.json": 162
+      },
+      "allSourceCodeV8BindingsMatch": true,
+      "operational": {
+        "reason": "exited",
+        "childExitCode": 0,
+        "signal": null,
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2601,
+        "maxSampledGroupRssBytes": 486834176
+      },
+      "lateSeparateRootProcessAbsence": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1-root-process-absence-v1.json",
+        "sha256": "5b844c4f67329301b2325c4e977d6defce3878e2fe565988ed16c60f6cee9eb0",
+        "originalOuter": 55971,
+        "originalChild": 55979,
+        "allFourESRCH": true,
+        "notInsertedIntoFrozenPacket": true
+      },
+      "beforeAfterDiskIdentityReceipt": {
+        "sourceEntries": 563,
+        "namedPackagePayloads": 2544,
+        "nodeLocksReuseLinksMatched": true,
+        "liveReauditPerformed": false
+      },
+      "selectionQualification": "Exact accepted calibrated selector plus native one-pass/four-skip summary and actual raw worker history; no captured successful verbose-name claim",
+      "bindingLimits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "manifestSha256": "a8328b9be41b3c9922baf583551041aef62df34168822b8d9d492b978700b90b",
+      "members": 1960,
+      "bytes": 30965371,
+      "childArchiveMembers": 1944,
+      "childArchiveBytes": 30114387,
+      "qualificationSha256": "f1a1d03ee8f6217220b53f6dd3d5478d9a93ae5b264359321fe79090c8882f48",
+      "admissionSha256": "0fdefadff1206286aefeff940b8086c2bf139a2d8588adfff3c236989a8d941e",
+      "history": {
+        "kind": "sync-initial",
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "actualReceiptCount": 5,
+      "rawReceiptSha256": "c989fcd56413f03531300d33b6deef792c8868966f2e18d3dcad3f3a6f67a8b9",
+      "reconstructedReachSequences": {
+        "literal-true-establishing-receipt": [
+          2
+        ],
+        "subscriber-return-before-preload": [
+          3
+        ],
+        "final-publication": [
+          4
+        ],
+        "worker-cleaned": [
+          5
+        ]
+      },
+      "sharedModel": {
+        "prior": [
+          {
+            "id": 1,
+            "rank": 10,
+            "markers": []
+          },
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": []
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": []
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": []
+          }
+        ],
+        "final": [
+          {
+            "id": 1,
+            "rank": 10,
+            "markers": []
+          },
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": []
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": []
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": []
+          }
+        ]
+      },
+      "reconstructedSnapshotComparisons": [
+        {
+          "sequence": 3,
+          "phase": "immediate-publication",
+          "cut": "subscriber-return-before-preload",
+          "payload": [
+            {
+              "id": 1,
+              "rank": 10,
+              "markers": []
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "markers": []
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            },
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            },
+            {
+              "id": 5,
+              "rank": 50,
+              "markers": []
+            }
+          ]
+        },
+        {
+          "sequence": 4,
+          "phase": "final-publication",
+          "payload": [
+            {
+              "id": 1,
+              "rank": 10,
+              "markers": []
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "markers": []
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            },
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            },
+            {
+              "id": 5,
+              "rank": 50,
+              "markers": []
+            }
+          ]
+        }
+      ],
+      "reconstructedEventComparisons": [],
+      "rawMetadataValueCount": 10,
+      "bindingCount": 486,
+      "bindingInventories": {
+        "evaluated-after-all.json": 162,
+        "evaluated-driver-start.json": 162,
+        "evaluated-pre-history.json": 162
+      },
+      "allSourceCodeV8BindingsMatch": true,
+      "operational": {
+        "reason": "exited",
+        "childExitCode": 0,
+        "signal": null,
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2213,
+        "maxSampledGroupRssBytes": 469778432
+      },
+      "lateSeparateRootProcessAbsence": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1-root-process-absence-v1.json",
+        "sha256": "1df02a382709d3092ead5027634195161c08a9c4c7ac92c46d4ad0cb04427ba7",
+        "originalOuter": 59447,
+        "originalChild": 59451,
+        "allFourESRCH": true,
+        "notInsertedIntoFrozenPacket": true
+      },
+      "beforeAfterDiskIdentityReceipt": {
+        "sourceEntries": 563,
+        "namedPackagePayloads": 2544,
+        "nodeLocksReuseLinksMatched": true,
+        "liveReauditPerformed": false
+      },
+      "selectionQualification": "Exact accepted calibrated selector plus native one-pass/four-skip summary and actual raw worker history; no captured successful verbose-name claim",
+      "bindingLimits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "manifestSha256": "6e9c65b15651d789a27947b8ce19a2c2cfd00e53831ccb06fd6db6f4e052992d",
+      "members": 1960,
+      "bytes": 30965148,
+      "childArchiveMembers": 1944,
+      "childArchiveBytes": 30114298,
+      "qualificationSha256": "c5fc466a7a74821a64951f6f1bb8850c9f3c5a9fb7db214bd7a3c5bad890f506",
+      "admissionSha256": "937221c4f57e306be0101da9106bc3929949c3bf2b976f91c4862e8e8eb1367c",
+      "history": {
+        "kind": "sync-mutation",
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "actualReceiptCount": 5,
+      "rawReceiptSha256": "2f65f67e776505d1e659018874532296c59ad9861bd4d0ca91b28f33b27b1bfa",
+      "reconstructedReachSequences": {
+        "ordinary-mutation-return-before-host-turn": [
+          3
+        ],
+        "final-publication": [
+          4
+        ],
+        "worker-cleaned": [
+          5
+        ]
+      },
+      "sharedModel": {
+        "prior": [
+          {
+            "id": 1,
+            "rank": 10,
+            "markers": []
+          },
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": []
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": []
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": []
+          }
+        ],
+        "final": [
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": []
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": []
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": []
+          },
+          {
+            "id": 1,
+            "rank": 60,
+            "markers": []
+          }
+        ]
+      },
+      "reconstructedSnapshotComparisons": [
+        {
+          "sequence": 3,
+          "phase": "immediate-publication",
+          "cut": null,
+          "payload": [
+            {
+              "id": 2,
+              "rank": 20,
+              "markers": []
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            },
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            },
+            {
+              "id": 5,
+              "rank": 50,
+              "markers": []
+            },
+            {
+              "id": 1,
+              "rank": 60,
+              "markers": []
+            }
+          ]
+        },
+        {
+          "sequence": 4,
+          "phase": "final-publication",
+          "payload": [
+            {
+              "id": 2,
+              "rank": 20,
+              "markers": []
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            },
+            {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            },
+            {
+              "id": 5,
+              "rank": 50,
+              "markers": []
+            },
+            {
+              "id": 1,
+              "rank": 60,
+              "markers": []
+            }
+          ]
+        }
+      ],
+      "reconstructedEventComparisons": [],
+      "rawMetadataValueCount": 10,
+      "bindingCount": 486,
+      "bindingInventories": {
+        "evaluated-after-all.json": 162,
+        "evaluated-driver-start.json": 162,
+        "evaluated-pre-history.json": 162
+      },
+      "allSourceCodeV8BindingsMatch": true,
+      "operational": {
+        "reason": "exited",
+        "childExitCode": 0,
+        "signal": null,
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2207,
+        "maxSampledGroupRssBytes": 460177408
+      },
+      "lateSeparateRootProcessAbsence": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1-root-process-absence-v1.json",
+        "sha256": "0a57f20f6b58c6718f636b4511694e9f0f848df524cb20c9d5472eb9a81177c6",
+        "originalOuter": 60343,
+        "originalChild": 60348,
+        "allFourESRCH": true,
+        "notInsertedIntoFrozenPacket": true
+      },
+      "beforeAfterDiskIdentityReceipt": {
+        "sourceEntries": 563,
+        "namedPackagePayloads": 2544,
+        "nodeLocksReuseLinksMatched": true,
+        "liveReauditPerformed": false
+      },
+      "selectionQualification": "Exact accepted calibrated selector plus native one-pass/four-skip summary and actual raw worker history; no captured successful verbose-name claim",
+      "bindingLimits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+    }
+  ],
+  "aggregate": {
+    "packetMembers": 5881,
+    "packetBytes": 93210475,
+    "actualReceipts": 223,
+    "declaredFiniteReaches": 15,
+    "allReachedExactlyOnce": true,
+    "bindings": 1620,
+    "separateOriginalIdAbsenceChecks": 12,
+    "nativePassed": 3,
+    "nativeSkipped": 12,
+    "serialNativeStartTimesVerified": true
+  },
+  "initialBindingCountCorrection": "Initial control has 486 bindings across three inventories; any earlier brief claim of648 is superseded by exact frozen records. Empty has648; mutation486.",
+  "syncMutationScope": "Raw establishing receipt at sequence2 records literalTrue=true, but it is not a declared mutation reach and supplies no claim that the ordinary write itself is a literal-true establishing operation. Immediate ordered publication is the mutation law checked.",
+  "originalSetupFailure": {
+    "stableFinding": "H02-V4-EMPTY-SCOPE-SETUP01",
+    "manifestSha256": "db576de10b07f8a9aa0bee621357ee739e8e9759a845b8b852492d2c75f6d25a",
+    "allTenFrozenMembersRehashed": true,
+    "toolExit127": true,
+    "originalLauncherPidPgid": "UNKNOWN; unchanged",
+    "noRetrospectiveProductReachCleanupOrOriginalIdAbsenceCredit": true
+  },
+  "limits": [
+    "Three finite histories only; no generated closure or conflicting-cache progress repair",
+    "Raw virtual metadata retained; no exact compiler-key encoding or temporal virtual-metadata coherence claim",
+    "Compiled inventories can include unused modules; child binding is not parent checker compiled-body or precise runtime coverage evidence",
+    "Separate late root ESRCH receipts verified without inserting into frozen result packets",
+    "Candidate 20 states remain UNREACHED; original failure/held admissions remain preserved",
+    "No runtime/test/build/project-verifier/native-collection/process/source operations or retries performed by this reviewer; no next admission"
+  ]
+}

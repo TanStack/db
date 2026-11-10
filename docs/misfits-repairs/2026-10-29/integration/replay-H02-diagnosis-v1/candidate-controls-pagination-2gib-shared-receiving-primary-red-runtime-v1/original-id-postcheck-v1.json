@@ -1,0 +1,51 @@
+{
+  "scope": "Original named outer/child PIDs and PGIDs only; no escaped-process or universal daemon/cache census",
+  "atUnixNs": 1793359936025291000,
+  "checks": [
+    {
+      "kind": "pid",
+      "id": 41290,
+      "probeSignal": 0,
+      "result": "absent",
+      "errno": 3,
+      "error": "[Errno 3] No such process"
+    },
+    {
+      "kind": "pid",
+      "id": 41300,
+      "probeSignal": 0,
+      "result": "absent",
+      "errno": 3,
+      "error": "[Errno 3] No such process"
+    },
+    {
+      "kind": "pgid",
+      "id": 41290,
+      "probeSignal": 0,
+      "result": "absent",
+      "errno": 3,
+      "error": "[Errno 3] No such process"
+    },
+    {
+      "kind": "pgid",
+      "id": 41300,
+      "probeSignal": 0,
+      "result": "absent",
+      "errno": 3,
+      "error": "[Errno 3] No such process"
+    }
+  ],
+  "mutationSignalsSent": false,
+  "namedPidInventory": {
+    "argv": [
+      "/bin/ps",
+      "-p",
+      "41290,41300",
+      "-o",
+      "pid=,ppid=,pgid=,rss=,command="
+    ],
+    "returnCode": 1,
+    "stdout": "",
+    "stderr": ""
+  }
+}

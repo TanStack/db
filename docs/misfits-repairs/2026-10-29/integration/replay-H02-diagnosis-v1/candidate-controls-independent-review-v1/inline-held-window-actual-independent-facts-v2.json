@@ -1,0 +1,162 @@
+{
+  "at": "2026-10-30T10:00:50.663659+00:00",
+  "mode": "static evidence read/hash/JSON only; no product/JS/model/native execution or process probes",
+  "cell": "inline-held-window",
+  "resultFreezeSha256": "578b8ca87c283a0767fa3783f2d46f3e67dac59786d30ef642dad36c26b4d485",
+  "rootBatchAdmissionSha256": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "resultFiles": 1975,
+  "sourceFiles": 584,
+  "payloadFiles": 2544,
+  "Node": 1,
+  "locks": 2,
+  "links": 4,
+  "v8CompiledBodies": 1626,
+  "inventoryFacts": {
+    "evaluated-pre-history.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "8fa02dd83c5aac0c12e6797759545f2c2040e7938df290202513e65c136ea0eb"
+    },
+    "evaluated-after-all.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "306d5bbcc289348152a6a342fc2b7d9d6954ce18c51ad42666ccc0b6afe90ffd"
+    }
+  },
+  "derivedBindingRows": 338,
+  "requiredPrehistoryModules": 20,
+  "rawReceipts": 444,
+  "boundaries": 423,
+  "phaseCounts": {
+    "worker-start": 1,
+    "completion-baseline-epoch-start": 3,
+    "completion-boundary": 423,
+    "completion-baseline-delivery": 6,
+    "completion-baseline-epoch-end": 3,
+    "completion-baseline-view": 1,
+    "completion-baseline-action": 4,
+    "completion-baseline-cut": 2,
+    "worker-cleaned": 1
+  },
+  "boundaryCounts": {
+    "real-status-callback": 3,
+    "source-load-enter": 10,
+    "provider-request": 10,
+    "provider-answer-executed": 10,
+    "source-load-return": 10,
+    "output-commit-return": 3,
+    "graph-enter": 7,
+    "operator-enter": 133,
+    "operator-return": 133,
+    "demand-return": 5,
+    "graph-return": 7,
+    "flush-enter": 22,
+    "flush-return": 22,
+    "source-load-applied-settled": 10,
+    "demand-settled": 5,
+    "facade-flush-enter": 2,
+    "facade-flush-return": 2,
+    "root-callback": 3,
+    "downstream-callback": 3,
+    "root-mark-ready-enter": 5,
+    "root-mark-ready-return": 5,
+    "public-read": 5,
+    "fixture-established": 1,
+    "public-operation-enter": 1,
+    "public-operation-return": 1,
+    "baseline-source-answer-release": 1,
+    "baseline-source-answer-applied": 1,
+    "baseline-source-answer-provenance": 1,
+    "cleanup-start": 1,
+    "cleanup-complete": 1
+  },
+  "sourceReleaseAppliedAndProvenance": {
+    "release": [
+      {
+        "sequence": 185,
+        "boundary": "baseline-source-answer-release",
+        "detail": {
+          "requirement": "answer",
+          "requests": [
+            {
+              "source": "marked",
+              "request": 2,
+              "scope": [
+                1,
+                2
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "source": "marked",
+              "load": 2
+            }
+          ]
+        }
+      }
+    ],
+    "applied": [
+      {
+        "sequence": 196,
+        "boundary": "baseline-source-answer-applied",
+        "detail": {
+          "requirement": "answer",
+          "loads": [
+            {
+              "source": "marked",
+              "load": 2,
+              "settledAt": 187
+            }
+          ]
+        }
+      }
+    ],
+    "provenance": [
+      {
+        "sequence": 419,
+        "boundary": "baseline-source-answer-provenance",
+        "detail": {
+          "requirement": "answer",
+          "releasedAt": 185,
+          "witnesses": [
+            {
+              "source": "marked",
+              "key": 3,
+              "request": 3,
+              "loads": [
+                3
+              ]
+            },
+            {
+              "source": "roots",
+              "key": 3,
+              "request": 3,
+              "loads": [
+                3
+              ]
+            },
+            {
+              "source": "children",
+              "key": 3,
+              "request": 2,
+              "loads": [
+                2
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "actualToolCompletionChunk": "cc297f",
+  "errors": [],
+  "allChecksPass": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "actualHelperNoActiveOperation": "required and UNREACHED",
+  "parentProofBoundary": "on-disk identity plus successful exact test/control-flow inference; no parent V8 binding",
+  "runtimeExecutions": 0
+}

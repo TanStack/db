@@ -1,0 +1,15 @@
+--- sealed-S/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
++++ inactive-U/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
+@@ -527,8 +527,10 @@
+     try {
+       fixture.recorder.event(boundary, capture())
+     } catch (error) {
+-      // A diagnostic failure cannot replace the original binding-guard error
+-      // or introduce a new binding predicate. Keep it separately on stderr.
++      // The helper suppresses direct diagnostic capture exceptions and
++      // best-effort logs them separately. Receipt-sink failures remain
++      // operational faults under unchanged transport/teardown; this packet
++      // claims no unconditional preservation of the original terminal error.
+       try {
+         console.error({
+           completionPeerDiagnosticFailure: boundary,

@@ -1,0 +1,871 @@
+--- parent/packages/db/tests/oracle-config.ts
++++ successor/packages/db/tests/oracle-config.ts
+@@ -5,6 +5,10 @@
+ type OracleEnvironment = Record<string, string | undefined>
+ 
+ const staticOracleProperties = [
++  `query.queued-answer-metadata.scope.default`,
++  `query.queued-answer-metadata.scope.authored`,
++  `query.queued-answer-metadata.subscription.default`,
++  `query.queued-answer-metadata.subscription.authored`,
+   `lint.part-reach`,
+   `scripts.lint-scope`,
+   `scripts.run-budget`,
+--- parent/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts
++++ successor/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts
+@@ -1,71 +1,164 @@
++import fc from 'fast-check'
+ import { describe, it } from 'vitest'
+ import { createOracleReach } from '../../db/tests/oracle-reach.js'
+ import {
++  oraclePropertyOptions,
++  oracleReplayRequested,
++  oracleReplayTest,
++  oracleRuns,
++} from '../../db/tests/oracle-config.js'
++import {
+   createMetadataReceiptCheck,
++  metadataFollowupArbitrary,
++  metadataFollowupHistories,
++  metadataHistoryStates,
+   metadataReceivingHistories,
+-  metadataReceivingStates,
++  metadataReceivingPaths,
+ } from './queued-answer-metadata-oracle.js'
+ import {
+   checkQueuedAnswerProgress,
+   createProgressReceiptCheck,
++  queuedAnswerExample,
+ } from './queued-answer-progress-oracle.js'
+ import { receiveProgressHistory } from './queued-answer-progress-supervisor.js'
++import type { MetadataHistory } from './queued-answer-metadata-oracle.js'
+ 
+ /**
+- * The real QueryClient receiver shares the existing metadata judgment. Each
+- * finite cell declares its own reach. This registration authorizes no runtime.
+- * Scope and conflict results, and default and authored keys, stay separate.
++ * Each finite history and generated campaign uses the real QueryClient
++ * receiver, the same ordinary payload law, and the existing independent
++ * attribution/publication judgment. The optional source update follows the
++ * settled reload baseline; it is not a QueryClient-fetched marker update.
++ * Each cache/key path owns reach and replay. This source registration supplies
++ * no native execution or progress-repair evidence.
+  */
++function makeReach(history: MetadataHistory, property?: string) {
++  return createOracleReach(
++    property ??
++      `query.queued-answer-metadata/${history.cacheIdentity}/${history.metadataKeys}`,
++    metadataHistoryStates(history),
++    { replaying: oracleReplayRequested() },
++  )
++}
++async function run(history: MetadataHistory, reach = makeReach(history)) {
++  reach.beginHistory()
++  const metadata = createMetadataReceiptCheck(history, (state) =>
++    reach.reach(state),
++  )
++  const rootPayload = createProgressReceiptCheck(history)
++  const downstreamPayload = createProgressReceiptCheck(history)
++  try {
++    const outcome = await receiveProgressHistory(history, (receipt) => {
++      rootPayload(receipt)
++      if (receipt.phase === `downstream-change`)
++        downstreamPayload({ ...receipt, phase: `public-change` })
++      else if (
++        [`reload-start`, `cleanup-start`, `followup-start`].includes(
++          receipt.phase,
++        )
++      )
++        downstreamPayload(receipt)
++      else if (
++        [`final-publication`, `followup-publication`].includes(receipt.phase)
++      )
++        downstreamPayload({
++          ...receipt,
++          rows: receipt.downstream as typeof receipt.rows,
++        })
++      metadata(receipt)
++      if (
++        receipt.phase === `conflicting-cache-premise` &&
++        history.cacheIdentity === `subscription`
++      )
++        reach.reach(`conflicting-cache-premise`)
++    })
++    checkQueuedAnswerProgress(history, outcome)
++    // This per-history judgment runs in campaigns and direct replay alike.
++    metadata.finish()
++  } finally {
++    console.info(`H02 metadata receiving reach`, {
++      cacheIdentity: history.cacheIdentity,
++      keyLane: history.metadataKeys,
++      quarter: history.metadataFollowupQuarter,
++      counts: Object.fromEntries(reach.counts()),
++    })
++  }
++}
++
+ describe(`queued-answer metadata receiving`, () => {
+-  it.each(metadataReceivingHistories)(
++  oracleReplayTest(it).each(metadataReceivingHistories)(
+     `checks metadata $cacheIdentity $metadataKeys`,
+     async (history) => {
+-      const states = [
+-        ...metadataReceivingStates,
+-        ...(history.cacheIdentity === `subscription`
+-          ? [`conflicting-cache-premise`]
+-          : []),
+-      ]
+-      const reach = createOracleReach(
+-        `query.queued-answer-metadata/${history.cacheIdentity}/${history.metadataKeys}`,
+-        states,
+-        { replaying: false },
+-      )
+-      reach.beginHistory()
+-      const metadata = createMetadataReceiptCheck(history, (state) =>
+-        reach.reach(state),
+-      )
+-      const rootPayload = createProgressReceiptCheck(history)
+-      const downstreamPayload = createProgressReceiptCheck(history)
+-      try {
+-        const outcome = await receiveProgressHistory(history, (receipt) => {
+-          rootPayload(receipt)
+-          if (receipt.phase === `downstream-change`)
+-            downstreamPayload({ ...receipt, phase: `public-change` })
+-          else if ([`reload-start`, `cleanup-start`].includes(receipt.phase))
+-            downstreamPayload(receipt)
+-          else if (receipt.phase === `final-publication`)
+-            downstreamPayload({
+-              ...receipt,
+-              rows: receipt.downstream as typeof receipt.rows,
+-            })
+-          metadata(receipt)
+-          if (
+-            receipt.phase === `conflicting-cache-premise` &&
+-            history.cacheIdentity === `subscription`
+-          )
+-            reach.reach(`conflicting-cache-premise`)
+-        })
+-        checkQueuedAnswerProgress(history, outcome)
+-        reach.assertReached()
+-      } finally {
+-        console.info(`H02 metadata receiving reach`, {
+-          cacheIdentity: history.cacheIdentity,
+-          keyLane: history.metadataKeys,
+-          counts: Object.fromEntries(reach.counts()),
+-        })
+-      }
++      const reach = makeReach(history)
++      await run(history, reach)
++      reach.assertReached()
+     },
+     60_000,
+   )
++  oracleReplayTest(it).each(metadataFollowupHistories)(
++    `checks source followup $cacheIdentity $metadataKeys quarter $metadataFollowupQuarter`,
++    async (history) => {
++      const reach = makeReach(history)
++      await run(history, reach)
++      reach.assertReached()
++    },
++    60_000,
++  )
++  describe.each(metadataReceivingPaths)(
++    `generated $cacheIdentity $metadataKeys`,
++    (path) => {
++      const property = `query.queued-answer-metadata.${path.cacheIdentity}.${path.metadataKeys}`
++      const historyOf = (facts: {
++        keyShift: number
++        rankScale: number
++        metadataFollowupQuarter: 1 | 2 | 3
++      }): MetadataHistory => ({
++        ...queuedAnswerExample,
++        ...path,
++        ...facts,
++        nonemptyPrior: true,
++      })
++      oracleReplayTest(it)(
++        `checks the fixed generated campaign`,
++        async () => {
++          const reach = makeReach(
++            historyOf({
++              keyShift: 0,
++              rankScale: 10,
++              metadataFollowupQuarter: 2,
++            }),
++            property,
++          )
++          await fc.assert(
++            fc.asyncProperty(metadataFollowupArbitrary, async (facts) => {
++              await run(historyOf(facts), reach)
++            }),
++            { numRuns: oracleRuns(8), seed: 20261030 },
++          )
++          reach.assertReached()
++        },
++        300_000,
++      )
++      oracleReplayTest(it, property)(
++        `checks the unseeded generated campaign or selected replay`,
++        async () => {
++          const reach = makeReach(
++            historyOf({
++              keyShift: 0,
++              rankScale: 10,
++              metadataFollowupQuarter: 2,
++            }),
++            property,
++          )
++          await fc.assert(
++            fc.asyncProperty(metadataFollowupArbitrary, async (facts) => {
++              await run(historyOf(facts), reach)
++            }),
++            oraclePropertyOptions(8, property),
++          )
++          reach.assertReached()
++        },
++        300_000,
++      )
++    },
++  )
+ })
+--- parent/packages/query-db-collection/tests/queued-answer-metadata-oracle.ts
++++ successor/packages/query-db-collection/tests/queued-answer-metadata-oracle.ts
+@@ -1,4 +1,5 @@
+ import { isDeepStrictEqual } from 'node:util'
++import fc from 'fast-check'
+ import { declareOracle } from '../../db/tests/oracle-declaration.js'
+ import {
+   attributeMetadataRows,
+@@ -32,7 +33,11 @@
+  * keys. A custom key activates a different reduction path, so reaches stay
+  * separate. Neither lane proves provider-row source attribution or optimistic
+  * origin transitions. The finite replacement changes IDs: a real receiving
+- * update.previousValue witness remains open, despite pure checker calibration.
++ * update.previousValue witness is added by an opt-in source follow-up after
++ * actual reload settlement. This receives an output Collection update through
++ * an established QueryClient graph, not a QueryClient-fetched marker update.
++ * Output metadata stays stable: copying current metadata onto an otherwise
++ * correct previous ordinary row is equivalent in this bounded profile.
+  */
+ export type MetadataHistory = QueryProgressHistory & {
+   metadataKeys: `default` | `authored`
+@@ -50,6 +55,51 @@
+     nonemptyPrior: true,
+   })),
+ )
++
++/**
++ * The later stage changes only one authored source rank. Positive quarters
++ * preserve the selected pivot's relational position; zero supplies a no-op.
++ * Four separate receiving lanes retain separate reach and replay coordinates.
++ */
++export const metadataReceivingPaths = metadataReceivingHistories.map(
++  ({ cacheIdentity, metadataKeys }) => ({ cacheIdentity, metadataKeys }),
++)
++export const metadataFollowupHistories: Array<MetadataHistory> =
++  metadataReceivingHistories.flatMap((history) =>
++    ([2, 0] as const).map((metadataFollowupQuarter) => ({
++      ...history,
++      metadataFollowupQuarter,
++    })),
++  )
++export const metadataFollowupArbitrary = fc.record({
++  keyShift: fc.integer({ min: 0, max: 20 }),
++  rankScale: fc.integer({ min: 1, max: 20 }),
++  metadataFollowupQuarter: fc.constantFrom(1 as const, 2 as const, 3 as const),
++})
++export function metadataHistoryStates(history: MetadataHistory): Array<string> {
++  return [
++    ...metadataReceivingStates,
++    ...(history.cacheIdentity === `subscription`
++      ? [`conflicting-cache-premise`]
++      : []),
++    ...(history.metadataFollowupQuarter === undefined
++      ? []
++      : [
++          `reload-baseline-compared`,
++          `followup-started`,
++          `source-applied`,
++          `followup-acquisitions-settled`,
++          ...([`root`, `downstream`] as const).flatMap((layer) => [
++            `followup-retained-key-${layer}`,
++            `followup-messages-${layer}`,
++            `followup-final-${layer}`,
++            ...(history.metadataFollowupQuarter! > 0
++              ? [`followup-update-${layer}`, `followup-previous-value-${layer}`]
++              : [`followup-noop-${layer}`]),
++          ]),
++        ]),
++  ]
++}
+ 
+ export const metadataReceivingStates = [
+   `initial-root`,
+@@ -135,8 +185,23 @@
+ ) {
+   let identities: Identities | undefined
+   let reloading = false
+-  const priorPayload = modelProgressValue(history, false)
+-  const finalPayload = modelProgressValue(history, true)
++  let priorPayload = modelProgressValue(history, false)
++  let finalPayload = modelProgressValue(history, true)
++  let reloadSettled = false
++  let baselineCompared = false
++  let following = false
++  let sourceAccepted = false
++  let sourceApplied = false
++  let followupSettled = false
++  let followupCompared = false
++  let workerCleaned = false
++  let baseline:
++    | { root: Array<MetadataResult>; downstream: Array<MetadataResult> }
++    | undefined
++  const baselineBindings: Partial<
++    Record<Layer, Map<AttributionKey, AttributionKey>>
++  > = {}
++  const followupAttempts = new Map<number, boolean>()
+   const prior: Partial<Record<Layer, Array<MetadataResult>>> = {}
+   const finalBatches: Record<Layer, Array<MetadataBatch>> = {
+     root: [],
+@@ -162,10 +227,14 @@
+     const rows = requireRows(rawRows)
+     const entries = requireEntries(rawEntries)
+     const binding = bindPublicKeys(entries, payload)
+-    const ownBinding =
+-      !final && initialBindings[layer] ? initialBindings[layer] : binding
+-    const rootBinding =
+-      layer === `root`
++    const ownBinding = following
++      ? baselineBindings[layer]
++      : !final && initialBindings[layer]
++        ? initialBindings[layer]
++        : binding
++    const rootBinding = following
++      ? baselineBindings.root
++      : layer === `root`
+         ? ownBinding
+         : !final || rawUpstreamEntries === undefined
+           ? initialBindings.root
+@@ -238,7 +307,102 @@
+     return { root, downstream }
+   }
+ 
+-  return (receipt: ProgressReceipt) => {
++  const requireComparedPublications = () => {
++    if (!baselineCompared)
++      throw new Error(`reload baseline publication was not compared`)
++    if (history.metadataFollowupQuarter !== undefined && !followupCompared)
++      throw new Error(`declared follow-up publication was not compared`)
++  }
++  const observe = (receipt: ProgressReceipt) => {
++    if (receipt.phase === `reload-settled`) reloadSettled = true
++    if (receipt.phase === `followup-start`) {
++      if (
++        !reloading ||
++        !baselineCompared ||
++        !baseline ||
++        following ||
++        history.metadataFollowupQuarter === undefined
++      )
++        throw new Error(
++          `follow-up precedes the compared settled reload baseline`,
++        )
++      // Parent consumption is contiguous and ordered by the shared transport.
++      // The child needs no acknowledgment. Failed baseline comparison cannot
++      // reach this assignment or reset the first observation error.
++      following = true
++      priorPayload = finalPayload
++      finalPayload = modelProgressValue(history, true, true)
++      Object.assign(prior, baseline)
++      for (const layer of [`root`, `downstream`] as const) {
++        finalBatches[layer].length = 0
++        finalPublished[layer] = false
++      }
++      reach(`followup-started`)
++    }
++    if (following && receipt.phase === `acquisition-accepted`) {
++      if (
++        typeof receipt.attempt !== `number` ||
++        followupAttempts.has(receipt.attempt)
++      )
++        throw new Error(`follow-up acquisition identity is invalid`)
++      followupAttempts.set(receipt.attempt, false)
++    }
++    if (receipt.phase === `followup-acquisition-settled`) {
++      if (
++        !following ||
++        typeof receipt.attempt !== `number` ||
++        followupAttempts.get(receipt.attempt) !== false ||
++        receipt.outcome !== `fulfilled`
++      )
++        throw new Error(
++          `follow-up acquisition did not reach applied settlement`,
++        )
++      followupAttempts.set(receipt.attempt, true)
++    }
++    if (receipt.phase === `followup-source-accepted`) {
++      if (
++        !following ||
++        sourceAccepted ||
++        typeof receipt.literalTrue !== `boolean`
++      )
++        throw new Error(`follow-up source acceptance is invalid`)
++      sourceAccepted = true
++    }
++    if (receipt.phase === `followup-source-applied`) {
++      if (!sourceAccepted || sourceApplied)
++        throw new Error(`follow-up source receipt did not apply once`)
++      sourceApplied = true
++      reach(`source-applied`)
++    }
++    if (receipt.phase === `followup-settled`) {
++      if (
++        !following ||
++        !sourceApplied ||
++        followupSettled ||
++        receipt.rootSubscriptionStatus !== `ready` ||
++        receipt.downstreamSubscriptionStatus !== `ready` ||
++        receipt.rootLoadingSubset !== false ||
++        receipt.downstreamLoadingSubset !== false ||
++        [...followupAttempts.values()].some((settled) => !settled) ||
++        !isDeepStrictEqual(
++          receipt.attempts,
++          [...followupAttempts.keys()].map((attempt) => [attempt, `fulfilled`]),
++        )
++      )
++        throw new Error(`follow-up output/acquisition cut is unsettled`)
++      if (
++        history.metadataFollowupQuarter! > 0 &&
++        !(
++          typeof receipt.rootCallbacks === `number` &&
++          receipt.rootCallbacks > 0 &&
++          typeof receipt.downstreamCallbacks === `number` &&
++          receipt.downstreamCallbacks > 0
++        )
++      )
++        throw new Error(`follow-up complete output callbacks did not reach`)
++      followupSettled = true
++      reach(`followup-acquisitions-settled`)
++    }
+     if (receipt.phase === `metadata-identities`) {
+       const { sourceId, rootId, downstreamId } = receipt
+       if (
+@@ -318,7 +482,21 @@
+         }
+       } else checkMetadataPublications([batch], expected, expected)
+     }
+-    if (receipt.phase === `final-publication`) {
++    if ([`final-publication`, `followup-publication`].includes(receipt.phase)) {
++      const followupFinal = receipt.phase === `followup-publication`
++      if (followupFinal !== following || (followupFinal && !followupSettled))
++        throw new Error(`metadata final observation stage is invalid`)
++      if (
++        !followupFinal &&
++        history.metadataFollowupQuarter !== undefined &&
++        (!reloadSettled ||
++          receipt.reloadSettled !== true ||
++          receipt.rootSubscriptionStatus !== `ready` ||
++          receipt.downstreamSubscriptionStatus !== `ready` ||
++          receipt.rootLoadingSubset !== false ||
++          receipt.downstreamLoadingSubset !== false)
++      )
++        throw new Error(`reload baseline did not reach settled outputs`)
+       if (!reloading) throw new Error(`metadata final cut precedes reload`)
+       const after = observePair(receipt, true, `final`)
+       for (const layer of [`root`, `downstream`] as const) {
+@@ -328,14 +506,68 @@
+           after[layer],
+         )
+         reach(`messages-${layer}`)
++        if (followupFinal) {
++          // The shared comparison above has required complete previous values,
++          // exact message counts and callback reads. Only actual updates earn
++          // update reach; delete+insert or a phase label cannot substitute.
++          const changes = finalBatches[layer].flatMap((batch) => batch.changes)
++          if (history.metadataFollowupQuarter! > 0) {
++            if (
++              changes.length !== 1 ||
++              changes[0]!.type !== `update` ||
++              changes[0]!.previousValue === undefined
++            )
++              throw new Error(`real same-key follow-up update did not reach`)
++            reach(`followup-update-${layer}`)
++            reach(`followup-previous-value-${layer}`)
++          } else {
++            if (changes.length)
++              throw new Error(`no-op follow-up published a change`)
++            reach(`followup-noop-${layer}`)
++          }
++          reach(`followup-retained-key-${layer}`)
++          reach(`followup-messages-${layer}`)
++          reach(`followup-final-${layer}`)
++        }
+       }
++      if (followupFinal) followupCompared = true
++      if (!followupFinal) {
++        baseline = after
++        for (const layer of [`root`, `downstream`] as const)
++          baselineBindings[layer] = new Map(
++            after[layer].map((row) => [
++              (row.ordinary as { id: AttributionKey }).id,
++              row.metadata.$key as AttributionKey,
++            ]),
++          )
++        baselineCompared = true
++        if (history.metadataFollowupQuarter !== undefined)
++          reach(`reload-baseline-compared`)
++      }
+     }
+     if (receipt.phase === `cleanup-start`) reloading = false
+-    if (receipt.phase === `worker-cleaned`) reach(`worker-cleaned`)
+-  }
++    if (receipt.phase === `worker-cleaned`) {
++      // The declared input program owes this stage even if every receipt for
++      // it is absent. Aggregate reach and replay suppression cannot waive it.
++      requireComparedPublications()
++      workerCleaned = true
++      reach(`worker-cleaned`)
++    }
++  }
++  return Object.assign(observe, {
++    finish() {
++      requireComparedPublications()
++      if (!workerCleaned)
++        throw new Error(`metadata worker cleanup was not observed`)
++    },
++  })
+ }
+ 
+ declareOracle({
+-  grammar: [metadataReceivingHistories],
++  grammar: [
++    metadataReceivingHistories,
++    metadataFollowupHistories,
++    metadataFollowupArbitrary,
++  ],
+   check: [createMetadataReceiptCheck],
+ })
+--- parent/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ successor/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -13,7 +13,7 @@
+ import { captureMetadataRows } from '../../db/tests/query/virtual-row-fields-support.js'
+ import { queryCollectionOptions } from '../src/query.js'
+ import { progressFacts } from './queued-answer-progress-oracle.js'
+-import type { LoadSubsetOptions } from '@tanstack/db'
++import type { LoadSubsetOptions, SyncAppliedReceipt } from '@tanstack/db'
+ import type { QueryKey } from '@tanstack/query-core'
+ import type {
+   ProgressHistory,
+@@ -60,7 +60,10 @@
+     emit(`warning`, { args: args.map(String) })
+     originalWarn(...args)
+   }
+-  const sourceControls: { change?: () => void } = {}
++  const sourceControls: {
++    change?: () => void
++    writeRank?: (value: { id: number; rank: number }) => SyncAppliedReceipt
++  } = {}
+   let firstSourceLoad = true
+   let sourceLiteralTrueReceipt = false
+   const hasLiteralTrueReceipt = () => sourceLiteralTrueReceipt
+@@ -86,6 +89,16 @@
+             return receipt
+           }
+           return true
++        }
++        sourceControls.writeRank = (value) => {
++          const row = roots.find(({ id }) => id === value.id)
++          if (!row) throw new Error(`authored source update has no source row`)
++          // Update provider facts before the real source sync write. Rank is
++          // an order term; any resulting repair still uses the normal path.
++          row.rank = value.rank
++          begin()
++          write({ type: `update`, value: { ...row } })
++          return commit()
+         }
+         sourceControls.change = () => {
+           begin()
+@@ -178,6 +191,14 @@
+   let acquisitionSequence = 0
+   let answerVersion = 0
+   let backendVersion = 0
++  let following = false
++  const followupAttempts = new Map<
++    number,
++    `pending` | `fulfilled` | `rejected`
++  >()
++  let followupError: unknown
++  let rootCallbacks = 0
++  let downstreamCallbacks = 0
+   let holding = false
+   let answerQueued = false
+   const hasQueuedAnswer = () => answerQueued
+@@ -539,6 +560,29 @@
+     try {
+       const result = actualLoad(options)
+       emit(`acquisition-accepted`, { attempt, literalTrue: result === true })
++      if (following) {
++        followupAttempts.set(attempt, `pending`)
++        // Observe the adapter's original applied-settlement promise; return it
++        // unchanged. These receipts do not supply expected public values.
++        void Promise.resolve(result).then(
++          () => {
++            followupAttempts.set(attempt, `fulfilled`)
++            emit(`followup-acquisition-settled`, {
++              attempt,
++              outcome: `fulfilled`,
++            })
++          },
++          (error: unknown) => {
++            followupAttempts.set(attempt, `rejected`)
++            followupError ??= error
++            emit(`followup-acquisition-settled`, {
++              attempt,
++              outcome: `rejected`,
++              message: String(error),
++            })
++          },
++        )
++      }
+       return result
+     } finally {
+       activeAttempts.pop()
+@@ -648,6 +692,7 @@
+       keyLane: history.metadataKeys,
+     })
+   const subscription = live.subscribeChanges((changes) => {
++    rootCallbacks++
+     emit(`public-change`, {
+       changes: history.metadataKeys ? captureChanges(changes) : changes,
+       rows: readLive(),
+@@ -663,6 +708,7 @@
+   // The downstream recorder supplies observations to the same publication law.
+   // It computes no expected value and preserves every delivered payload.
+   const downstreamSubscription = downstream.subscribeChanges((changes) => {
++    downstreamCallbacks++
+     emit(`downstream-change`, {
+       changes: history.metadataKeys ? captureChanges(changes) : changes,
+       rows: readDownstream(),
+@@ -738,6 +784,7 @@
+       queueAnswer({ kind: `lawful-control` })
+     }
+     await reload
++    if (history.metadataFollowupQuarter !== undefined) emit(`reload-settled`)
+     let stableTurns = 0
+     let previousCount = -1
+     while (stableTurns < 2) {
+@@ -759,8 +806,89 @@
+       ready: live.status === `ready`,
+       syncError: live.health.hasErrors,
+       health: live.health,
++      ...(history.metadataFollowupQuarter === undefined
++        ? {}
++        : {
++            reloadSettled: true,
++            rootSubscriptionStatus: subscription.status,
++            downstreamSubscriptionStatus: downstreamSubscription.status,
++            rootLoadingSubset: live.isLoadingSubset,
++            downstreamLoadingSubset: downstream.isLoadingSubset,
++          }),
+     })
+     captureBindings(`final-publication`)
++    if (history.metadataFollowupQuarter !== undefined) {
++      // The child records its settled baseline first. Only the parent judges
++      // it and locks bindings, in contiguous receipt order; no acknowledgment.
++      const beforeRoot = rootCallbacks
++      const beforeDownstream = downstreamCallbacks
++      following = true
++      emit(`followup-start`)
++      if (!sourceControls.writeRank)
++        throw new Error(`source rank control missing`)
++      const receipt = sourceControls.writeRank({
++        id: pivot,
++        rank: (3 + history.metadataFollowupQuarter / 4) * history.rankScale,
++      })
++      emit(`followup-source-accepted`, { literalTrue: receipt === true })
++      await receipt
++      emit(`followup-source-applied`)
++      let stableFollowupTurns = 0
++      let previousFollowup = ``
++      while (stableFollowupTurns < 2) {
++        await hostTurn()
++        if (followupError !== undefined) throw followupError
++        const requiresCallbacks = history.metadataFollowupQuarter > 0
++        const actual = {
++          attempts: [...followupAttempts],
++          rootCallbacks: rootCallbacks - beforeRoot,
++          downstreamCallbacks: downstreamCallbacks - beforeDownstream,
++          rootSubscriptionStatus: subscription.status,
++          downstreamSubscriptionStatus: downstreamSubscription.status,
++          rootLoadingSubset: live.isLoadingSubset,
++          downstreamLoadingSubset: downstream.isLoadingSubset,
++        }
++        // Applied source receipt + all actual new acquisitions + actual output
++        // callbacks (for a changed value) establish the candidate receiving cut.
++        // Quiet turns only drain later work; they cannot establish it alone.
++        const complete =
++          actual.attempts.every(([, state]) => state === `fulfilled`) &&
++          actual.rootSubscriptionStatus === `ready` &&
++          actual.downstreamSubscriptionStatus === `ready` &&
++          !actual.rootLoadingSubset &&
++          !actual.downstreamLoadingSubset &&
++          (!requiresCallbacks ||
++            (actual.rootCallbacks > 0 && actual.downstreamCallbacks > 0)) &&
++          pending.every(({ pending: waiting }) => !waiting) &&
++          queryClient
++            .getQueryCache()
++            .getAll()
++            .every((query) => query.state.fetchStatus === `idle`)
++        const signature = JSON.stringify(actual)
++        stableFollowupTurns =
++          complete && signature === previousFollowup
++            ? stableFollowupTurns + 1
++            : 0
++        previousFollowup = signature
++      }
++      emit(`followup-settled`, {
++        attempts: [...followupAttempts],
++        rootCallbacks: rootCallbacks - beforeRoot,
++        downstreamCallbacks: downstreamCallbacks - beforeDownstream,
++        rootSubscriptionStatus: subscription.status,
++        downstreamSubscriptionStatus: downstreamSubscription.status,
++        rootLoadingSubset: live.isLoadingSubset,
++        downstreamLoadingSubset: downstream.isLoadingSubset,
++      })
++      emit(`followup-publication`, {
++        rows: readLive(),
++        downstream: readDownstream(),
++        ...snapshotEntries(),
++        ready: live.status === `ready`,
++        syncError: live.health.hasErrors,
++      })
++      captureBindings(`followup-publication`)
++    }
+   } finally {
+     emit(`cleanup-start`)
+     holding = false
+--- parent/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
++++ successor/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+@@ -27,6 +27,8 @@
+   nonemptyPrior: boolean
+   // Separate receiving profile. Absent preserves the original H02 driver.
+   metadataKeys?: `default` | `authored`
++  // Observation stage after the completed reload; absent preserves H02.
++  metadataFollowupQuarter?: 0 | 1 | 2 | 3
+   keyShift: number
+   rankScale: number
+ }
+@@ -134,9 +136,24 @@
+  * facts define the final result only after every finite successful answer
+  * applies. Before that cut, publication retains the preceding complete value.
+  */
+-export function modelProgressValue(history: ProgressHistory, final: boolean) {
++export function modelProgressValue(
++  history: ProgressHistory,
++  final: boolean,
++  followup = false,
++) {
+   const { roots, marked, pivot } = progressFacts(history)
+   if (history.kind === `query` && final) marked.delete(pivot)
++  // Authored source facts define the later observation stage. This is not a
++  // Query-cache state or a new production controller. Quarter zero is a no-op.
++  if (followup) {
++    if (
++      history.kind !== `query` ||
++      history.metadataFollowupQuarter === undefined
++    )
++      throw new Error(`follow-up model requires an authored receiving stage`)
++    roots[2]!.rank =
++      (3 + history.metadataFollowupQuarter / 4) * history.rankScale
++  }
+   if (history.kind === `sync-mutation` && final) {
+     roots[0]!.rank = 6 * history.rankScale
+   }
+@@ -213,7 +230,8 @@
+   }
+   if (
+     receipt.phase === `immediate-publication` ||
+-    receipt.phase === `final-publication`
++    receipt.phase === `final-publication` ||
++    receipt.phase === `followup-publication`
+   ) {
+     if (
+       history.kind === `sync-initial` &&
+@@ -226,7 +244,11 @@
+       )
+     checkReplayPublication(
+       projectProgressRows(receipt.rows),
+-      modelProgressValue(history, true),
++      modelProgressValue(
++        history,
++        true,
++        receipt.phase === `followup-publication`,
++      ),
+       receipt.phase,
+     )
+     checkReplayPublication(
+@@ -237,7 +259,11 @@
+     if (history.kind === `query`) {
+       checkReplayPublication(
+         projectProgressRows(receipt.downstream),
+-        modelProgressValue(history, true),
++        modelProgressValue(
++          history,
++          true,
++          receipt.phase === `followup-publication`,
++        ),
+         `downstream observes the same complete publication`,
+       )
+       checkReplayPublication(
+@@ -263,17 +289,39 @@
+  * Raw payloads, including keys and metadata, remain in the receipt unchanged.
+  */
+ export function createProgressReceiptCheck(history: ProgressHistory) {
+-  const prior = modelProgressValue(history, false)
+-  const final = modelProgressValue(history, true)
++  let prior = modelProgressValue(history, false)
++  let final = modelProgressValue(history, true)
+   const eventRows = new Map(prior.map((row) => [row.id, row]))
+   let reloading = false
+   let finalPublished = false
++  let reloadFinalCompared = false
++  let following = false
+   return (receipt: ProgressReceipt) => {
+     checkProgressValue(history, receipt)
+     if (history.kind !== `query`) return
++    if (receipt.phase === `followup-start`) {
++      if (
++        !reloading ||
++        !reloadFinalCompared ||
++        following ||
++        history.metadataFollowupQuarter === undefined
++      )
++        throw new Error(`follow-up precedes the compared reload baseline`)
++      prior = final
++      final = modelProgressValue(history, true, true)
++      // The existing event-derived state must already equal the independently
++      // checked baseline. Do not reset it from a later observed result.
++      checkReplayPublication(
++        [...eventRows.values()].sort((a, b) => a.rank - b.rank),
++        prior,
++        `follow-up retains the checked event baseline`,
++      )
++      following = true
++      finalPublished = false
++    }
+     if (receipt.phase === `reload-start`) reloading = true
+     if (receipt.phase === `cleanup-start`) reloading = false
+-    if (receipt.phase === `final-publication`) {
++    if ([`final-publication`, `followup-publication`].includes(receipt.phase)) {
+       checkReplayPublication(
+         reloading,
+         true,
+@@ -284,6 +332,8 @@
+         projectProgressRows(receipt.rows),
+         `final checkpoint includes every event-derived public row`,
+       )
++      if (receipt.phase === `final-publication`) reloadFinalCompared = true
++      else if (!following) throw new Error(`follow-up final precedes its start`)
+     }
+     if (!reloading || receipt.phase !== `public-change`) return
+     const rows = projectProgressRows(receipt.rows)

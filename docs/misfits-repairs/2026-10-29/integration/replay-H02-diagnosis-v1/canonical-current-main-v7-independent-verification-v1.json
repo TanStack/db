@@ -1,0 +1,183 @@
+{
+  "method": "Independent Python standard-library reading, parsing and SHA256 only. No project verifier, tests, builds, receiving execution, process execution or source edits.",
+  "actualPacket": {
+    "manifestSha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+    "members": 1951,
+    "bytes": 43192185,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "acceptedPreparedPacket": {
+    "manifestSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+    "members": 62,
+    "bytes": 707085,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "liveFrozenSourceMaps": {
+    "productionFiles": {
+      "entries": 511,
+      "mismatches": []
+    },
+    "receivingProductionFiles": {
+      "entries": 161,
+      "mismatches": []
+    },
+    "instrumentFiles": {
+      "entries": 26,
+      "mismatches": []
+    },
+    "sharedInstrumentFiles": {
+      "entries": 11,
+      "mismatches": []
+    }
+  },
+  "rawPreservation": {
+    "members": 1944,
+    "bytes": 42792878,
+    "mismatches": [],
+    "rawExtra": []
+  },
+  "receipts": {
+    "sha256": "de02df48a7a1c52300a14a56b2579800b9b5151a6fd90197deaa63595c6c3783",
+    "bytes": 12655962,
+    "rows": 47739,
+    "trailingNewline": true,
+    "sequenceOrH02Errors": [],
+    "phaseCounts": {
+      "worker-start": 1,
+      "actual-key-prefix": 23883,
+      "query-key-callback": 9524,
+      "source-establishing-receipt": 1,
+      "acquisition-attempt": 4765,
+      "source-stack": 4,
+      "provider-request": 13,
+      "provider-answer": 10,
+      "acquisition-accepted": 4765,
+      "acquisition-release": 4756,
+      "cache-success": 9,
+      "public-change": 1,
+      "initial-publication": 1,
+      "reload-start": 1,
+      "release-scope": 2,
+      "conflicting-cache-premise": 1,
+      "retained-publication": 1,
+      "answer-queued": 1
+    },
+    "premiseSequence": 214,
+    "queuedSequence": 216,
+    "lastSequence": 47739,
+    "lastPhase": "acquisition-accepted",
+    "premiseChecks": {
+      "onlyOnePremise": true,
+      "onlyOneCompletedEnqueue": true,
+      "enqueueAfterPremise": true,
+      "exactAtom": true,
+      "exactVersions": true,
+      "enqueueReturned": true,
+      "microtask": true,
+      "currentPhysicalQueries": true,
+      "heldFetchingSuccess": true,
+      "matchingScopes": true,
+      "cachedContainsPivot": true,
+      "siblingEmpty": true,
+      "differentOwners": true,
+      "differentVersions": true,
+      "noExecutionThroughFinalDrain": true
+    },
+    "invalidActualPrefixes": 0,
+    "actualPrefixMismatch": 0,
+    "allAcceptedLiteralTrueFalse": true,
+    "leaseErrors": [],
+    "maxOutstandingAcquisitions": 9,
+    "finalOutstandingAcquisitions": 9,
+    "providerRequestsAfterEnqueue": 0,
+    "cacheSuccessAfterEnqueue": 0
+  },
+  "binding": {
+    "status": "bound",
+    "entries": 486,
+    "byInventoryAndKind": {
+      "evaluated-conflicting-cache-premise.json/instrument": 10,
+      "evaluated-conflicting-cache-premise.json/production": 152,
+      "evaluated-driver-start.json/instrument": 10,
+      "evaluated-driver-start.json/production": 152,
+      "evaluated-pre-history.json/instrument": 10,
+      "evaluated-pre-history.json/production": 152
+    },
+    "reportedFailures": [],
+    "independentArtifactCorrespondenceErrors": [],
+    "actualKeyCount": 23883,
+    "receiptCount": 47739,
+    "sealMetadata": {
+      "selectedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+      "sealed": true,
+      "skipAllPausesAcknowledged": true,
+      "debuggerDisableAcknowledged": true,
+      "inspectorDisconnectedBeforeHistory": true,
+      "inventorySha256": "d5ee2bfe5aa5b9643fef8cfe8bc6045e57cc31ae3412832bbc810640047e7f6f"
+    },
+    "limits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+  },
+  "supervisor": {
+    "sha256": "254890b387fe833a9fa0b7ceb15805019adbc27e3cb07bf6eee551c9b8ebe476",
+    "phase": "final-with-binding",
+    "firstKillTrigger": "post-enqueue-window",
+    "finalReason": "wall",
+    "bindingStatus": "bound",
+    "killAttempted": true,
+    "exitCode": null,
+    "signal": "SIGKILL",
+    "elapsedMsIncludingVerifier": 3534,
+    "maxSampledGroupRssBytes": 662372352,
+    "limits": {
+      "wallMs": 20000,
+      "groupRssBytes": 1073741824,
+      "nodeHeapMiB": 384,
+      "postEnqueueWindowMs": 1000
+    },
+    "postEnqueue": {
+      "postEnqueueWindowMs": 1000,
+      "conflictSequence": 214,
+      "queuedSequence": 216,
+      "queuedAtParentMonotonicMs": 2298.608833,
+      "receiptCount": 47739,
+      "acquisitionCount": 4765,
+      "releaseCount": 4756,
+      "lastSequence": 47739,
+      "lastPhase": "acquisition-accepted"
+    },
+    "heapDiagnosticDetected": false,
+    "stderrBytes": 0,
+    "cleanupErrors": [],
+    "latestGroupRows": [],
+    "semanticReceiptsMatchRaw": true,
+    "warnings": 0,
+    "prefixViolations": 0
+  },
+  "outcomeSha256": "19cc6be2bef64963fcf36cecbad69ee98addc80a7d7a99d87df4fdbb19a08a9a",
+  "invocation": {
+    "admittedBy": "/root",
+    "admissionFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v7-root-admission-v1.json",
+    "admissionSha256": "495cacbca9f98eacb0c96dae116d2d4e0e0e5730ad9bebb15a98016342593347",
+    "exactLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/launcher-v7.zsh",
+    "launcherSha256": "ea64c0ef3974ce9be100a800f3c236378c56f8f6c792b89712c9859964921252",
+    "recipeSha256": "65c8dc8d30196508c2af090fc675699f5b60b2b5685ce2c657d957610ad0a8bc",
+    "sourceFreezeSha256": "005344d82c3cfeb401da49dc9f70005a3048a47e793f9656462605cead6b3f17",
+    "preparationPacketSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+    "invocations": 1,
+    "outerExitCode": 1,
+    "outerToolSession": 88567,
+    "outerToolChunk": "a82954",
+    "completionToolChunk": "42d5af",
+    "outerPid": 66719,
+    "outerPgid": 66719,
+    "receivingPid": 66812,
+    "receivingPgid": 66812,
+    "rootIndependentAbsenceCheck": "Root reported ps output empty/exit0 for outer66719 and receiving66812 after invocation; no child-side recheck or runtime retry"
+  },
+  "rootAdmissionSha256": "495cacbca9f98eacb0c96dae116d2d4e0e0e5730ad9bebb15a98016342593347",
+  "timingLimit": "Final supervisor.json overwrites monitoring and before-kill snapshots. No separate kill-time monotonic scalar remains. Source-bound post-enqueue-window trigger requires >=1000 ms after parent observation of completed enqueue, but 3534 ms includes verifier and is not queue-to-kill measurement."
+}

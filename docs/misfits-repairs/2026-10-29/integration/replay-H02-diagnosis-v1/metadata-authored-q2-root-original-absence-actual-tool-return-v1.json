@@ -1,0 +1,7 @@
+{
+  "chunk_id": "5272ae",
+  "wall_time_seconds": 0.145213083,
+  "exit_code": 0,
+  "original_token_count": 81,
+  "output": "{\"output\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-root-original-absence-v1.json\", \"allOriginalRecordedIdentitiesObservedAbsent\": true, \"originalPidCount\": 4, \"originalTargetGroupCount\": 2}\n"
+}

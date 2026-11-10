@@ -1,0 +1,110 @@
+{
+  "kind": "proposed exact-byte evidence archive relocation",
+  "status": "plan only; root decision and independent preservation review required before old path removal",
+  "historicalBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1",
+  "historicalFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json",
+  "historicalFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "historicalPacket": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json",
+  "historicalPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "plannedArchiveBase": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1",
+  "mapping": [
+    {
+      "originalRelativePath": "materialization-source-v1/package.json",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/package.json",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/package.json.txt",
+      "sha256": "48e847860dd4f0907ce91e346dbb00a4a12213163ad3d80a953c343eb9a11979",
+      "bytes": 19,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-config.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/db/tests/oracle-config.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-config.js.txt",
+      "sha256": "43b444a2f6d45bebae305c02b6778b2cd2b6505543b21072d20fdd8c50cf56cf",
+      "bytes": 27226,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-declaration.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/db/tests/oracle-declaration.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-declaration.js.txt",
+      "sha256": "70af56378aa24746e78198bd3ad6ab7f71ed0d5983758db5867dfd041e67cf5b",
+      "bytes": 964,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-reach.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/db/tests/oracle-reach.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-reach.js.txt",
+      "sha256": "68f783ceb46df7a4ad25f92c549ca3afa4311f335fac7c746b7ae8d056602eee",
+      "bytes": 2624,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/db/tests/oracle-replay-witness.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/db/tests/oracle-replay-witness.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/db/tests/oracle-replay-witness.js.txt",
+      "sha256": "fffc2d35e7df584608f8a3ca4bffdcb9717204ff06117d7a8c7bdb7011796d2c",
+      "bytes": 3645,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js.txt",
+      "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d",
+      "bytes": 16519,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js.txt",
+      "sha256": "76e9c6686fc06c98260d084ef8359e530a31d9611055fbe6ba6b313e70d45016",
+      "bytes": 26471,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    },
+    {
+      "originalRelativePath": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "originalAbsolutePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "plannedArchiveRelativePath": "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js.txt",
+      "sha256": "8f758c24b37dbf0d5ebe2f8bc16a12b23e8ead4a75803aabf0516a99941f0cf4",
+      "bytes": 47107,
+      "role": "closed constructor emit evidence; not runtime input",
+      "copyStatus": "planned only; no archive copy or relocation performed"
+    }
+  ],
+  "actualHistoricalConstructorImport": {
+    "path": "/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+    "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d"
+  },
+  "preserveUnchanged": [
+    "historical input-freeze-v1.json bytes",
+    "historical input-packet-sha256-v1.json bytes",
+    "materialized-inputs-v1.json bytes",
+    "materialization-static-log-v1.json bytes",
+    "all sixteen program and recipe pairs",
+    "failed first singleton records and result freeze",
+    "combined-v2 source packet"
+  ],
+  "resolverPolicy": "For a historical input-freeze/packet key in mapping, read plannedArchiveBase/plannedArchiveRelativePath and demand the same SHA256; all other keys resolve at historicalBase/key unchanged. Never claim the old direct-path packet remains valid after relocation. New archive manifest must separately pin this mapping and archive bytes.",
+  "proposedSteps": [
+    "Before mutation rehash the historical freeze, packet, all eight old bytes, all unchanged input files, and exact failed-run freeze.",
+    "Create exclusive new archive directory. Copy each of eight files byte-for-byte to its mapped .txt path; no wrapper, encoding conversion, or newline normalization.",
+    "Create additive archive manifest including immutable original manifest hashes, emit command/log identity, actual historical temporary import identity, mapping, bytes and SHA256.",
+    "Independently rehash all archive copies and resolve every old freeze/packet key using the explicit map; compare original historical manifest bytes unchanged.",
+    "Only after root authorization and independent preservation acceptance, remove the exact eight old emitted evidence files. Preserve all historical manifest/program/recipe/failure records. Record removal and direct-path validation status explicitly.",
+    "Run required changed-file lint normally; no rule, budget, ignore, or source expectation changes. New constructor materializations, if ever separately authorized, stay in /private/tmp and preserve evidence as .txt from the outset."
+  ],
+  "ongoingRuntimePathNeedingOldGeneratedEvidence": false,
+  "runtimeAdmission": false,
+  "nativeRetries": 0,
+  "candidateRaw20": "all UNREACHED"
+}

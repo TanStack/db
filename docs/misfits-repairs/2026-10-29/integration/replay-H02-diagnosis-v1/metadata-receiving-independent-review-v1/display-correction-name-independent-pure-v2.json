@@ -1,0 +1,12 @@
+{
+  "status": "PASS: exact installed getter/matcher source evaluated on inert objects",
+  "checks": 40,
+  "cells": 4,
+  "nativeCollectionRuns": 0,
+  "nativeLists": 0,
+  "nativeProcessProbes": 0,
+  "filterNativeValidation": false,
+  "sourceSha256": "83bf35407776ade4793d34809d28d484650a3b82abbcd27a441a1c0d8e0ad05b",
+  "matcherSource": "function getTaskFullName(task) {\n\treturn `${task.suite ? `${getTaskFullName(task.suite)} ` : \"\"}${task.name}`;\n}",
+  "displayGetterSource": "\tget fullName() {\n\t\tif (this.#fullName === void 0) if (this.parent.type !== \"module\") this.#fullName = `${this.parent.fullName} > ${this.name}`;\n\t\telse this.#fullName = this.name;\n\t\treturn this.#fullName;\n\t}"
+}

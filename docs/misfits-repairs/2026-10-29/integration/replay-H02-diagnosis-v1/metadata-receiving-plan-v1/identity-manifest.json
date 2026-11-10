@@ -1,0 +1,119 @@
+{
+  "authorityAndResultInputs": {
+    "metadata-owner-exact-worktree-authority-correction-v1.md": "a18a81f020588d9514c53dd48d64df156b8c3236ad38db790b99c22545b94450",
+    "neighbor-nonempty-scope-current-main-v4-independent-result-review-v1.md": "8c20a57124f55a910f6267e139c23e6a5310a9298b65819172fe3901fe99282f",
+    "neighbor-nonempty-scope-current-main-v4-independent-result-verification-v1.json": "572eab858cecfa4dc391b113f6cc78312acda786f4f7aef4c9a36ad658b13ad4",
+    "prepared-neighbor-controls-v4/source-freeze-v4.json": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d"
+  },
+  "exactSourceReadIdentities": {
+    ".agents/skills/oracle-authoring/SKILL.md": "a7fecfa338e18777210948328e589e304b5e7716cf709ba2cd99aaa7e3851d22",
+    ".agents/skills/oracle-review/SKILL.md": "6ce535ca468de3acc60a8936871edd3d9638a498160f1c8705d709b13080e43f",
+    "AGENTS.md": "dc3d665ac8962d14519ce6d701a84120cb0eba9a698f4bef644e9a8a151d938f",
+    "docs/contributing/glossary.md": "f8cec460111439ba9ee65b0c1ecf8a60e466b576c4d94d75af222a9ced4ed02d",
+    "docs/contributing/oracle-coverage.md": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a",
+    "docs/contributing/oracle-rubric.md": "4bf86e90348850a66d70c48e47d0d32d0830a6929e132f960eaf5e5de398c1a2",
+    "docs/guides/live-queries.md": "67ae54a8e0fe7c79480a31f97f497d997af8f83f343b70ab13b82ce90df36323",
+    "docs/reference/interfaces/VirtualRowProps.md": "72f3a27dc323255991143a300b4fdd1425eec077d179ca24026fb188f4a89fd7",
+    "docs/reference/type-aliases/VirtualOrigin.md": "166a76c6c5a8a75fe19f6b2158bae8bbc62aa94b460f919fe3ab9bfe9a64abe3",
+    "packages/db/src/query/live/ARCHITECTURE.md": "5b5aa10c6672e7e60e38c1d2f5f28fa1f956d60741fb75965808050a256130b1",
+    "packages/db/src/virtual-props.ts": "28acdeda1137e0aad5f02af309939ee23bad61ae05cd1130b8d5d39925897a9a",
+    "packages/db/tests/collection-subscription-lifecycle-grammar-oracle.ts": "603121f389a34400f85d94cf318750cb26ec12bf7c953a87be9dbc3d418b7938",
+    "packages/db/tests/query/load-subset-retained-publication-oracle.ts": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "packages/db/tests/query/virtual-row-fields-grammar-oracle.ts": "301154bdaa1fe42fbd9b0f668947bac3a54f7cdb33a83cd4df7579a9f12c16c1",
+    "packages/db/tests/query/virtual-row-fields-oracle.test.ts": "3b0b5cebd4e20505073c363d2670bc61528a79e13835711241667613c7c89258",
+    "packages/db/tests/query/virtual-row-fields-source-oracle.ts": "d60c483456f6d222060976ebd10dd68ddbb9481c685f785f7a36e0c82ec1f80f",
+    "packages/db/tests/query/virtual-row-fields-support.ts": "34909f28bc58c17881a72ee25eb1a3b1962417e4841eb06a8a2088a8b693254c",
+    "packages/query-db-collection/tests/queued-answer-progress-driver.ts": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+    "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524",
+    "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+    "scripts/h02-progress/receipt-transport.mjs": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da"
+  },
+  "exactSourceWorktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "inheritedFrozenLineageFacts": {
+    "dependencyLimits": "Nine named runtime/tool packages have frozen own regular payload maps, including the actual installed @vitest/runner and @vitest/utils native formatter/matcher inputs. Installed pnpm lock and reuse links are frozen. Not a complete transitive preimage/host/native/dist equivalence claim.",
+    "dependencyReuseLinks": {
+      "node_modules": {
+        "isSymlink": true,
+        "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules"
+      },
+      "packages/db-ivm/node_modules": {
+        "isSymlink": true,
+        "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/db-ivm/node_modules"
+      },
+      "packages/db/node_modules": {
+        "isSymlink": true,
+        "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/db/node_modules"
+      },
+      "packages/query-db-collection/node_modules": {
+        "isSymlink": true,
+        "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/query-db-collection/node_modules"
+      }
+    },
+    "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+    "lockfiles": {
+      "installedPnpmLock": "0ca770f6dfbf410f9e4786c34905309f1e143b6c807fe8b395765b969c57b3fa",
+      "repoPnpmLock": "554050977c82b1254ccb63fff05dad33b214555c341551ed8a76d74144a22d08"
+    },
+    "node": {
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+      "version": "v24.19.0"
+    },
+    "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+    "productionIdentityFormat": "SHA256 of sorted compact JSON path-to-sha256 map",
+    "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1"
+  },
+  "lineageLimits": "Frozen production/dependency facts inherited from accepted V4 freeze; this plan hashes the listed source inputs only. No new complete source/dependency audit or network freshness check.",
+  "newArtifacts": [
+    "plan.md",
+    "identity-manifest.json"
+  ],
+  "operations": "Source and frozen report reading, SHA256 hashing, artifact writing only. No project code imported or executed. No tests/builds/lint/runtime/process checks/worktree/Git mutations/publication.",
+  "overlappingFrozenInstrumentIdentityChecks": {
+    "docs/contributing/oracle-coverage.md": {
+      "actual": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a",
+      "equal": true,
+      "expected": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a"
+    },
+    "packages/db/tests/query/load-subset-retained-publication-oracle.ts": {
+      "actual": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+      "equal": true,
+      "expected": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-driver.ts": {
+      "actual": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+      "equal": true,
+      "expected": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": {
+      "actual": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436",
+      "equal": true,
+      "expected": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+      "actual": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+      "equal": true,
+      "expected": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts": {
+      "actual": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524",
+      "equal": true,
+      "expected": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524"
+    },
+    "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts": {
+      "actual": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+      "equal": true,
+      "expected": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526"
+    },
+    "scripts/h02-progress/receipt-transport.mjs": {
+      "actual": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da",
+      "equal": true,
+      "expected": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da"
+    }
+  },
+  "planSha256": "40ae44ca12b6710f3e65fe8e46dd15a310d8f06a53bfd2be83ec7379afdf525b",
+  "source563MustRemainFrozen": true,
+  "status": "read-only plan; no source/test changes, runtime or admission"
+}

@@ -1,0 +1,785 @@
+{
+  "receivingMode": "baseline-constituent",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-receiving.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  },
+  "phase": "final-with-binding",
+  "pid": 4909,
+  "elapsedMs": 2374,
+  "maxSampledGroupRssBytes": 480264192,
+  "latestGroupRows": [],
+  "killAttempted": true,
+  "watchdogTrigger": "observation",
+  "heapDiagnosticDetected": false,
+  "postEnqueue": {
+    "postEnqueueWindowMs": 1000,
+    "receiptCount": 328,
+    "acquisitionCount": 0,
+    "releaseCount": 0,
+    "lastSequence": 328,
+    "lastPhase": "worker-error"
+  },
+  "outcome": {
+    "reason": "observation",
+    "exitCode": null,
+    "signal": "SIGKILL",
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "mode": "baseline-constituent",
+        "program": {
+          "gate": "source-failed-peer",
+          "parameters": {
+            "keyShift": 0,
+            "rankScale": 10,
+            "nonemptyPrior": true,
+            "partial": "limit",
+            "tie": false,
+            "selectedOutput": "root",
+            "answerScheduler": "microtask"
+          },
+          "setup": {
+            "run": "run-1",
+            "profile": "inline",
+            "facts": {
+              "roots": [
+                {
+                  "id": 1,
+                  "rank": 10
+                },
+                {
+                  "id": 2,
+                  "rank": 20
+                },
+                {
+                  "id": 3,
+                  "rank": 30
+                },
+                {
+                  "id": 4,
+                  "rank": 40
+                },
+                {
+                  "id": 5,
+                  "rank": 50
+                },
+                {
+                  "id": 6,
+                  "rank": 60
+                }
+              ],
+              "marked": [
+                3,
+                4,
+                5,
+                6
+              ],
+              "children": [
+                {
+                  "id": 101,
+                  "parent": 1
+                },
+                {
+                  "id": 102,
+                  "parent": 1
+                },
+                {
+                  "id": 201,
+                  "parent": 2
+                },
+                {
+                  "id": 202,
+                  "parent": 2
+                },
+                {
+                  "id": 301,
+                  "parent": 3
+                },
+                {
+                  "id": 302,
+                  "parent": 3
+                },
+                {
+                  "id": 401,
+                  "parent": 4
+                },
+                {
+                  "id": 402,
+                  "parent": 4
+                },
+                {
+                  "id": 501,
+                  "parent": 5
+                },
+                {
+                  "id": 502,
+                  "parent": 5
+                },
+                {
+                  "id": 601,
+                  "parent": 6
+                },
+                {
+                  "id": 602,
+                  "parent": 6
+                }
+              ]
+            },
+            "window": {
+              "offset": 0,
+              "limit": 2
+            },
+            "ready": true
+          },
+          "changedFacts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 10
+              },
+              {
+                "id": 2,
+                "rank": 20
+              },
+              {
+                "id": 3,
+                "rank": 30
+              },
+              {
+                "id": 4,
+                "rank": 40
+              },
+              {
+                "id": 5,
+                "rank": 50
+              },
+              {
+                "id": 6,
+                "rank": 60
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              },
+              {
+                "id": 103,
+                "parent": 1
+              }
+            ]
+          },
+          "target": "root",
+          "overlay": {
+            "id": "baseline-hold",
+            "kind": "root",
+            "row": {
+              "id": 1,
+              "rank": 9.9,
+              "children": [
+                101,
+                102
+              ]
+            }
+          },
+          "selectedKeys": {
+            "root": 1,
+            "facadeA": 1,
+            "facadeB": 2,
+            "pivot": 3,
+            "optimisticChild": 199
+          },
+          "answerScopes": {
+            "failure": {
+              "source": "marked",
+              "scope": [
+                3
+              ]
+            },
+            "peer": {
+              "source": "children",
+              "scope": [
+                3
+              ]
+            }
+          },
+          "errors": {
+            "source": "baseline-source",
+            "tail": "baseline-tail",
+            "graph": "baseline-graph",
+            "facadeB": "baseline-facade-B"
+          },
+          "steps": [
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "require",
+                "requirement": {
+                  "id": "answer",
+                  "kind": "source"
+                }
+              }
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "require",
+                "requirement": {
+                  "id": "peer",
+                  "kind": "source"
+                }
+              }
+            },
+            {
+              "kind": "control",
+              "control": "hold-demand-sources"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "request-window",
+                "operation": "window",
+                "options": {
+                  "limit": 3
+                },
+                "requires": [
+                  "answer",
+                  "peer"
+                ]
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "held-window"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "source-failure",
+                "requirement": "answer",
+                "error": "baseline-source"
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "source-failed-peer"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "source-answer",
+                "requirement": "peer",
+                "facts": {
+                  "roots": [
+                    {
+                      "id": 1,
+                      "rank": 10
+                    },
+                    {
+                      "id": 2,
+                      "rank": 20
+                    },
+                    {
+                      "id": 3,
+                      "rank": 30
+                    },
+                    {
+                      "id": 4,
+                      "rank": 40
+                    },
+                    {
+                      "id": 5,
+                      "rank": 50
+                    },
+                    {
+                      "id": 6,
+                      "rank": 60
+                    }
+                  ],
+                  "marked": [
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "id": 101,
+                      "parent": 1
+                    },
+                    {
+                      "id": 102,
+                      "parent": 1
+                    },
+                    {
+                      "id": 201,
+                      "parent": 2
+                    },
+                    {
+                      "id": 202,
+                      "parent": 2
+                    },
+                    {
+                      "id": 301,
+                      "parent": 3
+                    },
+                    {
+                      "id": 302,
+                      "parent": 3
+                    },
+                    {
+                      "id": 401,
+                      "parent": 4
+                    },
+                    {
+                      "id": 402,
+                      "parent": 4
+                    },
+                    {
+                      "id": 501,
+                      "parent": 5
+                    },
+                    {
+                      "id": 502,
+                      "parent": 5
+                    },
+                    {
+                      "id": 601,
+                      "parent": 6
+                    },
+                    {
+                      "id": 602,
+                      "parent": 6
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "public-state"
+            }
+          ],
+          "publicationEpochs": [
+            {
+              "id": "initialization",
+              "kind": "initialization",
+              "fromStep": -1,
+              "throughStep": -1
+            },
+            {
+              "id": "1:held-window",
+              "kind": "publication",
+              "fromStep": 0,
+              "throughStep": 4
+            },
+            {
+              "id": "2:source-failed-peer",
+              "kind": "publication",
+              "fromStep": 5,
+              "throughStep": 6
+            },
+            {
+              "id": "3:public-state",
+              "kind": "publication",
+              "fromStep": 7,
+              "throughStep": 8
+            }
+          ],
+          "sourceAnswerPremises": {
+            "peer": [
+              {
+                "source": "children",
+                "requiredKeys": [
+                  3
+                ],
+                "permittedKeys": [
+                  3
+                ],
+                "knowledge": "complete-domain",
+                "since": "answer-release"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 186,
+        "phase": "completion-baseline-view",
+        "setup": {
+          "run": "run-1",
+          "profile": "inline",
+          "facts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 10
+              },
+              {
+                "id": 2,
+                "rank": 20
+              },
+              {
+                "id": 3,
+                "rank": 30
+              },
+              {
+                "id": 4,
+                "rank": 40
+              },
+              {
+                "id": 5,
+                "rank": 50
+              },
+              {
+                "id": 6,
+                "rank": 60
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              }
+            ]
+          },
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "ready": true
+        },
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 291,
+        "phase": "completion-baseline-cut",
+        "boundary": "held-window",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        },
+        "operations": [
+          {
+            "operation": "window",
+            "returned": "promise",
+            "outcome": {
+              "state": "pending"
+            }
+          }
+        ],
+        "operation": "window",
+        "pendingProviderAnswers": 2
+      },
+      {
+        "h02": true,
+        "sequence": 321,
+        "phase": "completion-baseline-cut",
+        "boundary": "source-failed-peer",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "children": []
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 20,
+              "children": [
+                201,
+                202
+              ]
+            },
+            {
+              "id": 3,
+              "rank": 30,
+              "children": []
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": [
+            "baseline-source"
+          ]
+        },
+        "operations": [
+          {
+            "operation": "window",
+            "returned": "promise",
+            "outcome": {
+              "state": "pending"
+            }
+          }
+        ],
+        "requirement": "answer",
+        "error": "baseline-source",
+        "peerPending": true
+      },
+      {
+        "h02": true,
+        "sequence": 327,
+        "phase": "worker-cleaned",
+        "mode": "baseline-constituent",
+        "gate": "source-failed-peer"
+      },
+      {
+        "h02": true,
+        "sequence": 328,
+        "phase": "worker-error",
+        "message": "Error: completion law: coherent public values, handles, health and settled window; expected {\"roots\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}],\"facades\":[],\"downstream\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}],\"window\":{\"offset\":0,\"limit\":2},\"status\":\"ready\",\"requestErrors\":[\"baseline-source\"]}, got {\"roots\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}],\"facades\":[],\"downstream\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}],\"window\":{\"offset\":0,\"limit\":2},\"status\":\"ready\",\"requestErrors\":[\"baseline-source\"]}",
+        "stack": "Error: completion law: coherent public values, handles, health and settled window; expected {\"roots\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}],\"facades\":[],\"downstream\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}],\"window\":{\"offset\":0,\"limit\":2},\"status\":\"ready\",\"requestErrors\":[\"baseline-source\"]}, got {\"roots\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}],\"facades\":[],\"downstream\":[{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}],\"window\":{\"offset\":0,\"limit\":2},\"status\":\"ready\",\"requestErrors\":[\"baseline-source\"]}\n    at equal (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:175:11)\n    at checkCompletionPublicState (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1313:3)\n    at checkCompletionBaselineObservation (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1399:3)\n    at observe (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:911:5)\n    at driveCompletionBaselineProgram (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:940:12)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:5\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      }
+    ],
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/receipts.jsonl",
+    "primaryObservationError": "Error: completion law: callback has complete authored root content; expected [{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}], got [{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}]\n    at equal (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:175:11)\n    at check (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1721:5)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:280:9\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:400:7\n    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:171:9)\n    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:239:19)\n    at Timeout._onTimeout (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:437:14)\n    at listOnTimeout (node:internal/timers:635:17)\n    at processTimers (node:internal/timers:571:7)",
+    "bindingStatus": "bound"
+  }
+}

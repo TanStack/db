@@ -1,0 +1,75 @@
+import { codedMessage, devBuild } from "../error-message";
+export const cleanupNow = () => globalThis.performance?.now() ?? Date.now();
+export class CleanupQueue {
+  constructor() {
+    this.tasks = /* @__PURE__ */ new Map();
+    this.timeoutId = null;
+    this.microtaskScheduled = false;
+  }
+  static {
+    this.instance = null;
+  }
+  static getInstance() {
+    return CleanupQueue.instance ??= new CleanupQueue();
+  }
+  /**
+   * Queues a cleanup task and defers timeout selection to a microtask so
+   * multiple synchronous registrations can share one root timer.
+   */
+  schedule(key, gcTime, callback) {
+    const executeAt = cleanupNow() + gcTime;
+    this.tasks.set(key, { executeAt, callback });
+    if (!this.microtaskScheduled) {
+      this.microtaskScheduled = true;
+      Promise.resolve().then(() => {
+        this.microtaskScheduled = false;
+        this.updateTimeout();
+      });
+    }
+  }
+  cancel(key) {
+    this.tasks.delete(key);
+    if (this.tasks.size === 0 && this.timeoutId !== null) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+  }
+  /**
+   * Keeps only one active timeout: whichever task is due next.
+   */
+  updateTimeout() {
+    if (this.timeoutId !== null) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+    if (this.tasks.size === 0) {
+      return;
+    }
+    let earliestTime = Infinity;
+    for (const task of this.tasks.values()) {
+      if (task.executeAt < earliestTime) {
+        earliestTime = task.executeAt;
+      }
+    }
+    const delay = Math.max(0, earliestTime - cleanupNow());
+    this.timeoutId = setTimeout(() => {
+      this.timeoutId = null;
+      const now = cleanupNow();
+      for (const [key, task] of this.tasks.entries()) {
+        if (now >= task.executeAt) {
+          this.tasks.delete(key);
+          try {
+            task.callback();
+          } catch (error) {
+            console.error(
+              devBuild() && process.env.NODE_ENV !== `production` ? "Error in CleanupQueue task:" : codedMessage(214),
+              error
+            );
+          }
+        }
+      }
+      this.updateTimeout();
+    }, delay);
+    if (typeof this.timeoutId === `object`) this.timeoutId.unref();
+  }
+}

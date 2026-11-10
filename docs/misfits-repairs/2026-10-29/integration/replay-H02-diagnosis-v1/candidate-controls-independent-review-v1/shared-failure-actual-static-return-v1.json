@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-30T12:06:20.580888+00:00",
+  "classification": "instrumentation failure; no receiving product RED or GREEN",
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-failure-actual-independent-review-v1.md",
+    "sha256": "4e0b16b4e0aacddcdd70a20fc9e6c737682260067468887960092763234efe78"
+  },
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-failure-actual-independent-facts-v1.json",
+    "sha256": "0a01f7f2f65ff02f70601950ed10f64769a7785cbe5b8b912ef4bd4f4df6f88a"
+  },
+  "audit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-shared-failure-actual-v1.py",
+    "sha256": "f45688d1900b730a2c9ef1840c8e5aab415d289e49471f67081c8bbf251ee8bc",
+    "initial": "4a4a90",
+    "session": 61853,
+    "final": "868bba",
+    "exit": 0
+  },
+  "resultFreezeSha256": "5dd02625d22a6f096470737b3d09a447cf89c985d91f819e5e30cdda5c5e7b8a",
+  "admissionSha256": "61d6c5fee04057a468647bc392127d43f5f092708e287aa3b43cd932be439769",
+  "admissionState": "failure-only and spent; no retry or success admitted",
+  "phaseCollision": "confirmed by loaded source and static reconstruction matching raw291; original291292293 unchanged",
+  "originalPeerGuardComponent": "UNESTABLISHED",
+  "raw302and315": "UNCLASSIFIED as product behavior",
+  "requiredMinimumCorrection": "Local pre-close emission must retain checkpoint phase despite common.phase=cut; preserve parent active-epoch guard and actual original ordering. Calibrate marker/end/cut routing and wrong pre-close cut rejection before exact source successor. Add component-specific original-peer guard evidence without weakening predicates or no-cancel law. No correction applied.",
+  "runtimeAdmission": false,
+  "boundImports": 0,
+  "nativeProbes": 0,
+  "productionEdits": 0,
+  "successCredit": false,
+  "bugClassClosure": false,
+  "slot2": "returned",
+  "coordinatedLint": "PENDING ROOT",
+  "ledgerPrefixRows": 114,
+  "ledgerPrefixSha256": "b7fa7544ec7f7cf43641b7ecf279e0fe548fd95411cad2ee87e5b4a97a5c7e62"
+}

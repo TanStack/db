@@ -1,0 +1,33 @@
+{
+  "acceptedSelectorClassificationSha256": "4fd95de65589d512920a37f7ff92d90abdee1f54a9f265441bacc808ebb692d4",
+  "acceptedSelectorResultFreezeSha256": "7f797473ed69940fdca4f4506ef99a71997224fb3785aa99e7c9dc71006958b6",
+  "acceptedUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+  "containmentChanged": false,
+  "dependencyReuseLinks": 4,
+  "failedReceivingResultFreezeSha256": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb",
+  "files": {
+    "calibrate.py": "d78bde7283f65805cc592f8d15372309907be6e886f773c1de83b4420046284d",
+    "launcher-scope-default-q2.zsh": "76843f2532facb6174d7213d987026e4abce6f60a144103352037d2713e18b82",
+    "recipes.json": "0d355458749b39d551e79e56371007ce14beca345c5e4ad97e10054039ff3847",
+    "verify.py": "4acd4e023098048285e44f2416e91c1c987e14144bf1bab3ef52103ee65132b8"
+  },
+  "namedDependencyOwnPayloads": 2544,
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalSourceFiles": 573,
+  "passiveBaseline": "Candidate inventory only; actual artifact selection requires unique exact program/source/recorded identity agreement, ambiguity stops",
+  "predecessorBindingSha256": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+  "productionFiles": 511,
+  "retainedStageSelectorCorrectionOnly": true,
+  "reusedSourceFiles": 589,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceRefreezes": 0,
+  "sourceReviewSha256": "a07ed61feca7172165fb6d2489ce9d255fe160d761464152827f2dd584efd9f2",
+  "status": "SOURCE-ONLY v3 same singleton rebind; root recovery acceptance, independent recipe review and new one-shot admission required",
+  "success": "Actual canonical history, applied source/acquisition receipts, both-output complete public previousValue/update comparisons, shared finalizer and normal cleanup; no interpretation from list/quiet turns alone",
+  "toolchainRecoveryGate": "Required root acceptance; no changed wrappers accepted as a new preimage"
+}

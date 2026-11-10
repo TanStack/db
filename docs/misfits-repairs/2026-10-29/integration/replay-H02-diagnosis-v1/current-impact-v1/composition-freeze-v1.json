@@ -1,0 +1,146 @@
+[
+  {
+    "label": "current-main",
+    "root": "/private/tmp/h02-current-main-qpauslv5",
+    "base": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+    "patchSha256": null,
+    "patchApplyCheck": 0,
+    "patchPreimages": {
+      "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "packages/db/src/query/live/collection-config-builder.ts": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+      "packages/db/src/query/live/collection-subscriber.ts": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+      "packages/db/src/types.ts": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "packages/db/tests/oracle-config.ts": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908",
+      "packages/db/tests/oracle-replay-manifest.ts": "d59149f7dbf7d5ca11271c49ce24746389d3581d9d807dd0f241b86fae654483",
+      "packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts": "27f76be612a3058235953e5b984b77ba9274f1aab073035543161b71d4d14e48",
+      "packages/db/tests/query/load-subset-retained-publication-oracle.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-failed-sibling-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-pending-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-query-support.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-refinement-query.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-window-failure-query-oracle.test.ts": null
+    },
+    "productionIdentity": "ebf2eb723161c3ea7073c1f4de55ceb4ff02bf284bd1e2ea1e6b76db9230c0a4",
+    "matchesAccepted511FileProductionEnvelope": false,
+    "driverSha256": "18deeffebe73ebe94f94d5fdcfd8f2c8fc700d97286e990e14075326b7c6d066",
+    "aliasConfigSha256": "00751e94a37aeeec96bdad7fd300a3a092a1fc0efc45f9e2e4a2ddaf16542cb6",
+    "runtime": {
+      "vitest": {
+        "version": "4.1.12",
+        "sha256": "e5a6d55e103f04929442595df0f641f128b02fd706ff01474c094863b44511d0",
+        "resolved": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json"
+      },
+      "vite": {
+        "version": "7.3.7",
+        "sha256": "aae1f593c0e6f320989b60af6e90f8ed4ea5137e5a0b9db663f9b0088333eb3c",
+        "resolved": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json"
+      },
+      "query-core": {
+        "version": "5.90.20",
+        "sha256": "b1873c254b19d21a717c047a580c483e053b3233a123ca04a03eacf1b5b58beb",
+        "resolved": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json"
+      },
+      "jsdom": {
+        "version": "27.4.0",
+        "sha256": "e8f4906ea5beba475daa5736d0158f1770092c46718dd04aa2bfe2190808bb7e",
+        "resolved": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json"
+      },
+      "tanstack-vite-config": {
+        "version": "0.4.3",
+        "sha256": "e4fb7de5d887b9f89735b3f54197ab773ab4cec5815c51e4bb613a789a9c12b7",
+        "resolved": "/private/tmp/h02-current-main-qpauslv5/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json"
+      }
+    },
+    "receivingPath": "exact archived source composition with explicit DB/db-ivm source aliases; no builds; dependency clone fixed to historical diagnostic clone",
+    "node": "v24.19.0",
+    "originalViteConfigSha256": "e6d6e5657d63d276caf31f3208aa8cfe42411b3db7cced8f8dd9b544b6790f17",
+    "materialTestInputHashes": {
+      "packages/db/tests/reference-expression-oracle.ts": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "packages/db/tests/utils.ts": "d08f778d9f40f813ef57e6479fa6219fecee71ec7981e2cae90a3ea4938e96c3",
+      "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "packages/query-db-collection/package.json": "831b2604979ace0fc524a2860a83ddfb4626eb4283ac38947bfc1edb8701a7a5",
+      "packages/db/package.json": "f70a15504d3bb6ea6dac3658838c774e896f94e65468e248eb387b3e713684bf",
+      "packages/db-ivm/package.json": "0c13f25c570090f92158a931f4fb20b0626d2e9b1235ca5ec6fcc4a1a50aad1a"
+    },
+    "runtimeManifestHashesMatchHistoricalDependencyClone": {
+      "vitest": true,
+      "vite": true,
+      "query-core": true,
+      "jsdom": true,
+      "tanstack-vite-config": true
+    },
+    "architectureSameAsFullyReadHistoricalVersion": true
+  },
+  {
+    "label": "accepted-replay",
+    "root": "/private/tmp/h02-accepted-replay-bg5dj7ue",
+    "base": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+    "patchSha256": "d2da68a7310a91445497792eee3df29737bea7ff6b3c8a3d9261ab01ecb07760",
+    "patchApplyCheck": 0,
+    "patchPreimages": {
+      "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "packages/db/src/query/live/collection-config-builder.ts": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+      "packages/db/src/query/live/collection-subscriber.ts": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+      "packages/db/src/types.ts": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "packages/db/tests/oracle-config.ts": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908",
+      "packages/db/tests/oracle-replay-manifest.ts": "d59149f7dbf7d5ca11271c49ce24746389d3581d9d807dd0f241b86fae654483",
+      "packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts": "27f76be612a3058235953e5b984b77ba9274f1aab073035543161b71d4d14e48",
+      "packages/db/tests/query/load-subset-retained-publication-oracle.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-failed-sibling-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-pending-query-oracle.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-query-support.ts": null,
+      "packages/query-db-collection/tests/load-subset-replay-refinement-query.test.ts": null,
+      "packages/query-db-collection/tests/load-subset-window-failure-query-oracle.test.ts": null
+    },
+    "productionIdentity": "d7fa2b44615b883fcc3da8971c45da8848e1a6921e4ff2e7f2c2983eec6f3ae0",
+    "matchesAccepted511FileProductionEnvelope": true,
+    "driverSha256": "18deeffebe73ebe94f94d5fdcfd8f2c8fc700d97286e990e14075326b7c6d066",
+    "aliasConfigSha256": "00751e94a37aeeec96bdad7fd300a3a092a1fc0efc45f9e2e4a2ddaf16542cb6",
+    "runtime": {
+      "vitest": {
+        "version": "4.1.12",
+        "sha256": "e5a6d55e103f04929442595df0f641f128b02fd706ff01474c094863b44511d0",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json"
+      },
+      "vite": {
+        "version": "7.3.7",
+        "sha256": "aae1f593c0e6f320989b60af6e90f8ed4ea5137e5a0b9db663f9b0088333eb3c",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json"
+      },
+      "query-core": {
+        "version": "5.90.20",
+        "sha256": "b1873c254b19d21a717c047a580c483e053b3233a123ca04a03eacf1b5b58beb",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json"
+      },
+      "jsdom": {
+        "version": "27.4.0",
+        "sha256": "e8f4906ea5beba475daa5736d0158f1770092c46718dd04aa2bfe2190808bb7e",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json"
+      },
+      "tanstack-vite-config": {
+        "version": "0.4.3",
+        "sha256": "e4fb7de5d887b9f89735b3f54197ab773ab4cec5815c51e4bb613a789a9c12b7",
+        "resolved": "/private/tmp/h02-accepted-replay-bg5dj7ue/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json"
+      }
+    },
+    "receivingPath": "exact archived source composition with explicit DB/db-ivm source aliases; no builds; dependency clone fixed to historical diagnostic clone",
+    "node": "v24.19.0",
+    "originalViteConfigSha256": "e6d6e5657d63d276caf31f3208aa8cfe42411b3db7cced8f8dd9b544b6790f17",
+    "materialTestInputHashes": {
+      "packages/db/tests/reference-expression-oracle.ts": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "packages/db/tests/utils.ts": "d08f778d9f40f813ef57e6479fa6219fecee71ec7981e2cae90a3ea4938e96c3",
+      "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "packages/query-db-collection/package.json": "831b2604979ace0fc524a2860a83ddfb4626eb4283ac38947bfc1edb8701a7a5",
+      "packages/db/package.json": "f70a15504d3bb6ea6dac3658838c774e896f94e65468e248eb387b3e713684bf",
+      "packages/db-ivm/package.json": "0c13f25c570090f92158a931f4fb20b0626d2e9b1235ca5ec6fcc4a1a50aad1a"
+    },
+    "runtimeManifestHashesMatchHistoricalDependencyClone": {
+      "vitest": true,
+      "vite": true,
+      "query-core": true,
+      "jsdom": true,
+      "tanstack-vite-config": true
+    },
+    "architectureSameAsFullyReadHistoricalVersion": true
+  }
+]

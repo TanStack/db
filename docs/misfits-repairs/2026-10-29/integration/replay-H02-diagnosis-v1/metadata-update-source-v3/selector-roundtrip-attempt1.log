@@ -1,0 +1,11 @@
+{
+  "status": "source/static/pure calibration only; no new native registration or receiving execution",
+  "raw": 206,
+  "retainedBefore": 21,
+  "retainedAfter": 23,
+  "historicalRejected": true,
+  "correctedFinalizer": 1,
+  "reached": 31,
+  "rejected": 50,
+  "neighbors": 12
+}

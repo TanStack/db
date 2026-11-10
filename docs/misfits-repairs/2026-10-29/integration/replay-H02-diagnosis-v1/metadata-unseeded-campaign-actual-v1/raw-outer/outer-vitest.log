@@ -1,0 +1,349 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources
+
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'scope' 'default'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'scope' 'authored'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'subscription' 'default'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks metadata 'subscription' 'authored'
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 2
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 1,
+  counts: {
+    'initial-root': 1,
+    'initial-downstream': 1,
+    'nonempty-prior': 1,
+    'reload-started': 1,
+    'positive-held-provider-read': 1,
+    'held-root': 1,
+    'held-downstream': 1,
+    'completed-enqueue': 1,
+    'answer-executed': 1,
+    'callback-root': 1,
+    'callback-downstream': 1,
+    'selected-upstream-metadata': 1,
+    'messages-root': 1,
+    'messages-downstream': 1,
+    'final-root': 1,
+    'final-downstream': 1,
+    'worker-cleaned': 1,
+    'reload-baseline-compared': 1,
+    'followup-started': 1,
+    'source-applied': 1,
+    'followup-acquisitions-settled': 1,
+    'followup-retained-key-root': 1,
+    'followup-messages-root': 1,
+    'followup-final-root': 1,
+    'followup-update-root': 1,
+    'followup-previous-value-root': 1,
+    'followup-retained-key-downstream': 1,
+    'followup-messages-downstream': 1,
+    'followup-final-downstream': 1,
+    'followup-update-downstream': 1,
+    'followup-previous-value-downstream': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 2,
+  counts: {
+    'initial-root': 2,
+    'initial-downstream': 2,
+    'nonempty-prior': 2,
+    'reload-started': 2,
+    'positive-held-provider-read': 2,
+    'held-root': 2,
+    'held-downstream': 2,
+    'completed-enqueue': 2,
+    'answer-executed': 2,
+    'callback-root': 2,
+    'callback-downstream': 2,
+    'selected-upstream-metadata': 2,
+    'messages-root': 2,
+    'messages-downstream': 2,
+    'final-root': 2,
+    'final-downstream': 2,
+    'worker-cleaned': 2,
+    'reload-baseline-compared': 2,
+    'followup-started': 2,
+    'source-applied': 2,
+    'followup-acquisitions-settled': 2,
+    'followup-retained-key-root': 2,
+    'followup-messages-root': 2,
+    'followup-final-root': 2,
+    'followup-update-root': 2,
+    'followup-previous-value-root': 2,
+    'followup-retained-key-downstream': 2,
+    'followup-messages-downstream': 2,
+    'followup-final-downstream': 2,
+    'followup-update-downstream': 2,
+    'followup-previous-value-downstream': 2
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 2,
+  counts: {
+    'initial-root': 3,
+    'initial-downstream': 3,
+    'nonempty-prior': 3,
+    'reload-started': 3,
+    'positive-held-provider-read': 3,
+    'held-root': 3,
+    'held-downstream': 3,
+    'completed-enqueue': 3,
+    'answer-executed': 3,
+    'callback-root': 3,
+    'callback-downstream': 3,
+    'selected-upstream-metadata': 3,
+    'messages-root': 3,
+    'messages-downstream': 3,
+    'final-root': 3,
+    'final-downstream': 3,
+    'worker-cleaned': 3,
+    'reload-baseline-compared': 3,
+    'followup-started': 3,
+    'source-applied': 3,
+    'followup-acquisitions-settled': 3,
+    'followup-retained-key-root': 3,
+    'followup-messages-root': 3,
+    'followup-final-root': 3,
+    'followup-update-root': 3,
+    'followup-previous-value-root': 3,
+    'followup-retained-key-downstream': 3,
+    'followup-messages-downstream': 3,
+    'followup-final-downstream': 3,
+    'followup-update-downstream': 3,
+    'followup-previous-value-downstream': 3
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 1,
+  counts: {
+    'initial-root': 4,
+    'initial-downstream': 4,
+    'nonempty-prior': 4,
+    'reload-started': 4,
+    'positive-held-provider-read': 4,
+    'held-root': 4,
+    'held-downstream': 4,
+    'completed-enqueue': 4,
+    'answer-executed': 4,
+    'callback-root': 4,
+    'callback-downstream': 4,
+    'selected-upstream-metadata': 4,
+    'messages-root': 4,
+    'messages-downstream': 4,
+    'final-root': 4,
+    'final-downstream': 4,
+    'worker-cleaned': 4,
+    'reload-baseline-compared': 4,
+    'followup-started': 4,
+    'source-applied': 4,
+    'followup-acquisitions-settled': 4,
+    'followup-retained-key-root': 4,
+    'followup-messages-root': 4,
+    'followup-final-root': 4,
+    'followup-update-root': 4,
+    'followup-previous-value-root': 4,
+    'followup-retained-key-downstream': 4,
+    'followup-messages-downstream': 4,
+    'followup-final-downstream': 4,
+    'followup-update-downstream': 4,
+    'followup-previous-value-downstream': 4
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 3,
+  counts: {
+    'initial-root': 5,
+    'initial-downstream': 5,
+    'nonempty-prior': 5,
+    'reload-started': 5,
+    'positive-held-provider-read': 5,
+    'held-root': 5,
+    'held-downstream': 5,
+    'completed-enqueue': 5,
+    'answer-executed': 5,
+    'callback-root': 5,
+    'callback-downstream': 5,
+    'selected-upstream-metadata': 5,
+    'messages-root': 5,
+    'messages-downstream': 5,
+    'final-root': 5,
+    'final-downstream': 5,
+    'worker-cleaned': 5,
+    'reload-baseline-compared': 5,
+    'followup-started': 5,
+    'source-applied': 5,
+    'followup-acquisitions-settled': 5,
+    'followup-retained-key-root': 5,
+    'followup-messages-root': 5,
+    'followup-final-root': 5,
+    'followup-update-root': 5,
+    'followup-previous-value-root': 5,
+    'followup-retained-key-downstream': 5,
+    'followup-messages-downstream': 5,
+    'followup-final-downstream': 5,
+    'followup-update-downstream': 5,
+    'followup-previous-value-downstream': 5
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 1,
+  counts: {
+    'initial-root': 6,
+    'initial-downstream': 6,
+    'nonempty-prior': 6,
+    'reload-started': 6,
+    'positive-held-provider-read': 6,
+    'held-root': 6,
+    'held-downstream': 6,
+    'completed-enqueue': 6,
+    'answer-executed': 6,
+    'callback-root': 6,
+    'callback-downstream': 6,
+    'selected-upstream-metadata': 6,
+    'messages-root': 6,
+    'messages-downstream': 6,
+    'final-root': 6,
+    'final-downstream': 6,
+    'worker-cleaned': 6,
+    'reload-baseline-compared': 6,
+    'followup-started': 6,
+    'source-applied': 6,
+    'followup-acquisitions-settled': 6,
+    'followup-retained-key-root': 6,
+    'followup-messages-root': 6,
+    'followup-final-root': 6,
+    'followup-update-root': 6,
+    'followup-previous-value-root': 6,
+    'followup-retained-key-downstream': 6,
+    'followup-messages-downstream': 6,
+    'followup-final-downstream': 6,
+    'followup-update-downstream': 6,
+    'followup-previous-value-downstream': 6
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 3,
+  counts: {
+    'initial-root': 7,
+    'initial-downstream': 7,
+    'nonempty-prior': 7,
+    'reload-started': 7,
+    'positive-held-provider-read': 7,
+    'held-root': 7,
+    'held-downstream': 7,
+    'completed-enqueue': 7,
+    'answer-executed': 7,
+    'callback-root': 7,
+    'callback-downstream': 7,
+    'selected-upstream-metadata': 7,
+    'messages-root': 7,
+    'messages-downstream': 7,
+    'final-root': 7,
+    'final-downstream': 7,
+    'worker-cleaned': 7,
+    'reload-baseline-compared': 7,
+    'followup-started': 7,
+    'source-applied': 7,
+    'followup-acquisitions-settled': 7,
+    'followup-retained-key-root': 7,
+    'followup-messages-root': 7,
+    'followup-final-root': 7,
+    'followup-update-root': 7,
+    'followup-previous-value-root': 7,
+    'followup-retained-key-downstream': 7,
+    'followup-messages-downstream': 7,
+    'followup-final-downstream': 7,
+    'followup-update-downstream': 7,
+    'followup-previous-value-downstream': 7
+  }
+}
+
+stdout | packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay
+H02 metadata receiving reach {
+  cacheIdentity: 'scope',
+  keyLane: 'default',
+  quarter: 1,
+  counts: {
+    'initial-root': 8,
+    'initial-downstream': 8,
+    'nonempty-prior': 8,
+    'reload-started': 8,
+    'positive-held-provider-read': 8,
+    'held-root': 8,
+    'held-downstream': 8,
+    'completed-enqueue': 8,
+    'answer-executed': 8,
+    'callback-root': 8,
+    'callback-downstream': 8,
+    'selected-upstream-metadata': 8,
+    'messages-root': 8,
+    'messages-downstream': 8,
+    'final-root': 8,
+    'final-downstream': 8,
+    'worker-cleaned': 8,
+    'reload-baseline-compared': 8,
+    'followup-started': 8,
+    'source-applied': 8,
+    'followup-acquisitions-settled': 8,
+    'followup-retained-key-root': 8,
+    'followup-messages-root': 8,
+    'followup-final-root': 8,
+    'followup-update-root': 8,
+    'followup-previous-value-root': 8,
+    'followup-retained-key-downstream': 8,
+    'followup-messages-downstream': 8,
+    'followup-final-downstream': 8,
+    'followup-update-downstream': 8,
+    'followup-previous-value-downstream': 8
+  }
+}
+
+ ✓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay 19113ms
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'default' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'default' > checks the unseeded generated campaign or selected replay
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'authored' > checks the fixed generated campaign
+ ↓ packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts > queued-answer metadata receiving > generated 'subscription' 'authored' > checks the unseeded generated campaign or selected replay
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 19 skipped (20)
+   Start at  06:05:23
+   Duration  19.49s (transform 74ms, setup 25ms, import 104ms, tests 19.11s, environment 174ms)
+

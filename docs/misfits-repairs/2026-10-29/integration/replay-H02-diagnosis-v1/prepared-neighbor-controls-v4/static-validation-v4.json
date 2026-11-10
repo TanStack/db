@@ -1,0 +1,22 @@
+{
+  "status": "17pure checker controls and serial static checks passed; no receiving",
+  "pureRed": {
+    "unchangedCheckerSourceSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed",
+    "legitimateEnrichedCasesFailed": 2,
+    "othersPassed": 15,
+    "log": "pure-checker-red-v4.log",
+    "limits": "Checker calibration only, no production RED"
+  },
+  "pureGreen": {
+    "passed": 17,
+    "log": "pure-checker-final-v4.log",
+    "report": "pure-checker-final-v4.report.json",
+    "limits": "No product GREEN or retrospective V3result change"
+  },
+  "typecheck": true,
+  "eslint": true,
+  "changedLint": true,
+  "prettier": true,
+  "sourceFreezeSha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d",
+  "receivingInvocations": 0
+}

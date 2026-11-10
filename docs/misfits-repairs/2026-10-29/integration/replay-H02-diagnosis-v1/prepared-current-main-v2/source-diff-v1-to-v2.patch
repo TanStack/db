@@ -1,0 +1,811 @@
+--- v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ v2/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -118,16 +118,16 @@
+     })
+     const subscription = live.subscribeChanges(() => {})
+     try {
+-      const preload = live.preload()
+       if (history.kind === `sync-initial`) {
+         if (!hasLiteralTrueReceipt())
+           throw new Error(`literal-true initial premise not reached`)
+         emit(`immediate-publication`, {
++          cut: `subscriber-return-before-preload`,
+           rows: copyRows(live.toArray),
+           ready: live.status === `ready`,
+         })
+       }
+-      await preload
++      await live.preload()
+       if (history.kind === `sync-mutation`) {
+         sourceControls.change?.()
+         emit(`immediate-publication`, {
+--- v1/packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts
++++ v2/packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts
+@@ -8,8 +8,8 @@
+ } from '../../db/tests/oracle-config.js'
+ import { createOracleReach } from '../../db/tests/oracle-reach.js'
+ import {
+-  checkProgressValue,
+   checkQueuedAnswerProgress,
++  createProgressReceiptCheck,
+   progressExamples,
+   progressHistoryArbitrary,
+   progressHistoryFamily,
+@@ -41,8 +41,9 @@
+     )
+   const run = async (history: ProgressHistory, reach = makeReach()) => {
+     reach.beginHistory()
++    const observe = createProgressReceiptCheck(history)
+     const outcome = await receiveProgressHistory(history, (receipt) => {
+-      checkProgressValue(history, receipt)
++      observe(receipt)
+       if (receipt.phase === `conflicting-cache-premise`)
+         reach.reach(`conflicting-cache-premise`)
+       if (receipt.phase === `answer-queued`) reach.reach(`answer-queued`)
+--- v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
++++ v2/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+@@ -1,3 +1,4 @@
++import { isDeepStrictEqual } from 'node:util'
+ import fc from 'fast-check'
+ import { declareOracle } from '../../db/tests/oracle-declaration.js'
+ import {
+@@ -182,6 +183,15 @@
+     receipt.phase === `immediate-publication` ||
+     receipt.phase === `final-publication`
+   ) {
++    if (
++      history.kind === `sync-initial` &&
++      receipt.phase === `immediate-publication`
++    )
++      checkReplayPublication(
++        receipt.cut,
++        `subscriber-return-before-preload`,
++        `initial synchronous observation precedes a second public call`,
++      )
+     checkReplayPublication(
+       receipt.rows,
+       modelProgressValue(history, true),
+@@ -204,6 +214,99 @@
+         `finite successful answers leave no sync error`,
+       )
+     }
++  }
++}
++
++/**
++ * All reload callbacks expose a complete prior or final value (architecture
++ * law 9). Once final appears, this finite history has no further backend
++ * change that could restore prior. Provider release is not applied settlement:
++ * named held-answer cuts remain stricter than these two permitted snapshots.
++ *
++ * The event map below accumulates observations, not expected query semantics.
++ * It keeps the last callback-visible id/rank/markers projection. Duplicate
++ * inserts and missing deletes cannot disappear into Map.set/delete. Sorting
++ * uses this grammar's distinct numeric ranks; it checks event membership and
++ * values, while the callback snapshot separately checks contractual order.
++ * Raw payloads, including keys and metadata, remain in the receipt unchanged.
++ */
++export function createProgressReceiptCheck(history: ProgressHistory) {
++  const prior = modelProgressValue(history, false)
++  const final = modelProgressValue(history, true)
++  const eventRows = new Map(prior.map((row) => [row.id, row]))
++  let reloading = false
++  let finalPublished = false
++  const project = (value: unknown): ProgressRow => {
++    if (
++      typeof value !== `object` ||
++      value === null ||
++      !(`id` in value) ||
++      typeof value.id !== `number` ||
++      !(`rank` in value) ||
++      typeof value.rank !== `number` ||
++      !(`markers` in value) ||
++      !Array.isArray(value.markers) ||
++      !value.markers.every((marker: unknown) => typeof marker === `number`)
++    )
++      throw new Error(`public-change has an invalid id/rank/markers value`)
++    return { id: value.id, rank: value.rank, markers: [...value.markers] }
++  }
++  return (receipt: ProgressReceipt) => {
++    checkProgressValue(history, receipt)
++    if (history.kind !== `query`) return
++    if (receipt.phase === `reload-start`) reloading = true
++    if (receipt.phase === `cleanup-start`) reloading = false
++    if (!reloading || receipt.phase !== `public-change`) return
++    const isFinal = isDeepStrictEqual(receipt.rows, final)
++    checkReplayPublication(
++      receipt.rows,
++      finalPublished || isFinal ? final : prior,
++      `every reload callback publishes one complete snapshot without regression`,
++    )
++    finalPublished ||= isFinal
++    if (!Array.isArray(receipt.changes))
++      throw new Error(`public-change payload is missing`)
++    const changedIds = new Set<number>()
++    for (const change of receipt.changes) {
++      if (typeof change !== `object` || change === null)
++        throw new Error(`public-change operation is invalid`)
++      const value = project(change.value)
++      // Public-key reduction emits at most one replacement/removal per key.
++      checkReplayPublication(
++        changedIds.has(value.id),
++        false,
++        `one public-change operation per projected row`,
++      )
++      changedIds.add(value.id)
++      const present = eventRows.has(value.id)
++      if (change.type === `insert`) {
++        checkReplayPublication(present, false, `event insert has no prior row`)
++        eventRows.set(value.id, value)
++      } else if (change.type === `delete` || change.type === `update`) {
++        checkReplayPublication(present, true, `event operation has a prior row`)
++        if (change.type === `delete`) {
++          checkReplayPublication(
++            value,
++            eventRows.get(value.id),
++            `event delete carries the preceding public value`,
++          )
++          eventRows.delete(value.id)
++        } else {
++          if (change.previousValue !== undefined)
++            checkReplayPublication(
++              project(change.previousValue),
++              eventRows.get(value.id),
++              `event update carries the preceding public value`,
++            )
++          eventRows.set(value.id, value)
++        }
++      } else throw new Error(`public-change operation type is invalid`)
++    }
++    checkReplayPublication(
++      [...eventRows.values()].sort((left, right) => left.rank - right.rank),
++      receipt.rows,
++      `public-change payload and callback read expose the same complete value`,
++    )
+   }
+ }
+ 
+@@ -324,11 +427,23 @@
+     ({ phase }) => phase === `final-publication`,
+   )
+   checkReplayPublication(Boolean(final), true, `final semantic checkpoint ran`)
+-  for (const receipt of outcome.receipts) checkProgressValue(history, receipt)
++  if (history.kind !== `query`)
++    checkReplayPublication(
++      outcome.receipts.filter(({ phase }) => phase === `immediate-publication`)
++        .length,
++      1,
++      `synchronous control records its immediate observation`,
++    )
++  const observe = createProgressReceiptCheck(history)
++  for (const receipt of outcome.receipts) observe(receipt)
+ }
+ 
+ declareOracle({
+-  check: [checkQueuedAnswerProgress, checkProgressValue],
++  check: [
++    checkQueuedAnswerProgress,
++    checkProgressValue,
++    createProgressReceiptCheck,
++  ],
+   model: [modelProgressValue],
+   grammar: [progressHistoryArbitrary, progressHistoryFamily, progressFacts],
+ })
+--- v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
++++ v2/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts
+@@ -156,6 +156,9 @@
+             `conflicting-cache-premise`,
+             `answer-queued`,
+             `answer-executed`,
++            `reload-start`,
++            `public-change`,
++            `cleanup-start`,
+             `retained-publication`,
+             `initial-publication`,
+             `immediate-publication`,
+--- v1/scripts/h02-progress/bindings-calibration.test.mjs
++++ v2/scripts/h02-progress/bindings-calibration.test.mjs
+@@ -0,0 +1,275 @@
++import { strict as assert } from 'node:assert'
++import { spawnSync } from 'node:child_process'
++import { createHash } from 'node:crypto'
++import {
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  rmSync,
++  writeFileSync,
++} from 'node:fs'
++import { tmpdir } from 'node:os'
++import { dirname, resolve } from 'node:path'
++import { test } from 'node:test'
++import { fileURLToPath } from 'node:url'
++
++/**
++ * Authored provenance records exercise only the offline verifier. Fake source
++ * files are byte strings, never imported or evaluated. A fixture's bound result
++ * is calibration, not effective-source evidence for a real receiving run.
++ */
++const verifier = fileURLToPath(
++  new URL(`./verify-bindings.mjs`, import.meta.url),
++)
++const hash = (bytes) => createHash(`sha256`).update(bytes).digest(`hex`)
++const production = [
++  `packages/db/src/index.ts`,
++  `packages/db-ivm/src/index.ts`,
++  `packages/query-db-collection/src/query.ts`,
++]
++const instruments = [
++  `packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts`,
++  `packages/query-db-collection/tests/queued-answer-progress-driver.ts`,
++  `packages/query-db-collection/tests/queued-answer-progress-oracle.ts`,
++  `packages/db/tests/query/load-subset-retained-publication-oracle.ts`,
++  `packages/db/tests/reference-expression-oracle.ts`,
++  `scripts/h02-progress/source-binding.setup.ts`,
++  `packages/db/tests/optional-calibration-helper.ts`,
++]
++function fixture() {
++  const directory = mkdtempSync(resolve(tmpdir(), `h02-verifier-calibration-`))
++  const root = resolve(directory, `authored-source`)
++  const run = resolve(directory, `authored-run`)
++  mkdirSync(resolve(run, `evaluated-sources`), { recursive: true })
++  mkdirSync(resolve(run, `v8-sources`), { recursive: true })
++  const freeze = {
++    worktree: root,
++    productionFiles: {},
++    receivingProductionFiles: {},
++    instrumentFiles: {},
++    sharedInstrumentFiles: {},
++    packages: {},
++    node: {
++      executable: process.execPath,
++      sha256: hash(readFileSync(process.execPath)),
++    },
++  }
++  const inventory = []
++  const scripts = []
++  for (const [index, path] of [...production, ...instruments].entries()) {
++    const file = resolve(root, path)
++    const source = `authored original ${index}`
++    const code = `authored loader ${index}`
++    const executed = `authored wrapper { ${code} }`
++    mkdirSync(dirname(file), { recursive: true })
++    writeFileSync(file, source)
++    const sourceSha256 = hash(source)
++    const codeSha256 = hash(code)
++    if (production.includes(path)) {
++      freeze.productionFiles[path] = sourceSha256
++      freeze.receivingProductionFiles[path] = sourceSha256
++    } else freeze.instrumentFiles[path] = sourceSha256
++    inventory.push({
++      id: file,
++      file,
++      url: file,
++      evaluated: true,
++      sourceSha256,
++      codeSha256,
++    })
++    writeFileSync(resolve(run, `evaluated-sources`, `${codeSha256}.txt`), code)
++    const script = {
++      phase: `v8-compiled-script`,
++      scriptId: String(index),
++      url: file,
++      sourceSha256: hash(executed),
++    }
++    scripts.push(script)
++    writeFileSync(
++      resolve(run, `v8-sources`, `${script.sourceSha256}.txt`),
++      executed,
++    )
++  }
++  const raw = [
++    { phase: `worker-start`, history: { kind: `query` } },
++    { phase: `query-key-callback`, emptyOptions: true, key: [`authored`] },
++    { phase: `actual-key-prefix`, boundary: `authored`, key: [`authored`, 1] },
++    {
++      phase: `source-stack`,
++      stack: `${root}/packages/db/src/a.ts\n${root}/packages/db-ivm/src/b.ts`,
++    },
++  ]
++  writeFileSync(
++    resolve(run, `worker.log`),
++    raw.map((event) => JSON.stringify({ h02: true, ...event })).join(`\n`),
++  )
++  return { directory, root, run, freeze, inventory, scripts }
++}
++function verify(input, extraInventory) {
++  const { directory, root, run, freeze, inventory, scripts } = input
++  const freezePath = resolve(directory, `source-freeze.json`)
++  writeFileSync(freezePath, JSON.stringify(freeze))
++  writeFileSync(
++    resolve(run, `evaluated-driver-start.json`),
++    JSON.stringify({ selectedRoot: root, inventory }),
++  )
++  if (extraInventory)
++    writeFileSync(
++      resolve(run, `evaluated-after-all.json`),
++      JSON.stringify({ selectedRoot: root, inventory: extraInventory }),
++    )
++  writeFileSync(
++    resolve(run, `v8-binding.jsonl`),
++    scripts.map((entry) => JSON.stringify(entry)).join(`\n`),
++  )
++  const child = spawnSync(
++    process.execPath,
++    [`--max-old-space-size=384`, verifier, run, freezePath],
++    {
++      encoding: `utf8`,
++      timeout: 20_000,
++    },
++  )
++  assert.equal(child.error, undefined)
++  const result = JSON.parse(
++    readFileSync(resolve(run, `binding-verification.json`), `utf8`),
++  )
++  return { child, result }
++}
++function calibration(name, mutate, expected, after) {
++  test(name, () => {
++    const input = fixture()
++    try {
++      const extra = mutate(input)
++      const { child, result } = verify(input, extra)
++      if (expected === undefined) {
++        assert.equal(child.status, 0, child.stderr)
++        assert.equal(result.status, `bound`)
++      } else {
++        assert.notEqual(child.status, 0)
++        assert.equal(result.status, `binding-unresolved`)
++        assert.ok(
++          result.failures.some((failure) => failure.includes(expected)),
++          JSON.stringify(result.failures),
++        )
++      }
++      after?.(result)
++      console.info(
++        JSON.stringify({
++          calibration: name,
++          authoredInputsOnly: true,
++          exitCode: child.status,
++          status: result.status,
++          failures: result.failures,
++        }),
++      )
++    } finally {
++      rmSync(input.directory, { recursive: true, force: true })
++    }
++  })
++}
++calibration(
++  `accepts exact approved production and instrument bindings`,
++  () => {},
++)
++calibration(
++  `retains unevaluated optional instrument without execution credit`,
++  ({ inventory }) => {
++    inventory.at(-1).evaluated = false
++  },
++  undefined,
++  ({ bindings }) => {
++    assert.equal(
++      bindings.find(({ relative }) =>
++        relative.endsWith(`optional-calibration-helper.ts`),
++      ).evaluated,
++      false,
++    )
++  },
++)
++calibration(
++  `accepts required module evaluated at a later inventory cut`,
++  ({ inventory }) => {
++    const later = structuredClone(inventory)
++    inventory[3].evaluated = false
++    return later
++  },
++)
++calibration(
++  `rejects outside-root production`,
++  ({ inventory }) => {
++    inventory[0].file = `/authored-outside/packages/db/src/index.ts`
++  },
++  `outside/stale or unapproved package module`,
++)
++calibration(
++  `rejects stale dist substitution`,
++  ({ root, inventory }) => {
++    inventory[0].file = resolve(root, `packages/db/dist/index.js`)
++  },
++  `outside/stale or unapproved package module`,
++)
++calibration(
++  `rejects an unapproved package helper`,
++  ({ root, inventory }) => {
++    inventory.at(-1).file = resolve(
++      root,
++      `packages/db/tests/unapproved-helper.ts`,
++    )
++  },
++  `outside/stale or unapproved package module`,
++)
++calibration(
++  `rejects changed frozen original bytes`,
++  ({ root }) => {
++    writeFileSync(resolve(root, production[0]), `changed original`)
++  },
++  `changed frozen source`,
++)
++calibration(
++  `rejects wrong actual original-byte metadata`,
++  ({ inventory }) => {
++    inventory[3].sourceSha256 = `wrong`
++  },
++  `wrong actual original bytes`,
++)
++calibration(
++  `rejects changed retained loader bytes`,
++  ({ run, inventory }) => {
++    writeFileSync(
++      resolve(run, `evaluated-sources`, `${inventory[3].codeSha256}.txt`),
++      `changed loader`,
++    )
++  },
++  `wrong retained transformed bytes`,
++)
++calibration(
++  `rejects V8 bytes without exact loader body`,
++  ({ run, scripts }) => {
++    const source = `unrelated authored V8 body`
++    scripts[3].sourceSha256 = hash(source)
++    writeFileSync(
++      resolve(run, `v8-sources`, `${scripts[3].sourceSha256}.txt`),
++      source,
++    )
++  },
++  `no exact transformed-to-V8 binding`,
++)
++calibration(
++  `rejects a required path that never evaluated`,
++  ({ inventory }) => {
++    inventory[3].evaluated = false
++  },
++  `required evaluated receiving instrument missing`,
++)
++calibration(
++  `rejects transform-only evidence without actual registry bindings`,
++  ({ run, inventory }) => {
++    inventory.length = 0
++    writeFileSync(
++      resolve(run, `loader-binding.jsonl`),
++      JSON.stringify({ phase: `plugin-transform`, authored: true }),
++    )
++  },
++  `required evaluated receiving source missing`,
++)
+--- v1/scripts/h02-progress/calibration.config.ts
++++ v2/scripts/h02-progress/calibration.config.ts
+@@ -0,0 +1,16 @@
++import { defineConfig } from 'vitest/config'
++
++// Pure comparison calibration only. No receiving setup, production alias,
++// production driver, QueryClient, or generated history executes here.
++export default defineConfig({
++  test: {
++    include: [`scripts/h02-progress/checker-calibration.test.ts`],
++    environment: `node`,
++    pool: `forks`,
++    maxWorkers: 1,
++    fileParallelism: false,
++    execArgv: [`--max-old-space-size=384`],
++    coverage: { enabled: false },
++    typecheck: { enabled: false },
++  },
++})
+--- v1/scripts/h02-progress/checker-calibration.test.ts
++++ v2/scripts/h02-progress/checker-calibration.test.ts
+@@ -0,0 +1,151 @@
++import { describe, expect, it } from 'vitest'
++import {
++  createProgressReceiptCheck,
++  modelProgressValue,
++  queuedAnswerExample,
++} from '../../packages/query-db-collection/tests/queued-answer-progress-oracle.js'
++import type {
++  ProgressHistory,
++  ProgressReceipt,
++  ProgressRow,
++} from '../../packages/query-db-collection/tests/queued-answer-progress-oracle.js'
++
++/**
++ * Authored observations calibrate the shared judgment. They execute no driver,
++ * QueryClient, provider, production graph, or generated history. A rejected
++ * receipt proves checker sensitivity only; it is not a current-main RED.
++ */
++const history = { ...queuedAnswerExample, nonemptyPrior: true }
++const prior = modelProgressValue(history, false)
++const final = modelProgressValue(history, true)
++const changes = (before: Array<ProgressRow>, after: Array<ProgressRow>) => [
++  ...before.map((value) => ({ type: `delete`, value })),
++  ...after.map((value) => ({ type: `insert`, value })),
++]
++const lawful: Array<ProgressReceipt> = [
++  { phase: `initial-publication`, rows: prior },
++  { phase: `reload-start` },
++  { phase: `retained-publication`, rows: prior },
++  // These authored flags deliberately say no provider answer is pending.
++  // Neither the shared checker nor its production call site relies on them.
++  {
++    phase: `public-change`,
++    rows: prior,
++    changes: [],
++    pending: false,
++  },
++  {
++    phase: `public-change`,
++    rows: final,
++    changes: changes(prior, final),
++    pending: false,
++  },
++  { phase: `public-change`, rows: final, changes: [], pending: false },
++  {
++    phase: `final-publication`,
++    rows: final,
++    downstream: final,
++    ready: true,
++    syncError: false,
++  },
++  { phase: `cleanup-start` },
++]
++const check = (
++  receipts: Array<ProgressReceipt>,
++  input: ProgressHistory = history,
++) => {
++  const observe = createProgressReceiptCheck(input)
++  for (const receipt of receipts) observe(receipt)
++}
++
++describe(`pure progress receipt comparison calibration`, () => {
++  it(`accepts complete prior-to-final publication after provider releases`, () => {
++    expect(() => check(lawful)).not.toThrow()
++  })
++  it(`rejects a wrong transient before a later valid final publication`, () => {
++    const wrong = [
++      ...lawful.slice(0, 4),
++      { phase: `public-change`, rows: [], changes: [], pending: false },
++      ...lawful.slice(4),
++    ]
++    expect(() => check(wrong)).toThrow(
++      `every reload callback publishes one complete snapshot`,
++    )
++  })
++  it(`rejects a bad payload even when the callback read is correct`, () => {
++    const wrong = lawful.map((receipt, index) =>
++      index === 4 ? { ...receipt, changes: [] } : receipt,
++    )
++    expect(() => check(wrong)).toThrow(
++      `payload and callback read expose the same complete value`,
++    )
++  })
++  it(`rejects a return to prior after final first publishes`, () => {
++    const wrong = [
++      ...lawful.slice(0, 5),
++      { phase: `public-change`, rows: prior, changes: changes(final, prior) },
++      ...lawful.slice(5),
++    ]
++    expect(() => check(wrong)).toThrow(
++      `every reload callback publishes one complete snapshot`,
++    )
++  })
++  it(`rejects a duplicate insert without normalizing it away`, () => {
++    const wrong = [
++      ...lawful.slice(0, 4),
++      {
++        phase: `public-change`,
++        rows: prior,
++        changes: [{ type: `insert`, value: prior[0] }],
++      },
++    ]
++    expect(() => check(wrong)).toThrow(`event insert has no prior row`)
++  })
++  it(`rejects a missing delete without normalizing it away`, () => {
++    const wrong = [
++      ...lawful.slice(0, 4),
++      {
++        phase: `public-change`,
++        rows: prior,
++        changes: [{ type: `delete`, value: final[0] }],
++      },
++    ]
++    expect(() => check(wrong)).toThrow(`event operation has a prior row`)
++  })
++  it(`rejects duplicate updates even when their final folded value is correct`, () => {
++    const wrong = [
++      ...lawful.slice(0, 4),
++      {
++        phase: `public-change`,
++        rows: prior,
++        changes: [
++          { type: `update`, value: prior[0] },
++          { type: `update`, value: prior[0] },
++        ],
++      },
++    ]
++    expect(() => check(wrong)).toThrow(
++      `one public-change operation per projected row`,
++    )
++  })
++  it(`compares an initial synchronous snapshot at the initiating subscriber cut`, () => {
++    const initial = {
++      kind: `sync-initial` as const,
++      keyShift: 0,
++      rankScale: 10,
++    }
++    const immediate = {
++      phase: `immediate-publication`,
++      cut: `subscriber-return-before-preload`,
++      rows: modelProgressValue(initial, true),
++      ready: true,
++    }
++    expect(() => check([immediate], initial)).not.toThrow()
++    expect(() => check([{ ...immediate, rows: [] }], initial)).toThrow(
++      `immediate-publication`,
++    )
++    expect(() =>
++      check([{ ...immediate, cut: `after-preload` }], initial),
++    ).toThrow(`precedes a second public call`)
++  })
++})
+--- v1/scripts/h02-progress/source-binding.setup.ts
++++ v2/scripts/h02-progress/source-binding.setup.ts
+@@ -26,6 +26,19 @@
+   Error.stackTraceLimit = 80
+   const selectedRoot = process.env.H02_PROGRESS_SELECTED_ROOT
+   if (!selectedRoot) throw new Error(`selected source root is required`)
++  const freezePath = process.env.H02_PROGRESS_SOURCE_FREEZE
++  if (!freezePath) throw new Error(`selected source freeze is required`)
++  const freeze: {
++    worktree: string
++    instrumentFiles: Record<string, string>
++    sharedInstrumentFiles: Record<string, string>
++  } = JSON.parse(readFileSync(freezePath, `utf8`))
++  if (freeze.worktree !== selectedRoot)
++    throw new Error(`selected source freeze has a different root`)
++  const approvedInstruments = {
++    ...freeze.instrumentFiles,
++    ...freeze.sharedInstrumentFiles,
++  }
+   const capture = (cut: string) => {
+     // The runtime version and this private registry shape are frozen inputs.
+     // This reads actual loader metadata; it does not wrap fetch promises or
+@@ -42,11 +55,16 @@
+     const inventory = [...modules.idToModuleMap.values()].map((module) => {
+       const meta = module.meta
+       const code = meta && `code` in meta ? meta.code : undefined
+-      const sourceFile = module.file.replace(/\?.*$/, ``)
++      const sourceFile = resolve(module.file.replace(/\?.*$/, ``))
+       const production =
+         /\/packages\/(?:db|db-ivm|query-db-collection)\/src\//.test(sourceFile)
++      const relative = sourceFile.startsWith(selectedRoot + `/`)
++        ? sourceFile.slice(selectedRoot.length + 1)
++        : undefined
++      const approvedInstrument =
++        relative !== undefined && approvedInstruments[relative] !== undefined
+       let sourceSha256: string | undefined
+-      if (production) {
++      if (production || approvedInstrument) {
+         if (!sourceFile.startsWith(selectedRoot + `/`))
+           throw new Error(`outside selected production root: ${sourceFile}`)
+         sourceSha256 = createHash(`sha256`)
+--- v1/scripts/h02-progress/verify-bindings.mjs
++++ v2/scripts/h02-progress/verify-bindings.mjs
+@@ -14,6 +14,10 @@
+ const hash = (bytes) => createHash(`sha256`).update(bytes).digest(`hex`)
+ const freeze = JSON.parse(readFileSync(freezePath, `utf8`))
+ const root = freeze.worktree
++const approvedInstruments = {
++  ...freeze.instrumentFiles,
++  ...freeze.sharedInstrumentFiles,
++}
+ const failures = []
+ const jsonLines = (name) =>
+   readFileSync(resolve(directory, name), `utf8`)
+@@ -85,26 +89,35 @@
+   if (selectedRoot !== root)
+     failures.push(`wrong inventory root: ${selectedRoot}`)
+   for (const module of inventory) {
+-    if (
+-      !/\/packages\/(?:db|db-ivm|query-db-collection)\//.test(
+-        module.file ?? module.id,
+-      )
+-    )
+-      continue
+-    const file = module.file?.replace(/\?.*$/, ``)
+-    if (!file?.startsWith(root + `/`) || !file.includes(`/src/`)) {
++    const file = module.file && resolve(module.file.replace(/\?.*$/, ``))
++    const relative = file?.startsWith(root + `/`)
++      ? file.slice(root.length + 1)
++      : undefined
++    const packageModule =
++      /\/packages\/(?:db|db-ivm|query-db-collection)\//.test(file ?? module.id)
++    const production =
++      packageModule &&
++      /\/packages\/(?:db|db-ivm|query-db-collection)\/src\//.test(file ?? ``)
++    const instrument =
++      relative !== undefined && approvedInstruments[relative] !== undefined
++    const instrumentModule = /\/scripts\/h02-progress\//.test(file ?? module.id)
++    if (!packageModule && !instrument && !instrumentModule) continue
++    if (relative === undefined || (!production && !instrument)) {
+       failures.push(
+-        `outside/stale production module: ${module.file ?? module.id}`,
++        `outside/stale or unapproved package module: ${module.file ?? module.id}`,
+       )
+       continue
+     }
+-    const relative = file.slice(root.length + 1)
+-    if (freeze.productionFiles[relative] !== module.sourceSha256)
++    const kind = production ? `production` : `instrument`
++    const expected = production
++      ? freeze.receivingProductionFiles[relative]
++      : approvedInstruments[relative]
++    if (expected === undefined || expected !== module.sourceSha256)
+       failures.push(`wrong actual original bytes: ${relative}`)
+-    if (!module.evaluated || !module.codeSha256)
+-      failures.push(
+-        `production module lacks evaluated/code witness: ${relative}`,
+-      )
++    // A registry node can still be evaluating at one cut. Retain that fact;
++    // compiled binding alone receives no evaluated/executed path credit.
++    if (!module.codeSha256)
++      failures.push(`${kind} module lacks code witness: ${relative}`)
+     if (!module.codeSha256) continue
+     const transformed = readFileSync(
+       resolve(directory, `evaluated-sources`, `${module.codeSha256}.txt`),
+@@ -134,6 +147,8 @@
+     bindings.push({
+       inventory: name,
+       relative,
++      kind,
++      evaluated: module.evaluated === true,
+       codeSha256: module.codeSha256,
+       scripts: matches.map(({ scriptId, sourceSha256 }) => ({
+         scriptId,
+@@ -147,8 +162,29 @@
+   `packages/db-ivm/src/index.ts`,
+   `packages/query-db-collection/src/query.ts`,
+ ]) {
+-  if (!bindings.some(({ relative }) => relative === required))
+-    failures.push(`required receiving source missing: ${required}`)
++  if (
++    !bindings.some(
++      ({ relative, evaluated }) => relative === required && evaluated,
++    )
++  )
++    failures.push(`required evaluated receiving source missing: ${required}`)
++}
++for (const required of [
++  `packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts`,
++  `packages/query-db-collection/tests/queued-answer-progress-driver.ts`,
++  `packages/query-db-collection/tests/queued-answer-progress-oracle.ts`,
++  `packages/db/tests/query/load-subset-retained-publication-oracle.ts`,
++  `packages/db/tests/reference-expression-oracle.ts`,
++  `scripts/h02-progress/source-binding.setup.ts`,
++]) {
++  if (
++    !bindings.some(
++      ({ relative, evaluated }) => relative === required && evaluated,
++    )
++  )
++    failures.push(
++      `required evaluated receiving instrument missing: ${required}`,
++    )
+ }
+ const stacks = raw
+   .filter((event) => event.phase === `source-stack`)
+@@ -168,7 +204,7 @@
+   emptyCallbacks: emptyCalls.length,
+   bindings,
+   failures,
+-  limits: `V8 compiled inventory can include unused scripts; evaluated registry and positive stacks supply separate execution evidence. Final coverage is credited only if reached.`,
++  limits: `V8 compiled inventory can include unused scripts; evaluated registry and positive stacks supply separate receiving-path execution evidence. Child oracle-module evaluation does not prove parent checker invocation. Final coverage is credited only if reached.`,
+ }
+ writeFileSync(
+   resolve(directory, `binding-verification.json`),

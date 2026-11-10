@@ -1,0 +1,594 @@
+import fc from 'fast-check';
+import { declareOracle } from '../../db/tests/oracle-declaration.js';
+import { createOracleReach } from '../../db/tests/oracle-reach.js';
+import { checkCompletionObservation } from './queued-answer-completion-oracle.js';
+/**
+ * Construct legal programs for the completion owner's public laws. Each family
+ * contains mandatory lanes; eight random families need not accidentally select
+ * twenty rare states. The primary owner's eight original examples, fixed/random
+ * budgets, strict empty/nonempty reconstruction and direct replay stay intact.
+ * This adds bounded fixtures per family, not a run-budget or watchdog increase.
+ *
+ * `semantic` applies an authored external action to driver and model. `control`
+ * establishes a precise receiving premise without changing expected truth.
+ * `observe` captures a real cut and uses the shared comparison before reach.
+ * A missing future seam is setup-unresolved, never a baseline product failure.
+ * Drivers must refuse unavailable actions rather than synthesize their receipt.
+ */
+export const completionControlStates = [
+    `held-publication-changed-promise-demand-input-and-pending-D2`,
+    `complete-operator-stop-with-remaining-work`,
+    `answer-settled-before-exact-task-dispatch`,
+    `existing-window-pending-at-host-gap`,
+    `new-partial-window-pending-at-host-gap`,
+    `repeated-yield-same-operation-obligation`,
+    `quiescent-D2-held-flush-still-pending`,
+    `prior-queued-root-and-retained-facade-receipts`,
+    `facade-A-commit-before-facade-B-throw`,
+    `retained-facade-restoration-receipt-pending`,
+    `retry-keeps-task-and-replaces-failed-completion`,
+    `old-completion-observer-after-retry`,
+    `explicit-rollback-disposal-rejection-after-retry`,
+    `unexpected-retained-target-receipt-rejection`,
+    `terminal-graph-failure-with-unanswered-peer`,
+    `ordinary-demand-failure-keeps-existing-aggregation`,
+    `last-receipt-recheck-tail-throws-with-same-revisions`,
+    `publication-installed-before-status-tail-throws`,
+    `retryable-tail-failure-attached-and-unattached-operations`,
+    `old-task-after-cleanup-restart-with-live-current-task`,
+];
+export const completionParametersArbitrary = fc.record({
+    keyShift: fc.integer({ min: 0, max: 20 }),
+    rankScale: fc.integer({ min: 1, max: 20 }),
+    nonemptyPrior: fc.boolean(),
+    partial: fc.constantFrom(`offset`, `limit`),
+    tie: fc.boolean(),
+    selectedOutput: fc.constantFrom(`root`, `facade`),
+    answerScheduler: fc.constantFrom(`microtask`, `timer`),
+});
+const semantic = (action) => ({
+    kind: `semantic`,
+    action,
+});
+const control = (value) => ({
+    kind: `control`,
+    control: value,
+});
+const observe = (cut) => ({
+    kind: `observe`,
+    cut,
+});
+const require = (id, kind) => semantic({ type: `require`, requirement: { id, kind } });
+const commonLanes = [
+    `host-gap`,
+    `repeated-yield`,
+    `held-flush`,
+    `prior-output`,
+    `retry-observer`,
+    `cleanup-abandonment`,
+    `terminal-graph`,
+    `source-aggregation`,
+    `last-receipt-tail`,
+    `installed-status-tail`,
+    `retryable-scope`,
+    `stale-task`,
+];
+export const completionPathLanes = {
+    'query-inline-controlled': commonLanes,
+    'query-facade-controlled': [
+        ...commonLanes,
+        `facade-rollback`,
+        `rollback-disposal`,
+    ],
+    'query-inline-native': [`host-gap`],
+    'query-facade-native': [`host-gap`],
+    'adapter-facade-controlled': [`rollback-disposal`],
+    'manager-controlled': [`retryable-scope`],
+};
+/**
+ * Model facts are authored before acquisition. Two retained facade lanes force
+ * nonempty prior rows and independent nonempty children; the empty-prior axis
+ * remains in the host-gap lane. Numeric ties use ascending public-key order.
+ * Ordered drivers must fulfill real finite prefix/tie/refill requests. The
+ * original predicate-only five-root driver is not relabeled as that provider.
+ */
+export function completionFacts(parameters, retained) {
+    const roots = Array.from({ length: 6 }, (_, index) => ({
+        id: parameters.keyShift + index + 1,
+        rank: (parameters.tie ? Math.floor(index / 2) + 1 : index + 1) *
+            parameters.rankScale,
+    }));
+    const prior = {
+        roots,
+        marked: roots
+            .slice(retained || parameters.nonemptyPrior ? 2 : 0)
+            .map((row) => row.id),
+        children: roots.flatMap((row) => [
+            { id: row.id * 100 + 1, parent: row.id },
+            { id: row.id * 100 + 2, parent: row.id },
+        ]),
+    };
+    const answered = {
+        roots: roots.map((row) => ({
+            ...row,
+            rank: row.rank + parameters.rankScale / 10,
+        })),
+        marked: roots.slice(3).map((row) => row.id),
+        children: [
+            ...prior.children.map((row) => ({ ...row })),
+            ...roots
+                .slice(0, 2)
+                .map((row) => ({ id: row.id * 100 + 3, parent: row.id })),
+        ],
+    };
+    return { prior, answered };
+}
+/**
+ * The grammar is constructive: prerequisites exist before a request uses them,
+ * receipts stage before application, failed attempts precede retry, cleanup
+ * precedes restart, and an old delivery names a retired run. There is no action
+ * for arbitrary rejection of an accepted live receipt. The historical state14
+ * label is preserved. Its proposed legal-history clarification uses documented
+ * cleanup abandonment, per law7/14; source review has not adopted that mapping.
+ * The driver's actual acceptance/cleanup/rejection order must confirm it.
+ *
+ * Programs are recipes, not reached histories. A driver may not mark reach
+ * because it selected a lane or executed a semantic model action.
+ */
+export function constructCompletionProgram(parameters, path, lane) {
+    if (!completionPathLanes[path].includes(lane))
+        throw new Error(`completion grammar: unsupported ${path}/${lane}`);
+    const facade = path.includes(`facade`);
+    const retained = lane !== `host-gap`;
+    const { prior, answered } = completionFacts(parameters, retained);
+    const firstBucket = prior.roots[0].id;
+    const createdBucket = prior.roots[2].id;
+    const target = facade && parameters.selectedOutput === `facade`
+        ? { bucket: firstBucket }
+        : `root`;
+    const steps = [
+        require(`answer`, `source`),
+        require(`tail`, `publication`),
+        control(`begin-replay`),
+        semantic({
+            type: `request-window`,
+            operation: `existing`,
+            options: { offset: 0, limit: 3 },
+            requires: [`answer`, `tail`],
+        }),
+        control(`release-preceding-replay-answers`),
+        control(`wait-trigger`),
+        observe(`trigger`),
+        control(`wait-complete-operator-stop`),
+        observe(`operator-stop`),
+    ];
+    if (lane === `installed-status-tail`)
+        steps.splice(0, steps.length, require(`answer`, `source`), require(`tail`, `publication`), control(`prepare-held-initial`), semantic({
+            type: `request-initial`,
+            operation: `existing`,
+            requires: [`answer`, `tail`],
+        }));
+    const answer = () => semantic({ type: `source-answer`, requirement: `answer`, facts: answered });
+    const installAll = () => [
+        ...(facade
+            ? prior.roots.map((row) => semantic({
+                type: `install`,
+                target: { bucket: row.id },
+                snapshot: `desired`,
+            }))
+            : []),
+        semantic({ type: `install`, target: `root`, snapshot: `desired` }),
+    ];
+    const successfulTail = () => [
+        ...installAll(),
+        control(`wait-whole-successful-tail`),
+        semantic({ type: `tail-success`, requirement: `tail` }),
+        observe(`final`),
+    ];
+    const stageSelected = (id, outputTarget = target, snapshot = `desired`) => [
+        require(id, `output`),
+        semantic({
+            type: `stage-output`,
+            requirement: id,
+            target: outputTarget,
+            snapshot,
+            disposition: `retained`,
+        }),
+    ];
+    const addOutputDependency = (id) => {
+        const request = steps.find((step) => step.kind === `semantic` && step.action.type === `request-window`);
+        if (request?.kind === `semantic` &&
+            request.action.type === `request-window`)
+            request.action.requires.push(id);
+        // Move the declaration before request admission, preserving receipt staging
+        // at its actual external action. A request cannot name a future obligation.
+        const declaration = steps.findIndex((step) => step.kind === `semantic` &&
+            step.action.type === `require` &&
+            step.action.requirement.id === id);
+        if (declaration >= 0) {
+            const [step] = steps.splice(declaration, 1);
+            steps.splice(2, 0, step);
+        }
+    };
+    switch (lane) {
+        case `host-gap`:
+            steps.push(answer(), control(`wait-host-gap`), observe(`host-gap`), semantic({
+                type: `request-window`,
+                operation: `partial`,
+                options: parameters.partial === `limit` ? { limit: 1 } : { offset: 1 },
+                requires: [`tail`],
+            }), observe(`host-gap`), control(`dispatch-current-task`), ...successfulTail());
+            break;
+        case `repeated-yield`:
+            steps.push(require(`second-answer`, `source`));
+            addOutputDependency(`second-answer`);
+            for (const step of steps)
+                if (step.kind === `semantic` && step.action.type === `request-window`)
+                    step.action.options.limit = 4;
+            steps.push(answer(), control(`dispatch-current-task`), control(`wait-second-yield`), observe(`repeated-yield`), semantic({
+                type: `source-answer`,
+                requirement: `second-answer`,
+                facts: {
+                    ...answered,
+                    marked: prior.roots.slice(4).map((row) => row.id),
+                },
+            }), control(`dispatch-current-task`), ...successfulTail());
+            break;
+        case `held-flush`:
+            steps.push(control(`dispatch-current-task`), control(`wait-held-quiescent-flush`), observe(`held-flush`), answer(), ...successfulTail());
+            break;
+        case `prior-output`:
+            steps.push(...stageSelected(`root-prior`, `root`));
+            addOutputDependency(`root-prior`);
+            if (facade) {
+                steps.push(...stageSelected(`facade-prior`, { bucket: firstBucket }));
+                addOutputDependency(`facade-prior`);
+            }
+            steps.push(answer(), observe(`receipt-held`), semantic({ type: `apply-output`, requirement: `root-prior` }), ...(facade
+                ? [semantic({ type: `apply-output`, requirement: `facade-prior` })]
+                : []), control(`dispatch-current-task`), ...successfulTail());
+            break;
+        case `facade-rollback`:
+            steps.push(answer(), ...stageSelected(`facade-A`, { bucket: firstBucket }), ...stageSelected(`restore-A`, { bucket: firstBucket }, `restore`));
+            addOutputDependency(`facade-A`);
+            addOutputDependency(`restore-A`);
+            steps.push(control(`throw-facade-B-after-A-commit`), observe(`facade-attempt-failed`), observe(`receipt-held`), semantic({
+                type: `tail-failure`,
+                requirement: `tail`,
+                error: `facade-B`,
+                affected: [`existing`],
+            }), require(`retry-tail`, `publication`), semantic({
+                type: `request-window`,
+                operation: `retry`,
+                options: {},
+                requires: [`facade-A`, `restore-A`, `retry-tail`],
+            }), semantic({ type: `apply-output`, requirement: `facade-A` }), semantic({ type: `apply-output`, requirement: `restore-A` }), control(`dispatch-current-task`), ...installAll(), control(`wait-whole-successful-tail`), semantic({ type: `tail-success`, requirement: `retry-tail` }), observe(`final`));
+            break;
+        case `retry-observer`:
+        case `rollback-disposal`:
+            steps.push(answer(), semantic({
+                type: `tail-failure`,
+                requirement: `tail`,
+                error: `retryable-tail`,
+                affected: [`existing`],
+            }));
+            if (lane === `rollback-disposal`)
+                steps.push(require(`created`, `output`), semantic({
+                    type: `stage-output`,
+                    requirement: `created`,
+                    target: { bucket: createdBucket },
+                    snapshot: `desired`,
+                    disposition: `created`,
+                }), semantic({ type: `rollback-dispose`, requirement: `created` }));
+            steps.push(require(`retry-tail`, `publication`), semantic({
+                type: `request-window`,
+                operation: `retry`,
+                options: {},
+                requires: [`retry-tail`],
+            }), observe(`retry-attached`), control(lane === `rollback-disposal`
+                ? `deliver-old-rollback-rejection`
+                : `deliver-old-completion-observer`), observe(lane === `rollback-disposal`
+                ? `rollback-disposal-delivered`
+                : `old-completion-delivered`), control(`dispatch-current-task`), ...installAll(), control(`wait-whole-successful-tail`), semantic({ type: `tail-success`, requirement: `retry-tail` }), observe(`final`));
+            break;
+        case `cleanup-abandonment`:
+        case `stale-task`:
+            steps.push(...stageSelected(`retained`, target));
+            addOutputDependency(`retained`);
+            steps.push(semantic({ type: `cleanup` }), semantic({ type: `restart`, run: `run-2`, facts: answered }), require(`new-tail`, `publication`), semantic({
+                type: `request-window`,
+                operation: `current`,
+                options: { offset: 0, limit: 2 },
+                requires: [`new-tail`],
+            }), control(`wait-new-live-task`));
+            if (lane === `cleanup-abandonment`)
+                steps.push(observe(`retained-cleanup-abandoned`));
+            steps.push(control(`dispatch-stale-task`), semantic({ type: `obsolete-delivery`, run: `run-1` }), control(`dispatch-current-task`), observe(`stale-task`), ...installAll(), control(`wait-whole-successful-tail`), semantic({ type: `tail-success`, requirement: `new-tail` }), observe(`final`));
+            break;
+        case `terminal-graph`:
+            steps.push(require(`peer`, `source`), semantic({
+                type: `request-window`,
+                operation: `peer-operation`,
+                options: {},
+                requires: [`peer`],
+            }), control(`throw-resumed-graph`), semantic({ type: `graph-failure`, error: `graph-error` }), observe(`graph-failed`));
+            break;
+        case `source-aggregation`:
+            steps.push(require(`peer`, `source`));
+            addOutputDependency(`peer`);
+            steps.push(semantic({
+                type: `source-failure`,
+                requirement: `answer`,
+                error: `source-error`,
+            }), observe(`source-failed`), semantic({
+                type: `source-answer`,
+                requirement: `peer`,
+                facts: answered,
+            }), semantic({
+                type: `tail-failure`,
+                requirement: `tail`,
+                error: `source-error`,
+                affected: [`existing`],
+            }));
+            break;
+        case `last-receipt-tail`:
+            steps.push(answer(), ...stageSelected(`last-receipt`));
+            addOutputDependency(`last-receipt`);
+            steps.push(control(`dispatch-current-task`), observe(`receipt-held`), semantic({ type: `apply-output`, requirement: `last-receipt` }), control(`throw-last-receipt-recheck-tail`), semantic({
+                type: `tail-failure`,
+                requirement: `tail`,
+                error: `last-receipt-tail`,
+                affected: [`existing`],
+            }), observe(`tail-failed`));
+            break;
+        case `installed-status-tail`:
+        case `retryable-scope`:
+            if (lane === `retryable-scope`)
+                steps.push(require(`unrelated`, `source`), semantic({
+                    type: `request-window`,
+                    operation: `unattached`,
+                    options: {},
+                    requires: [`unrelated`],
+                }));
+            steps.push(answer(), ...installAll(), control(lane === `retryable-scope`
+                ? `throw-real-subscriber-tail-after-install`
+                : `throw-real-status-tail-after-install`), semantic({
+                type: `tail-failure`,
+                requirement: `tail`,
+                error: `installed-tail`,
+                affected: [`existing`],
+            }), observe(lane === `retryable-scope`
+                ? `retryable-scope-failed`
+                : `installed-tail-failed`));
+            break;
+    }
+    if (lane === `prior-output` ||
+        lane === `cleanup-abandonment` ||
+        lane === `stale-task`) {
+        // An ordinary source write first produces actual output while a persisting
+        // fixture transaction parks its commit. Only afterward may the changed
+        // demand suspend. This ordering is part of the input, not a reach label.
+        const staged = steps.filter((step) => step.kind === `semantic` && step.action.type === `stage-output`);
+        for (let index = steps.length - 1; index >= 0; index--)
+            if (steps[index]?.kind === `semantic` &&
+                steps[index].action
+                    .type === `stage-output`)
+                steps.splice(index, 1);
+        const replayIndex = steps.findIndex((step) => step.kind === `control` && step.control === `begin-replay`);
+        steps.splice(replayIndex, 0, semantic({
+            type: `source-write`,
+            facts: { ...answered, marked: prior.marked },
+        }), ...staged);
+    }
+    const outputHolds = [];
+    for (const step of steps) {
+        if (step.kind !== `semantic` || step.action.type !== `stage-output`)
+            continue;
+        const outputTarget = step.action.target;
+        const key = JSON.stringify(outputTarget);
+        if (outputHolds.some((hold) => JSON.stringify(hold.target) === key))
+            continue;
+        const overlay = outputTarget === `root`
+            ? {
+                id: `hold-root`,
+                kind: `root`,
+                row: {
+                    ...prior.roots[0],
+                    rank: prior.roots[0].rank - parameters.rankScale / 100,
+                    children: prior.children
+                        .filter((row) => row.parent === firstBucket)
+                        .map((row) => row.id),
+                },
+            }
+            : {
+                id: `hold-facade-${outputTarget.bucket}`,
+                kind: `facade`,
+                bucket: outputTarget.bucket,
+                rows: [
+                    ...prior.children
+                        .filter((row) => row.parent === outputTarget.bucket)
+                        .map((row) => row.id),
+                    outputTarget.bucket * 100 + 99,
+                ],
+            };
+        outputHolds.push({ target: outputTarget, overlay });
+    }
+    if (outputHolds.length > 0) {
+        const beforeWork = steps.findIndex((step) => step.kind === `control` ||
+            (step.kind === `semantic` && step.action.type === `source-write`));
+        steps.splice(beforeWork, 0, ...outputHolds.map((hold) => semantic({ type: `optimistic-overlay`, overlay: hold.overlay })), control(`arm-selected-output-holds`));
+        const released = new Set();
+        for (let index = 0; index < steps.length; index++) {
+            const step = steps[index];
+            if (step.kind !== `semantic` || step.action.type !== `apply-output`)
+                continue;
+            const id = step.action.requirement;
+            const stage = steps.find((candidate) => candidate.kind === `semantic` &&
+                candidate.action.type === `stage-output` &&
+                candidate.action.requirement === id);
+            if (stage?.kind !== `semantic` || stage.action.type !== `stage-output`)
+                continue;
+            const hold = outputHolds.find((item) => JSON.stringify(item.target) ===
+                JSON.stringify(stage.action.type === `stage-output` ? stage.action.target : null));
+            if (released.has(hold.overlay.id))
+                continue;
+            released.add(hold.overlay.id);
+            steps.splice(index++, 0, semantic({ type: `settle-optimistic`, overlay: hold.overlay.id }));
+        }
+    }
+    return {
+        path,
+        lane,
+        parameters,
+        answeredFacts: answered,
+        outputHolds,
+        answerPlan: {
+            pivot: parameters.keyShift + 3,
+            precedingScope: [parameters.keyShift + 1, parameters.keyShift + 2],
+            resolvingScopes: [
+                [parameters.keyShift + 3],
+                ...(lane === `repeated-yield` ? [[parameters.keyShift + 4]] : []),
+            ],
+            retainedScopes: [[parameters.keyShift + 5, parameters.keyShift + 6]],
+        },
+        setup: {
+            run: `run-1`,
+            profile: facade ? `facade` : `inline`,
+            facts: prior,
+            window: {
+                offset: 0,
+                limit: retained || parameters.nonemptyPrior ? 2 : 0,
+            },
+            ready: lane !== `installed-status-tail`,
+        },
+        steps,
+    };
+}
+/**
+ * Thirty mandatory programs per family preserve each material receiving path.
+ * Random values vary ranks/ties, translation, prior value, partial options,
+ * selected output target and answer schedule. A lane is never a reach count.
+ * Original progressHistoryFamily is still executed separately by its owner.
+ */
+export function completionProgramFamily(parameters) {
+    return Object.entries(completionPathLanes).flatMap(([path, lanes]) => lanes.map((lane) => constructCompletionProgram(parameters, path, lane)));
+}
+function statesAt(observation) {
+    const state = (index) => completionControlStates[index];
+    switch (observation.cut) {
+        case `trigger`:
+            return [state(0)];
+        case `operator-stop`:
+            return [state(1)];
+        case `host-gap`:
+            return [
+                state(2),
+                state(3),
+                ...(observation.partialOperation ? [state(4)] : []),
+            ];
+        case `repeated-yield`:
+            return [state(5)];
+        case `held-flush`:
+            return [state(6)];
+        case `receipt-held`:
+            return [
+                ...(observation.receipts.some((receipt) => receipt.target === `root` && receipt.beforeFirstStop) &&
+                    observation.receipts.some((receipt) => receipt.target !== `root` && receipt.beforeFirstStop)
+                    ? [state(7)]
+                    : []),
+                ...(observation.receipts.some((receipt) => receipt.role === `restore` && receipt.target !== `root`)
+                    ? [state(9)]
+                    : []),
+            ];
+        case `facade-attempt-failed`:
+            return [state(8)];
+        case `retry-attached`:
+            return [state(10)];
+        case `old-completion-delivered`:
+            return [state(11)];
+        case `rollback-disposal-delivered`:
+            return [state(12)];
+        // The old raw name stays discoverable. Its required legal witness is now
+        // acceptance -> cleanup start -> AbortError abandonment of a retained
+        // target -> a live replacement. It grants no same-run rejection policy.
+        case `retained-cleanup-abandoned`:
+            return [state(13)];
+        case `graph-failed`:
+            return [state(14)];
+        case `source-failed`:
+            return [state(15)];
+        case `tail-failed`:
+            return [state(16)];
+        case `installed-tail-failed`:
+            return [state(17)];
+        case `retryable-scope-failed`:
+            return [state(18)];
+        case `stale-task`:
+            return [state(19)];
+        case `final`:
+            return [];
+    }
+}
+const inlineStates = completionControlStates.filter((_, index) => ![7, 8, 9, 12].includes(index));
+export const completionPathStates = {
+    'query-inline-controlled': inlineStates,
+    'query-facade-controlled': completionControlStates,
+    'query-inline-native': completionControlStates.slice(0, 5),
+    'query-facade-native': completionControlStates.slice(0, 5),
+    'adapter-facade-controlled': [
+        completionControlStates[0],
+        completionControlStates[1],
+        completionControlStates[10],
+        completionControlStates[12],
+    ],
+    'manager-controlled': [
+        completionControlStates[0],
+        completionControlStates[1],
+        completionControlStates[18],
+    ],
+};
+/**
+ * Each path has positive minima and its own history counter. The caller starts
+ * one counter history for each actual program, compares its observation, then
+ * marks only measured cuts. Replay bypasses minima through the shared helper;
+ * normal fixed/random campaigns assert them and preserve counts in finally.
+ * Manager/adapter paths supplement, never replace, public query receiving.
+ */
+export function createCompletionReach(replaying) {
+    const paths = Object.keys(completionPathStates).map((path) => [
+        path,
+        createOracleReach(`query.queued-answer-completion.${path}`, completionPathStates[path], { replaying }),
+    ]);
+    const reaches = new Map(paths);
+    return {
+        beginHistory(path) {
+            reaches.get(path).beginHistory();
+        },
+        observe(path, model, observation) {
+            checkCompletionObservation(model, observation);
+            const declared = completionPathStates[path];
+            for (const state of statesAt(observation))
+                if (declared.includes(state))
+                    reaches.get(path).reach(state);
+        },
+        counts() {
+            return Object.fromEntries(paths.map(([path, reach]) => [
+                path,
+                Object.fromEntries(reach.counts()),
+            ]));
+        },
+        assertReached() {
+            for (const [, reach] of paths)
+                reach.assertReached();
+        },
+    };
+}
+declareOracle({
+    grammar: [
+        completionParametersArbitrary,
+        constructCompletionProgram,
+        completionProgramFamily,
+        completionFacts,
+    ],
+    check: [createCompletionReach],
+});

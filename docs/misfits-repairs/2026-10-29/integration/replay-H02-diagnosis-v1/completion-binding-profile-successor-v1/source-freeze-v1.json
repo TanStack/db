@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-30T09:27:37.001320+00:00",
+  "status": "source-prepared-independent-review-pending",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "headFromAcceptedFreeze": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "priorCombinedFreezeSha256": "8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1",
+  "preservedFailedFreezeSha256": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+  "bindingProfile": "completion-baseline-v1",
+  "sourceFiles": {
+    "scripts/h02-progress/verify-bindings.mjs": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+    "scripts/h02-progress/bindings-calibration.test.mjs": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a",
+    "scripts/h02-progress/completion-parent.mjs": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70"
+  },
+  "packetPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/completion-binding-profile-successor-v1/packet-v1.json",
+  "packetSha256": "04315917d06fa4e674efce03fe222632265261aa9ebc5684294136999abfdfc2",
+  "reportSha256": "00ae26b7e10ea4e665a55c84d230acc232df413d2eca38e99277e7174d3e26d9",
+  "runtimeAdmission": false,
+  "candidateRaw20": "all UNREACHED",
+  "exactInputChange": "Add bindingProfile: 'completion-baseline-v1' to new singleton recipe; original program bytes unchanged; preserve old recipe/output."
+}

@@ -1,0 +1,44 @@
+{
+  "slot": 3,
+  "workers": 1,
+  "serial": true,
+  "scope": "own five source files after graph-failure hold premise and proposed state14 wording",
+  "checks": [
+    {
+      "name": "format",
+      "cmd": "/Users/kyle.mathews/.n/bin/node node_modules/prettier/bin/prettier.cjs --check packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "8ed8a4",
+      "wall_time_seconds": 0.148360625,
+      "exit_code": 0,
+      "original_token_count": 17,
+      "output": "Checking formatting...\nAll matched files use Prettier code style!\n"
+    },
+    {
+      "name": "type",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --noEmit --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "ca354a",
+      "wall_time_seconds": 0.3630965,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "lint",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/eslint.config.mjs packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "ff556d",
+      "wall_time_seconds": 2.333219292,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "lint-changed-equivalent",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+      "chunk_id": "0ca678",
+      "wall_time_seconds": 10.00169575,
+      "session_id": 76648,
+      "original_token_count": 0,
+      "output": ""
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "at": "2026-10-30T09:58:54.498828+00:00",
+  "psExitCode": 0,
+  "namedPids": [
+    59903,
+    59913,
+    59916,
+    59919
+  ],
+  "namedGroups": [
+    59913,
+    59919
+  ],
+  "remainingNamedGroupRows": [],
+  "zeroSignalProbes": [
+    {
+      "kind": "pid",
+      "value": 59903,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pid",
+      "value": 59913,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pid",
+      "value": 59916,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pid",
+      "value": 59919,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pgid",
+      "value": 59913,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pgid",
+      "value": 59919,
+      "result": "ESRCH"
+    }
+  ],
+  "limits": "Named original identities and owned groups only; no escaped/unregistered descendant census or PID/PGID reuse proof."
+}

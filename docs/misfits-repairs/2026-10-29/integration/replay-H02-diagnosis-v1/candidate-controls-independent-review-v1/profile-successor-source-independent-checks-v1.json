@@ -1,0 +1,65 @@
+{
+  "at": "2026-10-30T09:31:02.590465+00:00",
+  "sourceFreezeSha256": "512408885f77e90d3a8374452e044f0216a2f803ff97dfe31894dba7b66d02db",
+  "packetSha256": "04315917d06fa4e674efce03fe222632265261aa9ebc5684294136999abfdfc2",
+  "counts": {
+    "liveSuccessorSources": 4,
+    "copies": 4,
+    "recordEntries": 19,
+    "productionFiles": 511,
+    "sharedInstrumentFiles": 23,
+    "instrumentFiles": 50,
+    "dependencyPayloads": 2544,
+    "completionRequiredInstruments": 17,
+    "commonRequiredProduction": 3
+  },
+  "sharedVerifierSectionsByteIdentical": {
+    "sourcePayloadNodeChecks": true,
+    "sealAndInspectorChecks": true,
+    "allObservedModuleProvenanceLoop": true,
+    "queryKeyPrefixChecks": true,
+    "progressStackCheck": true
+  },
+  "independentOfflineControls": {
+    "tests": 87,
+    "verifierCases": 83,
+    "allowed": 6,
+    "rejected": 77,
+    "actualRecipeValidatorCases": 4,
+    "actualToolCompletion": {
+      "chunk_id": "928fab",
+      "wall_time_seconds": 1.8417e-05,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "namesStatusesExitCodesMatchAuthor": true
+  },
+  "archiveResolution": {
+    "archiveMapSha256": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+    "historicalFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+    "historicalPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+    "freezeFilesResolved": 45,
+    "packetEntriesResolved": 46,
+    "archiveKeysResolved": 8,
+    "allMatched": true
+  },
+  "reviewArtifacts": {
+    "profile-successor-offline-independent-v1.log": "a39eecec2fde5944659dfcec9d73337a56f94c59c8dda478054973c75141b5b2",
+    "profile-successor-offline-tool-return-v1.json": "5917534b651d4ce7dfda54bf2ac63bb9151d9cbee364c215e1cdc17dfad0b786",
+    "profile-successor-offline-completion-tool-return-v1.json": "87a5e099ee2e638bd661dfcd5621335577132539c149dff57be5558c89aef699",
+    "historical-input-v1-archive-resolution-independent-v1.json": "ab93a37ef2a7ca943dda9e4c62cd58648d786f0f8d621b4a2c56c4a998c4886f"
+  },
+  "failures": [],
+  "runtime": {
+    "receiving": 0,
+    "productImports": 0,
+    "processProbes": 0,
+    "generatedHistories": 0,
+    "verifierOfflineCases": 83,
+    "recipePureCases": 4
+  },
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "runtimeAdmission": false
+}

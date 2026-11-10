@@ -1,0 +1,22 @@
+{
+  "kind": "Root independent fixed-input delta review and one fresh compiler decision",
+  "acceptedBy": "/root",
+  "sourceAuthor": "queued_progress_design",
+  "rootDeltaCheck": {
+    "chunk": "b00f16",
+    "exitCode": 0,
+    "exactSupplementDelta": true,
+    "sixNamedFilePinsMatched": true,
+    "otherContractFieldsUnchanged": true
+  },
+  "independentPriorActualReviewSha256": "693451a330053856ec096873ed63533e605cd484179f4bfd0ad28aa169deb3ec",
+  "sourceVerdict": "Fixed supplement adds three already observed declaration inputs and their three package metadata records. Unknown-input comparison stays strict; no future output is adopted as authority.",
+  "wrapperSha256": "e9fe2c0caf9e8ff3e58dc8a3cca71f28668d2c17a33ca72c9d340dbefce5620d",
+  "contractSha256": "b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1",
+  "toolProposalSha256": "6d63c0bada7ca78e5825885e94bbd5a9091dbf54ac48aa06d56f572e647a0f8c",
+  "decision": "Admit exact proposed source-v3 compiler-only invocation once with actual require_escalated and fresh receipt-v2 output.",
+  "reservedHeavySlot": 1,
+  "maxInvocations": 1,
+  "previousAttempt": "Remains failed and immutable; no retroactive pass.",
+  "limits": "No runtime receiving, product RED/GREEN, production mutation or automatic next action."
+}

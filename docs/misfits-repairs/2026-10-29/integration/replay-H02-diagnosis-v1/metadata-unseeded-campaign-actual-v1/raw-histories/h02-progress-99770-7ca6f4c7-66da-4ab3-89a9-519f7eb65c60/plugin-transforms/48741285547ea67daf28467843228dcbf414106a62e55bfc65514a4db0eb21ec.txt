@@ -1,0 +1,188 @@
+import { compileSingleRowExpression } from "../query/compiler/evaluators.js";
+import {
+  comparisonFunctions,
+  indexableOperations
+} from "../query/builder/functions.js";
+import { DEFAULT_COMPARE_OPTIONS, deepEquals } from "../utils.js";
+import {
+  indexObjectKind,
+  makeCheckedComparator,
+  makeComparator,
+  normalizeValue
+} from "../utils/comparison.js";
+import { codedMessage, codedWarning, devBuild } from "../error-message.js";
+function normalizeLocaleOptions(options) {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== void 0)
+  );
+}
+function canonicalizeLocale(locale) {
+  return locale === void 0 ? void 0 : Intl.getCanonicalLocales(locale)[0];
+}
+function resolveStringSort(options) {
+  return options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort;
+}
+export const IndexOperation = comparisonFunctions;
+export { indexableOperations } from "../query/builder/functions.js";
+export const builtInIndexResolverNames = /* @__PURE__ */ new WeakMap();
+export class BaseIndex {
+  constructor(id, expression, name, options) {
+    this.rangeValueDomains = /* @__PURE__ */ new Map();
+    this.id = id;
+    this.expression = expression;
+    this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS;
+    this.hasCustomComparator = options?.compareFn != null;
+    this.compareFn = makeCheckedComparator(
+      options?.compareFn ? (a, b) => options.compareFn(normalizeValue(a), normalizeValue(b)) : makeComparator(this.compareOptions, `index`)
+    );
+    this.name = name;
+    this.supportedOperations = new Set(indexableOperations);
+    this.initialize(options);
+  }
+  exactBucketKeys(value) {
+    return this.equalityLookup(value);
+  }
+  // Common methods
+  lookupSupportedOperation(operation, value) {
+    if (operation === `eq`) return this.equalityLookup(value);
+    if (operation === `in`) return this.inArrayLookup(value);
+    if (operation === `gt` || operation === `gte`)
+      return this.rangeQuery({
+        from: value,
+        fromInclusive: operation === `gte`
+      });
+    if (operation === `lt` || operation === `lte`)
+      return this.rangeQuery({ to: value, toInclusive: operation === `lte` });
+    return void 0;
+  }
+  /** Combine exact buckets without copying each bucket first. */
+  inArrayLookup(values) {
+    const result = /* @__PURE__ */ new Set();
+    for (const value of values) {
+      const keys = this.exactBucketKeys(value);
+      if (keys) for (const key of keys) result.add(key);
+    }
+    return result;
+  }
+  rangeQueryReversed(options = {}) {
+    const { from, to, fromInclusive = true, toInclusive = true } = options;
+    const reversed = {};
+    if (`to` in options) {
+      reversed.from = to;
+      reversed.fromInclusive = toInclusive;
+    }
+    if (`from` in options) {
+      reversed.to = from;
+      reversed.toInclusive = fromInclusive;
+    }
+    return this.rangeQuery(reversed);
+  }
+  supports(operation) {
+    return this.supportedOperations.has(operation);
+  }
+  get supportsRangeOptimization() {
+    return !this.hasCustomComparator;
+  }
+  get supportsOrderOptimization() {
+    if (this.hasCustomComparator || this.rangeValueDomains.size > 1)
+      return false;
+    const domain = this.rangeValueDomains.keys().next().value;
+    return domain === void 0 || ![
+      `Array`,
+      `Binary`,
+      `Temporal.Duration.calendar`,
+      `Temporal.PlainMonthDay`,
+      `function`
+    ].includes(domain);
+  }
+  addRangeValue(value) {
+    const domain = rangeValueDomain(value);
+    if (domain === void 0) return;
+    this.rangeValueDomains.set(
+      domain,
+      (this.rangeValueDomains.get(domain) ?? 0) + 1
+    );
+  }
+  removeRangeValue(value) {
+    const domain = rangeValueDomain(value);
+    if (domain === void 0) return;
+    const count = this.rangeValueDomains.get(domain);
+    if (count === void 0) return;
+    if (count === 1) this.rangeValueDomains.delete(domain);
+    else this.rangeValueDomains.set(domain, count - 1);
+  }
+  clearRangeValues() {
+    this.rangeValueDomains.clear();
+  }
+  canOptimizeRangeFor(value) {
+    const domain = rangeValueDomain(value);
+    if (domain === void 0) return true;
+    if (!isNativeRangeDomain(domain)) return false;
+    return this.rangeValueDomains.size === 0 || this.rangeValueDomains.size === 1 && this.rangeValueDomains.has(domain);
+  }
+  matchesField(fieldPath) {
+    return this.expression.type === `ref` && this.expression.path.length === fieldPath.length && this.expression.path.every((part, i) => part === fieldPath[i]);
+  }
+  /**
+   * Checks if the compare options match the index's compare options.
+   * The direction is ignored because the index can be reversed if the direction is different.
+   */
+  matchesCompareOptions(compareOptions) {
+    const indexCompareOptions = this.compareOptions;
+    const indexStringSort = resolveStringSort(indexCompareOptions);
+    const requestedStringSort = resolveStringSort(compareOptions);
+    if (indexCompareOptions.nulls !== compareOptions.nulls || indexStringSort !== requestedStringSort) {
+      return false;
+    }
+    if (indexStringSort === `custom` && requestedStringSort === `custom`) {
+      return indexCompareOptions.stringSort === `custom` && compareOptions.stringSort === `custom` && indexCompareOptions.compare === compareOptions.compare;
+    }
+    if (indexStringSort !== `locale` || requestedStringSort !== `locale`) {
+      return true;
+    }
+    const indexLocaleOptions = indexCompareOptions;
+    const requestedLocaleOptions = compareOptions;
+    return canonicalizeLocale(indexLocaleOptions.locale) === canonicalizeLocale(requestedLocaleOptions.locale) && deepEquals(
+      normalizeLocaleOptions(indexLocaleOptions.localeOptions),
+      normalizeLocaleOptions(requestedLocaleOptions.localeOptions)
+    );
+  }
+  /**
+   * Checks if the index matches the provided direction.
+   */
+  matchesDirection(direction) {
+    return this.compareOptions.direction === direction;
+  }
+  initialize(_options) {
+  }
+  evaluateIndexExpression(item) {
+    const evaluator = this.compiledIndexEvaluator ??= compileSingleRowExpression(this.expression);
+    return evaluator(item);
+  }
+  /** The indexed value of a row being added. A throwing expression fails the write. */
+  evaluateAddedValue(key, item) {
+    try {
+      return this.evaluateIndexExpression(item);
+    } catch (error) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Failed to evaluate index expression for key ${key}: ${error}` : codedMessage(99, { key, error }),
+        { cause: error }
+      );
+    }
+  }
+}
+function rangeValueDomain(value) {
+  if (value == null) return void 0;
+  if (value instanceof Date) return `date`;
+  if (typeof value === `object`) return indexObjectKind(value);
+  return typeof value;
+}
+function isNativeRangeDomain(domain) {
+  return domain === `number` || domain === `bigint` || domain === `boolean` || domain === `string` || domain === `date`;
+}
+export function warnRemovalFailure(key, error) {
+  console.warn(
+    devBuild() && process.env.NODE_ENV !== `production` ? `Failed to evaluate index expression for key ${key} during removal:` : codedWarning(216, { key }),
+    error
+  );
+}

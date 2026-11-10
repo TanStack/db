@@ -1,0 +1,90 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts
+@@ -71,6 +71,7 @@
+   since: `fixture-start` | `answer-release`
+ }
+ export type CompletionBaselineProgram = {
++  windowReceivingSchedule?: `failure-first` | `success`
+   gate: CompletionBaselineGate
+   parameters: CompletionParameters
+   setup: CompletionSetup
+@@ -92,6 +93,59 @@
+   steps: Array<CompletionBaselineStep>
+   publicationEpochs: Array<CompletionBaselinePublicationEpoch>
+   sourceAnswerPremises: Record<string, Array<CompletionBaselineSourcePremise>>
++}
++
++/**
++ * Two receiving witnesses share the primary pagination law and finite facts.
++ * Failure stops at the first handled-failure barrier: teardown, not a fictional
++ * answer of a canceled peer, follows it. Later settlement/retry remain open on
++ * this real-provider path. The success neighbor keeps the pivot eligible, so
++ * its complete target needs the held child's actual answer.
++ *
++ * The original constituent recipes remain unchanged. These explicit successors
++ * reuse their steps and independent publication model without adding a new
++ * lifecycle model or changing any generated campaign budget.
++ */
++export function constructCompletionWindowReceivingProgram(
++  parameters: CompletionParameters,
++  schedule: `failure-first` | `success`,
++): CompletionBaselineProgram {
++  const program = constructCompletionBaselineProgram(
++    parameters,
++    `inline`,
++    schedule === `failure-first` ? `source-failed-peer` : `held-window`,
++  )
++  if (schedule === `failure-first`) {
++    const boundary = program.steps.findIndex(
++      (step) =>
++        step.kind === `baseline-observe` &&
++        step.boundary === `source-failed-peer`,
++    )
++    program.steps = program.steps.slice(0, boundary + 1)
++    program.sourceAnswerPremises = {}
++  } else {
++    program.setup.facts.marked = program.setup.facts.marked.filter(
++      (id) => id !== program.selectedKeys.pivot,
++    )
++    program.steps = program.steps.map((step) => {
++      if (step.kind === `control` && step.control === `begin-replay`)
++        return control(`hold-demand-sources`)
++      if (step.kind === `semantic` && step.action.type === `source-answer`)
++        return semantic({
++          ...step.action,
++          facts: structuredClone(program.setup.facts),
++        })
++      return step
++    })
++    for (const premise of program.sourceAnswerPremises.answer ?? [])
++      if (premise.source === `children`) premise.since = `answer-release`
++  }
++  program.windowReceivingSchedule = schedule
++  program.publicationEpochs = authorCompletionBaselinePublicationEpochs(
++    program.setup,
++    program.steps,
++  )
++  return program
+ }
+ const semantic = (action: CompletionAction): CompletionBaselineStep => ({
+   kind: `semantic`,
+@@ -521,8 +575,9 @@
+  * Compute one expectation before running its physical interval. Replay only
+  * authored semantic actions in a fresh model; no actual request, output,
+  * callback, or late mutable outcome model supplies this value. A driver arms
+- * the returned snapshot before fromStep, compares every public callback at
+- * capture, and checks its persistent replicas at throughStep. Main outcome
++ * the returned snapshot before fromStep, records every raw public callback,
++ * then compares the captured callbacks and persistent replicas at throughStep.
++ * Main outcome
+  * actions still wait for their exact physical boundaries before being stepped.
+  */
+ export function modelCompletionBaselinePublicationEpoch(
+@@ -579,6 +634,7 @@
+   grammar: [
+     authorCompletionBaselinePublicationEpochs,
+     constructCompletionBaselineProgram,
++    constructCompletionWindowReceivingProgram,
+     completionBaselineProgramFamily,
+   ],
+ })

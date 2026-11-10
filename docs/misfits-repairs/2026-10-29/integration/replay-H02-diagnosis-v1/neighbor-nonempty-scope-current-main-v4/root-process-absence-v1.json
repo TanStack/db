@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-30T07:04:03.013198+00:00",
+  "checkedBy": "/root",
+  "toolChunk": "39c1aa",
+  "checks": [
+    {
+      "pid": 88862,
+      "process": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 88862,
+      "process": "pgid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 88884,
+      "process": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 88884,
+      "process": "pgid",
+      "result": "absent-ESRCH"
+    }
+  ],
+  "scope": "original outer and child identities after returned V4 command"
+}

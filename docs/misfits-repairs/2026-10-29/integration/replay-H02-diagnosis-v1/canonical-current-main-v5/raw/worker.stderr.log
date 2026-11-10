@@ -1,0 +1,97 @@
+
+
+#
+# Fatal error in , line 0
+# Check failed: needs_context && current_scope_ == closure_scope_ && current_scope_->is_function_scope() && !function_.is_null() implies function_->context() != *context_.
+#
+#
+#
+#FailureMessage Object: 0x16f68f6c8
+----- Native stack trace -----
+
+ 1: 0x10093cd4c node::NodePlatform::GetStackTracePrinter()::$_0::__invoke() [/Users/kyle.mathews/.n/bin/node]
+ 2: 0x10221e32c V8_Fatal(char const*, ...) [/Users/kyle.mathews/.n/bin/node]
+ 3: 0x100c49924 v8::internal::ScopeIterator::start_position() [/Users/kyle.mathews/.n/bin/node]
+ 4: 0x100c4bd58 v8::internal::ScopeIterator::VisitLocals(std::__1::function<bool (v8::internal::Handle<v8::internal::String>, v8::internal::Handle<v8::internal::Object>, v8::internal::ScopeIterator::ScopeType)> const&, v8::internal::ScopeIterator::Mode, v8::internal::ScopeIterator::ScopeType) const [/Users/kyle.mathews/.n/bin/node]
+ 5: 0x100c4a4b4 v8::internal::ScopeIterator::VisitLocalScope(std::__1::function<bool (v8::internal::Handle<v8::internal::String>, v8::internal::Handle<v8::internal::Object>, v8::internal::ScopeIterator::ScopeType)> const&, v8::internal::ScopeIterator::Mode, v8::internal::ScopeIterator::ScopeType) const [/Users/kyle.mathews/.n/bin/node]
+ 6: 0x100c497d0 v8::internal::ScopeIterator::ScopeObject(v8::internal::ScopeIterator::Mode) [/Users/kyle.mathews/.n/bin/node]
+ 7: 0x101286974 v8_inspector::V8DebuggerAgentImpl::currentCallFrames(std::__1::unique_ptr<std::__1::vector<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>, std::__1::allocator<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>>>, std::__1::default_delete<std::__1::vector<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>, std::__1::allocator<std::__1::unique_ptr<v8_inspector::protocol::Debugger::CallFrame, std::__1::default_delete<v8_inspector::protocol::Debugger::CallFrame>>>>>>*) [/Users/kyle.mathews/.n/bin/node]
+ 8: 0x10127cd40 v8_inspector::V8DebuggerAgentImpl::didPause(int, v8::Local<v8::Value>, std::__1::vector<int, std::__1::allocator<int>> const&, v8::debug::ExceptionType, bool, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]
+ 9: 0x10129f510 v8_inspector::V8InspectorImpl::forEachSession(int, std::__1::function<void (v8_inspector::V8InspectorSessionImpl*)> const&) [/Users/kyle.mathews/.n/bin/node]
+10: 0x1012905e8 v8_inspector::V8Debugger::handleProgramBreak(v8::Local<v8::Context>, v8::Local<v8::Value>, std::__1::vector<int, std::__1::allocator<int>> const&, v8::base::EnumSet<v8::debug::BreakReason, int>, v8::debug::ExceptionType, bool) [/Users/kyle.mathews/.n/bin/node]
+11: 0x100c50e00 v8::internal::Debug::OnDebugBreak(v8::internal::DirectHandle<v8::internal::FixedArray>, v8::internal::StepAction, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]
+12: 0x100c57c1c v8::internal::Debug::HandleDebugBreak(v8::internal::IgnoreBreakMode, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]
+13: 0x100c416a4 v8::debug::BreakRightNow(v8::Isolate*, v8::base::EnumSet<v8::debug::BreakReason, int>) [/Users/kyle.mathews/.n/bin/node]
+14: 0x100cd05a8 v8::internal::Isolate::InvokeApiInterruptCallbacks() [/Users/kyle.mathews/.n/bin/node]
+15: 0x100ced514 v8::internal::StackGuard::HandleInterrupts(v8::internal::StackGuard::InterruptLevel) [/Users/kyle.mathews/.n/bin/node]
+16: 0x1011dabb0 v8::internal::Runtime_StackGuardWithGap(int, unsigned long*, v8::internal::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+17: 0x101832234 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/Users/kyle.mathews/.n/bin/node]
+18: 0x101795934 Builtins_BaselineOutOfLinePrologue [/Users/kyle.mathews/.n/bin/node]
+19: 0x1249f6f98 
+20: 0x124abad24 
+21: 0x124c395b8 
+22: 0x124a89638 
+23: 0x124a47a6c 
+24: 0x124a786ec 
+25: 0x124aaaa18 
+26: 0x124a8c5f0 
+27: 0x1249bf100 
+28: 0x1249bf8b0 
+29: 0x1249bfbc8 
+30: 0x101794bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+31: 0x101794bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+32: 0x101794bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+33: 0x101794bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+34: 0x101794bec Builtins_InterpreterEntryTrampoline [/Users/kyle.mathews/.n/bin/node]
+35: 0x12491e604 
+36: 0x10181605c Builtins_SetPrototypeForEach [/Users/kyle.mathews/.n/bin/node]
+37: 0x1249047c4 
+38: 0x124952c18 
+39: 0x124904ae4 
+40: 0x12490509c 
+41: 0x12493374c 
+42: 0x1249338ac 
+43: 0x10184de70 Builtins_ArrayForEach [/Users/kyle.mathews/.n/bin/node]
+44: 0x12491f174 
+45: 0x124952c18 
+46: 0x12491f4c4 
+47: 0x12488f5c0 
+48: 0x1249c1620 
+49: 0x1017d37e8 Builtins_AsyncFunctionAwaitResolveClosure [/Users/kyle.mathews/.n/bin/node]
+50: 0x1018a8e58 Builtins_PromiseFulfillReactionJob [/Users/kyle.mathews/.n/bin/node]
+51: 0x1017c2bd0 Builtins_RunMicrotasks [/Users/kyle.mathews/.n/bin/node]
+52: 0x1017927b0 Builtins_JSRunMicrotasksEntry [/Users/kyle.mathews/.n/bin/node]
+53: 0x100cbb690 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/kyle.mathews/.n/bin/node]
+54: 0x100cbbf04 v8::internal::(anonymous namespace)::InvokeWithTryCatch(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/kyle.mathews/.n/bin/node]
+55: 0x100cbc040 v8::internal::Execution::TryRunMicrotasks(v8::internal::Isolate*, v8::internal::MicrotaskQueue*) [/Users/kyle.mathews/.n/bin/node]
+56: 0x100ceade4 v8::internal::MicrotaskQueue::RunMicrotasks(v8::internal::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+57: 0x100ceb744 v8::internal::MicrotaskQueue::PerformCheckpoint(v8::Isolate*) [/Users/kyle.mathews/.n/bin/node]
+58: 0x10077b0b8 node::InternalCallbackScope::Close() [/Users/kyle.mathews/.n/bin/node]
+59: 0x10077aa90 node::InternalCallbackScope::~InternalCallbackScope() [/Users/kyle.mathews/.n/bin/node]
+60: 0x1008162b0 node::Environment::RunTimers(uv_timer_s*) [/Users/kyle.mathews/.n/bin/node]
+61: 0x10176c6d0 uv__run_timers [/Users/kyle.mathews/.n/bin/node]
+62: 0x10176ffd8 uv_run [/Users/kyle.mathews/.n/bin/node]
+63: 0x10077c6a8 node::SpinEventLoopInternal(node::Environment*) [/Users/kyle.mathews/.n/bin/node]
+64: 0x1008f87d8 node::NodeMainInstance::Run() [/Users/kyle.mathews/.n/bin/node]
+65: 0x10084a7e0 node::Start(int, char**) [/Users/kyle.mathews/.n/bin/node]
+66: 0x18fdd44e4 start [/usr/lib/dyld]
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Worker forks emitted error.
+ ❯ EventEmitter.onTaskError ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3526:21
+ ❯ EventEmitter.emit node:events:509:28
+ ❯ ChildProcess.emitUnexpectedExit ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3092:22
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+Caused by: Error: Worker exited unexpectedly
+ ❯ ChildProcess.emitUnexpectedExit ../codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3090:33
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+

@@ -1,0 +1,368 @@
+{
+  "at": "2026-10-30T11:00:19.615292+00:00",
+  "mode": "Read/hash/JSON/source audit only. No imports of bound programs, test/model/product execution, or process probes.",
+  "knownIdentities": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/result-freeze-v1.json": "6a3df64c714d54542e8c2cda8ea3b5def9b5c2ef8c35652d2e452ce5463c7d9d",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/packet-manifest.json": "81ad3dffafeb7d9f2975d9e15ab1d01cfbef50ad9687cac5bfc0ba4c9f6e4cd3",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/binding.json": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/root-primary-red-admission-v1.json": "bced374c51614dbd911257589df9bec8a2bc58bb3be7bd6928c46c5d04966a87",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/launch.py": "8cae808cd8b045c45e78c10ca492ce0f8f712a6ea2d64a61ada28ee0aae7d4b0",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/run-recipe.json": "6a290c3a8e4a03382e026c39b09b71196bcc39aa9d7a2003253709ea3b2d8dc3",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/supplemental-tool-inputs.json": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/packet-sha256-v1.json": "2a6e992f2e25fa4dcbfb05456924bfb597bd583a59234a8b445b95a139773a75",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/source-freeze-v1.json": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/pagination-failed-peer-source-independent-review-v1.md": "fa564e2739de52a397e8cea07aa7edc12ac8125c2869673b8a341ab5fd273e07",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-source-failed-peer-checkpoint-actual-independent-review-v1.md": "d41d903daef37da930046d1f7b21e896edf959d7545207dc7496d4df59e3a96c",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-source-failed-peer-checkpoint-actual-independent-facts-v2.json": "ecc54f059aa9e133cc974aa73662ac2b8eaff3814016440c74f327f1684fbbe9",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-native-list-launcher-v1/launch.py": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/proposed-primary-red-command-v1.json": "5c99b568f990dd2d77dcc20451879de605e3d615013563dc071b1c07839ac18e",
+    "/bin/ps": "16d273739778797145fd22cba76113d2aaa99c759313d56ef87ed56a16bca083"
+  },
+  "resultAssets": {
+    "files": 13,
+    "bytes": 37846,
+    "drift": []
+  },
+  "expectedReportAbsent": {
+    "vitest-report.json": true
+  },
+  "containmentMembers": {
+    "files": 7,
+    "bytes": 1556590,
+    "drift": []
+  },
+  "sourcePacket": {
+    "files": 105,
+    "bytes": 2965709,
+    "drift": []
+  },
+  "currentSourcesAtIndependentAudit": {
+    "files": 595,
+    "bytes": 6900549,
+    "drift": [
+      {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+        "expected": "9237bde4da2d85ba933d3eee1ad11929c747196c7d3d5580a3b2cd2bad08cc3c",
+        "actual": "c8c524248740ea0349a226851166e5c5e1e660a04344a63c071564c6015dc6ec"
+      },
+      {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+        "expected": "aa28853ab3b9f64696d12bf63c675dcb30544dac8dee135551281e426265acc6",
+        "actual": "4e01aa39fe696d14f5acfef5d996f744a126f015aea1f0bb1c8eb4794acb70ba"
+      },
+      {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+        "expected": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec",
+        "actual": "d27a0742d23f9f4c240bedf449258d99296caabf17ead469934ea1feaf6c1f5c"
+      },
+      {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts",
+        "expected": "6f26a439c6bcf949364e6c32c238a72b98d1d29d929c355622e32232c56e4f32",
+        "actual": "49b284fd55d26d080ee38789056f48088b4199ccc04b0ca575b956304c76ee70"
+      }
+    ]
+  },
+  "immutableSourceCopies": {
+    "files": 84,
+    "bytes": 2146849,
+    "drift": []
+  },
+  "currentSourceDriftInterpretation": "Any drift is current successor work, separate from the immutable saved positive before/after/post identity; no historical result is inferred solely from current files.",
+  "dependencyChecks": {
+    "sourcePackages": 9,
+    "supplementalPackages": 253,
+    "uniqueRoots": 255,
+    "uniqueOwnPayloadFiles": 11974,
+    "uniqueOwnPayloadBytesRead": 174739946,
+    "resolutionEdges": 405,
+    "absentDeclaredOptionalOrPeers": 112,
+    "node": 1,
+    "python": 1,
+    "psBinary": 1,
+    "locks": 2,
+    "reuseLinks": 4
+  },
+  "actualInvocation": {
+    "admissionSha256": "bced374c51614dbd911257589df9bec8a2bc58bb3be7bd6928c46c5d04966a87",
+    "initial": {
+      "chunk_id": "46d907",
+      "wall_time_seconds": 1.002540084,
+      "session_id": 31238,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualCompletion": {
+      "chunk_id": "5a6619",
+      "wall_time_seconds": 1.85e-05,
+      "exit_code": 1,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualOuterExitCode": 1,
+    "actualInvocationPermission": "sandbox_permissions=require_escalated",
+    "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -I -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-containment-preparation-v1/launch.py --execute-exact-one 73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+    "maxInvocations": 1,
+    "retryAuthorized": false,
+    "progressionAuthorized": false
+  },
+  "nativeRecipe": {
+    "id": "primary-pagination-joined-window-failure-fixed-red-v1",
+    "order": 0,
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "argv": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "vite.config.ts",
+      "tests/query/pagination-oracle.property.test.ts",
+      "-t",
+      "retains complete windows across joined failure histories for a fixed seed",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--reporter=default",
+      "--reporter=json",
+      "--outputFile.json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/vitest-report.json"
+    ],
+    "presentationArgs": [
+      "--reporter=default",
+      "--reporter=json",
+      "--outputFile.json=/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/vitest-report.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+    "environment": {
+      "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1",
+      "CI": "1",
+      "NO_COLOR": "1"
+    },
+    "envUnset": [
+      "NODE_OPTIONS",
+      "NODE_PATH",
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH",
+      "TANSTACK_DB_ORACLE_CALIBRATION",
+      "H02_PROGRESS_WORKER_HISTORY",
+      "H02_PROGRESS_BINDING_DIR",
+      "H02_PROGRESS_SELECTED_ROOT",
+      "H02_PROGRESS_RECEIPTS",
+      "H02_PROGRESS_SOURCE_FREEZE",
+      "H02_COMPLETION_PARENT_PROGRAM",
+      "H02_COMPLETION_PARENT_PROGRAM_SHA256",
+      "H02_COMPLETION_WORKER_MODE",
+      "H02_COMPLETION_GROUP_REGISTRY"
+    ],
+    "additionalClearedPrefixes": [
+      "H02_",
+      "VITEST_",
+      "TANSTACK_DB_ORACLE_"
+    ],
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "nodeHeap": "installed Node default; NODE_OPTIONS cleared; no test/config timeout override",
+    "outerWallContainmentMs": 30000,
+    "groupRssContainmentBytes": 1073741824,
+    "samplingIntervalMs": 80,
+    "inventoryTimeoutMs": 1000,
+    "leaderReapTimeoutMs": 3000,
+    "descendantCleanupWindowMs": 3000,
+    "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1",
+    "stdoutPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/stdout.log",
+    "stderrPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/stderr.log",
+    "expectedOutput": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/vitest-report.json",
+      "title": "retains complete windows across joined failure histories for a fixed seed",
+      "ancestorTitles": [
+        "pagination recomputation oracle",
+        "joined window failure for a fixed seed"
+      ]
+    },
+    "campaign": {
+      "seed": 1665,
+      "runs": 8,
+      "familySchedules": [
+        "failure-first",
+        "peer-first",
+        "success"
+      ],
+      "noOtherCampaignAdmitted": true
+    },
+    "productVerdict": "UNCLASSIFIED; child assertion1 stays child1 and outer1; resource/setup/cleanup failures give no product RED",
+    "actualToolPermission": "require_escalated on actual launcher invocation; separate elevated preflight is insufficient",
+    "runtimeAdmission": "NOT ADMITTED; source-only preparation"
+  },
+  "receiptChronologyMs": {
+    "00-pre-spawn.receipt.json": 0,
+    "00-spawn.receipt.json": 3,
+    "00-group-verified.receipt.json": 3,
+    "00-failure.receipt.json": 1681,
+    "00-final.receipt.json": 1744
+  },
+  "RSS": {
+    "sampleSumBytes": 1091452928,
+    "limitBytes": 1073741824,
+    "excessBytes": 17711104,
+    "sampleCount": 13,
+    "failureAtMs": 1681,
+    "finalAtMs": 1744,
+    "rows": [
+      {
+        "pgid": 73353,
+        "pid": 73353,
+        "rssBytes": 488865792,
+        "stat": "Rs"
+      },
+      {
+        "pgid": 73353,
+        "pid": 73356,
+        "rssBytes": 31391744,
+        "stat": "S"
+      },
+      {
+        "pgid": 73353,
+        "pid": 73361,
+        "rssBytes": 571195392,
+        "stat": "S"
+      }
+    ],
+    "roles": "Not inferred: these rows do not retain process commands."
+  },
+  "cleanup": {
+    "originalChildPidPgid": 73353,
+    "outerPidPgid": 73331,
+    "killAttempts": [
+      {
+        "result": "sent",
+        "signal": "SIGKILL",
+        "targetPgid": 73353
+      }
+    ],
+    "childExit": -9,
+    "finalOriginalGroupRows": [],
+    "savedSeparatePostAbsence": {
+      "at": "2026-10-30T10:54:06.223544+00:00",
+      "actualProbePermission": "require_escalated",
+      "psExitCode": 0,
+      "psStderr": "",
+      "namedOriginalPids": [
+        73331,
+        73353
+      ],
+      "namedOriginalGroups": [
+        73331,
+        73353
+      ],
+      "remainingNamedRows": [],
+      "zeroSignalProbes": [
+        {
+          "kind": "pid",
+          "value": 73331,
+          "result": "ESRCH"
+        },
+        {
+          "kind": "pid",
+          "value": 73353,
+          "result": "ESRCH"
+        },
+        {
+          "kind": "pgid",
+          "value": 73331,
+          "result": "ESRCH"
+        },
+        {
+          "kind": "pgid",
+          "value": 73353,
+          "result": "ESRCH"
+        }
+      ],
+      "limits": "Original named PID/PGID observations only; no escaped/unregistered descendant census or PID/PGID reuse proof."
+    },
+    "limit": "Named original PID/PGID observations only; no escaped/unregistered census or reuse proof; no validation of separate inner completion-supervisor kill path."
+  },
+  "savedIdentity": {
+    "beforeAfterAndSeparatePost": {
+      "sourceFiles": 595,
+      "copiedSources": 84,
+      "namedPackageRoots": 255,
+      "namedPackagePayloads": 11974,
+      "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+      "nodeSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+    },
+    "separatePostReceipt": {
+      "at": "2026-10-30T10:54:26.798350+00:00",
+      "status": "PASS",
+      "identity": {
+        "sourceFiles": 595,
+        "copiedSources": 84,
+        "namedPackageRoots": 255,
+        "namedPackagePayloads": 11974,
+        "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+        "nodeSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+      },
+      "wrapperBeforeAfterAndSeparatePostReturnEqual": true,
+      "esbuildControlNamesPresent": [],
+      "bindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+      "runtimeConfigOrTestReimported": false,
+      "supervisorReimported": false,
+      "newNativeInvocation": false,
+      "same595Sources84Copies255PackageRoots11974Payloads405Edges112AbsentOptionalOrPeersVerified": true
+    },
+    "bindingLimitation": "Disk/source/tool checks and saved receipts only; no V8/evaluated-source binding claimed."
+  },
+  "expoDiagnosis": {
+    "plugin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js",
+    "pluginSha256": "78c7739176947b8e012ef3afc2e8c7c233fc21ee96a7fcf493e5178829c0ffb7",
+    "workspaceScanLines": [
+      61,
+      94
+    ],
+    "caughtParseLines": [
+      123,
+      137
+    ],
+    "nullProjectSkipLines": [
+      141,
+      145
+    ],
+    "spanSha256": {
+      "scan61to94": "a4895fc230786ff69884616b9c71de3d8da5b935b65534f7b63048dc0d0c3b30",
+      "catch123to137": "5e1374de37e143d64bc99cdc3ad1a6f264437e4ccf39b435e42b4e6b30c05dc5",
+      "skip141to145": "1583cf842d39f4abddc42a670cd84b0eaea8c02f631b37b8be27bb99ceafcf1d"
+    },
+    "conclusion": "Caught workspace configuration-scan parse errors. This path logs and returns null, then skips those projects. The retained output does not establish an independent fatal Expo setup stop or prove all later setup succeeds."
+  },
+  "qualification": "OPERATIONAL RSS CONTAINMENT. No product RED/GREEN, mutant rejection, assertion or reach credit.",
+  "bodyExecution": "UNESTABLISHED: no selected-test JSON/report, reach diagnostic, callback comparison or intended assertion retained. Missing evidence does not establish zero body execution.",
+  "rawTimestampCorrection": "Received ledger summary associates RSS with1744ms; immutable failure receipt records1681ms, and final receipt1744ms. Raw ledger text preserved.",
+  "sourceOrderReview": {
+    "immutable13assets/raw": "rehash PASS",
+    "exact actual command/permission/oneinvocation": "PASS against saved record",
+    "RSSkill chronology and sampledsum": "PASS; failure1681ms/final1744ms",
+    "ownedcleanup/namedabsence limit": "PASS within named identities only",
+    "bindings/sourcepost equality": "saved positive before/after/post retained; current audit separately recorded",
+    "Expo diagnostic fatality": "caught scan diagnostics; independent fatal setup not established",
+    "absence report/test/reach evidence": "no product or reach credit",
+    "preserved earlier first-callback-only RED and allUNREACHEDlimits": "preserved without expanding it"
+  },
+  "preservedLimits": {
+    "priorFirstCallbackRed": "Only earlier inline-source-failed-peer first callback raw301/boundary286 normalizeddelivery302; later raw321/flush-throw/pending operation contaminated follow-on.",
+    "candidateRaw20": "all UNREACHED; no credit transferred",
+    "actualHelperNoActiveOperation": "required and UNREACHED",
+    "state14": "proposed/unadopted",
+    "metadata": "separate owner",
+    "primaryReceiving": "rich full-child shared QueryClient receiving required before production edits",
+    "peerLivePremise": "Controlled experiment premise; no law forbidding lawful retirement",
+    "replay": "explicit -t selecting new random/replayed family required"
+  },
+  "auditProductExecutions": 0,
+  "auditModelExecutions": 0,
+  "auditTestExecutions": 0,
+  "auditNativeRunInvocations": 0,
+  "auditProcessProbes": 0,
+  "ledgerPrefix": {
+    "rows": 102,
+    "sha256": "6e72a0032f89f054e5286a3de20f8edc5de8cf403a287e1e8c9f2c0c0371a224"
+  },
+  "errors": [],
+  "allAuditChecksPass": true
+}

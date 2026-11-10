@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "v2ManifestSha256": "234ce9bd710d35915ea4a57a43043bde641d9cf468c060da9176b360793a6a30",
+  "v2Members": 13,
+  "v2TotalBytes": 49826,
+  "originalMembersReverified": 586,
+  "originalFileSetPreserved": true,
+  "sourceFilesReverified": 573,
+  "correctedReceivingSelectors": 4,
+  "inertListRecipes": 6,
+  "nativeExecutions": 0,
+  "failures": [],
+  "exactNumberedDependencySourceExcerpts": 5
+}

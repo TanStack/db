@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-30T10:19:32.239618+00:00",
+  "status": "singleton assertion failure frozen; independent actual review pending",
+  "nativeInvocations": 1,
+  "actualInitialTool": "f635d6",
+  "actualSession": 13154,
+  "actualFinalTool": "1cfb7b",
+  "actualExitCode": 1,
+  "actualLauncherPermission": "require_escalated",
+  "resultFreezeSha256": "37065c97890248961352332dc1a85ac252ecc4d6cd673a98f2706167b617d4d6",
+  "resultAssetsRehashed": 1975,
+  "preservedOriginalPacketAndResultEntriesRehashed": 4294,
+  "lint": {
+    "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+    "initial": "e98f52",
+    "session": 67027,
+    "final": "a0a923",
+    "exitCode": 0,
+    "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+  },
+  "slot2": "RETURNED",
+  "noRetry": true,
+  "remaining13": "UNRUN",
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "noProductVerdictByCollector": true,
+  "previousKillEpermCause": "unknown; prior failure preserved; no general failure-kill closure claimed"
+}

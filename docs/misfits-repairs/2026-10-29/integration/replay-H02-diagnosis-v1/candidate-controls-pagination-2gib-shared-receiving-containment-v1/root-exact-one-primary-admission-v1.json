@@ -1,0 +1,52 @@
+{
+  "admittedBy": "/root",
+  "admission": "exactly one fixed primary pagination command on unchanged production",
+  "scope": "N prepared exact launcher only; no receiving/random/candidate run or retry",
+  "pins": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/packet-manifest.json",
+      "sha256": "439cdcb6df9125142fece28cf55f834b60d071d57fb8b6498c2d4d1f7feca2f1"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/binding.json",
+      "sha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-window-receiving-source-independent-review-v1.md",
+      "sha256": "d942b55ce9fbbec48ae7726a644f1cce27808133fa3c3eb3d599df4b35d685eb"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-receiving-preparation-independent-review-v1.md",
+      "sha256": "b7cdd5827d504f604dd30423dd690a8c29de15495ab4b9dbc2b80e39a2ccf9df"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+      "sha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/validation-account-v1.json",
+      "sha256": "f9b32bf4d346b6778c94284cfae13ebf235a140bb666fb05a7868d6117d76c76"
+    }
+  ],
+  "toolReceiptRequirement": "Actual exec_command sandbox_permissions=require_escalated; preserve actual initial/session/final outer completion separately from child/supervisor receipt.",
+  "exactLaunchProposal": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/proposed-exact-one-launch-v1.json",
+  "exactLaunchProposalSha256": "58dbaab6c843ba1086bc3e17f091d7f002f15f5eb982103b7cf3a16379214c9b",
+  "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "argv": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/launch.py",
+    "--execute-exact-one",
+    "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf"
+  ],
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "slot": 2,
+  "containment": "Prepared30s/2GiB sampled original process group; default heap; ordinary setup/coverage/typechecking; no budget/seed/law change.",
+  "qualifications": "Root read Q/N reviews and exact recipe/binding; rehashed six critical external inputs. Q historical relocation changes no N pin. Exact lint completed0. Recovery qualification c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406 retains limits.",
+  "onCompletion": "Preserve child nonzero as actual outer nonzero; capture original IDs/cleanup and all raw output. Source/binding/setup/resource/cleanup/instrument failures provide no product RED. Stop after one launch and submit frozen actual result for independent review.",
+  "noAutomaticRetry": true,
+  "receivingAdmitted": false,
+  "randomCampaignAdmitted": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "remainingGates": "Primary actual comparison/reach; full-child failure and successful same-recorder real receiving; relevant sensitivity calibration; wider progress states. No production edit or closure follows from this admission."
+}

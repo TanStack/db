@@ -1,0 +1,7 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+  13:1  error  `../../../scripts/h02-progress/witness-premise.js` type import should occur after import of `./queued-answer-progress-oracle.js`  import/order
+
+✖ 1 problem (1 error, 0 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+

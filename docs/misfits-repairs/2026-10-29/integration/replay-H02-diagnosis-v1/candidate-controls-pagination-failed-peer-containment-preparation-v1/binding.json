@@ -1,0 +1,34 @@
+{
+  "status": "PREPARED ONLY; separate exact root admission required",
+  "python": {
+    "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+  },
+  "supervisor": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/docs/misfits-metadata-receiving-native-list-launcher-v1/launch.py",
+    "sha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+    "reuse": "run_one unchanged; configure report qualifier and UNSET only"
+  },
+  "proposedCommand": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/proposed-primary-red-command-v1.json",
+    "sha256": "5c99b568f990dd2d77dcc20451879de605e3d615013563dc071b1c07839ac18e"
+  },
+  "sourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/source-freeze-v1.json",
+    "sha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec"
+  },
+  "ps": {
+    "path": "/bin/ps",
+    "sha256": "16d273739778797145fd22cba76113d2aaa99c759313d56ef87ed56a16bca083"
+  },
+  "files": {
+    "launch.py": "8cae808cd8b045c45e78c10ca492ce0f8f712a6ea2d64a61ada28ee0aae7d4b0",
+    "run-recipe.json": "6a290c3a8e4a03382e026c39b09b71196bcc39aa9d7a2003253709ea3b2d8dc3",
+    "supplemental-tool-inputs.json": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50"
+  },
+  "actualLaunchRequires": "require_escalated on actual Python invocation; no launcher permission inference from prior ps preflight",
+  "runtimeInvocations": 0,
+  "runtimeProbeInvocations": 0,
+  "productVerdict": "UNCLASSIFIED"
+}

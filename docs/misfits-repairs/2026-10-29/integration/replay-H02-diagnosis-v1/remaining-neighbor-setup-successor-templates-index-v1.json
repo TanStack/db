@@ -1,0 +1,30 @@
+{
+  "status": "Inert exact setup-successor singleton templates; none admitted or executed",
+  "successorPacketManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/packet-sha256-v1.json",
+  "successorPacketSha256": "f25da3e002c69934d8c8d16f0880e76ecace90514e2ba650df3f1152bef5a4a8",
+  "orderedTemplates": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "sha256": "d5ab6faca69bfb048c6a07f444a6c0eafa58896474d679bb5fe5a9d3743c81ad",
+      "launcherSha256": "770f1dc51af09e40044ab57b3c764c1759ef9bc90d1f085e83d03f09975444d1",
+      "runtimeAdmitted": false
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "sha256": "5fae71b049200004ff097b4078fcfcc8c585ea0b88beb64ce9296e6d82b0d266",
+      "launcherSha256": "77256cb66200cf4a9b4cea1523a30e7020e5b3159d735931786f8400b562f918",
+      "runtimeAdmitted": false
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "sha256": "b1c285a6bed3007ac6034daa677146002c018d519b9d4f3e84287b4dd83f8cf3",
+      "launcherSha256": "a92494e092f0cd88c63fa9a25a71b5b085ba0a944a9ac878391692b2ec1ae7bf",
+      "runtimeAdmitted": false
+    }
+  ],
+  "oldAdmissionsHeld": true,
+  "newRuntimeRequestsMade": 0
+}

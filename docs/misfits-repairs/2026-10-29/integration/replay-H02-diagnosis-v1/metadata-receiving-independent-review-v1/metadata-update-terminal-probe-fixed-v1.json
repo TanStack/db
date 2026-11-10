@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "lawfulOriginalAndFollowupControls": 12,
+  "observations": [
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": false,
+      "error": null
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": false,
+      "error": null
+    }
+  ],
+  "rejected": 0,
+  "limits": "Pure authored observations only. No native registration, receiving, production execution or production RED/GREEN."
+}

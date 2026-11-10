@@ -1,0 +1,23 @@
+{
+  "sourceOnlyEmptyParentCreated": true,
+  "paths": [
+    {
+      "schedule": "failure-first",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1/inline-window-failure-first",
+      "parent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1",
+      "parentExists": true,
+      "leafAbsent": true,
+      "outerMkdirRecursive": false
+    },
+    {
+      "schedule": "success",
+      "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1/inline-window-success",
+      "parent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/runtime-output-v1",
+      "parentExists": true,
+      "leafAbsent": true,
+      "outerMkdirRecursive": false
+    }
+  ],
+  "outputLeafCreated": false,
+  "runtime": 0
+}

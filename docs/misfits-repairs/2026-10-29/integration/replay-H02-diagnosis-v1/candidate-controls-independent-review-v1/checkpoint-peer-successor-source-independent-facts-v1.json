@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-30T12:20:00.005455+00:00",
+  "mode": "Independent static inactive-source audit; no bound JS/TS, harness or model execution.",
+  "manifestSha256": "a56541c3188c6a8348aa1187575e0192410dc3e8d86d1a9697628dc4a9312d25",
+  "sourceFreezeSha256": "1bb89680e1cf69142d2edec1d5936a8e8a2a58ae12eff39f524d3422205ca4d8",
+  "members": 120,
+  "memberBytes": 2599271,
+  "activeSourcesUnchanged": 596,
+  "acceptedCopiesUnchanged": 85,
+  "productionUnchanged": 511,
+  "inactiveCopies": 85,
+  "changedInactiveSources": [
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts"
+  ],
+  "guardSha256": "a99a016f903375d02c44f56a12cb92a61cb9a62b317979d648983f7d0fdf2339",
+  "exactExtractionEntries": 8,
+  "savedCalibrationCases": 12,
+  "corrected": 4,
+  "hostileRejected": 8,
+  "reviewerCalibrationExecutions": 0,
+  "ESealedMembers": 1996,
+  "QHistoricalMembers": 126,
+  "QCurrentMembers": 133,
+  "DSealedMembers": 21,
+  "allAuditChecksPass": false,
+  "errors": [
+    "hash /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/original-peer-guard-condition-v1.ts.txt"
+  ],
+  "normalBoundKeySourceSuitability": "no blocking source finding identified",
+  "diagnosticCaptureNoninterference": "local catches only; no unconditional end-to-end receipt-fault preservation credit",
+  "diagnosticsRuntime": "UNREACHED",
+  "typecheck": 0,
+  "boundImports": 0,
+  "nativeProbes": 0,
+  "runtimeAdmission": false,
+  "slot2": "return after report",
+  "ledgerPrefixSha256": "eabfde1b27f844712d9f191656cfd58443b8b3313190c37aea2cfd0562439795"
+}

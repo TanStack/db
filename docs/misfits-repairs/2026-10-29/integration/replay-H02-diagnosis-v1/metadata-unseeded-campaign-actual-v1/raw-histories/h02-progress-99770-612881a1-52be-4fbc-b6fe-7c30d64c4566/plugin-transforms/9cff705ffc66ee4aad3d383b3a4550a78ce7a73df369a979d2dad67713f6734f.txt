@@ -1,0 +1,50 @@
+export function createSerialPacer(wait) {
+  const pending = /* @__PURE__ */ new Map();
+  const defaultOwner = {};
+  let persisting = false;
+  let nextStartAt = Number.NEGATIVE_INFINITY;
+  let timeout;
+  function drain() {
+    if (persisting || pending.size === 0) return;
+    const delay = nextStartAt - Date.now();
+    if (delay > 0) {
+      timeout ??= setTimeout(() => {
+        timeout = void 0;
+        drain();
+      }, delay);
+      return;
+    }
+    const [owner, callback] = pending.entries().next().value;
+    pending.delete(owner);
+    persisting = true;
+    nextStartAt = Date.now() + wait;
+    try {
+      void callback().then(settled, settled);
+    } catch (error) {
+      persisting = false;
+      queueMicrotask(drain);
+      throw error;
+    }
+  }
+  function settled() {
+    persisting = false;
+    drain();
+  }
+  return {
+    schedule(callback, owner = defaultOwner) {
+      pending.set(owner, callback);
+      drain();
+    },
+    hasPending(owner) {
+      return owner === void 0 ? pending.size > 0 : pending.has(owner);
+    },
+    cancel(owner) {
+      if (owner === void 0) pending.clear();
+      else pending.delete(owner);
+      if (pending.size === 0) {
+        if (timeout !== void 0) clearTimeout(timeout);
+        timeout = void 0;
+      }
+    }
+  };
+}

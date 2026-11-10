@@ -1,0 +1,30 @@
+{
+  "kind": "Root acceptance of actual qualified H02 source copy",
+  "actualInitial": {
+    "chunk": "e63808",
+    "session": 46686
+  },
+  "actualFinal": {
+    "chunk": "97749a",
+    "exitCode": 0
+  },
+  "independentReview": "candidate-controls-independent-review-v1/qualified-copy-actual-independent-review-v1.md",
+  "independentFreezeSha256": "1b491a76140b0994bd48c2e0b59385602ee016cc2418ff317fcbedbbb0b0f55e",
+  "checks": 40375,
+  "errors": 0,
+  "physical": {
+    "regulars": 603,
+    "links": 4,
+    "directories": 227,
+    "root": "/private/tmp/h02-qualified-peer-receiving-v1"
+  },
+  "disposition": "Accept copy fidelity and protected-source preservation only. Exact compiler source review remains separate.",
+  "rawStdout": {
+    "bytes": 173354,
+    "sha256": "a448255c72105bc6b8d26918f036e0731d7150f7127a077ff2e93e0a2666f4b1"
+  },
+  "limits": "API strings are truncated; persistent raw stream supplies complete receipt bytes. Finite bindings do not establish universal transitive closure. No receiving execution, reach or product credit.",
+  "compilerAdmission": false,
+  "nativeAdmission": false,
+  "canonicalImport": false
+}

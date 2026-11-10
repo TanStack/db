@@ -1,0 +1,11 @@
+{
+  "kind": "Preserved initial source-only author-audit failure",
+  "failedCheck": "noSourceMutationCommands",
+  "observed": "Whole-launcher regex reported false because it matched the literal pnpm segment in the immutable node_modules/.pnpm/vitest path.",
+  "technicalVerdict": "Audit-classifier false positive; no source mutation command was present or executed.",
+  "action": "Replace the whole-text package-manager word search with an explicit command-position/token audit. Keep the failing audit fact here; no source or launcher bytes changed.",
+  "actualNativeRuns": 0,
+  "actualMutants": 0,
+  "applicationSourceEdits": 0,
+  "earlierCompletedChecks": "All other 28 checks true in the failed source-only pass. No static-results.json was written by that failed pass."
+}

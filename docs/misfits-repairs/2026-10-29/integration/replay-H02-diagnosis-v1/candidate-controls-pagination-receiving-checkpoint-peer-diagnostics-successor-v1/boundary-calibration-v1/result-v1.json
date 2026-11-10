@@ -1,0 +1,754 @@
+{
+  "scope": "12 bounded pure writer/reader/routing boundary calibrations; controlled in-memory IO; no receiving/product execution",
+  "passed": true,
+  "cases": [
+    {
+      "name": "corrected-live-whole",
+      "mode": "corrected",
+      "delivery": "live",
+      "shortIo": false,
+      "rawSha256": "6cf04f3fc744d616076c9c138f243433fe05961a791bf0cac31cd270adf84790",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "epoch end",
+          "cutCalls": 0,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "complete cut",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        },
+        {
+          "label": "final",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        }
+      ],
+      "failure": null,
+      "routing": {
+        "comparisons": [
+          "callback replicas at 1:held-window",
+          "public cut held-window"
+        ],
+        "cutCalls": 1,
+        "checkpointCalls": 1,
+        "lastObservation": {
+          "phase": "completion-baseline-cut",
+          "boundary": "held-window"
+        }
+      },
+      "finalRouting": {
+        "epochIndex": 1,
+        "orderedIndex": 1,
+        "cuts": 1
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "bounded instrument path accepted"
+    },
+    {
+      "name": "corrected-live-short",
+      "mode": "corrected",
+      "delivery": "live",
+      "shortIo": true,
+      "rawSha256": "6cf04f3fc744d616076c9c138f243433fe05961a791bf0cac31cd270adf84790",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "epoch end",
+          "cutCalls": 0,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "complete cut",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        },
+        {
+          "label": "final",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        }
+      ],
+      "failure": null,
+      "routing": {
+        "comparisons": [
+          "callback replicas at 1:held-window",
+          "public cut held-window"
+        ],
+        "cutCalls": 1,
+        "checkpointCalls": 1,
+        "lastObservation": {
+          "phase": "completion-baseline-cut",
+          "boundary": "held-window"
+        }
+      },
+      "finalRouting": {
+        "epochIndex": 1,
+        "orderedIndex": 1,
+        "cuts": 1
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "bounded instrument path accepted"
+    },
+    {
+      "name": "corrected-final-whole",
+      "mode": "corrected",
+      "delivery": "final",
+      "shortIo": false,
+      "rawSha256": "6cf04f3fc744d616076c9c138f243433fe05961a791bf0cac31cd270adf84790",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        }
+      ],
+      "failure": null,
+      "routing": {
+        "comparisons": [
+          "callback replicas at 1:held-window",
+          "public cut held-window"
+        ],
+        "cutCalls": 1,
+        "checkpointCalls": 1,
+        "lastObservation": {
+          "phase": "completion-baseline-cut",
+          "boundary": "held-window"
+        }
+      },
+      "finalRouting": {
+        "epochIndex": 1,
+        "orderedIndex": 1,
+        "cuts": 1
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "bounded instrument path accepted"
+    },
+    {
+      "name": "corrected-final-short",
+      "mode": "corrected",
+      "delivery": "final",
+      "shortIo": true,
+      "rawSha256": "6cf04f3fc744d616076c9c138f243433fe05961a791bf0cac31cd270adf84790",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 1,
+          "checkpointCalls": 1,
+          "snapshot": {
+            "epochIndex": 1,
+            "orderedIndex": 1,
+            "cuts": 1
+          }
+        }
+      ],
+      "failure": null,
+      "routing": {
+        "comparisons": [
+          "callback replicas at 1:held-window",
+          "public cut held-window"
+        ],
+        "cutCalls": 1,
+        "checkpointCalls": 1,
+        "lastObservation": {
+          "phase": "completion-baseline-cut",
+          "boundary": "held-window"
+        }
+      },
+      "finalRouting": {
+        "epochIndex": 1,
+        "orderedIndex": 1,
+        "cuts": 1
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "bounded instrument path accepted"
+    },
+    {
+      "name": "old-collision-live-whole",
+      "mode": "old-collision",
+      "delivery": "live",
+      "shortIo": false,
+      "rawSha256": "0520083464a46f7c750d74603b63549a62c7ea17899029f01d0e670e2345c7ef",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at wrote (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:140:49)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:144:4\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "old-collision-live-short",
+      "mode": "old-collision",
+      "delivery": "live",
+      "shortIo": true,
+      "rawSha256": "0520083464a46f7c750d74603b63549a62c7ea17899029f01d0e670e2345c7ef",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at wrote (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:140:49)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:144:4\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "old-collision-final-whole",
+      "mode": "old-collision",
+      "delivery": "final",
+      "shortIo": false,
+      "rawSha256": "0520083464a46f7c750d74603b63549a62c7ea17899029f01d0e670e2345c7ef",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:148:19\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26\n    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:221:20)"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "old-collision-final-short",
+      "mode": "old-collision",
+      "delivery": "final",
+      "shortIo": true,
+      "rawSha256": "0520083464a46f7c750d74603b63549a62c7ea17899029f01d0e670e2345c7ef",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:148:19\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26\n    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:221:20)"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "wrong-preclose-cut-live-whole",
+      "mode": "wrong-preclose-cut",
+      "delivery": "live",
+      "shortIo": false,
+      "rawSha256": "f088f7ab6d0e58c438f45fa2643eac0bf05f4230b7cec82020f50c79ee0dd7e0",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "hostile complete cut before close",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at wrote (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:140:49)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:145:83\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "wrong-preclose-cut-live-short",
+      "mode": "wrong-preclose-cut",
+      "delivery": "live",
+      "shortIo": true,
+      "rawSha256": "f088f7ab6d0e58c438f45fa2643eac0bf05f4230b7cec82020f50c79ee0dd7e0",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "start",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "physical marker",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        },
+        {
+          "label": "hostile complete cut before close",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at wrote (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:140:49)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:145:83\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "wrong-preclose-cut-final-whole",
+      "mode": "wrong-preclose-cut",
+      "delivery": "final",
+      "shortIo": false,
+      "rawSha256": "f088f7ab6d0e58c438f45fa2643eac0bf05f4230b7cec82020f50c79ee0dd7e0",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:148:19\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26\n    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:221:20)"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    },
+    {
+      "name": "wrong-preclose-cut-final-short",
+      "mode": "wrong-preclose-cut",
+      "delivery": "final",
+      "shortIo": true,
+      "rawSha256": "f088f7ab6d0e58c438f45fa2643eac0bf05f4230b7cec82020f50c79ee0dd7e0",
+      "rawPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut",
+        "completion-baseline-epoch-end",
+        "completion-baseline-cut"
+      ],
+      "acceptedPhases": [
+        "completion-baseline-epoch-start",
+        "completion-baseline-checkpoint-captured",
+        "completion-baseline-cut"
+      ],
+      "samples": [
+        {
+          "label": "final",
+          "cutCalls": 0,
+          "checkpointCalls": 0,
+          "snapshot": {
+            "activeEpoch": "1:held-window",
+            "epochIndex": 0,
+            "orderedIndex": 0,
+            "cuts": 0
+          }
+        }
+      ],
+      "failure": {
+        "message": "public cut preceded its complete callback interval",
+        "stack": "Error: public cut preceded its complete callback interval\n    at Object.route (eval at makeRoute (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:93:17), <anonymous>:59:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:132:108\n    at Object.push (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:146:9)\n    at Object.drain (eval at makeTransport (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:89:10), <anonymous>:204:19)\n    at drain (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:137:17)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/[eval1]:148:19\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:224:26\n    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:221:20)"
+      },
+      "routing": {
+        "comparisons": [],
+        "cutCalls": 0,
+        "checkpointCalls": 0
+      },
+      "finalRouting": {
+        "activeEpoch": "1:held-window",
+        "epochIndex": 0,
+        "orderedIndex": 0,
+        "cuts": 0
+      },
+      "allControlledDescriptorsClosed": true,
+      "classification": "hostile instrument control rejected at unchanged active-epoch guard"
+    }
+  ],
+  "sourceHashes": {
+    "transport": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da",
+    "parent": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235",
+    "copiedDriver": "5b61e73c4872d7f496d4ff17f5157b1179d54af2497a3ebfd426ff483a5bf3ae"
+  },
+  "productRed": false,
+  "productGreen": false,
+  "receivingRetry": false,
+  "reachCredit": false,
+  "limits": "Only held-window marker/end/complete-cut routing; shared semantic model/checker are call-count spies and do not execute. Diagnostic helpers remain source-only. No typecheck, config import, target import, process probe or production claim."
+}

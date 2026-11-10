@@ -1,0 +1,522 @@
+import { deepEqualsInternal, isTemporal } from "./utils";
+import { codedMessage, devBuild } from "./error-message";
+const draftCopies = /* @__PURE__ */ new WeakMap();
+function defineDataProperty(object, key, value) {
+  if (key !== `__proto__`) {
+    ;
+    object[key] = value;
+    return;
+  }
+  Object.defineProperty(object, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true
+  });
+}
+function unwrapDraft(value) {
+  return value !== null && typeof value === `object` ? draftCopies.get(value) ?? value : value;
+}
+const ARRAY_MODIFYING_METHODS = /* @__PURE__ */ new Set([
+  `pop`,
+  `push`,
+  `shift`,
+  `unshift`,
+  `splice`,
+  `sort`,
+  `reverse`,
+  `fill`,
+  `copyWithin`,
+  `set`
+]);
+const MAP_SET_ITERATOR_METHODS = /* @__PURE__ */ new Set([
+  `entries`,
+  `keys`,
+  `values`,
+  `forEach`
+]);
+function isProxiableObject(value) {
+  return value !== null && typeof value === `object` && !(value instanceof Date) && !(value instanceof RegExp) && !isTemporal(value);
+}
+function createModifyingMethodHandler(methodFn, changeTracker, markChanged, receiver) {
+  return function(...args) {
+    const result = methodFn.apply(changeTracker.copy_, args);
+    markChanged(changeTracker);
+    return result === changeTracker.copy_ ? receiver : result;
+  };
+}
+function createMapSetIteratorHandler(methodName, prop, changeTracker, collectionProxy, memoizedCreateChangeProxy) {
+  if (!MAP_SET_ITERATOR_METHODS.has(methodName) && prop !== Symbol.iterator) {
+    return void 0;
+  }
+  return (...args) => {
+    const copy = changeTracker.copy_;
+    const isMap = copy instanceof Map;
+    if (isMap && methodName === `keys`) return copy.keys();
+    const track = (value) => isProxiableObject(value) ? memoizedCreateChangeProxy(value, {
+      tracker: changeTracker,
+      prop: ``,
+      retainIdentity: true
+    }).proxy : value;
+    if (methodName === `forEach`) {
+      const callback = args[0];
+      if (typeof callback !== `function`)
+        throw new TypeError(
+          devBuild() && process.env.NODE_ENV !== `production` ? `forEach callback must be a function` : codedMessage(109)
+        );
+      return copy.forEach((value, key) => {
+        const tracked = track(value);
+        callback.call(args[1], tracked, isMap ? key : tracked, collectionProxy);
+      });
+    }
+    const entries = copy.entries();
+    const pairs = methodName === `entries` || isMap && prop === Symbol.iterator;
+    return {
+      next() {
+        const result = entries.next();
+        if (result.done) return result;
+        const [key, value] = result.value;
+        const tracked = track(value);
+        return {
+          done: false,
+          value: pairs ? [isMap ? key : tracked, tracked] : tracked
+        };
+      },
+      [Symbol.iterator]() {
+        return this;
+      }
+    };
+  };
+}
+function deepClone(obj, visited = /* @__PURE__ */ new WeakMap(), detach = false) {
+  obj = unwrapDraft(obj);
+  if (obj === null || obj === void 0) {
+    return obj;
+  }
+  if (typeof obj !== `object`) {
+    return obj;
+  }
+  if (visited.has(obj)) {
+    return visited.get(obj);
+  }
+  if (obj instanceof Date) {
+    const clone2 = new Date(obj.getTime());
+    visited.set(obj, clone2);
+    return clone2;
+  }
+  if (obj instanceof RegExp) {
+    const clone2 = new RegExp(obj.source, obj.flags);
+    clone2.lastIndex = obj.lastIndex;
+    visited.set(obj, clone2);
+    return clone2;
+  }
+  if (obj instanceof URL) {
+    const clone2 = new URL(obj.href);
+    visited.set(obj, clone2);
+    return clone2;
+  }
+  if (Array.isArray(obj)) {
+    const arrayClone = new Array(obj.length);
+    visited.set(obj, arrayClone);
+    obj.forEach((item, index) => {
+      arrayClone[index] = deepClone(item, visited, detach);
+    });
+    return arrayClone;
+  }
+  const tag = Object.prototype.toString.call(obj);
+  const BufferConstructor = tag === `[object ArrayBuffer]` ? ArrayBuffer : tag === `[object SharedArrayBuffer]` && typeof SharedArrayBuffer !== `undefined` ? SharedArrayBuffer : void 0;
+  if (BufferConstructor) {
+    let byteLength;
+    try {
+      byteLength = Object.getOwnPropertyDescriptor(
+        BufferConstructor.prototype,
+        `byteLength`
+      ).get.call(obj);
+    } catch {
+    }
+    if (byteLength !== void 0) {
+      const clone2 = new BufferConstructor(byteLength);
+      new Uint8Array(clone2).set(
+        new Uint8Array(obj)
+      );
+      visited.set(obj, clone2);
+      return clone2;
+    }
+  }
+  if (ArrayBuffer.isView(obj)) {
+    const buffer = deepClone(obj.buffer, visited, detach);
+    const kind = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(Uint8Array.prototype),
+      Symbol.toStringTag
+    ).get.call(obj);
+    if (kind === void 0) {
+      const clone3 = new DataView(buffer, obj.byteOffset, obj.byteLength);
+      visited.set(obj, clone3);
+      return clone3;
+    }
+    const Constructor = Object.getPrototypeOf(obj).constructor;
+    const length = obj.length;
+    const native = Function.prototype.toString.call(Constructor) === Function.prototype.toString.call(
+      globalThis[kind]
+    );
+    const clone2 = native ? new Constructor(buffer, obj.byteOffset, length) : new Constructor(length);
+    visited.set(obj, clone2);
+    clone2.set(obj);
+    return clone2;
+  }
+  if (obj instanceof Map) {
+    const clone2 = /* @__PURE__ */ new Map();
+    visited.set(obj, clone2);
+    obj.forEach((value, key) => {
+      clone2.set(key, deepClone(value, visited, detach));
+    });
+    return clone2;
+  }
+  if (obj instanceof Set) {
+    const clone2 = /* @__PURE__ */ new Set();
+    visited.set(obj, clone2);
+    obj.forEach((value) => {
+      clone2.add(deepClone(value, visited, detach));
+    });
+    return clone2;
+  }
+  if (isTemporal(obj)) {
+    return obj;
+  }
+  if (detach) {
+    const prototype = Object.getPrototypeOf(obj);
+    if (prototype !== Object.prototype && prototype !== null) return obj;
+  }
+  const clone = {};
+  visited.set(obj, clone);
+  for (const key of Reflect.ownKeys(obj)) {
+    if (typeof key === `symbol` || Object.prototype.propertyIsEnumerable.call(obj, key)) {
+      defineDataProperty(
+        clone,
+        key,
+        deepClone(
+          obj[key],
+          visited,
+          detach
+        )
+      );
+    }
+  }
+  return clone;
+}
+function draftValuesEqual(left, right, paired) {
+  return deepEqualsInternal(left, right, paired, true);
+}
+export function createChangeProxy(target, parent) {
+  const changeProxyCache = /* @__PURE__ */ new Map();
+  function memoizedCreateChangeProxy(innerTarget, innerParent) {
+    if (changeProxyCache.has(innerTarget)) {
+      return changeProxyCache.get(innerTarget);
+    } else {
+      const changeProxy = createChangeProxy(innerTarget, innerParent);
+      changeProxyCache.set(innerTarget, changeProxy);
+      return changeProxy;
+    }
+  }
+  const valueCopies = parent?.tracker.valueCopies ?? /* @__PURE__ */ new WeakMap();
+  const changeTracker = {
+    valueCopies,
+    copy_: parent ? valueCopies.get(target) ?? target : deepClone(target, valueCopies),
+    // The root target is the stored row, which the draft never writes, so it
+    // is its own baseline. A nested target is a draft copy that writes reach.
+    originalObject: parent ? deepClone(target) : target,
+    modified: false,
+    assigned_: /* @__PURE__ */ Object.create(null),
+    parent,
+    target
+    // Store reference to the target object
+  };
+  function markChanged(state) {
+    if (!state.modified) {
+      state.modified = true;
+    }
+    if (state.parent) {
+      if (!state.parent.retainIdentity && state.parent.tracker.copy_[state.parent.prop] === state.copy_) {
+        state.parent.tracker.assigned_[state.parent.prop] = true;
+      }
+      markChanged(state.parent.tracker);
+    }
+  }
+  function checkIfReverted(state) {
+    if (state.copy_ instanceof Map || state.copy_ instanceof Set) {
+      return draftValuesEqual(
+        Array.from(state.copy_),
+        Array.from(
+          state.originalObject
+        )
+      );
+    }
+    for (const prop in state.assigned_) {
+      if (!state.assigned_[prop] || Object.hasOwn(state.copy_, prop) !== Object.hasOwn(state.originalObject, prop) || !draftValuesEqual(
+        state.copy_[prop],
+        state.originalObject[prop]
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+  function checkParentStatus(parentState) {
+    const isReverted = checkIfReverted(parentState);
+    if (isReverted) {
+      parentState.modified = false;
+      parentState.assigned_ = /* @__PURE__ */ Object.create(null);
+      const edge = parentState.parent;
+      if (edge) {
+        if (draftValuesEqual(
+          edge.tracker.copy_[edge.prop],
+          edge.tracker.originalObject[edge.prop]
+        ))
+          delete edge.tracker.assigned_[edge.prop];
+        checkParentStatus(edge.tracker);
+      }
+    }
+  }
+  function isOriginalValue(prop, value) {
+    const original = changeTracker.originalObject;
+    return Object.hasOwn(original, prop) && draftValuesEqual(value, original[prop]);
+  }
+  function recordWrite(prop, reverted) {
+    if (reverted) {
+      delete changeTracker.assigned_[prop.toString()];
+      changeTracker.modified = true;
+      checkParentStatus(changeTracker);
+    } else {
+      changeTracker.assigned_[prop.toString()] = true;
+      markChanged(changeTracker);
+    }
+  }
+  const proxy = new Proxy(changeTracker.copy_, {
+    get(ptarget, prop, receiver) {
+      const value = changeTracker.copy_[prop];
+      const desc = Object.getOwnPropertyDescriptor(ptarget, prop);
+      if (desc?.get) {
+        return value;
+      }
+      if (desc?.configurable === false && !desc.writable) {
+        if (isProxiableObject(value)) {
+          changeTracker.assigned_[String(prop)] = true;
+          markChanged(changeTracker);
+        }
+        return value;
+      }
+      if (typeof value === `function`) {
+        if (Object.hasOwn(ptarget, prop) || prop === `constructor`) return value;
+        const methodName = prop.toString();
+        if (methodName === `subarray` && ArrayBuffer.isView(ptarget)) {
+          return (...args) => memoizedCreateChangeProxy(value.apply(ptarget, args), {
+            tracker: changeTracker,
+            prop: ``,
+            retainIdentity: true
+          }).proxy;
+        }
+        if (ARRAY_MODIFYING_METHODS.has(methodName) && (Array.isArray(ptarget) || ArrayBuffer.isView(ptarget))) {
+          return createModifyingMethodHandler(
+            value,
+            changeTracker,
+            markChanged,
+            receiver
+          );
+        }
+        if (Array.isArray(ptarget)) {
+          return value.bind(receiver);
+        }
+        if (ptarget instanceof Map || ptarget instanceof Set) {
+          const resolveValue = (entry) => {
+            const raw = unwrapDraft(entry);
+            return raw !== null && typeof raw === `object` ? valueCopies.get(raw) ?? raw : raw;
+          };
+          if (methodName === `has` || methodName === `delete` || methodName === `add` || methodName === `set`) {
+            return (...args) => {
+              if (ptarget instanceof Set) args[0] = resolveValue(args[0]);
+              else if (methodName === `set`) args[1] = resolveValue(args[1]);
+              const result = value.apply(ptarget, args);
+              if (methodName !== `has`) markChanged(changeTracker);
+              return result === ptarget ? receiver : result;
+            };
+          }
+          if (ptarget instanceof Map && methodName === `get`) {
+            return (key) => {
+              const entry = ptarget.get(key);
+              return isProxiableObject(entry) ? memoizedCreateChangeProxy(entry, {
+                tracker: changeTracker,
+                prop: ``,
+                retainIdentity: true
+              }).proxy : entry;
+            };
+          }
+          if (methodName === `clear`) {
+            return createModifyingMethodHandler(
+              value,
+              changeTracker,
+              markChanged,
+              receiver
+            );
+          }
+          const iteratorHandler = createMapSetIteratorHandler(
+            methodName,
+            prop,
+            changeTracker,
+            receiver,
+            memoizedCreateChangeProxy
+          );
+          if (iteratorHandler) {
+            return iteratorHandler;
+          }
+        }
+        return value.bind(ptarget);
+      }
+      if (isProxiableObject(value)) {
+        const nestedParent = {
+          tracker: changeTracker,
+          prop: String(prop)
+        };
+        return memoizedCreateChangeProxy(value, nestedParent).proxy;
+      }
+      return value;
+    },
+    set(ptarget, prop, value) {
+      if (Reflect.getOwnPropertyDescriptor(ptarget, prop)?.get) {
+        return Reflect.set(ptarget, prop, value);
+      }
+      const currentValue = changeTracker.copy_[prop];
+      if (!Object.hasOwn(changeTracker.copy_, prop) || !draftValuesEqual(currentValue, value)) {
+        const reverted = isOriginalValue(prop, value);
+        changeTracker.copy_[prop] = reverted ? deepClone(changeTracker.originalObject[prop]) : value;
+        recordWrite(prop, reverted);
+      }
+      return true;
+    },
+    defineProperty(ptarget, prop, descriptor) {
+      const result = Reflect.defineProperty(ptarget, prop, descriptor);
+      if (result && (`value` in descriptor || descriptor.get || descriptor.set)) {
+        recordWrite(prop, isOriginalValue(prop, Reflect.get(ptarget, prop)));
+      }
+      return result;
+    },
+    getOwnPropertyDescriptor(ptarget, prop) {
+      return Reflect.getOwnPropertyDescriptor(ptarget, prop);
+    },
+    preventExtensions(ptarget) {
+      return Reflect.preventExtensions(ptarget);
+    },
+    isExtensible(ptarget) {
+      return Reflect.isExtensible(ptarget);
+    },
+    deleteProperty(dobj, prop) {
+      const stringProp = typeof prop === `symbol` ? prop.toString() : prop;
+      if (Object.hasOwn(dobj, prop)) {
+        const hadPropertyInOriginal = Object.prototype.propertyIsEnumerable.call(
+          changeTracker.originalObject,
+          prop
+        );
+        const result = Reflect.deleteProperty(dobj, prop);
+        if (result) {
+          if (!hadPropertyInOriginal) {
+            delete changeTracker.assigned_[stringProp];
+            changeTracker.modified = true;
+            checkParentStatus(changeTracker);
+          } else {
+            changeTracker.assigned_[stringProp] = false;
+            markChanged(changeTracker);
+          }
+        }
+        return result;
+      }
+      return true;
+    }
+  });
+  draftCopies.set(proxy, changeTracker.copy_);
+  return {
+    proxy,
+    getChanges: () => {
+      if (!changeTracker.modified) {
+        return {};
+      }
+      if (typeof changeTracker.copy_ !== `object` || Array.isArray(changeTracker.copy_)) {
+        return changeTracker.copy_;
+      }
+      if (Object.keys(changeTracker.assigned_).length === 0) {
+        return changeTracker.copy_;
+      }
+      const result = {};
+      const mayHaveChangedAliases = Object.keys(changeTracker.assigned_).some(
+        (key) => typeof changeTracker.copy_[key] === `object` || typeof changeTracker.originalObject[key] === `object`
+      );
+      const pairedRoots = /* @__PURE__ */ new Map([
+        [changeTracker.copy_, changeTracker.originalObject]
+      ]);
+      for (const key in changeTracker.copy_) {
+        const value = changeTracker.copy_[key];
+        const original = changeTracker.originalObject[key];
+        if (changeTracker.assigned_[key] === true || mayHaveChangedAliases && !draftValuesEqual(
+          value instanceof Set ? Array.from(value) : value,
+          original instanceof Set ? Array.from(original) : original,
+          pairedRoots
+        )) {
+          defineDataProperty(result, key, changeTracker.copy_[key]);
+        }
+      }
+      for (const key of Object.keys(changeTracker.assigned_)) {
+        if (changeTracker.assigned_[key] === false) {
+          defineDataProperty(result, key, void 0);
+        }
+      }
+      return result;
+    }
+  };
+}
+export function createArrayChangeProxy(targets) {
+  const proxiesWithChanges = targets.map((target) => createChangeProxy(target));
+  return {
+    proxies: proxiesWithChanges.map((p) => p.proxy),
+    getChanges: () => proxiesWithChanges.map((p) => p.getChanges())
+  };
+}
+export function withChangeTracking(target, callback) {
+  const { proxy, getChanges } = createChangeProxy(target);
+  callback(proxy);
+  return deepClone(getChanges(), void 0, true);
+}
+export function withArrayChangeTracking(targets, callback) {
+  const { proxies, getChanges } = createArrayChangeProxy(targets);
+  callback(proxies);
+  return deepClone(getChanges(), void 0, true);
+}
+function isFlatPlainObject(value) {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  for (const key in value) {
+    const { value: field, get } = Object.getOwnPropertyDescriptor(value, key);
+    if (get || field !== null && typeof field === `object`) return false;
+  }
+  return Object.getOwnPropertySymbols(value).length === 0;
+}
+export function withFlatChangeTracking(targets, callback, asArray) {
+  if (!targets.every(isFlatPlainObject)) return void 0;
+  const drafts = targets.map((target) => ({ ...target }));
+  callback(asArray ? drafts : drafts[0]);
+  return drafts.map((draft, index) => {
+    const original = targets[index];
+    const changes = {};
+    let assignedObject = false;
+    for (const key in draft) {
+      const value = draft[key];
+      const before = original[key];
+      if (!Object.hasOwn(original, key) || !(value === before || Object.is(value, before) || typeof before === `object` && before !== null && draftValuesEqual(value, before))) {
+        defineDataProperty(changes, key, value);
+        if (value !== null && typeof value === `object`) assignedObject = true;
+      }
+    }
+    for (const key in original) {
+      if (!Object.hasOwn(draft, key))
+        defineDataProperty(changes, key, void 0);
+    }
+    return assignedObject ? deepClone(changes, void 0, true) : changes;
+  });
+}

@@ -1,0 +1,27 @@
+{
+  "name": "E08-no-window",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-no-window.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "fba5105b08d9763f8ee4fd4053c21a0989e9c97c9a8d82637b3005172a0cc131",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": 0,
+  "termination": null,
+  "elapsedSeconds": 1.747,
+  "maximumGroupRssBytes": 571637760,
+  "rssSamples": 11,
+  "pgid": 1377
+}

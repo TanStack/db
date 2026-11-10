@@ -1,0 +1,56 @@
+{
+  "preserved": {
+    "queuedAnswerExample": {
+      "before": "68cac3512a94c393eac7e3abc65ba9da9e694f416d88d5d5857ef88ff45d8be8",
+      "after": "68cac3512a94c393eac7e3abc65ba9da9e694f416d88d5d5857ef88ff45d8be8",
+      "equal": true
+    },
+    "progressExamples": {
+      "before": "65906d6137ea6c0cb98c859f33f9d5a51b5806753c7b9e9aacc5e61f95c87eba",
+      "after": "65906d6137ea6c0cb98c859f33f9d5a51b5806753c7b9e9aacc5e61f95c87eba",
+      "equal": true
+    },
+    "progressHistoryArbitrary": {
+      "before": "f7c9b77fb2f34101549bb7fd846c00a87425e178d2d62e580e91e08f45860683",
+      "after": "f7c9b77fb2f34101549bb7fd846c00a87425e178d2d62e580e91e08f45860683",
+      "equal": true
+    },
+    "progressHistoryFamily": {
+      "before": "9cd40bfc61ff265f9a79c3bb0b0ec5f51be155e5c8a2573dbc9f44fa04129cb9",
+      "after": "9cd40bfc61ff265f9a79c3bb0b0ec5f51be155e5c8a2573dbc9f44fa04129cb9",
+      "equal": true
+    },
+    "progressFacts": {
+      "before": "05860540a44960f544beafd214dadddb55602de904afeec0f955eb99fbe1d447",
+      "after": "05860540a44960f544beafd214dadddb55602de904afeec0f955eb99fbe1d447",
+      "equal": true
+    },
+    "modelProgressValue": {
+      "before": "845e47dbb74cbe4b78547d1c6855a545747ff74b6ab395eb78990492b22507f8",
+      "after": "845e47dbb74cbe4b78547d1c6855a545747ff74b6ab395eb78990492b22507f8",
+      "equal": true
+    },
+    "projectProgressRows": {
+      "before": "d360781d56822352ffe6996f941c1abaf6d655feeee8098b62e0422483278141",
+      "after": "d360781d56822352ffe6996f941c1abaf6d655feeee8098b62e0422483278141",
+      "equal": true
+    },
+    "checkProgressValue": {
+      "before": "1950891022d353139167f4258b2ac81c235e1ccc53bc089e488c08006fd1a2af",
+      "after": "1950891022d353139167f4258b2ac81c235e1ccc53bc089e488c08006fd1a2af",
+      "equal": true
+    },
+    "checkQueuedAnswerProgress": {
+      "before": "78bc806576bd447aeab143bfcf7ff98fdcc5e6f8636d96830693fc1224aacfc3",
+      "after": "78bc806576bd447aeab143bfcf7ff98fdcc5e6f8636d96830693fc1224aacfc3",
+      "equal": true
+    }
+  },
+  "originalRunnerSha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+  "frozenRunnerSha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+  "originalExamples": 8,
+  "originalFamilyMembersPerSample": 3,
+  "fixedAndRandomBudgetEach": 8,
+  "budgetOrReplayChanged": false,
+  "grammarOrHistoryExecuted": false
+}

@@ -1,0 +1,264 @@
+import { Aggregate, Func, isBasicOrAggregateExpression } from "../ir";
+import { codedMessage, devBuild } from "../../error-message.js";
+import { grouping } from "../compiler/grouping.js";
+import { isRefProxy, toExpression } from "./ref-proxy.js";
+import { registerWrapper } from "./wrapper-identity.js";
+export function eq(left, right) {
+  return new Func(`eq`, [toExpression(left), toExpression(right)]);
+}
+export function gt(left, right) {
+  return new Func(`gt`, [toExpression(left), toExpression(right)]);
+}
+export function gte(left, right) {
+  return new Func(`gte`, [toExpression(left), toExpression(right)]);
+}
+export function lt(left, right) {
+  return new Func(`lt`, [toExpression(left), toExpression(right)]);
+}
+export function lte(left, right) {
+  return new Func(`lte`, [toExpression(left), toExpression(right)]);
+}
+export function and(left, right, ...rest) {
+  const allArgs = [left, right, ...rest];
+  return new Func(
+    `and`,
+    allArgs.map((arg) => toExpression(arg))
+  );
+}
+export function or(left, right, ...rest) {
+  const allArgs = [left, right, ...rest];
+  return new Func(
+    `or`,
+    allArgs.map((arg) => toExpression(arg))
+  );
+}
+export function not(value) {
+  return new Func(`not`, [toExpression(value)]);
+}
+export function isUndefined(value) {
+  return new Func(`isUndefined`, [toExpression(value)]);
+}
+export function isNull(value) {
+  return new Func(`isNull`, [toExpression(value)]);
+}
+export function inArray(value, array) {
+  return new Func(`in`, [toExpression(value), toExpression(array)]);
+}
+export function like(left, right) {
+  return new Func(`like`, [toExpression(left), toExpression(right)]);
+}
+export function ilike(left, right) {
+  return new Func(`ilike`, [toExpression(left), toExpression(right)]);
+}
+export function upper(arg) {
+  return new Func(`upper`, [toExpression(arg)]);
+}
+export function lower(arg) {
+  return new Func(`lower`, [toExpression(arg)]);
+}
+export function length(arg) {
+  return new Func(`length`, [toExpression(arg)]);
+}
+export function concat(...args) {
+  const toArrayArg = args.find(
+    (arg) => arg instanceof ToArrayWrapper
+  );
+  if (toArrayArg) {
+    if (args.length !== 1) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `concat(toArray(...)) currently supports only a single toArray(...) argument` : codedMessage(110)
+      );
+    }
+    return new ConcatToArrayWrapper(toArrayArg.query, toArrayArg.runtime);
+  }
+  return new Func(
+    `concat`,
+    args.map((arg) => toExpression(arg))
+  );
+}
+export function coalesce(...args) {
+  return new Func(
+    `coalesce`,
+    args.map((arg) => toExpression(arg))
+  );
+}
+export function caseWhen(...args) {
+  if (args.length < 2) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() requires at least two arguments` : codedMessage(111)
+    );
+  }
+  const pairCount = Math.floor(args.length / 2);
+  for (let i = 0; i < pairCount; i++) {
+    const condition = args[i * 2];
+    if (!isConditionValue(condition)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() conditions must be expression-like values` : codedMessage(112)
+      );
+    }
+  }
+  if (caseWhenHasOnlyExpressionValues(args)) {
+    return new Func(
+      `caseWhen`,
+      args.map((arg) => toExpression(arg))
+    );
+  }
+  return new CaseWhenWrapper(args);
+}
+export function add(left, right) {
+  return new Func(`add`, [
+    toExpression(left),
+    toExpression(right)
+  ]);
+}
+export function subtract(left, right) {
+  return new Func(`subtract`, [
+    toExpression(left),
+    toExpression(right)
+  ]);
+}
+export function multiply(left, right) {
+  return new Func(`multiply`, [
+    toExpression(left),
+    toExpression(right)
+  ]);
+}
+export function divide(left, right) {
+  return new Func(`divide`, [
+    toExpression(left),
+    toExpression(right)
+  ]);
+}
+export function count(arg) {
+  return new Aggregate(`count`, [toExpression(arg)], grouping);
+}
+export function avg(arg) {
+  return new Aggregate(`avg`, [toExpression(arg)], grouping);
+}
+export function sum(arg) {
+  return new Aggregate(`sum`, [toExpression(arg)], grouping);
+}
+export function min(arg) {
+  return new Aggregate(`min`, [toExpression(arg)], grouping);
+}
+export function max(arg) {
+  return new Aggregate(`max`, [toExpression(arg)], grouping);
+}
+export const indexableOperations = [
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `in`
+];
+export const comparisonFunctions = [
+  ...indexableOperations,
+  `like`,
+  `ilike`
+];
+export const operators = [
+  // Comparison operators
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `in`,
+  `like`,
+  `ilike`,
+  // Logical operators
+  `and`,
+  `or`,
+  `not`,
+  // Null checking
+  `isNull`,
+  `isUndefined`,
+  // String functions
+  `upper`,
+  `lower`,
+  `length`,
+  `concat`,
+  // Numeric functions
+  `add`,
+  `subtract`,
+  `multiply`,
+  `divide`,
+  // Utility functions
+  `coalesce`,
+  `caseWhen`,
+  // Aggregate functions
+  `count`,
+  `avg`,
+  `sum`,
+  `min`,
+  `max`
+];
+export class ToArrayWrapper {
+  constructor(query, runtime) {
+    this.query = query;
+    this.runtime = runtime;
+    this.__brand = `ToArrayWrapper`;
+    registerWrapper(this, `toArray()`);
+  }
+}
+export class ConcatToArrayWrapper {
+  constructor(query, runtime) {
+    this.query = query;
+    this.runtime = runtime;
+    this.__brand = `ConcatToArrayWrapper`;
+    registerWrapper(this, `concat(toArray())`);
+  }
+}
+export class CaseWhenWrapper {
+  constructor(args) {
+    this.args = args;
+    this.__brand = `CaseWhenWrapper`;
+    registerWrapper(this, `caseWhen()`);
+  }
+}
+export class MaterializeWrapper {
+  constructor(query, runtime) {
+    this.query = query;
+    this.runtime = runtime;
+    this.__brand = `MaterializeWrapper`;
+    registerWrapper(this, `materialize()`);
+  }
+}
+function caseWhenHasOnlyExpressionValues(args) {
+  const valueIndexes = getCaseWhenValueIndexes(args.length);
+  return valueIndexes.every((index) => isExpressionValue(args[index]));
+}
+function getCaseWhenValueIndexes(argCount) {
+  const valueIndexes = [];
+  const hasDefaultValue = argCount % 2 === 1;
+  const pairCount = Math.floor(argCount / 2);
+  for (let i = 0; i < pairCount; i++) {
+    valueIndexes.push(i * 2 + 1);
+  }
+  if (hasDefaultValue) {
+    valueIndexes.push(argCount - 1);
+  }
+  return valueIndexes;
+}
+function isExpressionValue(value) {
+  if (isRefProxy(value)) return true;
+  if (isBasicOrAggregateExpression(value)) return true;
+  if (value == null) return true;
+  if (typeof value === `string` || typeof value === `number` || typeof value === `boolean` || typeof value === `bigint`) {
+    return true;
+  }
+  if (value instanceof Date || Array.isArray(value)) return true;
+  return false;
+}
+function isConditionValue(value) {
+  return isExpressionValue(value) && !Array.isArray(value);
+}
+export class IncludeWrapper {
+  constructor(query, runtime) {
+    this.query = query;
+    this.runtime = runtime;
+    this.__brand = `IncludeWrapper`;
+    registerWrapper(this, `include()`);
+  }
+}

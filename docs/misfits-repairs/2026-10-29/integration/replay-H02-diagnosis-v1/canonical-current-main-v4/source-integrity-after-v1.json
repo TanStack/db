@@ -1,0 +1,9 @@
+{
+  "acceptedFreezeSha256": "55fa4125913996e46b45e205129ea2a9df0151dd11d7fac4ecdaf4ec9017872c",
+  "unchanged": {
+    "productionFiles": 511,
+    "instrumentFiles": 17,
+    "sharedInstrumentFiles": 11
+  },
+  "authorSourceEditsAfterAcceptance": 0
+}

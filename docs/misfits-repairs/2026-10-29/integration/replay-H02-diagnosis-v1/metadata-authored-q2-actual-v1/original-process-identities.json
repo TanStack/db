@@ -1,0 +1,31 @@
+{
+  "limits": "No actual current-run parent/outer live PPID/PGID observation or initial inner getpgid receipt was supplied. No later identity substituted.",
+  "processes": [
+    {
+      "groupTarget": 71010,
+      "identitySource": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q2/launcher-process.txt",
+      "pid": 71010,
+      "role": "outer"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "Exact bound supervisor source process.pid naming in the original prepared UUID directory; no live PPID/PGID receipt",
+      "pid": 71040,
+      "role": "receiving-parent"
+    },
+    {
+      "groupTarget": 71052,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b/supervisor.json",
+      "limit": "Bound detached-spawn target group; no persisted initial actual getpgid",
+      "pid": 71052,
+      "role": "detached-leader"
+    },
+    {
+      "groupTarget": null,
+      "identitySource": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b/receipts.jsonl.writer.json",
+      "pid": 71056,
+      "role": "receipt-writer"
+    }
+  ],
+  "status": "Original recorded identities only; absence checks not executed by this audit."
+}

@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "manifestSha256": "f08445559a9e558843c278e2222ab37cdfff23cfa842271570a1e49d423dda57",
+  "launcherMembers": 10,
+  "launcherBytes": 45262,
+  "exactLauncherFileSet": true,
+  "bindingSha256": "4c49dc8775fe70804cd8cd1246d39e863c815c5378de4f0f27412df16b9e879a",
+  "launchSha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+  "calibrateSha256": "cd5c407c7647fc54e78cca05eb6fc8a9690e78aa7b7fbfa55c2cbe8077828a13",
+  "runRecipeSha256": "9b6d7735213526a9894b39bc04704d0e21f010775a78902f55e8e9d425b2f885",
+  "staticVerifyInputs": {
+    "sourceFiles": 573,
+    "namedPackagePayloadFiles": 2544,
+    "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+    "recipesSha256": "8d72b7b9458f7a4c92634eac46fa3a8c6af09fc9e22031c253bc62e86b44c704"
+  },
+  "recipes": 6,
+  "nativeCommands": 0,
+  "nativeProcessProbes": 0,
+  "pureJSONEqualsAuthor": true,
+  "sourceOutputDirectoryAbsent": true,
+  "failures": []
+}

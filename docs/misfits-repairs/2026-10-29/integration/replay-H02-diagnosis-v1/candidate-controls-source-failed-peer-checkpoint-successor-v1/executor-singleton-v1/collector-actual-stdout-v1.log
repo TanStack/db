@@ -1,0 +1,35 @@
+{
+  "cellId": "inline-source-failed-peer",
+  "resultFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/inline-source-failed-peer-result-freeze-v1.json",
+  "resultFreezeSha256": "37065c97890248961352332dc1a85ac252ecc4d6cd673a98f2706167b617d4d6",
+  "assetCount": 1975,
+  "operationalAndTestChecksPassed": false,
+  "actualOuterExitCode": 1,
+  "parentTestChildExitCode": 1,
+  "receivers": [
+    {
+      "originalDirectory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e",
+      "copiedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/runtime-output-v1/inline-source-failed-peer/receiving-artifacts",
+      "nativeFiles": 1957,
+      "allCopiedBytesReadBack": true,
+      "receiptCount": 328,
+      "epochs": 4,
+      "cuts": 3,
+      "semanticActions": 5,
+      "workerCleaned": 1,
+      "nativeExitCode": null,
+      "bindingStatus": "bound",
+      "bindingProfile": "completion-baseline-v1"
+    }
+  ],
+  "failures": [
+    "actual outer tool exit is not zero",
+    "outer outcome exitCode differs",
+    "native receiving did not exit normally with zero",
+    "worker error present",
+    "authored epoch starts differ",
+    "authored epoch ends differ",
+    "authored observation cuts differ",
+    "authored semantic action count differs"
+  ]
+}

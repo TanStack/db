@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "../../packages/query-db-collection/tests/queued-answer-progress*.ts",
+    "../../packages/query-db-collection/tests/queued-answer-metadata*.ts",
+    "../../packages/db/tests/query/virtual-row-fields-oracle.test.ts",
+    "./*.ts"
+  ]
+}

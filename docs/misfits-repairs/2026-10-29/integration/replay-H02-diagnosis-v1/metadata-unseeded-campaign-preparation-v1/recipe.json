@@ -1,0 +1,51 @@
+{
+  "argv": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism",
+    "--reporter=verbose",
+    "--silent=false",
+    "-t",
+    "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ unseeded\\ generated\\ campaign\\ or\\ selected\\ replay$"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+    "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS",
+    "H02_PROGRESS_SOURCE_FREEZE"
+  ],
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "expectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+  "expectedFilterName": "queued-answer metadata receiving generated 'scope' 'default' checks the unseeded generated campaign or selected replay",
+  "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-scope-default-v1",
+  "id": "generated-scope-default-random",
+  "innerReceivingBudget": {
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000,
+    "wallMs": 20000
+  },
+  "phase": "per-path 8-history receiving calibration",
+  "processSupervision": "Reuse separately reviewed outer supervision and original receiving supervisor; this structured argv is not an admitted launcher. Preserve raw output and actual outer/inner return records and containment evidence before next command.",
+  "property": "query.queued-answer-metadata.scope.default",
+  "receivingHistory": null,
+  "status": "UNADMITTED and UNEXECUTED; independent preparation review and separate exact root one-shot admission required",
+  "testTimeoutMs": 300000
+}

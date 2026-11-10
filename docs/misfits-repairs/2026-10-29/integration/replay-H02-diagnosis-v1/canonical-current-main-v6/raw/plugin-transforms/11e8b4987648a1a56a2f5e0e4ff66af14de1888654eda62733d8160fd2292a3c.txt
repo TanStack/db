@@ -1,0 +1,17 @@
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler
+} from "../../scheduler.js";
+import { getActiveTransaction } from "../../transactions.js";
+export function scheduleQueryGraphRun(jobId, dependencies, run, contextId = getActiveTransaction()?.id ?? getActivePublicationContext()) {
+  const deps = [...dependencies];
+  if (contextId !== void 0) {
+    for (const dep of deps) dep.scheduleGraphRun({ contextId });
+  }
+  transactionScopedScheduler.schedule({
+    contextId,
+    jobId,
+    dependencies: deps,
+    run
+  });
+}

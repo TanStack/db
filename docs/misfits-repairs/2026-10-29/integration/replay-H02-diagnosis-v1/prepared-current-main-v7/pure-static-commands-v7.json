@@ -1,0 +1,34 @@
+{
+  "envSet": {
+    "H02_PROGRESS_V6_STDERR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v6/raw/worker.stderr.log",
+    "H02_PROGRESS_V5_STDERR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v5/raw/worker.stderr.log",
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source-freeze-v6.json",
+    "H02_PROGRESS_BINDING_DIR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/root-setup-calibration"
+  },
+  "outcomes": [
+    {
+      "name": "format-final-v7",
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+        "--write",
+        "scripts/h02-progress/receiving-monitor.mjs",
+        "scripts/h02-progress/receiving-monitor.test.mjs",
+        "scripts/h02-progress/checker-calibration.test.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "typescript-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+        "-p",
+        "scripts/h02-progress/tsconfig.json"
+      ],
+      "exitCode": 2,
+      "signal": null
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "additionalPureRecipeControls": [
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "drop environment cleanup",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "change Node heap",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "change post-enqueue bound",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "change metadata key lane",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "add an execution argument",
+      "rejected": true
+    }
+  ],
+  "authorPureControls": {
+    "accepted": 1,
+    "exactOutputMatches": true,
+    "rejected": 8
+  },
+  "freshOutputAbsent": true,
+  "independentCalibrationSha256": "4e7b4ec9ac5936e3922a4e9f64898b9d774c1e4758a849996a2eae2b187117e2",
+  "independentPreflightSha256": "c964cc9d845474364a6c57067f1940b9136218bd12d5618eeb34b4a891be2ae9",
+  "inputPins": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-independent-review.md": "a07ed61feca7172165fb6d2489ce9d255fe160d761464152827f2dd584efd9f2",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v2/binding.json": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v2/verify.py": "e7d4fab7945dfe254f36c24792ddf56b7beef355275f048f725a53bef4c535ab",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/binding.json": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/packet-manifest.json": "b541cc7f75830a6d9bb12eb8f174a792c31b532b53912f18f8584c111160bd43",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-inventory.json": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84"
+  },
+  "launcherOnlyEpochPathSubstitutions": true,
+  "limits": "No launcher execution; existing outer supervision and actual escalated one-shot admission remain root-owned. Source-only preflight does not accept changed wrappers or establish parent compiled/runtime identity.",
+  "nativeLaunches": 0,
+  "nativeReadinessCredit": false,
+  "prior20NameDiscoveryCarriedWithOriginalLimits": true,
+  "processProbes": 0,
+  "recipeChanges": [
+    "cwd",
+    "envSet.H02_PROGRESS_SOURCE_FREEZE",
+    "freshOutputDirectory"
+  ],
+  "registrationAndFinalizerUnchanged": true,
+  "rootToolchainRecoveryAccepted": false,
+  "scriptSha256": "65cc2ac24cee9c48813259ffecadae289f6d34ad1baebbff4c40d646315525a5",
+  "sourceMembersRehashed": 589,
+  "status": "ACCEPT BOUNDED V3 RECEIVING PREPARATION; NO RUNTIME ADMISSION"
+}

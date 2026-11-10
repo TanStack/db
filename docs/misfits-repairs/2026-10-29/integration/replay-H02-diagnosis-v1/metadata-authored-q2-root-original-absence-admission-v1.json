@@ -1,0 +1,9 @@
+{
+  "kind": "Root one-shot decision for original metadata-authored-q2 identities",
+  "proposal": "metadata-receiving-independent-review-v1/metadata-authored-q2-independent-original-absence-proposal-v1.json",
+  "proposalSha256": "2c2c0bc8c962abf842a6875c2242fe71580115421050781e293a6a47281cf472",
+  "scriptSha256": "8f6682920c60c0ed8cf5ddf052f02216eb0896b0bd35c36aab8b553bf4042491",
+  "decision": "Admit exact read-only absence procedure once with require_escalated; record actual result separately.",
+  "scope": "Only four recorded PIDs and two recorded groups; signal zero only. No retry, cleanup, product execution or substituted identity.",
+  "limits": "Point-in-time numeric identity observations cannot supply missing initial parent/group receipts."
+}

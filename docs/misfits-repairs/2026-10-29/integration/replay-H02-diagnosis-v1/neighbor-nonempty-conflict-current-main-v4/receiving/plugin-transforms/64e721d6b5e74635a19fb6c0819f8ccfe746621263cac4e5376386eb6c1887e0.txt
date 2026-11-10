@@ -1,0 +1,37 @@
+export function runCleanupWithLocalTeardown(cleanup, teardown) {
+  let result;
+  try {
+    result = cleanup?.();
+  } catch (cleanupError) {
+    try {
+      teardown();
+    } catch (teardownError) {
+      throw aggregateCleanupFailures(cleanupError, teardownError);
+    }
+    throw cleanupError;
+  }
+  try {
+    teardown();
+  } catch (teardownError) {
+    if (!isPromiseLike(result)) throw teardownError;
+    return Promise.resolve(result).then(
+      () => {
+        throw teardownError;
+      },
+      (cleanupError) => {
+        throw aggregateCleanupFailures(cleanupError, teardownError);
+      }
+    );
+  }
+  return isPromiseLike(result) ? Promise.resolve(result) : void 0;
+}
+function isPromiseLike(value) {
+  return !!value && (typeof value === `object` || typeof value === `function`) && typeof value.then === `function`;
+}
+function aggregateCleanupFailures(cleanupError, teardownError) {
+  return new AggregateError(
+    [cleanupError, teardownError],
+    `Adapter cleanup and local teardown both failed`,
+    { cause: cleanupError }
+  );
+}

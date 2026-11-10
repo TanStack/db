@@ -1,0 +1,2571 @@
+import {
+  CancelledError,
+  QueryObserver,
+  hashKey,
+  partialMatchKey
+} from "@tanstack/query-core";
+import {
+  LoadSubsetOperationAbortedError,
+  compileSingleRowExpression,
+  deepEquals,
+  getLoadSubsetDemandKey,
+  makeComparator,
+  toBooleanPredicate,
+  validateSyncPersistenceCapability,
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+  withCollectionSyncConfigFactory
+} from "@tanstack/db";
+import {
+  GetKeyRequiredError,
+  InitialDataInOnDemandModeError,
+  InvalidQueryResultError,
+  QueryClientRequiredError,
+  QueryFnRequiredError,
+  QueryKeyRequiredError
+} from "./errors";
+import { createWriteUtils } from "./manual-sync";
+import { runCleanupWithLocalTeardown } from "./cleanup";
+function isStoredLoadSubsetOptions(value) {
+  return value !== null && typeof value === `object`;
+}
+const queryObserverOptionKeys = [
+  `enabled`,
+  `refetchInterval`,
+  `retry`,
+  `retryDelay`,
+  `staleTime`,
+  `gcTime`,
+  `refetchOnWindowFocus`,
+  `refetchOnReconnect`,
+  `refetchOnMount`,
+  `networkMode`
+];
+function pickDefinedQueryObserverOptions(config) {
+  const options = {};
+  for (const key of queryObserverOptionKeys) {
+    if (config[key] !== void 0) {
+      ;
+      options[key] = config[key];
+    }
+  }
+  return options;
+}
+const QUERY_COLLECTION_GC_PREFIX = `queryCollection:gc:`;
+let nextQueryCollectionAuthorityPosition = 0;
+const queryCollectionFetchActionStarts = /* @__PURE__ */ new WeakMap();
+const queryCollectionCurrentFetchStarts = /* @__PURE__ */ new WeakMap();
+const queryCollectionSuccessfulFetchStarts = /* @__PURE__ */ new WeakMap();
+const queryCollectionSuccessfulFetchData = /* @__PURE__ */ new WeakMap();
+const queryCollectionSuccessfulFetchVersions = /* @__PURE__ */ new WeakMap();
+const queryCollectionCacheOwners = /* @__PURE__ */ new WeakMap();
+const queryCollectionDirectCachePatches = /* @__PURE__ */ new WeakMap();
+class QueryCollectionUtilsImpl {
+  constructor(state, refetch, writeUtils) {
+    this.state = state;
+    this.refetch = refetch;
+    this.writeInsert = writeUtils.writeInsert;
+    this.writeUpdate = writeUtils.writeUpdate;
+    this.writeDelete = writeUtils.writeDelete;
+    this.writeUpsert = writeUtils.writeUpsert;
+    this.writeBatch = writeUtils.writeBatch;
+  }
+  // Getters for QueryObserver state
+  get isFetching() {
+    return Array.from(this.state.observers.values()).some(
+      (observer) => observer.getCurrentResult().isFetching
+    );
+  }
+  get isRefetching() {
+    return Array.from(this.state.observers.values()).some(
+      (observer) => observer.getCurrentResult().isRefetching
+    );
+  }
+  get isLoading() {
+    return Array.from(this.state.observers.values()).some(
+      (observer) => observer.getCurrentResult().isLoading
+    );
+  }
+  get dataUpdatedAt() {
+    return Math.max(
+      0,
+      ...Array.from(this.state.observers.values()).map(
+        (observer) => observer.getCurrentResult().dataUpdatedAt
+      )
+    );
+  }
+  get fetchStatus() {
+    let aggregate = `idle`;
+    for (const observer of this.state.observers.values()) {
+      const fetchStatus = observer.getCurrentResult().fetchStatus;
+      if (fetchStatus === `fetching`) return `fetching`;
+      if (fetchStatus === `paused`) aggregate = `paused`;
+    }
+    return aggregate;
+  }
+}
+export function queryCollectionOptions(config) {
+  const {
+    queryKey,
+    queryFn,
+    select,
+    queryClient,
+    enabled,
+    refetchInterval,
+    retry,
+    retryDelay,
+    staleTime,
+    gcTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    refetchOnMount,
+    networkMode,
+    initialData,
+    initialDataUpdatedAt,
+    persistedGcTime,
+    getKey,
+    onInsert,
+    onUpdate,
+    onDelete,
+    meta,
+    ...baseCollectionConfig
+  } = config;
+  const syncMode = baseCollectionConfig.syncMode ?? `eager`;
+  if (syncMode === `on-demand` && (initialData !== void 0 || initialDataUpdatedAt !== void 0)) {
+    throw new InitialDataInOnDemandModeError();
+  }
+  const initialDataObserverOptions = syncMode === `eager` ? {
+    ...initialData !== void 0 && { initialData },
+    ...initialDataUpdatedAt !== void 0 && {
+      initialDataUpdatedAt
+    },
+    // Placeholder data is observer-local UI state in TanStack Query. It
+    // must not be exposed as collection-wide normalized rows, including
+    // when supplied through QueryClient defaults.
+    placeholderData: void 0
+  } : {
+    // A collection-wide initializer cannot establish membership for
+    // arbitrary on-demand subsets. A defined initializer is needed to
+    // override a QueryClient default because Query Core can apply
+    // defaults again while constructing each Query.
+    initialData: () => void 0,
+    initialDataUpdatedAt: void 0,
+    placeholderData: void 0
+  };
+  const baseKey = typeof queryKey === `function` ? queryKey({}) : queryKey;
+  const fullSourceKey = syncMode === `on-demand` && typeof queryKey !== `function` ? baseKey : void 0;
+  const fullSourceHash = fullSourceKey && hashKey(fullSourceKey);
+  const validateQueryKeyPrefix = (key) => {
+    if (typeof queryKey !== `function`) return;
+    const isValidPrefix = key.length >= baseKey.length && baseKey.every((segment, i) => deepEquals(segment, key[i]));
+    if (!isValidPrefix) {
+      console.warn(
+        `[QueryCollection] queryKey function must return keys that extend the base key prefix. Base: ${JSON.stringify(baseKey)}, Got: ${JSON.stringify(key)}. This can cause stale cache issues.`
+      );
+    }
+  };
+  if (!queryKey) {
+    throw new QueryKeyRequiredError();
+  }
+  if (!queryFn) {
+    throw new QueryFnRequiredError();
+  }
+  if (!queryClient) {
+    throw new QueryClientRequiredError();
+  }
+  if (!getKey) {
+    throw new GetKeyRequiredError();
+  }
+  const state = {
+    observers: /* @__PURE__ */ new Map()
+  };
+  let activeMutationHandlerCount = 0;
+  const resultApplicationSettlements = /* @__PURE__ */ new WeakMap();
+  const fetchApplicationRecords = /* @__PURE__ */ new WeakMap();
+  let ownedCacheQueries = /* @__PURE__ */ new WeakSet();
+  const cacheOwnerToken = {};
+  let trackedCacheQueries;
+  const logicalHashesByQuery = /* @__PURE__ */ new WeakMap();
+  let requiredCacheGenerationFetchStart;
+  let scopedRecoveryEpoch = 0;
+  let scopedRecoveryPending = false;
+  const trackCacheQuery = (query, logicalHash) => {
+    trackedCacheQueries.add(query);
+    if (logicalHash !== void 0) {
+      const hashes = logicalHashesByQuery.get(query) ?? /* @__PURE__ */ new Set();
+      hashes.add(logicalHash);
+      logicalHashesByQuery.set(query, hashes);
+    }
+  };
+  const trackOwnedCacheQuery = (query, logicalHash) => {
+    ownedCacheQueries.add(query);
+    trackCacheQuery(query, logicalHash);
+    const owners = queryCollectionCacheOwners.get(query) ?? /* @__PURE__ */ new Set();
+    owners.add(cacheOwnerToken);
+    queryCollectionCacheOwners.set(query, owners);
+  };
+  const getLogicalHashes = (query) => logicalHashesByQuery.get(query) ?? /* @__PURE__ */ new Set([hashKey(query.queryKey)]);
+  const getFetchApplicationRecord = (query, fetchStart, hashedQueryKey) => {
+    const recordsByStart = fetchApplicationRecords.get(query) ?? /* @__PURE__ */ new Map();
+    fetchApplicationRecords.set(query, recordsByStart);
+    const recordsByHash = recordsByStart.get(fetchStart) ?? /* @__PURE__ */ new Map();
+    recordsByStart.set(fetchStart, recordsByHash);
+    const record = recordsByHash.get(hashedQueryKey) ?? {};
+    recordsByHash.set(hashedQueryKey, record);
+    return record;
+  };
+  const getRecordedResultApplicationSettlement = (hashedQueryKey, result) => resultApplicationSettlements.get(result)?.get(hashedQueryKey);
+  const recordResultApplicationSettlement = (hashedQueryKey, result, settlement) => {
+    const settlementsByHash = resultApplicationSettlements.get(result) ?? /* @__PURE__ */ new Map();
+    settlementsByHash.set(hashedQueryKey, settlement);
+    resultApplicationSettlements.set(result, settlementsByHash);
+  };
+  const captureFetchResult = (query, fetchStart) => {
+    for (const hashedQueryKey of getLogicalHashes(query)) {
+      const observer = state.observers.get(hashedQueryKey);
+      if (!observer || observer.getCurrentQuery() !== query) continue;
+      const result = observer.getCurrentResult();
+      const record = getFetchApplicationRecord(
+        query,
+        fetchStart,
+        hashedQueryKey
+      );
+      record.result = result;
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        result
+      );
+      if (settlement) record.settlement = settlement;
+    }
+  };
+  const captureFetchApplications = (query, fetchStart) => {
+    const recordsByHash = fetchApplicationRecords.get(query)?.get(fetchStart);
+    if (!recordsByHash) return;
+    for (const [hashedQueryKey, record] of recordsByHash) {
+      if (!record.result) continue;
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        record.result
+      );
+      if (settlement) record.settlement = settlement;
+    }
+  };
+  const retireFetchApplicationRecords = (query, fetchStarts) => {
+    const recordsByStart = fetchApplicationRecords.get(query);
+    if (!recordsByStart) return;
+    for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart);
+    if (recordsByStart.size === 0) fetchApplicationRecords.delete(query);
+  };
+  const hasCurrentCacheGenerationFetch = (query) => requiredCacheGenerationFetchStart === void 0 || (queryCollectionSuccessfulFetchStarts.get(query) ?? 0) > requiredCacheGenerationFetchStart;
+  const hashToQueryKey = /* @__PURE__ */ new Map();
+  const queryToRows = /* @__PURE__ */ new Map();
+  const releasedOwnership = /* @__PURE__ */ new WeakSet();
+  const hasAppliedOwnership = (hashedQueryKey) => {
+    const ownedRows = queryToRows.get(hashedQueryKey);
+    return ownedRows !== void 0 && !releasedOwnership.has(ownedRows);
+  };
+  const rowToQueries = /* @__PURE__ */ new Map();
+  const unsubscribes = /* @__PURE__ */ new Map();
+  const pendingReadyUnsubscribes = /* @__PURE__ */ new Map();
+  let directWriteGeneration = 0;
+  const unownedDirectWritePositions = /* @__PURE__ */ new Map();
+  const acceptedRowPositions = /* @__PURE__ */ new Map();
+  let latestAcceptedRowPosition = 0;
+  const awaitingFetchSuccessNotification = /* @__PURE__ */ new WeakSet();
+  const awaitingFetchSuccessVersions = /* @__PURE__ */ new WeakMap();
+  const fetchStartGenerations = /* @__PURE__ */ new Map();
+  const cancelPreWriteFetch = (query, hashedQueryKey) => {
+    const fetchStart = queryCollectionCurrentFetchStarts.get(query) ?? fetchStartGenerations.get(hashedQueryKey);
+    if (query.state.fetchStatus === `fetching` && (fetchStart ?? directWriteGeneration) < directWriteGeneration) {
+      void query.cancel({ silent: true });
+    }
+  };
+  const pendingResultApplications = /* @__PURE__ */ new Map();
+  const directWriteKeyGenerations = /* @__PURE__ */ new Map();
+  let pendingDirectWrites;
+  let writingDirectCache = false;
+  const unpatchedCacheVersions = /* @__PURE__ */ new WeakMap();
+  let deferredResults = 0;
+  const queryRefCounts = /* @__PURE__ */ new Map();
+  const fullSourceDependents = /* @__PURE__ */ new Map();
+  let ensureEagerSubscription = () => {
+  };
+  let applyRefetchResultWhenUnsubscribed = (_hashedQueryKey, _result) => false;
+  let getExceptionalResultSettlement = (_result) => void 0;
+  let activeSyncSession;
+  const addRowOwner = (rowKey, hashedQueryKey) => {
+    const owners = rowToQueries.get(rowKey) || /* @__PURE__ */ new Set();
+    owners.add(hashedQueryKey);
+    rowToQueries.set(rowKey, owners);
+    const ownedRows = queryToRows.get(hashedQueryKey) || /* @__PURE__ */ new Set();
+    ownedRows.add(rowKey);
+    queryToRows.set(hashedQueryKey, ownedRows);
+  };
+  const addRowOwners = (rowKey, owners) => {
+    if (owners.size === 0) {
+      rowToQueries.delete(rowKey);
+      return;
+    }
+    rowToQueries.set(rowKey, new Set(owners));
+    owners.forEach((owner) => {
+      const ownedRows = queryToRows.get(owner) || /* @__PURE__ */ new Set();
+      ownedRows.add(rowKey);
+      queryToRows.set(owner, ownedRows);
+    });
+  };
+  const removeRowOwner = (rowKey, hashedQueryKey) => {
+    const owners = rowToQueries.get(rowKey);
+    owners?.delete(hashedQueryKey);
+    if (!owners?.size) {
+      rowToQueries.delete(rowKey);
+    }
+    const ownedRows = queryToRows.get(hashedQueryKey);
+    ownedRows?.delete(rowKey);
+    return !owners?.size;
+  };
+  const removeQueryOwnership = (hashedQueryKey) => {
+    const nextOwnersByRow = /* @__PURE__ */ new Map();
+    queryToRows.get(hashedQueryKey)?.forEach((rowKey) => {
+      const nextOwners = new Set(rowToQueries.get(rowKey));
+      nextOwners.delete(hashedQueryKey);
+      nextOwnersByRow.set(rowKey, nextOwners);
+      if (nextOwners.size === 0) rowToQueries.delete(rowKey);
+      else rowToQueries.set(rowKey, nextOwners);
+    });
+    const released = /* @__PURE__ */ new Set();
+    releasedOwnership.add(released);
+    queryToRows.set(hashedQueryKey, released);
+    return nextOwnersByRow;
+  };
+  const internalSync = (params) => {
+    const syncSession = {};
+    activeSyncSession = syncSession;
+    pendingResultApplications.clear();
+    requiredCacheGenerationFetchStart = void 0;
+    scopedRecoveryPending = false;
+    trackedCacheQueries = new Set(
+      queryClient.getQueryCache().findAll({ queryKey: baseKey })
+    );
+    for (const query of trackedCacheQueries) {
+      if (query.state.fetchStatus === `fetching`) {
+        fetchStartGenerations.set(
+          hashKey(query.queryKey),
+          queryCollectionCurrentFetchStarts.get(query) ?? fetchStartGenerations.get(hashKey(query.queryKey)) ?? directWriteGeneration
+        );
+      }
+    }
+    const {
+      begin,
+      write,
+      commit,
+      markReady,
+      fail,
+      reportError,
+      reportHealthy,
+      invalidateLoadedSubsets,
+      collection,
+      metadata
+    } = params;
+    let runReady = false;
+    let runFailed = false;
+    const readyRun = () => {
+      if (runReady || runFailed) return;
+      runReady = true;
+      markReady();
+    };
+    const failBeforeReady = (error) => {
+      if (runReady) return false;
+      runFailed = true;
+      fail(error);
+      return true;
+    };
+    const orderedPageResults = /* @__PURE__ */ new WeakMap();
+    const acquisitionRefetches = /* @__PURE__ */ new Map();
+    let invalidationTimer;
+    const recordOrderedPageResult = (query, hashedQueryKey, rows) => {
+      const options2 = query.meta?.loadSubsetOptions;
+      if (syncMode !== `on-demand` || !isStoredLoadSubsetOptions(options2) || !options2.orderBy?.length)
+        return;
+      const previous = orderedPageResults.get(query);
+      const { where, orderBy } = options2;
+      const next = {
+        readKey: previous?.readKey ?? getLoadSubsetDemandKey({ where, orderBy }),
+        leadingValue: previous?.leadingValue ?? compileSingleRowExpression(orderBy[0].expression),
+        compare: previous?.compare ?? makeComparator(orderBy[0].compareOptions),
+        keys: JSON.stringify(
+          rows.map((row) => JSON.stringify(getKey(row))).sort()
+        ),
+        last: void 0
+      };
+      for (const row of rows) {
+        const value = next.leadingValue(row);
+        if (next.last === void 0 || next.compare(value, next.last.value) > 0)
+          next.last = { value };
+      }
+      orderedPageResults.set(query, next);
+      if (invalidationTimer !== void 0 || acquisitionRefetches.has(hashedQueryKey) || previous?.last === void 0 || previous.keys === next.keys)
+        return;
+      const end = previous.last.value;
+      const endMovedEarlier = next.last === void 0 || next.compare(next.last.value, end) < 0;
+      const hasLaterPage = () => [...state.observers.values()].some((observer) => {
+        const other = orderedPageResults.get(observer.getCurrentQuery());
+        return other !== void 0 && other !== next && other.readKey === next.readKey && (other.last === void 0 || next.compare(other.last.value, end) > 0);
+      });
+      if (endMovedEarlier || hasLaterPage()) {
+        invalidationTimer = setTimeout(() => {
+          invalidationTimer = void 0;
+          if (activeSyncSession === syncSession) invalidateLoadedSubsets();
+        }, 0);
+      }
+    };
+    const persistence = metadata === void 0 ? null : validateSyncPersistenceCapability(metadata.persistence);
+    if (persistence?.startupCacheGenerationRotated === true) {
+      requiredCacheGenerationFetchStart = nextQueryCollectionAuthorityPosition;
+      for (const query of trackedCacheQueries) {
+        if (query.state.fetchStatus !== `idle` && queryCollectionCurrentFetchStarts.get(query) === void 0) {
+          queryCollectionCurrentFetchStarts.set(
+            query,
+            requiredCacheGenerationFetchStart
+          );
+        }
+      }
+    }
+    let syncStarted = false;
+    let startupRetentionSettled = false;
+    const pendingStartupLoads = /* @__PURE__ */ new Map();
+    const retainedQueriesPendingRevalidation = /* @__PURE__ */ new Set();
+    const observedErrorUpdates = /* @__PURE__ */ new WeakMap();
+    const errorRevisions = /* @__PURE__ */ new Map();
+    const errorRevisionOf = (hashedQueryKey) => errorRevisions.get(hashedQueryKey) ?? 0;
+    const bumpErrorRevision = (hashedQueryKey) => {
+      errorRevisions.set(hashedQueryKey, errorRevisionOf(hashedQueryKey) + 1);
+    };
+    const failedResultApplications = /* @__PURE__ */ new Map();
+    const failingQueries = /* @__PURE__ */ new Map();
+    const reportUnheld = (error) => {
+      for (const held of failingQueries.values()) if (held === error) return;
+      reportHealthy(error);
+    };
+    const reportFailing = (hashedQueryKey, error) => {
+      const previous = failingQueries.get(hashedQueryKey);
+      failingQueries.set(hashedQueryKey, error);
+      if (!runReady) return;
+      reportError(error);
+      if (previous !== void 0) reportUnheld(previous);
+    };
+    const reportRecovered = (hashedQueryKey) => {
+      const error = failingQueries.get(hashedQueryKey);
+      if (!failingQueries.delete(hashedQueryKey) || !runReady) return;
+      if (failingQueries.size === 0) reportHealthy();
+      else reportUnheld(error);
+    };
+    const exceptionalResultSettlements = /* @__PURE__ */ new WeakMap();
+    const pendingExceptionalResultSettlements = /* @__PURE__ */ new Set();
+    const deferredRefreshes = /* @__PURE__ */ new Map();
+    const readExceptionalResultSettlement = (result) => exceptionalResultSettlements.get(result);
+    const writeExceptionalResultSettlement = (result, settlement) => {
+      exceptionalResultSettlements.set(result, settlement);
+    };
+    getExceptionalResultSettlement = readExceptionalResultSettlement;
+    const resultApplicationControllers = /* @__PURE__ */ new Map();
+    const effectivePersistedGcTimes = /* @__PURE__ */ new Map();
+    const persistedRetentionTimers = /* @__PURE__ */ new Map();
+    let persistedRetentionMaintenance = Promise.resolve();
+    const invalidatePendingResultApplication = (hashedQueryKey) => {
+      const controller = resultApplicationControllers.get(hashedQueryKey);
+      controller?.rollback?.();
+      pendingResultApplications.delete(hashedQueryKey);
+      failedResultApplications.delete(hashedQueryKey);
+      resultApplicationControllers.delete(hashedQueryKey);
+      controller?.abort();
+    };
+    const waitForCurrentResultApplication = async (hashedQueryKey) => {
+      for (; ; ) {
+        const application = pendingResultApplications.get(hashedQueryKey);
+        if (!application) return;
+        try {
+          await application;
+        } catch (error) {
+          if (pendingResultApplications.get(hashedQueryKey) === application || failedResultApplications.has(hashedQueryKey) && failedResultApplications.get(hashedQueryKey) === error) {
+            throw error;
+          }
+        }
+      }
+    };
+    const waitForAuthoritativeObserverResult = (observer, hashedQueryKey, createCancellationError, acceptsResult = () => true) => new Promise((resolve, reject) => {
+      let active = true;
+      let unsubscribe = () => {
+      };
+      const pending = pendingReadyUnsubscribes.get(hashedQueryKey) ?? /* @__PURE__ */ new Set();
+      const finish = (settle) => {
+        if (!active) return;
+        active = false;
+        unsubscribe();
+        pending.delete(cancel);
+        if (pending.size === 0) {
+          pendingReadyUnsubscribes.delete(hashedQueryKey);
+        }
+        settle();
+      };
+      const cancel = () => {
+        finish(() => reject(createCancellationError()));
+      };
+      pending.add(cancel);
+      pendingReadyUnsubscribes.set(hashedQueryKey, pending);
+      unsubscribe = observer.subscribe((result) => {
+        queueMicrotask(() => {
+          if (result.isSuccess && !collection.deferDataRefresh || result.isError && !result.isFetching) {
+            if (acceptsResult(result)) finish(() => resolve(result));
+          }
+        });
+      });
+    });
+    const getDeferredRefresh = (hashedQueryKey, barrier) => {
+      const barrierRefreshes = deferredRefreshes.get(barrier) ?? /* @__PURE__ */ new Map();
+      const existing = barrierRefreshes.get(hashedQueryKey);
+      if (existing) return existing;
+      const refresh = barrier.then(async () => {
+        const observer = state.observers.get(hashedQueryKey);
+        if (!observer) throw new CancelledError();
+        let replacement = await observer.refetch();
+        for (; ; ) {
+          if (!replacement.isSuccess) return replacement;
+          await new Promise((resolve) => queueMicrotask(resolve));
+          if (collection.deferDataRefresh) {
+            replacement = await waitForAuthoritativeObserverResult(
+              observer,
+              hashedQueryKey,
+              () => new CancelledError()
+            );
+            continue;
+          }
+          const replacementSettlement = readExceptionalResultSettlement(replacement);
+          if (replacementSettlement?.type === `rejected`) {
+            throw replacementSettlement.error;
+          }
+          if (replacementSettlement?.type === `pending`) {
+            return replacementSettlement.promise;
+          }
+          const application = getResultApplicationSettlement(hashedQueryKey);
+          if (application !== true) await application;
+          return replacement;
+        }
+      });
+      barrierRefreshes.set(hashedQueryKey, refresh);
+      deferredRefreshes.set(barrier, barrierRefreshes);
+      const removeRefresh = () => {
+        if (barrierRefreshes.get(hashedQueryKey) !== refresh) return;
+        barrierRefreshes.delete(hashedQueryKey);
+        if (barrierRefreshes.size === 0) deferredRefreshes.delete(barrier);
+      };
+      void refresh.then(removeRefresh, removeRefresh);
+      return refresh;
+    };
+    const scheduleDeferredResultSettlement = (hashedQueryKey, result, refresh) => {
+      const existing = readExceptionalResultSettlement(result);
+      if (existing?.type === `pending`) return existing;
+      let rejectSettlement;
+      const promise = new Promise(
+        (resolve, reject) => {
+          rejectSettlement = reject;
+          void refresh.then(resolve, reject);
+        }
+      );
+      void promise.catch(() => {
+      });
+      const settlement = {
+        type: `pending`,
+        promise,
+        reject: rejectSettlement
+      };
+      writeExceptionalResultSettlement(result, settlement);
+      pendingExceptionalResultSettlements.add(settlement);
+      void promise.then(
+        () => {
+          pendingExceptionalResultSettlements.delete(settlement);
+        },
+        () => {
+          pendingExceptionalResultSettlements.delete(settlement);
+        }
+      );
+      return settlement;
+    };
+    const getResultApplicationSettlement = (hashedQueryKey) => {
+      const pending = pendingResultApplications.get(hashedQueryKey);
+      if (pending) {
+        return waitForCurrentResultApplication(hashedQueryKey);
+      }
+      if (failedResultApplications.has(hashedQueryKey)) {
+        return Promise.reject(failedResultApplications.get(hashedQueryKey));
+      }
+      return true;
+    };
+    const getRowMetadata = (rowKey) => metadata?.row.get(rowKey);
+    const getOwnersFromMetadata = (rowMetadata, rowKey) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`)
+        return /* @__PURE__ */ new Set();
+      const queryMetadata = rowMetadata.queryCollection;
+      if (!queryMetadata || typeof queryMetadata !== `object`)
+        return /* @__PURE__ */ new Set();
+      const owners = queryMetadata.owners;
+      if (!owners || typeof owners !== `object`) return /* @__PURE__ */ new Set();
+      const result = new Set(Object.keys(owners));
+      if (rowKey === void 0) return result;
+      result.forEach((owner) => {
+        const rows = queryToRows.get(owner);
+        if (rows && !rows.has(rowKey)) result.delete(owner);
+      });
+      return result;
+    };
+    const getPersistedOwners = (rowKey) => getOwnersFromMetadata(getRowMetadata(rowKey), rowKey);
+    const setPersistedOwners = (rowKey, owners) => {
+      if (!metadata) {
+        return;
+      }
+      const currentMetadata = { ...getRowMetadata(rowKey) ?? {} };
+      if (owners.size === 0) {
+        delete currentMetadata.queryCollection;
+        if (Object.keys(currentMetadata).length === 0) {
+          metadata.row.delete(rowKey);
+        } else {
+          metadata.row.set(rowKey, currentMetadata);
+        }
+        return;
+      }
+      metadata.row.set(rowKey, {
+        ...currentMetadata,
+        queryCollection: {
+          owners: Object.fromEntries(
+            Array.from(owners.values()).map((owner) => [owner, true])
+          )
+        }
+      });
+    };
+    const parsePersistedQueryRetentionEntry = (value, expectedHash) => {
+      if (!value || typeof value !== `object`) {
+        return void 0;
+      }
+      const record = value;
+      if (record.queryHash !== expectedHash) {
+        return void 0;
+      }
+      if (record.mode === `until-revalidated`) {
+        return {
+          queryHash: expectedHash,
+          mode: `until-revalidated`
+        };
+      }
+      if (record.mode === `ttl` && typeof record.expiresAt === `number` && Number.isFinite(record.expiresAt)) {
+        return {
+          queryHash: expectedHash,
+          mode: `ttl`,
+          expiresAt: record.expiresAt
+        };
+      }
+      return void 0;
+    };
+    const runPersistedRetentionMaintenance = (task) => {
+      persistedRetentionMaintenance = persistedRetentionMaintenance.then(
+        task,
+        task
+      );
+      return persistedRetentionMaintenance;
+    };
+    const cancelPersistedRetentionExpiry = (hashedQueryKey) => {
+      const timer = persistedRetentionTimers.get(hashedQueryKey);
+      if (timer) {
+        clearTimeout(timer);
+        persistedRetentionTimers.delete(hashedQueryKey);
+      }
+    };
+    const getHydratedOwnedRowsForQueryBaseline = (hashedQueryKey) => {
+      const knownRows = queryToRows.get(hashedQueryKey);
+      if (knownRows) {
+        return new Set(knownRows);
+      }
+      const ownedRows = /* @__PURE__ */ new Set();
+      const hydratedOwners = Array.from(
+        collection._state.syncedData.keys(),
+        (rowKey) => [rowKey, getPersistedOwners(rowKey)]
+      );
+      for (const [rowKey, owners] of hydratedOwners) {
+        if (owners.size === 0) {
+          continue;
+        }
+        addRowOwners(rowKey, owners);
+        if (owners.has(hashedQueryKey)) {
+          ownedRows.add(rowKey);
+        }
+      }
+      return ownedRows;
+    };
+    const loadPersistedBaselineForQuery = async (hashedQueryKey, incomingItemsAreEmpty = false) => {
+      const recoveryEpoch = scopedRecoveryEpoch;
+      const knownRows = queryToRows.get(hashedQueryKey);
+      if (knownRows && (knownRows.size > 0 || incomingItemsAreEmpty) && Array.from(knownRows).every((rowKey) => collection.has(rowKey))) {
+        const baseline2 = /* @__PURE__ */ new Map();
+        knownRows.forEach((rowKey) => {
+          const value = collection.get(rowKey);
+          const owners = rowToQueries.get(rowKey);
+          if (value && owners) {
+            baseline2.set(rowKey, {
+              value,
+              owners: new Set(owners)
+            });
+          }
+        });
+        return baseline2;
+      }
+      const scanPersisted = persistence?.scanPersistedRows;
+      if (!scanPersisted) {
+        const baseline2 = /* @__PURE__ */ new Map();
+        getHydratedOwnedRowsForQueryBaseline(hashedQueryKey).forEach(
+          (rowKey) => {
+            const value = collection.get(rowKey);
+            const owners = rowToQueries.get(rowKey);
+            if (value && owners) {
+              baseline2.set(rowKey, {
+                value,
+                owners: new Set(owners)
+              });
+            }
+          }
+        );
+        return baseline2;
+      }
+      const baseline = /* @__PURE__ */ new Map();
+      const scannedRows = await scanPersisted();
+      if (recoveryEpoch !== scopedRecoveryEpoch || scopedRecoveryPending) {
+        return baseline;
+      }
+      const scannedOwners = scannedRows.map(
+        (row) => getOwnersFromMetadata(row.metadata, row.key)
+      );
+      scannedRows.forEach((row, index) => {
+        const ownerSet = scannedOwners[index];
+        if (ownerSet.size === 0) {
+          return;
+        }
+        addRowOwners(row.key, ownerSet);
+        if (ownerSet.has(hashedQueryKey)) {
+          baseline.set(row.key, {
+            value: row.value,
+            owners: ownerSet
+          });
+        }
+      });
+      return baseline;
+    };
+    const cleanupPersistedPlaceholder = async (hashedQueryKey) => {
+      if (!metadata) {
+        return;
+      }
+      const recoveryEpoch = scopedRecoveryEpoch;
+      const baseline = await loadPersistedBaselineForQuery(hashedQueryKey);
+      if (recoveryEpoch !== scopedRecoveryEpoch || scopedRecoveryPending) {
+        return;
+      }
+      const rowsToDelete = [];
+      begin();
+      baseline.forEach(({ value: oldItem, owners }, rowKey) => {
+        owners.delete(hashedQueryKey);
+        setPersistedOwners(rowKey, owners);
+        const needToRemove = removeRowOwner(rowKey, hashedQueryKey);
+        if (needToRemove) {
+          rowsToDelete.push(oldItem);
+        }
+      });
+      rowsToDelete.forEach((row) => {
+        write({ type: `delete`, value: row });
+      });
+      metadata.collection.delete(
+        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`
+      );
+      commit();
+      queryToRows.delete(hashedQueryKey);
+    };
+    const schedulePersistedRetentionExpiry = (entry) => {
+      if (entry.mode !== `ttl`) {
+        return;
+      }
+      cancelPersistedRetentionExpiry(entry.queryHash);
+      const delay = Math.max(0, entry.expiresAt - Date.now());
+      const timer = setTimeout(() => {
+        persistedRetentionTimers.delete(entry.queryHash);
+        void runPersistedRetentionMaintenance(async () => {
+          const currentEntry = metadata?.collection.get(
+            `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`
+          );
+          const parsedCurrentEntry = parsePersistedQueryRetentionEntry(
+            currentEntry,
+            entry.queryHash
+          );
+          if (parsedCurrentEntry?.mode !== `ttl`) {
+            return;
+          }
+          if (parsedCurrentEntry.expiresAt > Date.now()) {
+            return schedulePersistedRetentionExpiry(parsedCurrentEntry);
+          }
+          await cleanupPersistedPlaceholder(entry.queryHash);
+        });
+      }, delay);
+      persistedRetentionTimers.set(entry.queryHash, timer);
+    };
+    const consumePersistedQueryRetentionAtStartup = async () => {
+      if (!metadata) {
+        return;
+      }
+      const retentionEntries = metadata.collection.list(
+        QUERY_COLLECTION_GC_PREFIX
+      );
+      const now = Date.now();
+      for (const { key, value } of retentionEntries) {
+        const hashedQueryKey = key.slice(QUERY_COLLECTION_GC_PREFIX.length);
+        const parsed = parsePersistedQueryRetentionEntry(value, hashedQueryKey);
+        if (!parsed) {
+          continue;
+        }
+        if (parsed.mode === `ttl` && parsed.expiresAt <= now) {
+          await cleanupPersistedPlaceholder(parsed.queryHash);
+        } else if (parsed.mode === `ttl`) {
+          schedulePersistedRetentionExpiry(parsed);
+        }
+      }
+    };
+    const generateQueryKeyFromOptions = (opts) => {
+      if (typeof queryKey === `function`) {
+        const { refetch: _refetch, ...queryKeyOptions } = opts;
+        return queryKey(queryKeyOptions);
+      } else if (syncMode === `on-demand`) {
+        const demandKey = getLoadSubsetDemandKey(opts);
+        return demandKey !== void 0 ? [...queryKey, demandKey] : queryKey;
+      } else {
+        return queryKey;
+      }
+    };
+    const startupRetentionEntries = metadata?.collection.list(
+      QUERY_COLLECTION_GC_PREFIX
+    );
+    const startupRetentionMaintenancePromise = !startupRetentionEntries || startupRetentionEntries.length === 0 ? (() => {
+      startupRetentionSettled = true;
+      return Promise.resolve();
+    })() : runPersistedRetentionMaintenance(async () => {
+      try {
+        await consumePersistedQueryRetentionAtStartup();
+      } finally {
+        startupRetentionSettled = true;
+      }
+    });
+    const waitForQueryReady = (observer, hashedQueryKey, acceptsResult) => waitForAuthoritativeObserverResult(
+      observer,
+      hashedQueryKey,
+      () => new LoadSubsetOperationAbortedError(),
+      acceptsResult
+    ).then((result) => {
+      if (result.isError) throw result.error;
+    });
+    const waitForQueryReadyAndApplied = (observer, hashedQueryKey, acceptsResult) => waitForQueryReady(observer, hashedQueryKey, acceptsResult).then(() => {
+      const settlement = getResultApplicationSettlement(hashedQueryKey);
+      return settlement === true ? void 0 : settlement;
+    });
+    const refetchAndWaitForApplication = async (observer, hashedQueryKey) => new Promise((resolve, reject) => {
+      let active = true;
+      const pending = pendingReadyUnsubscribes.get(hashedQueryKey) ?? /* @__PURE__ */ new Set();
+      const finish = (settle) => {
+        if (!active) return;
+        active = false;
+        const refetches = acquisitionRefetches.get(hashedQueryKey) - 1;
+        if (refetches === 0) acquisitionRefetches.delete(hashedQueryKey);
+        else acquisitionRefetches.set(hashedQueryKey, refetches);
+        pending.delete(cancel);
+        if (pending.size === 0) {
+          pendingReadyUnsubscribes.delete(hashedQueryKey);
+        }
+        settle();
+      };
+      const cancel = () => {
+        finish(() => reject(new LoadSubsetOperationAbortedError()));
+      };
+      pending.add(cancel);
+      pendingReadyUnsubscribes.set(hashedQueryKey, pending);
+      acquisitionRefetches.set(
+        hashedQueryKey,
+        (acquisitionRefetches.get(hashedQueryKey) ?? 0) + 1
+      );
+      const refetch2 = async () => {
+        const waitsForDeferredApplication = !!collection.deferDataRefresh;
+        cancelPreWriteFetch(observer.getCurrentQuery(), hashedQueryKey);
+        for (; ; ) {
+          if (!active) return;
+          try {
+            await observer.refetch({ throwOnError: true });
+          } catch (error) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              observer.getCurrentQuery()
+            );
+            if (requiredCacheGenerationFetchStart === void 0 || fetchStart === void 0 || fetchStart > requiredCacheGenerationFetchStart) {
+              throw error;
+            }
+            continue;
+          }
+          await new Promise((resume) => queueMicrotask(resume));
+          if (!active) return;
+          if (hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
+            break;
+          }
+        }
+        if (waitsForDeferredApplication || !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
+          await waitForQueryReadyAndApplied(observer, hashedQueryKey);
+          return;
+        }
+        const settlement = getResultApplicationSettlement(hashedQueryKey);
+        if (settlement !== true) await settlement;
+      };
+      void refetch2().then(
+        () => finish(resolve),
+        (error) => finish(() => reject(error))
+      );
+    });
+    const refetchOrWaitForEnabledQuery = (observer, hashedQueryKey) => {
+      const query = observer.getCurrentQuery();
+      const queryEnabled = typeof enabled === `function` ? enabled(query) : enabled !== false;
+      if (queryEnabled)
+        return refetchAndWaitForApplication(observer, hashedQueryKey);
+      const cachedVersion = query.state.dataUpdateCount;
+      return waitForQueryReadyAndApplied(observer, hashedQueryKey, (result) => {
+        if (result.isError) return true;
+        const current = observer.getCurrentQuery();
+        return current.state.dataUpdateCount > cachedVersion && queryCollectionSuccessfulFetchVersions.get(current) === current.state.dataUpdateCount && hasCurrentCacheGenerationFetch(current);
+      });
+    };
+    const createQueryFromOpts = (opts = {}, queryFunction = queryFn) => {
+      if (!startupRetentionSettled) {
+        const acquisition = {};
+        const pending = pendingStartupLoads.get(opts) ?? /* @__PURE__ */ new Set();
+        pending.add(acquisition);
+        pendingStartupLoads.set(opts, pending);
+        return startupRetentionMaintenancePromise.then(() => {
+          if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
+            throw new LoadSubsetOperationAbortedError();
+          }
+          if (pending.size === 0) pendingStartupLoads.delete(opts);
+          const resumed = createQueryFromOpts(opts, queryFunction);
+          return resumed === true ? void 0 : resumed;
+        });
+      }
+      const requestedKey = generateQueryKeyFromOptions(opts);
+      const requestedHash = hashKey(requestedKey);
+      const fullObserver = fullSourceHash === void 0 ? void 0 : state.observers.get(fullSourceHash);
+      const hasFullSourceDependent = fullSourceDependents.has(requestedHash);
+      if (hasFullSourceDependent && fullObserver === void 0) {
+        throw new Error(`A full-source dependent lost its Query observer`);
+      }
+      const fullQuery = fullObserver?.getCurrentQuery();
+      const fullResult = fullObserver?.getCurrentResult();
+      const appliedFullResult = fullResult !== void 0 && getRecordedResultApplicationSettlement(fullSourceHash, fullResult) !== void 0;
+      const retainedRequestedEntry = metadata?.collection.get(
+        `${QUERY_COLLECTION_GC_PREFIX}${requestedHash}`
+      );
+      const requestedScopeNeedsRevalidation = parsePersistedQueryRetentionEntry(
+        retainedRequestedEntry,
+        requestedHash
+      ) !== void 0;
+      const sharesFullSource = !opts.refetch && fullSourceKey !== void 0 && fullSourceHash !== requestedHash && (hasFullSourceDependent || !requestedScopeNeedsRevalidation && !state.observers.has(requestedHash) && (queryRefCounts.get(fullSourceHash) ?? 0) > 0 && fullResult?.isSuccess === true && fullQuery?.state.fetchStatus === `idle` && hasCurrentCacheGenerationFetch(fullQuery) && !pendingResultApplications.has(fullSourceHash) && !failedResultApplications.has(fullSourceHash) && appliedFullResult);
+      const key = sharesFullSource ? fullSourceKey : requestedKey;
+      const hashedQueryKey = sharesFullSource ? fullSourceHash : requestedHash;
+      const {
+        subscription: _subscription,
+        refetch: _refetch,
+        ...requestOptions
+      } = opts;
+      const extendedMeta = { ...meta };
+      Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
+        value: requestOptions,
+        enumerable: false,
+        configurable: true,
+        writable: true
+      });
+      const retainedEntry = hashedQueryKey === requestedHash ? retainedRequestedEntry : metadata?.collection.get(
+        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`
+      );
+      if (parsePersistedQueryRetentionEntry(retainedEntry, hashedQueryKey) !== void 0) {
+        retainedQueriesPendingRevalidation.add(hashedQueryKey);
+      }
+      cancelPersistedRetentionExpiry(hashedQueryKey);
+      validateQueryKeyPrefix(key);
+      if (state.observers.has(hashedQueryKey)) {
+        queryRefCounts.set(
+          hashedQueryKey,
+          (queryRefCounts.get(hashedQueryKey) || 0) + 1
+        );
+        if (sharesFullSource) {
+          fullSourceDependents.set(
+            requestedHash,
+            (fullSourceDependents.get(requestedHash) ?? 0) + 1
+          );
+        }
+        const observer = state.observers.get(hashedQueryKey);
+        const currentResult = observer.getCurrentResult();
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey);
+        }
+        const query = observer.getCurrentQuery();
+        const directPatch = queryCollectionDirectCachePatches.get(query);
+        if (unpatchedCacheVersions.has(query) || syncMode === `on-demand` && directPatch !== void 0 && (directPatch.owner !== cacheOwnerToken || directPatch.session !== syncSession) || directWriteGeneration > 0 && query.state.dataUpdateCount > (queryCollectionSuccessfulFetchVersions.get(query) ?? 0)) {
+          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey);
+        }
+        if (!hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
+          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey);
+        }
+        if (currentResult.isSuccess) {
+          if (collection.deferDataRefresh) {
+            return waitForQueryReadyAndApplied(observer, hashedQueryKey);
+          }
+          return getResultApplicationSettlement(hashedQueryKey);
+        } else if (currentResult.isError && !currentResult.isFetching) {
+          return Promise.reject(currentResult.error);
+        } else {
+          return waitForQueryReadyAndApplied(observer, hashedQueryKey);
+        }
+      }
+      const observerOptions = {
+        ...pickDefinedQueryObserverOptions({
+          enabled,
+          refetchInterval,
+          retry,
+          retryDelay,
+          staleTime,
+          gcTime,
+          refetchOnWindowFocus,
+          refetchOnReconnect,
+          refetchOnMount,
+          networkMode
+        }),
+        ...initialDataObserverOptions,
+        queryKey: key,
+        queryFn: (context) => {
+          const logicalHash = hashKey(context.queryKey);
+          const physicalQuery = queryClient.getQueryCache().find({
+            queryKey: context.queryKey,
+            exact: true
+          });
+          fetchStartGenerations.set(
+            logicalHash,
+            Math.max(
+              fetchStartGenerations.get(logicalHash) ?? 0,
+              directWriteGeneration
+            )
+          );
+          const queryWithSharedSignal = () => {
+            const sharedContext = Object.defineProperties(
+              {},
+              Object.getOwnPropertyDescriptors(context)
+            );
+            sharedContext.meta = {
+              ...context.meta,
+              loadSubsetOptions: {
+                ...requestOptions,
+                get signal() {
+                  return context.signal;
+                }
+              }
+            };
+            return queryFunction(sharedContext);
+          };
+          if ((queryRefCounts.get(logicalHash) ?? 0) > 1 || (physicalQuery?.getObserversCount() ?? 0) > 1 || hashedQueryKey === fullSourceHash && fullSourceDependents.size || requestOptions.signal?.aborted) {
+            return queryWithSharedSignal();
+          }
+          const recoverReleasedSignal = (error) => {
+            const isAbortError = typeof error === `object` && error !== null && `name` in error && error.name === `AbortError`;
+            if (!requestOptions.signal?.aborted || error !== requestOptions.signal.reason && !isAbortError || !physicalQuery || physicalQuery.getObserversCount() === 0 || queryClient.getQueryCache().find({
+              queryKey: context.queryKey,
+              exact: true
+            }) !== physicalQuery || physicalQuery.state.fetchStatus !== `fetching`) {
+              throw error;
+            }
+            return queryWithSharedSignal();
+          };
+          try {
+            return Promise.resolve(queryFunction(context)).catch(
+              recoverReleasedSignal
+            );
+          } catch (error) {
+            return recoverReleasedSignal(error);
+          }
+        },
+        meta: extendedMeta,
+        structuralSharing: true,
+        notifyOnChangeProps: `all`
+      };
+      const localObserver = new QueryObserver(queryClient, observerOptions);
+      const localQuery = localObserver.getCurrentQuery();
+      trackOwnedCacheQuery(localQuery, hashedQueryKey);
+      const resolvedQueryGcTime = queryClient.getQueryCache().find({
+        queryKey: key,
+        exact: true
+      })?.gcTime;
+      const effectivePersistedGcTime = persistedGcTime ?? resolvedQueryGcTime;
+      hashToQueryKey.set(hashedQueryKey, key);
+      state.observers.set(hashedQueryKey, localObserver);
+      const physicalFetchStart = queryCollectionCurrentFetchStarts.get(localQuery);
+      if (physicalFetchStart !== void 0 && (localQuery.state.fetchStatus === `fetching` || queryCollectionSuccessfulFetchData.get(localQuery) === localQuery.state.data)) {
+        fetchStartGenerations.set(hashedQueryKey, physicalFetchStart);
+      }
+      if (effectivePersistedGcTime !== void 0) {
+        effectivePersistedGcTimes.set(hashedQueryKey, effectivePersistedGcTime);
+      } else {
+        effectivePersistedGcTimes.delete(hashedQueryKey);
+      }
+      queryRefCounts.set(
+        hashedQueryKey,
+        (queryRefCounts.get(hashedQueryKey) || 0) + 1
+      );
+      const cachedData = queryClient.getQueryData(key);
+      if (cachedData !== void 0) {
+        const directPatch = queryCollectionDirectCachePatches.get(localQuery);
+        const foreignDirectPatch = syncMode === `on-demand` && directPatch !== void 0 && (directPatch.owner !== cacheOwnerToken || directPatch.session !== syncSession);
+        const unverifiedCacheEdit = directWriteGeneration > 0 && localQuery.state.dataUpdateCount > (queryCollectionSuccessfulFetchVersions.get(localQuery) ?? 0);
+        const cachedRows = persistence?.scanPersistedRows === void 0 ? void 0 : select ? select(cachedData) : cachedData;
+        const unknownPersistedRowOrder = persistence?.scanPersistedRows !== void 0 && Array.isArray(cachedRows) && cachedRows.some((row) => {
+          const rowKey = getKey(row);
+          return collection._state.getAcceptedSyncedRow(rowKey) !== void 0 && !unownedDirectWritePositions.has(rowKey) && !rowToQueries.has(rowKey);
+        });
+        if (syncStarted || collection.subscriberCount > 0) {
+          subscribeToQuery(
+            localObserver,
+            hashedQueryKey,
+            foreignDirectPatch || unverifiedCacheEdit || unknownPersistedRowOrder ? {
+              data: localQuery.state.data,
+              version: localQuery.state.dataUpdateCount,
+              fetchStart: queryCollectionCurrentFetchStarts.get(localQuery)
+            } : void 0
+          );
+        }
+        const currentResult = localObserver.getCurrentResult();
+        if (opts.refetch || unpatchedCacheVersions.has(localQuery) || foreignDirectPatch || unverifiedCacheEdit || unknownPersistedRowOrder) {
+          return opts.refetch ? refetchAndWaitForApplication(localObserver, hashedQueryKey) : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey);
+        }
+        if (!hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())) {
+          return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey);
+        }
+        if (currentResult.isError && !currentResult.isFetching) {
+          return Promise.reject(currentResult.error);
+        }
+        if (!currentResult.isSuccess) {
+          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey);
+        }
+        if (collection.deferDataRefresh) {
+          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey);
+        }
+        return getResultApplicationSettlement(hashedQueryKey);
+      }
+      if (requiredCacheGenerationFetchStart !== void 0) {
+        if (syncStarted || collection.subscriberCount > 0) {
+          subscribeToQuery(localObserver, hashedQueryKey);
+        }
+        return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey);
+      }
+      const readyPromise = waitForQueryReadyAndApplied(
+        localObserver,
+        hashedQueryKey
+      );
+      if (syncStarted || collection.subscriberCount > 0) {
+        subscribeToQuery(localObserver, hashedQueryKey);
+      }
+      return readyPromise;
+    };
+    const validateSuccessfulResultItems = (resultQueryKey, result) => {
+      const rawData = result.data;
+      const newItemsArray = select ? select(rawData) : rawData;
+      const source = select ? `select()` : `queryFn`;
+      if (!Array.isArray(newItemsArray)) {
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`
+          )
+        };
+      }
+      const invalidItemIndex = newItemsArray.findIndex(
+        (item) => item === null || typeof item !== `object`
+      );
+      if (invalidItemIndex !== -1) {
+        const invalidItem = newItemsArray[invalidItemIndex];
+        const invalidItemDescription = invalidItem === null ? `null` : typeof invalidItem;
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Invalid item at index ${invalidItemIndex}: ${invalidItemDescription} for queryKey ${JSON.stringify(resultQueryKey)}`
+          )
+        };
+      }
+      return { items: newItemsArray };
+    };
+    const mergeOlderRows = (items, fetchStart, hashedQueryKey) => {
+      const rows = new Map(items.map((row) => [getKey(row), row]));
+      for (const [key, generation] of directWriteKeyGenerations) {
+        if (generation <= fetchStart) continue;
+        if (syncMode === `on-demand` && !rows.has(key) && !queryToRows.get(hashedQueryKey)?.has(key))
+          continue;
+        const accepted = collection._state.getAcceptedSyncedRow(key);
+        if (accepted === void 0) rows.delete(key);
+        else rows.set(key, accepted);
+      }
+      return Array.from(rows.values());
+    };
+    const directWritesSettled = async () => {
+      while (pendingDirectWrites) await pendingDirectWrites;
+    };
+    const validateSuccessfulResultItemsForApplication = (resultQueryKey, result) => {
+      const validation = validateSuccessfulResultItems(resultQueryKey, result);
+      if (`error` in validation) {
+        writeExceptionalResultSettlement(result, {
+          type: `rejected`,
+          error: validation.error
+        });
+        throw validation.error;
+      }
+      return validation.items;
+    };
+    const applySuccessfulResult = (queryKey2, result, applicationToken, persistedBaseline, signal, validatedItems) => {
+      const hashedQueryKey = hashKey(queryKey2);
+      if (collection.status === `cleaned-up` || signal?.aborted) {
+        throw new LoadSubsetOperationAbortedError();
+      }
+      if (isMutationPublicationBlocked()) {
+        applicationToken.settleRefetchAtFetchBoundary?.();
+      }
+      const newItemsArray = validatedItems ?? validateSuccessfulResultItemsForApplication(queryKey2, result);
+      const currentSyncedItems = new Map(
+        collection._state.acceptedSyncedEntries()
+      );
+      const shouldUsePersistedBaseline = persistedBaseline !== void 0;
+      const previouslyOwnedRows = shouldUsePersistedBaseline ? new Set(persistedBaseline.keys()) : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey);
+      const currentQuery = queryClient.getQueryCache().find({ queryKey: queryKey2, exact: true });
+      const cachedRemoteFetchStart = currentQuery !== void 0 && queryCollectionSuccessfulFetchData.get(currentQuery) === currentQuery.state.data ? queryCollectionSuccessfulFetchStarts.get(currentQuery) : void 0;
+      if (syncMode === `eager`) {
+        unownedDirectWritePositions.forEach((directPosition, key) => {
+          if (currentSyncedItems.has(key) && cachedRemoteFetchStart !== void 0 && cachedRemoteFetchStart > directPosition)
+            previouslyOwnedRows.add(key);
+        });
+      } else if (cachedRemoteFetchStart !== void 0 && (unownedDirectWritePositions.size > 0 || persistence?.scanPersistedRows !== void 0)) {
+        const scope = state.observers.get(hashedQueryKey)?.options.meta?.loadSubsetOptions;
+        if (isStoredLoadSubsetOptions(scope) && scope.limit === void 0 && scope.offset === void 0 && scope.cursor === void 0) {
+          const matches = scope.where ? compileSingleRowExpression(scope.where) : void 0;
+          currentSyncedItems.forEach((row, key) => {
+            const directPosition = unownedDirectWritePositions.get(key);
+            if (directPosition === void 0 ? !persistence?.scanPersistedRows || getPersistedOwners(key).size > 0 : cachedRemoteFetchStart <= directPosition)
+              return;
+            try {
+              if (matches && !toBooleanPredicate(matches(row))) return;
+            } catch {
+              return;
+            }
+            previouslyOwnedRows.add(key);
+          });
+        }
+      }
+      const newItemsMap = /* @__PURE__ */ new Map();
+      newItemsArray.forEach((item) => {
+        const key = getKey(item);
+        const acceptedPosition = acceptedRowPositions.get(key);
+        newItemsMap.set(
+          key,
+          cachedRemoteFetchStart !== void 0 && acceptedPosition !== void 0 && acceptedPosition > cachedRemoteFetchStart && currentSyncedItems.has(key) ? currentSyncedItems.get(key) : item
+        );
+      });
+      const settledDirectPositions = /* @__PURE__ */ new Map();
+      const removedRows = /* @__PURE__ */ new Set();
+      const previousOwnedRows = queryToRows.get(hashedQueryKey);
+      const affectedRowKeys = /* @__PURE__ */ new Set([
+        ...previouslyOwnedRows,
+        ...newItemsMap.keys()
+      ]);
+      const previousOwnersByRow = /* @__PURE__ */ new Map();
+      affectedRowKeys.forEach((key) => {
+        const owners = rowToQueries.get(key);
+        previousOwnersByRow.set(key, owners ? new Set(owners) : void 0);
+      });
+      let transactionActive = false;
+      let resultTransaction;
+      const restoreOwnershipTracking = () => {
+        if (resultTransaction?.applicationStarted) return;
+        if (resultTransaction === void 0 && Array.from(affectedRowKeys).every((key) => {
+          const trackedOwners = rowToQueries.get(key) ?? /* @__PURE__ */ new Set();
+          const publishedOwners = getOwnersFromMetadata(
+            collection._state.syncedMetadata.get(key)
+          );
+          return trackedOwners.size === publishedOwners.size && Array.from(trackedOwners).every(
+            (owner) => publishedOwners.has(owner)
+          );
+        })) {
+          return;
+        }
+        if (!state.observers.has(hashedQueryKey)) return;
+        if (resultApplicationControllers.get(hashedQueryKey) !== applicationToken) {
+          return;
+        }
+        if (previousOwnedRows === void 0) {
+          queryToRows.delete(hashedQueryKey);
+        } else {
+          queryToRows.set(hashedQueryKey, previousOwnedRows);
+        }
+        previousOwnersByRow.forEach((owners, key) => {
+          if (owners === void 0) {
+            rowToQueries.delete(key);
+          } else {
+            rowToQueries.set(key, owners);
+          }
+        });
+      };
+      applicationToken.rollback = restoreOwnershipTracking;
+      const failApplication = (error) => {
+        restoreOwnershipTracking();
+        if (transactionActive) {
+          const cancellation = new AbortController();
+          cancellation.abort();
+          try {
+            commit(cancellation.signal);
+          } catch {
+          }
+        }
+        throw error;
+      };
+      try {
+        queryToRows.set(hashedQueryKey, new Set(previouslyOwnedRows));
+        begin();
+        transactionActive = true;
+        if (metadata) {
+          metadata.collection.delete(
+            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`
+          );
+        }
+        previouslyOwnedRows.forEach((key) => {
+          const oldItem = shouldUsePersistedBaseline ? persistedBaseline.get(key)?.value : currentSyncedItems.get(key);
+          const newItem = newItemsMap.get(key);
+          if (!newItem) {
+            const directPosition = unownedDirectWritePositions.get(key);
+            if (directPosition !== void 0)
+              settledDirectPositions.set(key, directPosition);
+            const owners = getPersistedOwners(key);
+            owners.delete(hashedQueryKey);
+            setPersistedOwners(key, owners);
+            const needToRemove = removeRowOwner(key, hashedQueryKey);
+            if (needToRemove) {
+              write({ type: `delete`, key });
+              removedRows.add(key);
+            }
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
+            write({ type: `update`, value: newItem });
+          }
+        });
+        newItemsMap.forEach((newItem, key) => {
+          const directPosition = unownedDirectWritePositions.get(key);
+          if (!previouslyOwnedRows.has(key) && directPosition !== void 0 && (cachedRemoteFetchStart ?? 0) <= directPosition) {
+            return;
+          }
+          if (directPosition !== void 0 && cachedRemoteFetchStart !== void 0 && cachedRemoteFetchStart > directPosition) {
+            settledDirectPositions.set(key, directPosition);
+          }
+          const owners = getPersistedOwners(key);
+          const addsOwner = !owners.has(hashedQueryKey);
+          const insertsRow = !currentSyncedItems.has(key);
+          if (addsOwner) {
+            owners.add(hashedQueryKey);
+          }
+          addRowOwner(key, hashedQueryKey);
+          if (insertsRow) {
+            write({ type: `insert`, value: newItem });
+          } else if (!previouslyOwnedRows.has(key) && (result.isFetchedAfterMount || directPosition !== void 0 && cachedRemoteFetchStart !== void 0 && cachedRemoteFetchStart > directPosition) && !deepEquals(currentSyncedItems.get(key), newItem)) {
+            write({ type: `update`, value: newItem });
+          }
+          if (addsOwner || insertsRow) {
+            setPersistedOwners(key, owners);
+          }
+        });
+        resultTransaction = collection._state.pendingSyncedTransactions.at(-1);
+        if (isMutationPublicationBlocked()) {
+          applicationToken.settleRefetchAtFetchBoundary?.();
+        }
+        const applied = commit();
+        applicationToken.rollback = void 0;
+        transactionActive = false;
+        retainedQueriesPendingRevalidation.delete(hashedQueryKey);
+        cancelPersistedRetentionExpiry(hashedQueryKey);
+        const finishApplication = () => {
+          if (currentQuery) {
+            recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray);
+          }
+          removedRows.forEach((key) => {
+            if (collection._state.getAcceptedSyncedRow(key) === void 0)
+              acceptedRowPositions.delete(key);
+          });
+          const recordFetchPosition = (position) => {
+            newItemsMap.forEach((_item, key) => {
+              if (collection._state.getAcceptedSyncedRow(key) === void 0)
+                return;
+              if (position > (acceptedRowPositions.get(key) ?? 0))
+                acceptedRowPositions.set(key, position);
+            });
+            latestAcceptedRowPosition = Math.max(
+              latestAcceptedRowPosition,
+              position
+            );
+          };
+          if (cachedRemoteFetchStart !== void 0) {
+            recordFetchPosition(cachedRemoteFetchStart);
+          } else if (currentQuery) {
+            const appliedData = currentQuery.state.data;
+            queueMicrotask(() => {
+              if (queryCollectionSuccessfulFetchData.get(currentQuery) === appliedData) {
+                const position = queryCollectionSuccessfulFetchStarts.get(currentQuery);
+                if (position !== void 0) recordFetchPosition(position);
+              }
+            });
+          }
+          settledDirectPositions.forEach((position, key) => {
+            if (unownedDirectWritePositions.get(key) === position)
+              unownedDirectWritePositions.delete(key);
+          });
+          if (!signal?.aborted) {
+            readyRun();
+          }
+        };
+        const accepted = whenSyncAccepted(applied);
+        if (accepted === true) finishApplication();
+        else void accepted.then(finishApplication, () => void 0);
+        if (applied !== true) {
+          return applied.then(() => void 0, failApplication);
+        }
+        return true;
+      } catch (error) {
+        return failApplication(error);
+      }
+    };
+    const reconcileSuccessfulResult = async (queryKey2, result, applicationToken, signal, selectedItems, fetchStart) => {
+      const hashedQueryKey = hashKey(queryKey2);
+      const validatedItems = selectedItems ?? validateSuccessfulResultItemsForApplication(queryKey2, result);
+      const persistedBaseline = await loadPersistedBaselineForQuery(
+        hashedQueryKey,
+        validatedItems.length === 0
+      );
+      if (collection.status === `cleaned-up` || resultApplicationControllers.get(hashedQueryKey) !== applicationToken) {
+        throw new LoadSubsetOperationAbortedError();
+      }
+      const appliedThroughGeneration = directWriteGeneration;
+      const query = queryClient.getQueryCache().find({ queryKey: queryKey2, exact: true });
+      const physicalFetchStart = query ? queryCollectionCurrentFetchStarts.get(query) : void 0;
+      const currentItems = fetchStart !== void 0 && fetchStart < appliedThroughGeneration ? mergeOlderRows(validatedItems, fetchStart, hashedQueryKey) : validatedItems;
+      await applySuccessfulResult(
+        queryKey2,
+        result,
+        applicationToken,
+        persistedBaseline,
+        signal,
+        currentItems
+      );
+      if (fetchStart !== void 0 && fetchStart < appliedThroughGeneration && fetchStartGenerations.get(hashedQueryKey) === fetchStart && query && queryCollectionCurrentFetchStarts.get(query) === physicalFetchStart) {
+        fetchStartGenerations.set(hashedQueryKey, appliedThroughGeneration);
+      }
+    };
+    const trackResultApplication = (hashedQueryKey, application, isFetching, applicationErrorRevision) => {
+      pendingResultApplications.set(hashedQueryKey, application);
+      const finish = () => {
+        if (pendingResultApplications.get(hashedQueryKey) === application) {
+          pendingResultApplications.delete(hashedQueryKey);
+          return true;
+        }
+        return false;
+      };
+      void application.then(
+        () => {
+          if (finish()) {
+            failedResultApplications.delete(hashedQueryKey);
+            if (!isFetching && applicationErrorRevision === errorRevisionOf(hashedQueryKey)) {
+              reportRecovered(hashedQueryKey);
+            }
+          }
+        },
+        (error) => {
+          if (!finish()) return;
+          failedResultApplications.set(hashedQueryKey, error);
+          bumpErrorRevision(hashedQueryKey);
+          console.error(
+            `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
+            error
+          );
+          if (!failBeforeReady(error)) reportFailing(hashedQueryKey, error);
+        }
+      );
+    };
+    const enqueueResultApplication = (hashedQueryKey, result, apply) => {
+      invalidatePendingResultApplication(hashedQueryKey);
+      const currentErrorRevision = errorRevisionOf(hashedQueryKey);
+      const controller = new AbortController();
+      let settleRefetchAtFetchBoundary = () => {
+      };
+      const fetchBoundary = new Promise((resolve) => {
+        settleRefetchAtFetchBoundary = resolve;
+      });
+      controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary;
+      resultApplicationControllers.set(hashedQueryKey, controller);
+      let application;
+      try {
+        application = apply(controller.signal, controller);
+      } catch (error) {
+        application = Promise.reject(error);
+      }
+      if (application === true) {
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          recordResultApplicationSettlement(
+            hashedQueryKey,
+            result,
+            Promise.resolve()
+          );
+          resultApplicationControllers.delete(hashedQueryKey);
+          failedResultApplications.delete(hashedQueryKey);
+          if (!result.isFetching && currentErrorRevision === errorRevisionOf(hashedQueryKey)) {
+            reportRecovered(hashedQueryKey);
+          }
+        }
+        return;
+      }
+      const refetchSettlement = Promise.race([application, fetchBoundary]);
+      void refetchSettlement.catch(() => void 0);
+      recordResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+        refetchSettlement
+      );
+      const cleanupController = () => {
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          resultApplicationControllers.delete(hashedQueryKey);
+        }
+      };
+      void application.then(cleanupController, cleanupController);
+      if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+        trackResultApplication(
+          hashedQueryKey,
+          application,
+          result.isFetching,
+          currentErrorRevision
+        );
+      }
+    };
+    const makeQueryResultHandler = (queryKey2) => {
+      const hashedQueryKey = hashKey(queryKey2);
+      const observerEpoch = scopedRecoveryEpoch;
+      const handleQueryResult = (result) => {
+        if (activeSyncSession !== syncSession || scopedRecoveryPending || observerEpoch !== scopedRecoveryEpoch) {
+          return;
+        }
+        const observer = state.observers.get(hashedQueryKey);
+        const observedQuery = observer?.getCurrentQuery();
+        if (observer && observedQuery) {
+          trackOwnedCacheQuery(observedQuery, hashedQueryKey);
+        }
+        if (writingDirectCache) return;
+        if (observedQuery) {
+          const fetchStart = queryCollectionCurrentFetchStarts.get(observedQuery);
+          if (result.isError && requiredCacheGenerationFetchStart !== void 0 && fetchStart !== void 0 && fetchStart <= requiredCacheGenerationFetchStart) {
+            return;
+          }
+          if (result.isSuccess) {
+            if (result.isFetching && !collection.deferDataRefresh && hasAppliedOwnership(hashedQueryKey) && queryCollectionSuccessfulFetchData.get(observedQuery) === observedQuery.state.data) {
+              return;
+            }
+            if (!hasCurrentCacheGenerationFetch(observedQuery)) {
+              queueMicrotask(() => {
+                const currentObserver = state.observers.get(hashedQueryKey);
+                if (currentObserver && currentObserver === observer && hasCurrentCacheGenerationFetch(
+                  currentObserver.getCurrentQuery()
+                )) {
+                  handleQueryResult(currentObserver.getCurrentResult());
+                }
+              });
+              return;
+            }
+            if ((directWriteGeneration > 0 || latestAcceptedRowPosition > (queryCollectionCurrentFetchStarts.get(observedQuery) ?? latestAcceptedRowPosition)) && observedQuery.state.dataUpdateCount > (queryCollectionSuccessfulFetchVersions.get(observedQuery) ?? 0)) {
+              const version = observedQuery.state.dataUpdateCount;
+              if (awaitingFetchSuccessVersions.get(observedQuery) !== version) {
+                awaitingFetchSuccessVersions.set(observedQuery, version);
+                queueMicrotask(() => {
+                  const currentObserver = state.observers.get(hashedQueryKey);
+                  if (currentObserver === observer && observedQuery.state.data === result.data && observedQuery.state.dataUpdateCount === version)
+                    handleQueryResult(result);
+                });
+                return;
+              }
+              if (directWriteGeneration > 0 && queryCollectionSuccessfulFetchData.get(observedQuery) !== observedQuery.state.data)
+                return;
+            }
+            const currentFetchStart = queryCollectionCurrentFetchStarts.get(observedQuery);
+            if (!result.isFetching && (unownedDirectWritePositions.size > 0 || persistence?.scanPersistedRows !== void 0) && currentFetchStart !== void 0 && currentFetchStart !== queryCollectionSuccessfulFetchStarts.get(observedQuery) && !awaitingFetchSuccessNotification.has(result)) {
+              awaitingFetchSuccessNotification.add(result);
+              queueMicrotask(() => {
+                const currentObserver = state.observers.get(hashedQueryKey);
+                if (currentObserver?.getCurrentResult() === result)
+                  handleQueryResult(result);
+              });
+              return;
+            }
+            const unpatchedVersion = unpatchedCacheVersions.get(observedQuery);
+            if (unpatchedVersion !== void 0) {
+              if (observedQuery.state.dataUpdateCount <= unpatchedVersion)
+                return;
+              unpatchedCacheVersions.delete(observedQuery);
+            }
+          }
+        }
+        if (result.isSuccess && collection.deferDataRefresh) {
+          if (result.isFetching) {
+            void getDeferredRefresh(hashedQueryKey, collection.deferDataRefresh);
+            return;
+          }
+          scheduleDeferredResultSettlement(
+            hashedQueryKey,
+            result,
+            getDeferredRefresh(hashedQueryKey, collection.deferDataRefresh)
+          );
+          return;
+        }
+        if (result.isSuccess && !result.isFetching && (pendingDirectWrites !== void 0 || (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) < directWriteGeneration)) {
+          const query = observer?.getCurrentQuery();
+          const fetchStart = fetchStartGenerations.get(hashedQueryKey) ?? 0;
+          if (readExceptionalResultSettlement(result)?.type === `pending`)
+            return;
+          const validation = validateSuccessfulResultItems(queryKey2, result);
+          if (query && `items` in validation) {
+            deferredResults++;
+            const refresh = (async () => {
+              await directWritesSettled();
+              const current = state.observers.get(hashedQueryKey);
+              if (current?.getCurrentQuery() !== query) {
+                throw new CancelledError();
+              }
+              const merged = mergeOlderRows(
+                validation.items,
+                fetchStart,
+                hashedQueryKey
+              );
+              let unsubscribe = () => {
+              };
+              const notified = new Promise((resolve) => {
+                unsubscribe = current.subscribe(() => resolve());
+              });
+              const before = current.getCurrentResult();
+              try {
+                fetchStartGenerations.set(hashedQueryKey, directWriteGeneration);
+                const patched = updateCacheDataForKey(queryKey2, merged);
+                if (!patched) {
+                  enqueueResultApplication(
+                    hashedQueryKey,
+                    result,
+                    (signal, token) => retainedQueriesPendingRevalidation.has(hashedQueryKey) ? reconcileSuccessfulResult(
+                      queryKey2,
+                      result,
+                      token,
+                      signal,
+                      merged,
+                      fetchStart
+                    ) : applySuccessfulResult(
+                      queryKey2,
+                      result,
+                      token,
+                      void 0,
+                      signal,
+                      merged
+                    )
+                  );
+                  const application2 = getResultApplicationSettlement(hashedQueryKey);
+                  if (application2 !== true) await application2;
+                  return current.getCurrentResult();
+                }
+                if (current.getCurrentResult() === before)
+                  handleQueryResult(before);
+                else await notified;
+              } finally {
+                unsubscribe();
+              }
+              await new Promise((resolve) => queueMicrotask(resolve));
+              const application = getResultApplicationSettlement(hashedQueryKey);
+              if (application !== true) await application;
+              return current.getCurrentResult();
+            })();
+            const settled = () => {
+              deferredResults--;
+            };
+            void refresh.then(settled, settled);
+            scheduleDeferredResultSettlement(hashedQueryKey, result, refresh);
+            return;
+          }
+        }
+        if (result.isSuccess) {
+          if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            const query = queryClient.getQueryCache().find({
+              queryKey: queryKey2,
+              exact: true
+            });
+            if (query?.state.dataUpdateCount === 0) {
+              if (!result.isFetching) {
+                state.observers.get(hashedQueryKey)?.refetch().catch(() => {
+                });
+              }
+              return;
+            }
+            if (result.isFetching) return;
+            enqueueResultApplication(
+              hashedQueryKey,
+              result,
+              (signal, token) => reconcileSuccessfulResult(
+                queryKey2,
+                result,
+                token,
+                signal,
+                void 0,
+                fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration
+              )
+            );
+          } else {
+            enqueueResultApplication(
+              hashedQueryKey,
+              result,
+              (signal, token) => applySuccessfulResult(queryKey2, result, token, void 0, signal)
+            );
+          }
+        }
+        if (observedQuery && result.errorUpdateCount < (observedErrorUpdates.get(observedQuery) ?? 0)) {
+          observedErrorUpdates.delete(observedQuery);
+        }
+        if (result.isError && result.fetchStatus === `idle`) {
+          const isNewError = !observedQuery || result.errorUpdateCount !== observedErrorUpdates.get(observedQuery);
+          if (isNewError) {
+            if (observedQuery) {
+              observedErrorUpdates.set(observedQuery, result.errorUpdateCount);
+            }
+            bumpErrorRevision(hashedQueryKey);
+          }
+          console.error(
+            `[QueryCollection] Error observing query ${String(queryKey2)}:`,
+            result.error
+          );
+          if (!failBeforeReady(result.error) && isNewError)
+            reportFailing(hashedQueryKey, result.error);
+        }
+      };
+      return handleQueryResult;
+    };
+    const isSubscribed = (hashedQueryKey) => {
+      return unsubscribes.has(hashedQueryKey);
+    };
+    applyRefetchResultWhenUnsubscribed = (hashedQueryKey, result) => {
+      if (isSubscribed(hashedQueryKey)) return false;
+      const trackedQueryKey = hashToQueryKey.get(hashedQueryKey);
+      if (!trackedQueryKey) return false;
+      makeQueryResultHandler(trackedQueryKey)(result);
+      return true;
+    };
+    const subscribeToQuery = (observer, hashedQueryKey, ignoredCacheSnapshot) => {
+      if (!isSubscribed(hashedQueryKey)) {
+        if (syncMode === `eager`) observer.setOptions(observer.options);
+        const cachedQueryKey = hashToQueryKey.get(hashedQueryKey);
+        const handleQueryResult = makeQueryResultHandler(cachedQueryKey);
+        const applyResult = (result) => {
+          if (ignoredCacheSnapshot && result.isSuccess) {
+            const query = observer.getCurrentQuery();
+            if (query.state.data === ignoredCacheSnapshot.data && query.state.dataUpdateCount === ignoredCacheSnapshot.version && (query.state.fetchStatus !== `idle` || queryCollectionCurrentFetchStarts.get(query) === ignoredCacheSnapshot.fetchStart))
+              return;
+          }
+          handleQueryResult(result);
+        };
+        const unsubscribeFn = observer.subscribe(applyResult);
+        unsubscribes.set(hashedQueryKey, unsubscribeFn);
+        const currentResult = observer.getCurrentResult();
+        if (currentResult.isSuccess || currentResult.isError) {
+          applyResult(currentResult);
+        }
+      }
+    };
+    const subscribeToQueries = () => {
+      state.observers.forEach(
+        (observer, hashedQueryKey) => subscribeToQuery(observer, hashedQueryKey)
+      );
+    };
+    const unsubscribeFromQueries = () => {
+      unsubscribes.forEach((unsubscribeFn) => {
+        unsubscribeFn();
+      });
+      unsubscribes.clear();
+    };
+    ensureEagerSubscription = () => {
+      if (syncMode !== `eager`) return;
+      state.observers.forEach((observer, key) => {
+        const query = observer.getCurrentQuery();
+        if (queryClient.getQueryCache().get(query.queryHash) !== query) {
+          subscribeToQuery(observer, key);
+        }
+      });
+    };
+    syncStarted = true;
+    const unsubscribeFromCollectionEvents = collection.on(
+      `subscribers:change`,
+      ({ subscriberCount }) => {
+        if (subscriberCount > 0) {
+          subscribeToQueries();
+        } else if (subscriberCount === 0) {
+          unsubscribeFromQueries();
+        }
+      }
+    );
+    if (syncMode === `eager`) {
+      const result = createQueryFromOpts({});
+      if (result instanceof Promise) {
+        void result.catch(() => {
+        });
+      }
+    } else {
+      if (startupRetentionSettled) {
+        readyRun();
+      } else {
+        void startupRetentionMaintenancePromise.then(readyRun);
+      }
+    }
+    subscribeToQueries();
+    state.observers.forEach((observer, hashedQueryKey) => {
+      const query = observer.getCurrentQuery();
+      const directPatch = queryCollectionDirectCachePatches.get(query);
+      if (syncMode === `on-demand` && directPatch && (directPatch.owner !== cacheOwnerToken || directPatch.session !== syncSession))
+        return;
+      const cachedQueryKey = hashToQueryKey.get(hashedQueryKey);
+      const handleQueryResult = makeQueryResultHandler(cachedQueryKey);
+      handleQueryResult(observer.getCurrentResult());
+    });
+    const unsubscribePendingReadyListeners = (hashedQueryKey) => {
+      pendingReadyUnsubscribes.get(hashedQueryKey)?.forEach((unsubscribe) => {
+        unsubscribe();
+      });
+      pendingReadyUnsubscribes.delete(hashedQueryKey);
+    };
+    const cleanupQueryInternal = (hashedQueryKey) => {
+      const query = state.observers.get(hashedQueryKey)?.getCurrentQuery();
+      unsubscribes.get(hashedQueryKey)?.();
+      unsubscribes.delete(hashedQueryKey);
+      unsubscribePendingReadyListeners(hashedQueryKey);
+      cancelPersistedRetentionExpiry(hashedQueryKey);
+      retainedQueriesPendingRevalidation.delete(hashedQueryKey);
+      invalidatePendingResultApplication(hashedQueryKey);
+      const nextOwnersByRow = removeQueryOwnership(hashedQueryKey);
+      const ownershipTombstone = queryToRows.get(hashedQueryKey);
+      const retireOwnership = () => {
+        if (queryToRows.get(hashedQueryKey) === ownershipTombstone)
+          queryToRows.delete(hashedQueryKey);
+      };
+      const rowsToDelete = [];
+      nextOwnersByRow.forEach((nextOwners, rowKey) => {
+        const row = collection._state.getAcceptedSyncedRow(rowKey);
+        if (nextOwners.size === 0 && row) {
+          rowsToDelete.push(row);
+        }
+      });
+      const shouldWriteMetadata = metadata !== void 0 && nextOwnersByRow.size > 0;
+      const retentionKey = `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`;
+      const hasRetentionMarker = metadata?.collection.get(retentionKey) !== void 0;
+      const needsTransaction = shouldWriteMetadata || rowsToDelete.length > 0 || hasRetentionMarker;
+      if (needsTransaction) {
+        begin();
+      }
+      nextOwnersByRow.forEach((owners, rowKey) => {
+        if (shouldWriteMetadata) {
+          setPersistedOwners(rowKey, owners);
+        }
+      });
+      if (rowsToDelete.length > 0) {
+        rowsToDelete.forEach((row) => {
+          write({ type: `delete`, value: row });
+        });
+      }
+      if (hasRetentionMarker) {
+        metadata.collection.delete(retentionKey);
+      }
+      const applied = needsTransaction ? commit() : true;
+      const retireDeletedPositions = () => {
+        rowsToDelete.forEach((row) => {
+          const key = getKey(row);
+          if (collection._state.getAcceptedSyncedRow(key) === void 0)
+            acceptedRowPositions.delete(key);
+        });
+      };
+      const accepted = whenSyncAccepted(applied);
+      if (accepted === true) retireDeletedPositions();
+      else void accepted.then(retireDeletedPositions, () => void 0);
+      if (applied === true) retireOwnership();
+      else void applied.then(retireOwnership, () => void 0);
+      state.observers.delete(hashedQueryKey);
+      reportRecovered(hashedQueryKey);
+      if (query?.state.fetchStatus !== `fetching`)
+        fetchStartGenerations.delete(hashedQueryKey);
+      hashToQueryKey.delete(hashedQueryKey);
+      errorRevisions.delete(hashedQueryKey);
+      queryRefCounts.delete(hashedQueryKey);
+      effectivePersistedGcTimes.delete(hashedQueryKey);
+    };
+    const cleanupQueryIfIdle = (hashedQueryKey) => {
+      const refcount = queryRefCounts.get(hashedQueryKey) || 0;
+      const observer = state.observers.get(hashedQueryKey);
+      const effectivePersistedGcTime = effectivePersistedGcTimes.get(hashedQueryKey);
+      if (refcount <= 0) {
+        unsubscribes.get(hashedQueryKey)?.();
+        unsubscribes.delete(hashedQueryKey);
+        unsubscribePendingReadyListeners(hashedQueryKey);
+      }
+      if (refcount > 0) {
+        return;
+      }
+      const hasListeners = observer?.hasListeners() ?? false;
+      if (hasListeners) {
+        queryRefCounts.set(hashedQueryKey, 0);
+        return;
+      }
+      if (effectivePersistedGcTime !== void 0 && metadata && persistence?.scanPersistedRows) {
+        invalidatePendingResultApplication(hashedQueryKey);
+        begin();
+        metadata.collection.set(
+          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+          {
+            queryHash: hashedQueryKey,
+            mode: effectivePersistedGcTime === Number.POSITIVE_INFINITY ? `until-revalidated` : `ttl`,
+            ...effectivePersistedGcTime === Number.POSITIVE_INFINITY ? {} : { expiresAt: Date.now() + effectivePersistedGcTime }
+          }
+        );
+        commit();
+        if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
+          schedulePersistedRetentionExpiry({
+            queryHash: hashedQueryKey,
+            mode: `ttl`,
+            expiresAt: Date.now() + effectivePersistedGcTime
+          });
+        }
+        unsubscribes.get(hashedQueryKey)?.();
+        unsubscribes.delete(hashedQueryKey);
+        state.observers.delete(hashedQueryKey);
+        reportRecovered(hashedQueryKey);
+        if (observer?.getCurrentQuery().state.fetchStatus !== `fetching`)
+          fetchStartGenerations.delete(hashedQueryKey);
+        hashToQueryKey.delete(hashedQueryKey);
+        errorRevisions.delete(hashedQueryKey);
+        queryRefCounts.set(hashedQueryKey, 0);
+        return;
+      }
+      cleanupQueryInternal(hashedQueryKey);
+    };
+    const forceCleanupQuery = (hashedQueryKey) => {
+      cleanupQueryInternal(hashedQueryKey);
+    };
+    const unsubscribeQueryCache = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === `added` && partialMatchKey(event.query.queryKey, baseKey)) {
+        trackCacheQuery(event.query);
+      }
+      if (!trackedCacheQueries.has(event.query)) return;
+      if (event.type === `updated`) {
+        if (event.action.type === `fetch`) {
+          let fetchStart = queryCollectionFetchActionStarts.get(event.action);
+          if (fetchStart === void 0) {
+            fetchStart = ++nextQueryCollectionAuthorityPosition;
+            queryCollectionFetchActionStarts.set(event.action, fetchStart);
+          }
+          fetchStartGenerations.set(hashKey(event.query.queryKey), fetchStart);
+          state.observers.forEach((observer, logicalHash) => {
+            if (observer.getCurrentQuery() === event.query)
+              fetchStartGenerations.set(logicalHash, fetchStart);
+          });
+          queryCollectionCurrentFetchStarts.set(event.query, fetchStart);
+          const obsoleteFetchStarts = [
+            ...fetchApplicationRecords.get(event.query)?.keys() ?? []
+          ].filter((start) => start !== fetchStart);
+          if (obsoleteFetchStarts.length > 0) {
+            queueMicrotask(
+              () => retireFetchApplicationRecords(event.query, obsoleteFetchStarts)
+            );
+          }
+          captureFetchResult(event.query, fetchStart);
+        } else if (event.action.type === `success` && !event.action.manual) {
+          if (event.query.state.data === event.action.data)
+            queryCollectionDirectCachePatches.delete(event.query);
+          queryCollectionSuccessfulFetchData.set(
+            event.query,
+            event.action.data
+          );
+          queryCollectionSuccessfulFetchVersions.set(
+            event.query,
+            event.query.state.dataUpdateCount
+          );
+          const fetchStart = queryCollectionCurrentFetchStarts.get(
+            event.query
+          );
+          if (fetchStart !== void 0) {
+            queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart);
+            captureFetchResult(event.query, fetchStart);
+            queueMicrotask(() => {
+              captureFetchApplications(event.query, fetchStart);
+              retireFetchApplicationRecords(event.query, [fetchStart]);
+            });
+          }
+        } else if (event.action.type === `error`) {
+          const fetchStart = queryCollectionCurrentFetchStarts.get(
+            event.query
+          );
+          if (fetchStart !== void 0) {
+            captureFetchResult(event.query, fetchStart);
+            queueMicrotask(
+              () => retireFetchApplicationRecords(event.query, [fetchStart])
+            );
+          }
+        } else if (event.action.type === `setState` && event.action.state.fetchStatus === `idle`) {
+          const fetchStart = queryCollectionCurrentFetchStarts.get(
+            event.query
+          );
+          if (fetchStart !== void 0) {
+            queueMicrotask(
+              () => retireFetchApplicationRecords(event.query, [fetchStart])
+            );
+          }
+        }
+      }
+      const hashedKey = hashKey(event.query.queryKey);
+      if (!state.observers.has(hashedKey) && (event.type === `removed` || event.query.state.fetchStatus !== `fetching`)) {
+        fetchStartGenerations.delete(hashedKey);
+      }
+      if (event.type === `removed`) {
+        trackedCacheQueries.delete(event.query);
+        if (hashToQueryKey.has(hashedKey)) {
+          if (syncMode === `eager`) {
+            unsubscribes.get(hashedKey)?.();
+            unsubscribes.delete(hashedKey);
+            unsubscribePendingReadyListeners(hashedKey);
+            if (collection.subscriberCount > 0) ensureEagerSubscription();
+            return;
+          }
+          cleanupQueryIfIdle(hashedKey);
+        }
+      }
+    });
+    const cleanup = () => {
+      if (activeSyncSession === syncSession) activeSyncSession = void 0;
+      clearTimeout(invalidationTimer);
+      invalidationTimer = void 0;
+      pendingStartupLoads.clear();
+      fullSourceDependents.clear();
+      ensureEagerSubscription = () => {
+      };
+      applyRefetchResultWhenUnsubscribed = () => false;
+      unsubscribeFromCollectionEvents();
+      unsubscribeFromQueries();
+      persistedRetentionTimers.forEach((timer) => {
+        clearTimeout(timer);
+      });
+      persistedRetentionTimers.clear();
+      pendingExceptionalResultSettlements.forEach((settlement) => {
+        settlement.reject(new CancelledError());
+      });
+      pendingExceptionalResultSettlements.clear();
+      deferredRefreshes.clear();
+      if (getExceptionalResultSettlement === readExceptionalResultSettlement) {
+        getExceptionalResultSettlement = () => void 0;
+      }
+      const allHashedKeys = /* @__PURE__ */ new Set([
+        ...state.observers.keys(),
+        ...queryToRows.keys()
+      ]);
+      for (const hashedKey of allHashedKeys) {
+        forceCleanupQuery(hashedKey);
+      }
+      fetchStartGenerations.clear();
+      unownedDirectWritePositions.clear();
+      acceptedRowPositions.clear();
+      latestAcceptedRowPosition = 0;
+      unsubscribeQueryCache();
+      for (const query of [...trackedCacheQueries]) {
+        const belongsToCleanup = [...getLogicalHashes(query)].some(
+          (hash) => allHashedKeys.has(hash)
+        );
+        if (belongsToCleanup && (syncMode === `eager` || ownedCacheQueries.has(query) && query.getObserversCount() === 0)) {
+          queryClient.getQueryCache().remove(query);
+        }
+      }
+      for (const query of trackedCacheQueries) {
+        queryCollectionCacheOwners.get(query)?.delete(cacheOwnerToken);
+      }
+      trackedCacheQueries.clear();
+      ownedCacheQueries = /* @__PURE__ */ new WeakSet();
+    };
+    const unloadSubset = (options2) => {
+      const pending = pendingStartupLoads.get(options2);
+      if (pending) {
+        pending.delete(pending.values().next().value);
+        if (pending.size === 0) pendingStartupLoads.delete(options2);
+        return;
+      }
+      const requestedHash = hashKey(generateQueryKeyFromOptions(options2));
+      const dependentCount = options2.refetch ? void 0 : fullSourceDependents.get(requestedHash);
+      if (dependentCount !== void 0) {
+        if (dependentCount === 1) fullSourceDependents.delete(requestedHash);
+        else fullSourceDependents.set(requestedHash, dependentCount - 1);
+      }
+      const hashedQueryKey = dependentCount === void 0 ? requestedHash : fullSourceHash;
+      const currentCount = queryRefCounts.get(hashedQueryKey) || 0;
+      const newCount = currentCount - 1;
+      if (newCount <= 0) {
+        queryRefCounts.set(hashedQueryKey, 0);
+        cleanupQueryIfIdle(hashedQueryKey);
+      } else {
+        queryRefCounts.set(hashedQueryKey, newCount);
+      }
+    };
+    const restartAfterScopedRecovery = async (cacheRotated) => {
+      const recoveryEpoch = ++scopedRecoveryEpoch;
+      scopedRecoveryPending = true;
+      unsubscribeFromQueries();
+      for (const hashedQueryKey of state.observers.keys()) {
+        unsubscribePendingReadyListeners(hashedQueryKey);
+        invalidatePendingResultApplication(hashedQueryKey);
+      }
+      await cacheRotated;
+      if (activeSyncSession !== syncSession) throw new CancelledError();
+      if (recoveryEpoch !== scopedRecoveryEpoch) return;
+      queryToRows.clear();
+      rowToQueries.clear();
+      retainedQueriesPendingRevalidation.clear();
+      directWriteKeyGenerations.clear();
+      unownedDirectWritePositions.clear();
+      acceptedRowPositions.clear();
+      latestAcceptedRowPosition = 0;
+      persistedRetentionTimers.forEach((timer) => clearTimeout(timer));
+      persistedRetentionTimers.clear();
+      requiredCacheGenerationFetchStart = nextQueryCollectionAuthorityPosition;
+      scopedRecoveryPending = false;
+      state.observers.forEach((observer, hashedQueryKey) => {
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) {
+          subscribeToQuery(observer, hashedQueryKey);
+        }
+      });
+    };
+    const loadSubsetDedupe = syncMode === `eager` ? void 0 : createQueryFromOpts;
+    return {
+      loadSubset: loadSubsetDedupe,
+      unloadSubset: syncMode === `eager` ? void 0 : unloadSubset,
+      restartAfterScopedRecovery: syncMode === `on-demand` ? restartAfterScopedRecovery : void 0,
+      cleanup
+    };
+  };
+  const refetchQueryResults = async (opts, awaitApplications) => {
+    const allQueryKeys = [...hashToQueryKey.values()];
+    ensureEagerSubscription();
+    const syncSession = activeSyncSession;
+    const recoveryEpoch = scopedRecoveryEpoch;
+    const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+      if (scopedRecoveryPending) throw new CancelledError();
+      const hashedQueryKey = hashKey(trackedQueryKey);
+      const queryObserver = state.observers.get(hashedQueryKey);
+      if (!queryObserver) return void 0;
+      const readExceptionalSettlement = getExceptionalResultSettlement;
+      let query = queryObserver.getCurrentQuery();
+      let startingResult;
+      let fetchRecord;
+      let result;
+      try {
+        cancelPreWriteFetch(query, hashedQueryKey);
+        const fetch = queryObserver.refetch({
+          throwOnError: opts?.throwOnError
+        });
+        query = queryObserver.getCurrentQuery();
+        startingResult = queryObserver.getCurrentResult();
+        const fetchStart = queryCollectionCurrentFetchStarts.get(query);
+        if (fetchStart !== void 0) {
+          fetchRecord = getFetchApplicationRecord(
+            query,
+            fetchStart,
+            hashedQueryKey
+          );
+        }
+        result = await fetch;
+        if (scopedRecoveryPending || recoveryEpoch !== scopedRecoveryEpoch) {
+          throw new CancelledError();
+        }
+      } catch (error) {
+        if (scopedRecoveryPending || recoveryEpoch !== scopedRecoveryEpoch) {
+          throw new CancelledError();
+        }
+        const currentResult = queryObserver.getCurrentResult();
+        const appliedUnsubscribed2 = applyRefetchResultWhenUnsubscribed(
+          hashedQueryKey,
+          currentResult
+        );
+        const causalResult2 = appliedUnsubscribed2 ? currentResult : fetchRecord?.result ?? currentResult;
+        if (fetchRecord) {
+          fetchRecord.result = causalResult2;
+          fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+            hashedQueryKey,
+            causalResult2
+          );
+        }
+        throw error;
+      }
+      const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+        hashedQueryKey,
+        result
+      );
+      const causalResult = appliedUnsubscribed ? result : fetchRecord?.result ?? result;
+      if (fetchRecord) {
+        fetchRecord.result = causalResult;
+        fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+          hashedQueryKey,
+          causalResult
+        );
+      }
+      await new Promise((resolve) => queueMicrotask(resolve));
+      const exceptionalSettlement = readExceptionalSettlement(causalResult) ?? readExceptionalSettlement(result);
+      const settlement = fetchRecord?.settlement ?? getRecordedResultApplicationSettlement(hashedQueryKey, result) ?? getRecordedResultApplicationSettlement(hashedQueryKey, startingResult);
+      if (activeSyncSession !== syncSession && exceptionalSettlement === void 0 && settlement === void 0) {
+        throw new CancelledError();
+      }
+      if (awaitApplications) {
+        if (exceptionalSettlement?.type === `rejected`) {
+          throw exceptionalSettlement.error;
+        }
+        if (exceptionalSettlement?.type === `pending`) {
+          const replacement = await exceptionalSettlement.promise;
+          if (recoveryEpoch !== scopedRecoveryEpoch) {
+            throw new CancelledError();
+          }
+          if (!replacement.isSuccess && opts?.throwOnError) {
+            throw replacement.error;
+          }
+          return replacement;
+        }
+      }
+      if (awaitApplications && !isMutationPublicationBlocked() && settlement) {
+        if (opts?.throwOnError) {
+          await settlement;
+        } else {
+          await settlement.catch(() => void 0);
+        }
+      }
+      if (recoveryEpoch !== scopedRecoveryEpoch) throw new CancelledError();
+      return causalResult;
+    });
+    return await Promise.all(refetchPromises);
+  };
+  const isMutationPublicationBlocked = () => {
+    if (activeMutationHandlerCount > 0) return true;
+    for (const transaction of writeContext?.collection._state.transactions.values() ?? []) {
+      if (transaction.state === `persisting`) return true;
+    }
+    return false;
+  };
+  const refetch = (opts) => refetchQueryResults(opts, !isMutationPublicationBlocked());
+  const ownedByAnotherCollection = (query) => {
+    for (const owner of queryCollectionCacheOwners.get(query) ?? []) {
+      if (owner !== cacheOwnerToken) return true;
+    }
+    return false;
+  };
+  const updateCacheDataForKey = (key, items, selectedItems) => {
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true });
+    const markUnpatchable = () => {
+      if (query) unpatchedCacheVersions.set(query, query.state.dataUpdateCount);
+    };
+    if (syncMode === `on-demand` && query && ownedByAnotherCollection(query)) {
+      markUnpatchable();
+      return false;
+    }
+    if (query?.state.status === `pending` && query.state.fetchStatus !== `idle`) {
+      markUnpatchable();
+      return false;
+    }
+    const writeCache = (data) => {
+      if (query) {
+        queryCollectionDirectCachePatches.set(query, {
+          owner: cacheOwnerToken,
+          session: activeSyncSession
+        });
+        query.setState(
+          query.state.status === `pending` ? { data, status: `success` } : { data }
+        );
+        unpatchedCacheVersions.delete(query);
+      } else {
+        queryClient.setQueryData(key, data);
+        const seededQuery = queryClient.getQueryCache().find({ queryKey: key, exact: true });
+        if (seededQuery)
+          queryCollectionDirectCachePatches.set(seededQuery, {
+            owner: cacheOwnerToken,
+            session: activeSyncSession
+          });
+      }
+    };
+    if (select) {
+      const oldData = query?.state.data;
+      if (!oldData || typeof oldData !== `object`) {
+        markUnpatchable();
+        return false;
+      }
+      if (Array.isArray(oldData)) {
+        writeCache(items);
+        return true;
+      }
+      const selectedArray = selectedItems ?? select(oldData);
+      if (!Array.isArray(selectedArray)) {
+        markUnpatchable();
+        return false;
+      }
+      const property = Object.keys(oldData).find(
+        (name) => oldData[name] === selectedArray
+      );
+      if (property === void 0) {
+        markUnpatchable();
+        return false;
+      }
+      writeCache({ ...oldData, [property]: items });
+      return true;
+    } else {
+      const previous = query?.state.data;
+      if (previous === void 0 || Array.isArray(previous)) {
+        writeCache(items);
+        return true;
+      }
+      return false;
+    }
+  };
+  const reserveDirectWrite = () => {
+    directWriteGeneration = ++nextQueryCollectionAuthorityPosition;
+    for (const [hashedQueryKey, observer] of state.observers) {
+      if (observer.getCurrentQuery().state.fetchStatus !== `fetching` && !pendingResultApplications.has(hashedQueryKey))
+        fetchStartGenerations.set(hashedQueryKey, directWriteGeneration);
+    }
+    return directWriteGeneration;
+  };
+  const claimDirectWriteKeys = (keys, position) => {
+    let older = deferredResults > 0 || pendingDirectWrites !== void 0 || pendingResultApplications.size > 0;
+    if (!older) {
+      for (const query of trackedCacheQueries) {
+        if (query.state.fetchStatus === `fetching`) {
+          older = true;
+          break;
+        }
+      }
+    }
+    if (!older) directWriteKeyGenerations.clear();
+    else for (const key of keys) directWriteKeyGenerations.set(key, position);
+  };
+  const noteWaitingDirectWrite = (waiting) => {
+    const tail = Promise.all([
+      pendingDirectWrites,
+      waiting
+    ]).then(
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = void 0;
+      },
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = void 0;
+      }
+    );
+    pendingDirectWrites = tail;
+  };
+  const updateCacheData = (getItems, changedKeys, position) => {
+    writingDirectCache = true;
+    try {
+      const acceptedItems = getItems(changedKeys);
+      const accepted = new Map(
+        acceptedItems.map((item) => [getKey(item), item])
+      );
+      writeDirectCache(getItems, changedKeys, accepted);
+      for (const key of changedKeys) {
+        if (accepted.has(key)) {
+          acceptedRowPositions.set(key, position);
+          latestAcceptedRowPosition = Math.max(
+            latestAcceptedRowPosition,
+            position
+          );
+          if ((rowToQueries.get(key)?.size ?? 0) === 0)
+            unownedDirectWritePositions.set(key, position);
+          else unownedDirectWritePositions.delete(key);
+          continue;
+        }
+        unownedDirectWritePositions.delete(key);
+        acceptedRowPositions.delete(key);
+        for (const owner of [...rowToQueries.get(key) ?? []]) {
+          removeRowOwner(key, owner);
+        }
+      }
+    } finally {
+      writingDirectCache = false;
+    }
+  };
+  const writeDirectCache = (getItems, changedKeys, accepted) => {
+    const changed = new Set(changedKeys);
+    const patchRows = (rows) => {
+      const present = /* @__PURE__ */ new Set();
+      let touched = false;
+      const patched = rows.flatMap((row) => {
+        const key = getKey(row);
+        present.add(key);
+        if (!changed.has(key)) return [row];
+        touched = true;
+        const next = accepted.get(key);
+        return next === void 0 ? [] : [next];
+      });
+      return { patched, present, touched };
+    };
+    if (syncMode === `on-demand`) {
+      const affectedOwners = new Set(
+        changedKeys.flatMap((key) => [...rowToQueries.get(key) ?? []])
+      );
+      const activeQueries = /* @__PURE__ */ new Set();
+      for (const [hashedQueryKey, observer] of state.observers) {
+        const query = observer.getCurrentQuery();
+        if (activeQueries.has(query)) continue;
+        if (!affectedOwners.has(hashedQueryKey) && hasAppliedOwnership(hashedQueryKey) && query.state.fetchStatus !== `fetching` && !pendingResultApplications.has(hashedQueryKey))
+          continue;
+        activeQueries.add(query);
+        const data = query.state.data;
+        const rows = select && data !== void 0 ? select(data) : data;
+        if (!Array.isArray(rows)) continue;
+        const { patched, touched } = patchRows(rows);
+        if (!touched) continue;
+        updateCacheDataForKey(query.queryKey, patched, rows);
+      }
+      for (const query of [...trackedCacheQueries]) {
+        if (activeQueries.has(query)) continue;
+        if (ownedByAnotherCollection(query) || query.getObserversCount() > 0)
+          continue;
+        queryClient.getQueryCache().remove(query);
+      }
+      return;
+    }
+    const allCached = [...trackedCacheQueries];
+    if (allCached.length > 0) {
+      for (const query of allCached) {
+        const data = query.state.data;
+        const rows = select && data !== void 0 ? select(data) : data;
+        if (!Array.isArray(rows)) {
+          updateCacheDataForKey(query.queryKey, getItems());
+          continue;
+        }
+        const { patched, present } = patchRows(rows);
+        for (const key of changedKeys) {
+          const next = accepted.get(key);
+          if (!present.has(key) && next !== void 0) patched.push(next);
+        }
+        updateCacheDataForKey(query.queryKey, patched, rows);
+      }
+    } else {
+      updateCacheDataForKey(baseKey, getItems());
+    }
+  };
+  let writeContext = null;
+  const enhancedInternalSync = (syncParams) => {
+    let earlierCommits;
+    const commit = (signal) => {
+      const applied = syncParams.commit(signal);
+      const accepted = whenSyncAccepted(applied);
+      if (accepted !== true) {
+        const tail = accepted.then(
+          () => {
+            if (earlierCommits === tail) earlierCommits = void 0;
+          },
+          () => {
+            if (earlierCommits === tail) earlierCommits = void 0;
+          }
+        );
+        earlierCommits = tail;
+      }
+      return applied;
+    };
+    const params = { ...syncParams, commit };
+    const { begin, write, collection } = params;
+    let queryClientMounted = false;
+    const mountQueryClient = () => {
+      if (!queryClientMounted) {
+        queryClient.mount();
+        queryClientMounted = true;
+      }
+    };
+    const unmountQueryClient = () => {
+      if (queryClientMounted) {
+        queryClient.unmount();
+        queryClientMounted = false;
+      }
+    };
+    mountQueryClient();
+    const contextQueryKey = typeof queryKey === `function` ? queryKey({}) : queryKey;
+    const currentWriteContext = {
+      collection,
+      queryClient,
+      queryKey: contextQueryKey,
+      getKey,
+      begin,
+      write,
+      commit,
+      updateCacheData,
+      reserveDirectWrite,
+      claimDirectWriteKeys,
+      noteWaitingDirectWrite,
+      earlierCommits: () => earlierCommits
+    };
+    writeContext = currentWriteContext;
+    const syncResult = internalSync(params);
+    const sync2 = typeof syncResult === `function` ? { cleanup: syncResult } : typeof syncResult === `object` ? syncResult : {};
+    return {
+      ...sync2,
+      cleanup: () => {
+        if (writeContext === currentWriteContext) writeContext = null;
+        return runCleanupWithLocalTeardown(sync2.cleanup, unmountQueryClient);
+      }
+    };
+  };
+  const writeUtils = createWriteUtils(
+    () => writeContext
+  );
+  const runMutationHandler = (handler) => handler && (async (params) => {
+    activeMutationHandlerCount++;
+    try {
+      await handler(params);
+    } finally {
+      activeMutationHandlerCount--;
+    }
+  });
+  const utils = new QueryCollectionUtilsImpl(
+    state,
+    refetch,
+    writeUtils
+  );
+  const sync = withCollectionSyncConfigFactory(
+    { sync: enhancedInternalSync },
+    (source, utilities, startSyncIfIdle) => {
+      const boundUtilities = utilities;
+      for (const name of Object.keys(writeUtils)) {
+        const write = boundUtilities[name];
+        boundUtilities[name] = (...args) => {
+          startSyncIfIdle();
+          return write(...args);
+        };
+      }
+      return source;
+    }
+  );
+  const options = {
+    ...baseCollectionConfig,
+    getKey,
+    syncMode,
+    sync,
+    onInsert: runMutationHandler(onInsert),
+    onUpdate: runMutationHandler(onUpdate),
+    onDelete: runMutationHandler(onDelete),
+    utils
+  };
+  return withCollectionConfigFactory(
+    options,
+    (client) => queryCollectionOptions({
+      ...config,
+      queryClient: client.getDependency(`queryClient`) ?? config.queryClient,
+      id: options.id
+    })
+  );
+}

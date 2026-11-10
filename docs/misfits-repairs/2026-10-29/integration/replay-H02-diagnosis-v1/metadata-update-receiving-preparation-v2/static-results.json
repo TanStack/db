@@ -1,0 +1,28 @@
+{
+  "baselineCalibration": "synthetic temporary root only; no actual receiving artifact selection",
+  "freshOutputAbsent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-scope-default-q2-v2",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newGuardian": false,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "pureCalibration": {
+    "accepted": 7,
+    "exitCode": 0,
+    "rejected": 19,
+    "sha256": "88b111cf3872c65a094e090a789bcb149e779b154c71ecb156b6ceedeefe779a"
+  },
+  "pythonAstAndCompile": {
+    "bytecodeWritten": false,
+    "modules": 2,
+    "passed": true
+  },
+  "sourceAndPrerequisiteChecks": "full unchanged source gate and clean universe+selector judgment passed under forbidden native/PID/group/signal APIs",
+  "sourceCopies": 0,
+  "sourceRefreezes": 0,
+  "status": "SOURCE/STATIC/PURE ONLY; no receiving execution",
+  "zshSyntax": {
+    "exitCode": 0,
+    "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -1,0 +1,267 @@
+import {
+  compareKeys,
+  distinct,
+  filter,
+  join,
+  map,
+  reduce,
+  serializeValue
+} from "@tanstack/db-ivm";
+import { codedMessage, devBuild } from "../../error-message.js";
+import {
+  canonicalizeByPublicKey,
+  exposeRouting,
+  routeKey
+} from "./public-key-reduction.js";
+export const BUCKET_FACADE_REF = /* @__PURE__ */ Symbol(`bucketFacadeRef`);
+let nextBucketFacadeEdgeId = 0;
+export function materializeCompilation(compilation, getRootKey) {
+  if (!compilation.includes?.length) {
+    return { pipeline: compilation.pipeline, facades: void 0 };
+  }
+  const built = /* @__PURE__ */ new WeakMap();
+  const materialized = materializeRelation(
+    compilation,
+    getRootKey,
+    built,
+    `root`
+  );
+  return {
+    ...materialized,
+    facades: dedupeFacades(materialized.facades)
+  };
+}
+function materializeRelation(compilation, getKey, built, scope) {
+  const cached = built.get(compilation)?.[scope];
+  if (cached) return cached;
+  let pipeline = canonicalizeByPublicKey(
+    exposeRouting(compilation.pipeline),
+    getKey,
+    scope,
+    compilation.valueIdentity
+  );
+  const facades = [];
+  for (const include of compilation.includes ?? []) {
+    const child = materializeRelation(
+      include.childCompilationResult,
+      void 0,
+      built,
+      `child`
+    );
+    facades.push(...child.facades);
+    const bucketRows = createBucketRows(
+      child.pipeline,
+      include.childCompilationResult.valueIdentity
+    );
+    if (include.materialization === `collection`) {
+      const edgeId = `bucket-facade-${++nextBucketFacadeEdgeId}`;
+      const activeBuckets = createActiveBuckets(
+        pipeline,
+        include,
+        compilation.valueIdentity
+      );
+      const activeBucketRows = activeBuckets.pipe(
+        join(bucketRows),
+        map(([bucketKey, [, row]]) => [bucketKey, row])
+      );
+      facades.push({
+        edgeId,
+        rows: activeBucketRows,
+        activeBuckets,
+        hasOrderBy: include.hasOrderBy
+      });
+      pipeline = attachCollectionInclude(
+        pipeline,
+        include,
+        edgeId,
+        scope,
+        compilation.valueIdentity
+      );
+    } else {
+      pipeline = attachInlineInclude(
+        pipeline,
+        bucketRows,
+        include,
+        scope,
+        compilation.valueIdentity
+      );
+    }
+  }
+  const result = { pipeline, facades };
+  built.set(compilation, { ...built.get(compilation), [scope]: result });
+  return result;
+}
+function dedupeFacades(facades) {
+  return [...new Map(facades.map((facade) => [facade.edgeId, facade])).values()];
+}
+function attachInlineInclude(parentPipeline, bucketRows, include, scope, valueIdentity) {
+  const bucketValues = bucketRows.pipe(
+    reduce((values) => {
+      const rows = [];
+      for (const [row, multiplicity] of values) {
+        if (multiplicity < 0) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Materialization bucket row has negative multiplicity` : codedMessage(157)
+          );
+        }
+        for (let index = 0; index < multiplicity; index++) rows.push(row);
+      }
+      if (rows.length === 0) return [];
+      rows.sort(compareBucketRows);
+      return [[{ value: materializeRows(rows, include) }, 1]];
+    })
+  );
+  const routedParents = parentPipeline.pipe(
+    map(([parentKey, rawTuple]) => {
+      const tuple = rawTuple;
+      const routing = getIncludeRoute(tuple, include.fieldName);
+      return [
+        routing?.active !== true ? `inactive:${serializeValue(parentKey)}` : routeKey(
+          routing.correlationKey,
+          routing.parentContext,
+          valueIdentity
+        ),
+        [parentKey, tuple]
+      ];
+    }),
+    join(bucketValues, `left`),
+    map(([_bucketKey, [parent, bucketValue]]) => {
+      const [parentKey, tuple] = parent;
+      const [value, order, correlationKey, parentContext, routing, publicKey] = tuple;
+      const edgeRouting = routing?.[include.fieldName];
+      if (edgeRouting?.active !== true) {
+        return [
+          parentKey,
+          [value, order, correlationKey, parentContext, routing, publicKey]
+        ];
+      }
+      const materialized = bucketValue === null ? emptyMaterializedValue(include.materialization) : bucketValue.value;
+      return [
+        parentKey,
+        [
+          setNestedValue(value, include.resultPath, materialized),
+          order,
+          correlationKey,
+          parentContext,
+          routing,
+          publicKey
+        ]
+      ];
+    })
+  );
+  return canonicalizeByPublicKey(
+    routedParents,
+    void 0,
+    scope,
+    valueIdentity
+  );
+}
+function createBucketRows(childPipeline, valueIdentity) {
+  return childPipeline.pipe(
+    map(([internalKey, rawTuple]) => {
+      const [value, order, correlationKey, parentContext, , publicKey] = rawTuple;
+      return [
+        routeKey(correlationKey, parentContext, valueIdentity),
+        [publicKey ?? internalKey, value, order]
+      ];
+    })
+  );
+}
+function attachCollectionInclude(parentPipeline, include, edgeId, scope, valueIdentity) {
+  const routedParents = parentPipeline.pipe(
+    map(([parentKey, rawTuple]) => {
+      const tuple = rawTuple;
+      const routing = getIncludeRoute(tuple, include.fieldName);
+      if (routing?.active !== true) return [parentKey, tuple];
+      const facade = createBucketFacadeRef(
+        edgeId,
+        routeKey(routing.correlationKey, routing.parentContext, valueIdentity)
+      );
+      return [
+        parentKey,
+        [
+          setNestedValue(tuple[0], include.resultPath, facade),
+          tuple[1],
+          tuple[2],
+          tuple[3],
+          tuple[4],
+          tuple[5]
+        ]
+      ];
+    })
+  );
+  return canonicalizeByPublicKey(
+    routedParents,
+    void 0,
+    scope,
+    valueIdentity
+  );
+}
+function createActiveBuckets(parentPipeline, include, valueIdentity) {
+  return parentPipeline.pipe(
+    map(([parentKey, rawTuple]) => {
+      const tuple = rawTuple;
+      const routing = getIncludeRoute(tuple, include.fieldName);
+      const bucketKey = routing?.active === true ? routeKey(
+        routing.correlationKey,
+        routing.parentContext,
+        valueIdentity
+      ) : void 0;
+      return [parentKey, bucketKey];
+    }),
+    filter(([, bucketKey]) => bucketKey !== void 0),
+    distinct(([, bucketKey]) => bucketKey),
+    map(([, bucketKey]) => [bucketKey, true])
+  );
+}
+function createBucketFacadeRef(edgeId, bucketKey) {
+  return { [BUCKET_FACADE_REF]: { edgeId, bucketKey } };
+}
+function getIncludeRoute(tuple, fieldName) {
+  return tuple[4]?.[fieldName];
+}
+function compareBucketRows(left, right) {
+  const [leftPublicKey, , leftOrder] = left;
+  const [rightPublicKey, , rightOrder] = right;
+  if (leftOrder !== rightOrder) {
+    if (leftOrder === void 0) return 1;
+    if (rightOrder === void 0) return -1;
+    return leftOrder < rightOrder ? -1 : 1;
+  }
+  if ((typeof leftPublicKey === `string` || typeof leftPublicKey === `number`) && (typeof rightPublicKey === `string` || typeof rightPublicKey === `number`)) {
+    return compareKeys(leftPublicKey, rightPublicKey);
+  }
+  const leftKey = serializeValue(leftPublicKey);
+  const rightKey = serializeValue(rightPublicKey);
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+}
+function materializeRows(rows, include) {
+  const scalarField = include.scalarField;
+  const values = scalarField ? rows.map(([, value]) => value[scalarField]) : rows.map(([, value]) => value);
+  if (include.materialization === `array`) return values;
+  if (include.materialization === `singleton`) return values[0];
+  return values.map((value) => String(value ?? ``)).join(``);
+}
+function emptyMaterializedValue(materialization) {
+  if (materialization === `array`) return [];
+  if (materialization === `concat`) return ``;
+  if (materialization === `singleton`) return void 0;
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `Collection includes require a bucket facade` : codedMessage(158)
+  );
+}
+function setNestedValue(source, path, value) {
+  const root = { ...source };
+  let target = root;
+  let current = source;
+  for (let index = 0; index < path.length - 1; index++) {
+    const part = path[index];
+    const currentChild = current?.[part];
+    const next = Array.isArray(currentChild) ? [...currentChild] : { ...currentChild ?? {} };
+    target[part] = next;
+    target = next;
+    current = currentChild;
+  }
+  target[path[path.length - 1]] = value;
+  return root;
+}

@@ -1,0 +1,14 @@
+{
+  "own_v1_freeze_preserved": "3ddcd6a44dde1a373b0c5270452532761a4f9685ad83326288822c003179fd71",
+  "own_v2_freeze": "f5a06b11f530bba5891bfe875fb31919b96a7563c5280e4907e03057d0d72bbc",
+  "own_v2_packet": "e06189395339c18560b3196c1e172489f005de91db96b6a51d1aad7bcde11d84",
+  "own_v2_packet_members_checked": 15,
+  "packet_mismatches": 0,
+  "standaloneSourcePreparation": "acceptable within declared scope after2 v1falsegreens repaired",
+  "combinedGate": "pending exact native source freeze",
+  "candidate20": "all UNREACHED",
+  "reviewReportSha256": "0b106b2eb1a7deba20e5f4350aad57ad796880b257015f3f8e2757756617f539",
+  "pureV2Sha256": "baa0904529e24046f2a567a29a9268bdb356ed6518f4dbfe182daf635b2baf79",
+  "preservationWorkloadSha256": "3091f895faa8d4d8f50175d760decb5e6056417026a1e12b049ced1e2c026fe7",
+  "noActiveOperationScopeSha256": "aac6d0c03874595622e5e170cdb502e0cb9e0ff611c72e8588d35bd0ffb5b132"
+}

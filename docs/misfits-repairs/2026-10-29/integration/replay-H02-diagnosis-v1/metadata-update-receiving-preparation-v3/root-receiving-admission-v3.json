@@ -1,0 +1,34 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/evaluate_metadata_external",
+  "reservedHeavySlot": 4,
+  "admittedRuntime": true,
+  "maxInvocations": 1,
+  "firstCommand": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/first-command.json",
+    "sha256": "0202923c2af3b89485d744ce789293a522cc1efd2412df4a78a1f42accda5a51"
+  },
+  "packetManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/packet-manifest.json",
+    "sha256": "b541cc7f75830a6d9bb12eb8f174a792c31b532b53912f18f8584c111160bd43"
+  },
+  "binding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/binding.json",
+    "sha256": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470"
+  },
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-receiving-preparation-review-v3.md",
+    "sha256": "83c10d9fc61522dcd2f2b19bffb63711daffe241fcd0ccb835dd05fc1860866e"
+  },
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sharedRecoveryQualification": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/root-shared-toolchain-recovery-qualification-v1.json",
+    "sha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406"
+  },
+  "purpose": "One correctedsame scope/defaultq2 receiver; unchangedcanonicalhistory/registration/filter and original20-name discoverylimits",
+  "executionRequirement": "Actual exec_command sandbox_permissions=require_escalated; exactfirstcommand directzsh; separateactualouterreturn and existingsupervision; test60s nothardouterwatchdog",
+  "after": "Stoponanyoutcome. Uniqueactualidentityselectiononly; fullraw/provenance/sourcepostcheck/originalouterleaderwriterIDsabsence; require explicit metadata.finish/reachassert and all31states forGREEN. Independentactualreview before anynextcommand. No retry/mutant/production/Git/PR/canonical action.",
+  "limits": "Stablemetadata/directeagersource-sync only; originalinitialPGID/parentcheckerprovenance limits unchanged; no strictprogress/classclosurecredit",
+  "canonicalImport": false,
+  "publishing": false
+}

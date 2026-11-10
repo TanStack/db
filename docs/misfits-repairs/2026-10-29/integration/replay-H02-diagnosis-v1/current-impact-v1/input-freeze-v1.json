@@ -1,0 +1,8 @@
+{
+  "accepted-replay-production-files.json": "27d4a8656e8b9353cdff3a3ee2a53d693342540ce549628ab54cb08708cdfd60",
+  "composition-freeze-v1.json": "f9b4f48e2efa7cf2a628c1f2d7e938f46fcc285921367931ba13754e03a1db50",
+  "current-main-production-files.json": "c2817300551f67092db1a47981daa9a8eecd3af402027b5477bed909674d89ab",
+  "h02-current-impact-v1.test.ts": "18deeffebe73ebe94f94d5fdcfd8f2c8fc700d97286e990e14075326b7c6d066",
+  "plan-v1.md": "17fe6a34468eb5559d5397edbd804f8ebafdc0ae7caf7792cb420f972aea33c1",
+  "run-current-capped.py": "5cd40288c2db75bcb29721ce45281d1240840fe87b3ef1e07d3214c640ef7d59"
+}

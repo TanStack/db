@@ -1,0 +1,25 @@
+{
+  "acceptedCorrectionReviewSha256": "7a67cd9bae25c9ed49b4135ebafa985e2af24768faaa1e2a37cd553b0b632e05",
+  "correctionManifestSha256": "c2445689e8fb7f5e931d490487a0eff0ef2b3e17173388ebd25bbbf18c277b4d",
+  "dependencyReuseLinks": 4,
+  "files": {
+    "calibrate.py": "0d94d03f12f822b35b0bf2d73f0504344bec4018858bb97be56349ec6d1d3b44",
+    "recipes.json": "c9582603691d779f22a10cf60ec16bed95ab49a3efb8ea8a6afaf02a9d2c0714",
+    "run.py": "67725f24bb7ed12134b2a39024758bb7b9d7781a6262f85d7ac6c62af7ae6a91",
+    "verify.py": "bb7a78d7810788ff1dd47d3d780afc4edf0da3891326c3794097fb5b57dfc2de"
+  },
+  "namedDependencyOwnPayloads": 2544,
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalSourceFiles": 573,
+  "originalStoppedClassificationSha256": "c89e2e1a2663edae0c4d7c984f62830466b66b6dc96f6dc82bd8bbe150f7e118",
+  "previousPreparationBindingSha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65",
+  "productionFiles": 511,
+  "reusedSourceFiles": 588,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "status": "SOURCE-ONLY fresh universe setup; separate source review and new root admission required",
+  "success": "Fresh actual outer0, qualified wrapper and clean native child0; no stopped-result waiver"
+}

@@ -1,0 +1,11 @@
+{
+  "predecessorScript": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-audit-v1.py",
+  "predecessorScriptSha256": "0132600b4ae8177cd5c1481fc1a0ec47598e9464db6f2a8ba1f9af9c76721edc",
+  "predecessorAuditSha256": "b83332e52a6499d5010c317665f36a2ae8e6161efc970f9d0d7850a2de504bf0",
+  "predecessorActualCommandChunk": "c35f97",
+  "predecessorSession": 21370,
+  "predecessorCompletionChunk": "27925b",
+  "predecessorExit": 0,
+  "successor": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-audit-v2.py",
+  "changes": "Remove stale inherited word unseeded from a scope-limit sentence; add explicit callback entry-key uniqueness and resource-summary consistency checks. No product/gate/config/model imports or new process probe. Preserve predecessor artifacts."
+}

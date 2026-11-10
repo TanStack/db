@@ -1,0 +1,22 @@
+{
+  "kind": "Preserved author evidence-audit errors; not application results",
+  "initialCapture": {
+    "file": "capture-audit.py",
+    "sha256": "cd6b6244c4f780779be3ebec72efcd2d9682594e4755c1c59759ec8567ae64d7",
+    "toolChunk": "cf2f2b",
+    "exitCode": 1,
+    "firstError": "AssertionError: [(\"checks source followup 'scope' 'authored' quarter 2\", '2372')]",
+    "cause": "Greedy .* > title prefix consumed describe group",
+    "priorWrites": "None: failed before candidate-selection or any capture write",
+    "correction": "Additive capture-audit-v2.py anchors the known complete registration filename and preserves the describe/title hierarchy; no source, selection, comparison or raw evidence changed"
+  },
+  "exploratoryRead": {
+    "toolChunk": "13856d",
+    "exitCode": 1,
+    "firstError": "TypeError: Object of type dict_keys is not JSON serializable",
+    "cause": "Read-only diagnostic attempted to pretty-print dict_keys",
+    "writes": false,
+    "productRuntime": false
+  },
+  "correctionScope": "Audit text only; no native runtime, imports, compiler, process probes, installs, Git, PR or canonical action."
+}

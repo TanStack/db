@@ -1,0 +1,61 @@
+# Independent neighbor V1 source review
+
+Verdict: the four-file overlay is a suitable additive basis for the baseline neighbor controls, **with the source and recipe corrections below required for the next freeze**. V1 is not admission-ready. This review grants no receiving invocation, product GREEN, continuation reach, or production-repair approval.
+
+Reviewer `/root/review_h02_prepared` used source inspection and independent standard-library parsing, hashing and exact text diff only. No test, build, project verifier, install, receiving worker, process check or live source edit ran. The independent machine record is `prepared-neighbor-controls-v1-independent-verification-v1.json`, SHA256 `b4274be8bdee9d5859428751c30918d5fd6752b776aed5115e66c49a334528b7`.
+
+## Exact inputs and preservation
+
+All **31 members / 304852 bytes** in the proposed packet match, with no missing or extra member. Manifest SHA256: `b206eb8be463f293bd530977c039fdf830894aba157077f198d2f5bffd834b98`. The contracts hash is `39f0eddf77f42240351cb521d9c21601d0be550c4933d228c714f9ea6e072e76`; the exact patch hash is `59942b0a318523795654a3b0c218a3b6da3a72304b41445c6fab1f841c40d20f`; the recipes hash is `e00b320f78b3cfb1edebd42bec58ce39a23f47e66e0d9f95ba4bfc8b1c548305`. Both old source anchors match the live H02 worktree; both proposed new paths are absent there. All four proposed source hashes match. Recomputing the unified diff from exact live/proposed bytes reproduces the patch byte for byte.
+
+I also rehashed all V7 preparation members (62 / 707085 bytes) and actual result members (1951 / 43192185 bytes); both packet manifests and all members remain unchanged. All protected live source maps still match: 511 production, 26 instrument, and 11 shared entries. The proposed ownership changes are confined to reach/premise observations inside the existing reacquisition runner. Its reference model, 42-history grammar, settlement schedule and complete observation-object comparison remain unchanged. No new expected row table is introduced.
+
+## Accepted source properties
+
+The downstream observer replaces an already existing empty subscription callback. It neither acquires an additional subscription nor changes the query shape. Its new work copies the callback payload and public rows into durable receipts. The positive held-provider read is placed at the driver's already existing host cut, after reload begins and before either existing semantic replay release. It introduces **no await, host yield, preload, provider release, graph call or scheduler interception**. `toArray` enumerates current state through `values`/`get`; these reads do not preload or drain the graph. The two parent-side publication accumulators reuse the independent shared judgment and have separate observed event maps. Root and downstream final checks remain tied to the same relational result.
+
+The synchronous branch is byte-identical: the initial source-establishing commit must return literal true; the initial public rows/readiness are recorded after subscriber return and before `preload`; ordinary mutation rows/readiness are recorded immediately after the existing source transaction, before another host turn. Query-only observation additions do not move either cut or turn a Promise acquisition into literal true. The ordinary mutation remains unbounded, outside the finite ordered repair barrier.
+
+The ownership overlay captures the exact sole detail Query before peers are acquired, and later verifies that this same object remains in the real QueryClient cache with successful data containing the shared row. A peer cache cannot satisfy that identity by accident. These cache reads, row reads and reach calls do not fetch, settle a promise, add a turn, or release an owner. The existing reference result still checks held, published, settled, all-peers-released and final-release rows plus query-call count. Zero-peer histories remain explicit ablations; one- and two-peer histories expose missing reacquired ownership after the peers leave. The grammar has six fresh/no-refetch and 36 stale/refetch histories, totaling 42. No runtime count is claimed.
+
+A positive held-provider count establishes only that this finite driver still holds at least one answer at its named cut. It does not establish D2 suspension, an active continuation, output receipt visibility, or a universal retention premise. The exact queued-conflict witness and its physical Query binding remain separately required for a progress RED.
+
+## H02-NEIGHBOR-V1-IND-01: count callback reach at the promised reload cut
+
+In the proposed neighbor runner, lines 69–71 and 82 mark downstream/root callback reach without regard to phase. Both subscriptions can deliver initial callbacks before `reload-start`; those initial receipts can therefore satisfy the declared callback reaches. The shared checker itself already limits its reload comparison to the interval from reload-start to cleanup-start, and the distinct nonempty prior/final values would still reject a missing required final event. This finding concerns inaccurate reach evidence, not a demonstrated false product GREEN.
+
+Minimum correction: track the named reload observation interval in the runner and mark root/downstream callback reaches only inside it, before cleanup. Keep forwarding actual observations through the same checks. Do not add an await or work-producing call. Preserve raw initial callbacks as diagnostics, with their own meaning.
+
+## H02-NEIGHBOR-V1-IND-02: distinguish fresh reacquisition from a completed refetch
+
+The proposed ownership reach array includes `refetch-outcome-settled` for every history, then marks it after awaiting reacquisition. In six fresh histories no refetch starts; resolving the unused test deferred does not make a real Query refetch occur. Counting those histories as refetch settlement misstates the reached premise.
+
+Minimum correction: use a conditional declared state and mark an explicit fresh-cache/no-refetch checkpoint for fresh histories. Preserve refetch-outcome settlement for stale histories, tied to the existing real query-function refetch and settlement. The existing model and query-call comparison remain unchanged. Update the declared-reach and contract records to match. No stronger settlement promise should be inferred from reacquisition's public Promise, because the existing owner explicitly does not compare that API's settlement contract.
+
+Ownership reach diagnostics currently print only after the full comparison succeeds. Moving only that diagnostic emission to `finally` would preserve partial counts on a failure without changing a product comparison or test schedule; this is useful for later result classification, but not a missing product-law assertion.
+
+## H02-NEIGHBOR-V1-IND-03: prepare an empty-prior completion baseline
+
+The four proposed paths contain strict nonempty replay and a **nonempty** scope-key completion control. V7's canonical empty-prior strict history supplies bounded progress RED, but it was killed and supplies no final root/downstream publication GREEN. The accepted neighbor obligation covers empty and nonempty retained/final snapshots. A nonempty scope-key completion alone does not discharge the empty-prior baseline observation.
+
+Minimum correction: add a separately selected empty-prior scope-key path using the existing history/model/driver/checker, with a measured empty prior, positive held-provider read, actual enqueue/execution, reload root/downstream events, final publication and worker cleanup. The expected value still comes from the shared model. Report each path separately. Scope-key completion cannot substitute for strict subscription-key completion after a candidate repair; retain the canonical strict empty RED and the proposed strict nonempty path as distinct evidence.
+
+## H02-NEIGHBOR-V1-IND-04: replace obsolete checkout prerequisites and freeze real containment
+
+V1 says overlays must be installed in a separate checkout. Root has since authorized instrument/test evolution in the **same existing H02 worktree**, after review, while preserving archived V7 sources/results and all current production bytes. Update contracts, handoff and recipes to that authority. No separate checkout, install, dependency override or live reuse-link change is necessary. An installed successor must have its own source/dependency freeze; it must never point changed live instruments at the immutable V7 freeze. The freeze must cover the added parent runner/config and ownership owner/support inputs, not just the child driver's previously bound modules.
+
+Progress paths can retain the accepted existing parent supervisor/verifier arrangement, exact per-path selectors, raw receipt preservation and qualified first-trigger gate. The synchronous and scope-key paths do not acquire a progress-law RED merely by timing out. The generic inherited checker message alone remains insufficient.
+
+The ownership command is explicitly uncontained in V1, so it cannot be admitted as written. Prepare and freeze the concrete external wrapper first: root has allowed a 60-second original process-group wall, Node and worker 384MiB heap, sampled group 1GiB RSS, complete stdout/stderr, exact source identity, final group capture, and post-run root process absence observation. Its recorded recipe must match that actual wrapper; V1's bare ownership parent command still requests 1536MiB and is not that scheme. Classify an ownership timeout, OOM, RSS cutoff, setup/observation failure or cleanup failure as an operational failed/inconclusive control, **never a queued-answer progress-law verdict**. Normal ownership comparison failures remain their own product observations. The author is preparing this wrapper in a separate staged source packet for review; none is accepted here.
+
+## H02-NEIGHBOR-V1-IND-05: separate baseline reach from prepared candidate controls
+
+Current production has no continuation scheduler/token, so candidate-specific suspension, parked-output, operation-fence, terminal-resume and stale-task reaches cannot be achieved by an unchanged-production baseline. Keep their actual counts **UNREACHED**. A requirement to achieve those nonexistent reaches before the production edit would be circular.
+
+Use two explicit gates. First, establish the applicable baseline cuts with independently accepted finite receiving instruments: existing qualified strict progress RED; ownership; empty/nonempty retained and final publication/downstream; literal-true initial return; and ordinary synchronous mutation. Second, before a production edit, prepare and review the **concrete candidate-control source** for the narrow callback/token interface and shared operation/publication judgment described in completion API v3 section 4. A prose list of future reaches is not that source preparation. Do not insert a no-op continuation into baseline production or intercept global timers to manufacture reach.
+
+The candidate source must prepare distinguishing observations for answer settlement before the exact task runs, the existing and new partial-options window operations in that gap, repeated yields/ties/refills, graph quiescence with a held flush, parked root and touched-facade output receipts including earlier queued output, terminal graph/publication failure with an unanswered source peer, recoverable demand failure, and stale lifecycle callbacks. Those candidate reaches and hostile controls are measured **after** an authorized candidate implementation. The candidate-specific early-window-success mutant must fail publication; original starvation must fail progress. Baseline applicable gates and candidate source preparation are pre-edit requirements; candidate reached/GREEN/mutant evidence is post-edit. None is supplied by V1.
+
+## Closeout
+
+The author acknowledged staged V2 corrections for callback reach scope, fresh/no-refetch reach, empty-prior completion, and same-worktree recipes. Preserve V1, then submit the exact corrected sources and concrete wrapper recipes for the next independent freeze review. All new measured reaches remain zero. This report does not authorize running V1, applying production edits, or counting source plausibility as completed receiving evidence.

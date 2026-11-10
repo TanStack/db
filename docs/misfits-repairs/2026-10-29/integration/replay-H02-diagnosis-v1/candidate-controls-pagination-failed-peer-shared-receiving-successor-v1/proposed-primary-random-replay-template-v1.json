@@ -1,0 +1,32 @@
+{
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vite.config.ts",
+    "tests/query/pagination-oracle.property.test.ts",
+    "-t",
+    "retains complete windows across joined failure histories for a random or replayed seed",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+  "environment": {
+    "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1",
+    "TANSTACK_DB_ORACLE_PROPERTY": "pagination.joined-window-failure",
+    "TANSTACK_DB_ORACLE_SEED": "<actual FastCheck-reported seed>",
+    "TANSTACK_DB_ORACLE_PATH": "<actual FastCheck-reported path>"
+  },
+  "requiredUnsetEnvironment": [
+    "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH"
+  ],
+  "campaign": "TEMPLATE ONLY: explicit random-or-replayed leaf selector excludes all older unwrapped tests; fill actual seed/path from admitted primary failure and freeze a new exact recipe before replay",
+  "assertionCheckpoint": "exact original failed applied-load error handled as lastSubsetError; classify original peer as pending or observably AbortError-retired; shared full-child retained snapshot comparison for every captured callback and current read before peer release/window wait",
+  "runtimeAdmission": "NOT ADMITTED; new exact-source independent review plus separate2GiB operational packet and root admission required",
+  "scope": "proposal only; package config keeps its ordinary coverage/typecheck setup; no copied native completion launcher is suitable for this primary command",
+  "numericalDeadline": "no product deadline; root must admit operational containment separately",
+  "nativeReceiving": 0,
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193"
+}

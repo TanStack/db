@@ -1,0 +1,30 @@
+'use strict';async (__vite_ssr_exports__,__vite_ssr_import_meta__,__vite_ssr_import__,__vite_ssr_dynamic_import__,__vite_ssr_exportAll__,__vite_ssr_exportName__,__filename,__dirname,module,exports,require)=>{{const __vite_ssr_import_0__ = await __vite_ssr_import__("/@id/__vite-browser-external:node:fs", {"importedNames":["default"]});
+const __vite_ssr_import_1__ = await __vite_ssr_import__("/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js", {"importedNames":["it"]});
+ const readFileSync = __vite_ssr_import_0__.default["readFileSync"]; const writeSync = __vite_ssr_import_0__.default["writeSync"];
+
+(0,__vite_ssr_import_1__.it)(`receives a finite queued backend answer`, async () => {
+  const path = process.env.H02_PROGRESS_WORKER_HISTORY;
+  if (!path) throw new Error(`H02_PROGRESS_WORKER_HISTORY is required`);
+  try {
+    const history = JSON.parse(readFileSync(path, `utf8`));
+    const { driveQueuedAnswerHistory } = await __vite_ssr_dynamic_import__("/packages/query-db-collection/tests/queued-answer-progress-driver.ts");
+    await driveQueuedAnswerHistory(history);
+  } catch (error) {
+    writeSync(
+      1,
+      JSON.stringify({
+        h02: true,
+        phase: `worker-error`,
+        message: String(error),
+        stack: error instanceof Error ? error.stack : void 0
+      }) + `
+`
+    );
+    throw error;
+  }
+});
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUE7QUFDQTtBQUR3Qzs7R0FNeEMsMEJBQUcsMkNBQTJDLFlBQVk7QUFDeEQsUUFBTSxPQUFPLFFBQVEsSUFBSTtBQUN6QixNQUFJLENBQUMsS0FBTSxPQUFNLElBQUksTUFBTSx5Q0FBeUM7QUFDcEUsTUFBSTtBQUNGLFVBQU0sVUFBVSxLQUFLLE1BQU0sYUFBYSxNQUFNLE1BQU0sQ0FBQztBQUNyRCxVQUFNLEVBQUUseUJBQXlCLElBQUksTUFBTSw0QkFDekMsb0NBQ0Y7QUFDQSxVQUFNLHlCQUF5QixPQUFPO0FBQUEsRUFDeEMsU0FBUyxPQUFPO0FBQ2Q7QUFBQSxNQUNFO0FBQUEsTUFDQSxLQUFLLFVBQVU7QUFBQSxRQUNiLEtBQUs7QUFBQSxRQUNMLE9BQU87QUFBQSxRQUNQLFNBQVMsT0FBTyxLQUFLO0FBQUEsUUFDckIsT0FBTyxpQkFBaUIsUUFBUSxNQUFNLFFBQVE7QUFBQSxNQUNoRCxDQUFDLElBQUk7QUFBQTtBQUFBLElBQ1A7QUFDQSxVQUFNO0FBQUEsRUFDUjtBQUNGLENBQUMiLCJuYW1lcyI6W10sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbInF1ZXVlZC1hbnN3ZXItcHJvZ3Jlc3MucmVjZWl2aW5nLnRlc3QudHMiXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgcmVhZEZpbGVTeW5jLCB3cml0ZVN5bmMgfSBmcm9tICdub2RlOmZzJ1xuaW1wb3J0IHsgaXQgfSBmcm9tICd2aXRlc3QnXG5pbXBvcnQgdHlwZSB7IFByb2dyZXNzSGlzdG9yeSB9IGZyb20gJy4vcXVldWVkLWFuc3dlci1wcm9ncmVzcy1vcmFjbGUuanMnXG5cbi8vIFRoaXMgb3JkaW5hcnkgcnVubmVyIHJlZ2lzdGVycyB0aGUgcHJvZHVjdGlvbiBkcml2ZXIuIEl0IGNvbnRhaW5zIG5vXG4vLyBleHBlY3RlZCBhbnN3ZXI7IHRoZSBzdXBlcnZpc2luZyBvcmFjbGUgb3ducyBldmVyeSBwcm9kdWN0IGNvbXBhcmlzb24uXG5pdChgcmVjZWl2ZXMgYSBmaW5pdGUgcXVldWVkIGJhY2tlbmQgYW5zd2VyYCwgYXN5bmMgKCkgPT4ge1xuICBjb25zdCBwYXRoID0gcHJvY2Vzcy5lbnYuSDAyX1BST0dSRVNTX1dPUktFUl9ISVNUT1JZXG4gIGlmICghcGF0aCkgdGhyb3cgbmV3IEVycm9yKGBIMDJfUFJPR1JFU1NfV09SS0VSX0hJU1RPUlkgaXMgcmVxdWlyZWRgKVxuICB0cnkge1xuICAgIGNvbnN0IGhpc3RvcnkgPSBKU09OLnBhcnNlKHJlYWRGaWxlU3luYyhwYXRoLCBgdXRmOGApKSBhcyBQcm9ncmVzc0hpc3RvcnlcbiAgICBjb25zdCB7IGRyaXZlUXVldWVkQW5zd2VySGlzdG9yeSB9ID0gYXdhaXQgaW1wb3J0KFxuICAgICAgYC4vcXVldWVkLWFuc3dlci1wcm9ncmVzcy1kcml2ZXIuanNgXG4gICAgKVxuICAgIGF3YWl0IGRyaXZlUXVldWVkQW5zd2VySGlzdG9yeShoaXN0b3J5KVxuICB9IGNhdGNoIChlcnJvcikge1xuICAgIHdyaXRlU3luYyhcbiAgICAgIDEsXG4gICAgICBKU09OLnN0cmluZ2lmeSh7XG4gICAgICAgIGgwMjogdHJ1ZSxcbiAgICAgICAgcGhhc2U6IGB3b3JrZXItZXJyb3JgLFxuICAgICAgICBtZXNzYWdlOiBTdHJpbmcoZXJyb3IpLFxuICAgICAgICBzdGFjazogZXJyb3IgaW5zdGFuY2VvZiBFcnJvciA/IGVycm9yLnN0YWNrIDogdW5kZWZpbmVkLFxuICAgICAgfSkgKyBgXFxuYCxcbiAgICApXG4gICAgdGhyb3cgZXJyb3JcbiAgfVxufSlcbiJdLCJmaWxlIjoiL3BhY2thZ2VzL3F1ZXJ5LWRiLWNvbGxlY3Rpb24vdGVzdHMvcXVldWVkLWFuc3dlci1wcm9ncmVzcy5yZWNlaXZpbmcudGVzdC50cyJ9
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJ1cmwiOiIyIiwiaW1wb3J0ZWRVcmxzIjoiMyIsIm1hcHBpbmdzIjpmYWxzZX0sIi9Vc2Vycy9reWxlLm1hdGhld3MvcHJvZ3JhbXMvdGFuc3RhY2stZGIvLndvcmt0cmVlcy9jb2RleC1taXNmaXRzLWgwMi1wcm9ncmVzcy1tYWluLXYxL3BhY2thZ2VzL3F1ZXJ5LWRiLWNvbGxlY3Rpb24vdGVzdHMvcXVldWVkLWFuc3dlci1wcm9ncmVzcy5yZWNlaXZpbmcudGVzdC50cyIsIi9wYWNrYWdlcy9xdWVyeS1kYi1jb2xsZWN0aW9uL3Rlc3RzL3F1ZXVlZC1hbnN3ZXItcHJvZ3Jlc3MucmVjZWl2aW5nLnRlc3QudHMiLFtdXQ==
+}}

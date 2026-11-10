@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-30T09:26:40.850027+00:00",
+  "authorization": "Root explicitly authorized copy-only archive preparation; root owns independent verification and any later exact eight removals.",
+  "before": {
+    "historicalManifests": {
+      "input-freeze-v1.json": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+      "input-packet-sha256-v1.json": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+      "inline-park-root-result-freeze-v1.json": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c"
+    },
+    "inputFreezeFilesMatched": 45,
+    "inputPacketEntriesMatched": 46,
+    "failedResultAssetsMatched": 1974,
+    "combinedV2PacketEntriesMatched": 222,
+    "allMatched": true
+  },
+  "after": {
+    "historicalManifests": {
+      "input-freeze-v1.json": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+      "input-packet-sha256-v1.json": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+      "inline-park-root-result-freeze-v1.json": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c"
+    },
+    "inputFreezeFilesMatched": 45,
+    "inputPacketEntriesMatched": 46,
+    "failedResultAssetsMatched": 1974,
+    "combinedV2PacketEntriesMatched": 222,
+    "allMatched": true
+  },
+  "copyCount": 8,
+  "allCopiesExactByteSizeAndSha256": true,
+  "allOriginalPathsStillPresent": true,
+  "originalRemovalsPerformed": 0,
+  "archiveMapSha256": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+  "resolverSha256": "837e9572f5191fab7714eb154a02c7aefdf57cb35211c31a2204ffdcc383b847",
+  "noRuntime": true,
+  "noCompilerOrConstructor": true,
+  "noRuleOrBudgetOrIgnoreChange": true
+}

@@ -1,0 +1,52 @@
+{
+  "bindingSha256": "cf38c8a9e5f7df342e88813a7de8ae456f7474a1f5a8dedd9eab9683602967dc",
+  "kind": "Immutable source-only root omission checker-calibration proposal",
+  "members": {
+    "binding.json": {
+      "bytes": 9891,
+      "sha256": "cf38c8a9e5f7df342e88813a7de8ae456f7474a1f5a8dedd9eab9683602967dc"
+    },
+    "calibration-config.mjs.txt": {
+      "bytes": 463,
+      "sha256": "355356885558a585d68288df3cae8d75499a7e15d6c429bcb970bdbac76e028f"
+    },
+    "calibration-source.template.txt": {
+      "bytes": 9274,
+      "sha256": "fc8ef50335d78c483f98b65bdb45a1b638bbe845a0b14a9eb2c7e831ab25107a"
+    },
+    "launch-calibration.py.txt": {
+      "bytes": 3178,
+      "sha256": "2163ef0b3872fd7451c001c6302512d87a22333a598890154ac6596ce67fce76"
+    },
+    "metadata-previous-value-calibration-oracle.test.ts.txt": {
+      "bytes": 10402,
+      "sha256": "4a47eb7d67429acd289893e678770828826ad8847f8d4b9436e6e29bf38365ba"
+    },
+    "next-invocation.json": {
+      "bytes": 3096,
+      "sha256": "6ebed7e45159ebe306d7e54754467f2de150a48f6e11d0ddffec24ca6ab08794"
+    },
+    "package.json.txt": {
+      "bytes": 33,
+      "sha256": "a90fc33418afa2b9cbf4768524b021135b965ecdf993457505bfae3ac44a8428"
+    },
+    "preparation-author-diagnostic.json": {
+      "bytes": 617,
+      "sha256": "e158025e8b0e3e03e453ac19e3e30fe656c3f7155f0998735bd76b31d5578de1"
+    },
+    "proposal.md": {
+      "bytes": 5276,
+      "sha256": "3552d41591b50513d6f9960c36551480a72456b9aa8d99ad3d403a3a0704c838"
+    },
+    "source-only-checks.json": {
+      "bytes": 774,
+      "sha256": "3e606fd824aaddff5631cffb91667a0e37bcfcf3415a921c03867fab04e69f07"
+    }
+  },
+  "nativeInvocations": 0,
+  "nextInvocationSha256": "6ebed7e45159ebe306d7e54754467f2de150a48f6e11d0ddffec24ca6ab08794",
+  "noClosureClaim": true,
+  "productionEdits": 0,
+  "runtimeAdmission": false,
+  "sourceMaterialization": false
+}

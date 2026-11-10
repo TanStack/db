@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-30T10:54:06.223544+00:00",
+  "actualProbePermission": "require_escalated",
+  "psExitCode": 0,
+  "psStderr": "",
+  "namedOriginalPids": [
+    73331,
+    73353
+  ],
+  "namedOriginalGroups": [
+    73331,
+    73353
+  ],
+  "remainingNamedRows": [],
+  "zeroSignalProbes": [
+    {
+      "kind": "pid",
+      "value": 73331,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pid",
+      "value": 73353,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pgid",
+      "value": 73331,
+      "result": "ESRCH"
+    },
+    {
+      "kind": "pgid",
+      "value": 73353,
+      "result": "ESRCH"
+    }
+  ],
+  "limits": "Original named PID/PGID observations only; no escaped/unregistered descendant census or PID/PGID reuse proof."
+}

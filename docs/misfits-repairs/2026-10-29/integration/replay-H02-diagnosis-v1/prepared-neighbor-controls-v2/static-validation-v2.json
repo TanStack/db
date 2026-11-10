@@ -1,0 +1,22 @@
+{
+  "status": "serial pure/static checks passed; no receiving",
+  "pureOwnershipChecks": 16,
+  "pureCandidateChecks": 9,
+  "typecheck": true,
+  "eslint": true,
+  "changedLint": true,
+  "prettier": true,
+  "unchangedOrdinaryOwnershipWarnings": 2,
+  "nodeHeapMiB": {
+    "pure": 384,
+    "typecheckAndLintOnly": 1536
+  },
+  "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+  "sharedJudgment": {
+    "path": "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "sha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "source": "immutable latest-main-standalone-v1 candidate-source snapshot; imported unchanged"
+  },
+  "initialDiagnostic": "initial-pure-diagnostic-v2.md",
+  "receivingInvocations": 0
+}

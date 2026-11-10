@@ -1,0 +1,143 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-oracle.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-oracle.ts
+@@ -1,5 +1,6 @@
+ import { isDeepStrictEqual } from 'node:util'
+ import { declareOracle } from '../../db/tests/oracle-declaration.js'
++import { referenceJoinedWindowRows } from '../../db/tests/query/pagination-window-publication-oracle.js'
+ 
+ /**
+  * A finite answer getting a host turn is not window completion. ARCHITECTURE
+@@ -44,7 +45,7 @@
+   roots: Array<CompletionRow>
+   facades: Array<CompletionFacade>
+   downstream: Array<CompletionRow>
+-  window: CompletionWindow
++  window: CompletionWindow | undefined
+   status: `loading` | `ready` | `crashed` | `cleaned-up`
+   requestErrors: Array<string>
+ }
+@@ -207,19 +208,7 @@
+   window: CompletionWindow,
+ ): Array<CompletionRow> {
+   validWindow(window)
+-  const marked = new Set(facts.marked)
+-  return facts.roots
+-    .filter((row) => !marked.has(row.id))
+-    .sort((left, right) => left.rank - right.rank || left.id - right.id)
+-    .slice(window.offset, window.offset + window.limit)
+-    .map(({ id, rank }) => ({
+-      id,
+-      rank,
+-      children: facts.children
+-        .filter((child) => child.parent === id)
+-        .map((child) => child.id)
+-        .sort((left, right) => left - right),
+-    }))
++  return referenceJoinedWindowRows(facts, `asc`, window)
+ }
+ 
+ /**
+@@ -1308,6 +1297,7 @@
+ function checkCompletionPublicState(
+   model: CompletionModel,
+   observation: CompletionStateObservation,
++  failureBarrier?: { requirement: string; error: string },
+ ): void {
+   equal(observation.run, model.run, `observation belongs to current sync run`)
+   equal(
+@@ -1315,13 +1305,53 @@
+     modelCompletionView(model),
+     `coherent public values, handles, health and settled window`,
+   )
++  const expectedOperations = model.operations.map((operation) => ({
++    operation: operation.operation,
++    returned: `promise`,
++    outcome: operation.outcome,
++  }))
++  if (failureBarrier) {
++    // The first handled-failure barrier precedes operation waiting. Retirement
++    // may already have released the last peer; it does not authorize success
++    // or a different error. Later settlement/retry are separate histories.
++    equal(
++      observation.operations.length,
++      expectedOperations.length,
++      `original operation count at first failure barrier`,
++    )
++    for (const [index, expected] of expectedOperations.entries()) {
++      const actual = observation.operations[index]!
++      equal(
++        actual.operation,
++        expected.operation,
++        `original operation identity at first failure barrier`,
++      )
++      equal(
++        actual.returned,
++        expected.returned,
++        `original operation Promise at first failure barrier`,
++      )
++      if (
++        model.operations[index]!.requires.includes(failureBarrier.requirement)
++      )
++        demand(
++          actual.outcome.state === `pending` ||
++            (actual.outcome.state === `rejected` &&
++              actual.outcome.error === failureBarrier.error),
++          `failed window is pending or rejects with the exact required failure`,
++        )
++      else
++        equal(
++          actual.outcome,
++          expected.outcome,
++          `unaffected operation result at first failure barrier`,
++        )
++    }
++    return
++  }
+   equal(
+     observation.operations,
+-    model.operations.map((operation) => ({
+-      operation: operation.operation,
+-      returned: `promise`,
+-      outcome: operation.outcome,
+-    })),
++    expectedOperations,
+     `original public operation results follow authored dependencies`,
+   )
+ }
+@@ -1349,6 +1379,8 @@
+         requirement: string
+         error: string
+         peerPending: boolean
++        peerRetired?: boolean
++        firstFailureBarrier?: true
+       }
+     | {
+         boundary: `facade-rollback`
+@@ -1396,7 +1428,14 @@
+     runtimeTag(observation.phase, `completion-baseline-cut`),
+     `unknown baseline completion phase`,
+   )
+-  checkCompletionPublicState(model, observation)
++  checkCompletionPublicState(
++    model,
++    observation,
++    observation.boundary === `source-failed-peer` &&
++      observation.firstFailureBarrier
++      ? { requirement: observation.requirement, error: observation.error }
++      : undefined,
++  )
+   switch (observation.boundary) {
+     case `held-window`:
+       positive(
+@@ -1443,7 +1482,10 @@
+       break
+     case `source-failed-peer`:
+       booleanFields(observation, [`peerPending`])
+-      demand(observation.peerPending, `actual baseline peer remains unanswered`)
++      demand(
++        observation.peerPending !== (observation.peerRetired === true),
++        `actual baseline peer is pending or observably retired`,
++      )
+       equal(
+         requirement(model, observation.requirement).outcome,
+         { state: `rejected`, error: observation.error },

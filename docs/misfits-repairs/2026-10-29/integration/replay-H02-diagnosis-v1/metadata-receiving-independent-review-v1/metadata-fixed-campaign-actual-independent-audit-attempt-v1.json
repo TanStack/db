@@ -1,0 +1,14 @@
+{
+  "status": "AUDITOR PATH-ALIAS ASSERTION; NO CAMPAIGN FINDING",
+  "script": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-fixed-campaign-actual-independent-audit-v1.py",
+  "scriptSha256": "c860feba0cf4f7a0a22f1d18a666e4fc9c36a65e93cf53dcff7d36c94f1ef4a1",
+  "actualCommandChunk": "5e26b1",
+  "actualAuditSession": 64332,
+  "actualCompletionChunk": "e6a198",
+  "actualExit": 1,
+  "failure": "exact source history path",
+  "reason": "Auditor used lexical equality for /var and /private/var aliases. Prepared/source/history binding must compare resolved paths, as prior accepted single-history audit does. Both original spellings are preserved.",
+  "successor": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-fixed-campaign-actual-independent-audit-v2.py",
+  "nativeLaunches": 0,
+  "processProbes": 0
+}

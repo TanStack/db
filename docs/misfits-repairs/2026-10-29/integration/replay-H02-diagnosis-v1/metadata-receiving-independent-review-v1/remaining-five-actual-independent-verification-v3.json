@@ -1,0 +1,94 @@
+{
+  "status": "PASS: exact bounded native selector results verified",
+  "resultFreezeSha256": "c15be2132f0b8179d889e99b7d655e41e2025d6971d817dce98cfa5d16f62841",
+  "runtimeAssets": 37,
+  "exactRuntimeFileSet": true,
+  "verifiedOriginalPackets": {
+    "misfits-metadata-receiving-preparation-v1": 586,
+    "misfits-metadata-receiving-recipes-v2": 13,
+    "misfits-metadata-receiving-native-list-launcher-v1": 10,
+    "misfits-metadata-receiving-native-list-display-correction-v2": 22
+  },
+  "activeSourceFilesUnchanged": 573,
+  "namedDependencyOwnPayloadFilesUnchanged": 2544,
+  "reuseLinksUnchanged": 4,
+  "locksUnchanged": 2,
+  "nodePythonMatched": true,
+  "originalChildExitCode": 0,
+  "originalActualOuterExitCode": 1,
+  "priorStoppedEvidencePreserved": true,
+  "actualOuterExitCode": 0,
+  "nativeResults": [
+    {
+      "order": 1,
+      "recipeId": "native-list-scope-default-remaining-v3",
+      "count": 1,
+      "names": [
+        "queued-answer metadata receiving > checks metadata 'scope' 'default'"
+      ],
+      "exitCode": 0,
+      "pid": 92123,
+      "samples": 7,
+      "elapsedMs": 944,
+      "maxSampledGroupRssBytes": 299319296
+    },
+    {
+      "order": 2,
+      "recipeId": "native-list-scope-authored-remaining-v3",
+      "count": 1,
+      "names": [
+        "queued-answer metadata receiving > checks metadata 'scope' 'authored'"
+      ],
+      "exitCode": 0,
+      "pid": 92187,
+      "samples": 6,
+      "elapsedMs": 812,
+      "maxSampledGroupRssBytes": 305135616
+    },
+    {
+      "order": 3,
+      "recipeId": "native-list-subscription-default-remaining-v3",
+      "count": 1,
+      "names": [
+        "queued-answer metadata receiving > checks metadata 'subscription' 'default'"
+      ],
+      "exitCode": 0,
+      "pid": 92356,
+      "samples": 6,
+      "elapsedMs": 1048,
+      "maxSampledGroupRssBytes": 298156032
+    },
+    {
+      "order": 4,
+      "recipeId": "native-list-subscription-authored-remaining-v3",
+      "count": 1,
+      "names": [
+        "queued-answer metadata receiving > checks metadata 'subscription' 'authored'"
+      ],
+      "exitCode": 0,
+      "pid": 92570,
+      "samples": 6,
+      "elapsedMs": 1024,
+      "maxSampledGroupRssBytes": 298582016
+    },
+    {
+      "order": 5,
+      "recipeId": "native-list-old-scope-default-negative-remaining-v3",
+      "count": 0,
+      "names": [],
+      "exitCode": 0,
+      "pid": 92834,
+      "samples": 7,
+      "elapsedMs": 1161,
+      "maxSampledGroupRssBytes": 280854528
+    }
+  ],
+  "rootRecordedOriginalPidPgidAbsences": 12,
+  "reviewerNativeCommands": 0,
+  "reviewerProcessProbes": 0,
+  "receivingRuns": 0,
+  "failures": [],
+  "finalReceiptsEqualOuterStates": 5,
+  "originalH02SourceInputsUnchanged": 563,
+  "exactOriginalStoppedRuntimeFileSet": true
+}

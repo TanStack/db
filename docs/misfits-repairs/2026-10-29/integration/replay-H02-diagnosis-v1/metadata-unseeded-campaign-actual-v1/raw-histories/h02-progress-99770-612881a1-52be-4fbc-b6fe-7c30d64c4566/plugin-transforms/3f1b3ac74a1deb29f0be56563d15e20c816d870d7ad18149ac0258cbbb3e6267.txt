@@ -1,0 +1,4 @@
+export function runWithCommitCompletion(run, onCommit) {
+  const transaction = run();
+  return onCommit?.() ?? transaction.when(`settled`);
+}

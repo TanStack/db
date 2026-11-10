@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts (4 tests | 1 failed | 3 skipped) 2ms
+     × replays the finite five-root queued-answer history 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts > queued backend answer progress > replays the finite five-root queued-answer history
+TypeError: The URL must be of scheme file
+ ❯ receiveProgressHistory packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:29:16
+     27|   observe: (receipt: ProgressReceipt) => void,
+     28| ): Promise<ProgressOutcome> {
+     29|   const root = fileURLToPath(new URL(`../../../`, import.meta.url))
+       |                ^
+     30|   const sourceFreeze = process.env.H02_PROGRESS_SOURCE_FREEZE
+     31|   if (!sourceFreeze)
+ ❯ run packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:45:27
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:65:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  22:18:13
+   Duration  512ms (transform 45ms, setup 19ms, import 75ms, tests 2ms, environment 327ms)
+

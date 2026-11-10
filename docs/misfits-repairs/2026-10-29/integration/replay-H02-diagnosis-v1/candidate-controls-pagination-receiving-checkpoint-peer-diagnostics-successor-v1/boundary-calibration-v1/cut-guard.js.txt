@@ -1,0 +1,11 @@
+
+        if (activeEpoch !== undefined)
+          throw new Error(`public cut preceded its complete callback interval`)
+        const expected = orderedSteps[orderedIndex++]
+        if (
+          expected?.kind !== `baseline-observe` ||
+          expected.boundary !== receipt.boundary
+        )
+          throw new Error(
+            `receiving observation does not match its authored recipe order`,
+          )

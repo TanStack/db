@@ -1,0 +1,18 @@
+{
+  "sourceFilesMatched": 584,
+  "payloadFilesMatched": 2544,
+  "nodeTwoLocksFourLinksMatched": true,
+  "inputPacketMatched": true,
+  "proofBoundary": "on-disk identity only; no parent V8 attestation",
+  "failuresAtIdentityCheckpoint": [
+    "actual outer tool exit is not zero",
+    "outer outcome exitCode differs",
+    "native receiving did not exit normally with zero",
+    "native cleanup failure or remaining rows",
+    "worker error present",
+    "authored epoch starts differ",
+    "authored epoch ends differ",
+    "authored observation cuts differ",
+    "authored semantic action count differs"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "status": "SEALED SOURCE-ONLY OPERATIONAL DESIGN; runtime source/command binding pending",
+  "members": {
+    "actual-pure-tool-record-v1.json": {
+      "sha256": "d13f5776df38b6e80faa026c587fc51e350571888afaa57953bba0941f868879",
+      "bytes": 464
+    },
+    "check-thresholds.py": {
+      "sha256": "8c8d75d97cfae0101dbc3850e871785aef5094d4851ba42f2eab3e54fda117a0",
+      "bytes": 3072
+    },
+    "operational-successor-design-v1.json": {
+      "sha256": "f0bfbe5b67d5404d4ce78815aaeafc9901652ec86a461f8ade53dfd8d4ae2700",
+      "bytes": 2997
+    },
+    "pure-boundary-results-v1.json": {
+      "sha256": "8e79a81670433755d129f7f9053fa3c0bd99d8cf6596281867f19d21888b57b1",
+      "bytes": 993
+    },
+    "report-v1.md": {
+      "sha256": "6b259fed3914771571fffbc3921f88e81a2b08b78ba220249de830e539ccd433",
+      "bytes": 2508
+    },
+    "supervisor-2gib.py": {
+      "sha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+      "bytes": 17962
+    },
+    "supervisor-threshold-only-v1.patch": {
+      "sha256": "5f1303fa65b8af3d709470f71a862fbfb89d4e7dea8c5911cff3b7b8de502b93",
+      "bytes": 1343
+    }
+  },
+  "fileCount": 7,
+  "totalBytes": 29339,
+  "newRssBytes": 2147483648,
+  "unchangedWallMs": 30000,
+  "runtimeAdmitted": false,
+  "nativeInvocations": 0
+}

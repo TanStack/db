@@ -1,0 +1,48 @@
+{
+  "kind": "Bounded source/read/hash/JSON/string/RegExp checks only. No native loader/import/compiler/discovery/test launch. No application source was evaluated.",
+  "checks": {
+    "fiveExistingBaselineRecipes": true,
+    "sameV3Freeze": true,
+    "unchangedBudgets": true,
+    "allReplayInputsCleared": true,
+    "exactAnchors": true,
+    "zeroQuarterSelectors": true,
+    "positiveStateCounts": true,
+    "authoredPositiveCampaignParity": true,
+    "eightUniqueMutants": true,
+    "completeMutantProduct": true,
+    "deterministicCurrentRunRoleBinding": true,
+    "opaqueDefaultKeys": true,
+    "twoControlsRequireOwnQualification": true,
+    "noExecutableMutantRecipes": true,
+    "completeCurrentComparisonsPreserved": true,
+    "allSourceOnly": true
+  },
+  "unusedOutputs": [
+    {
+      "id": "followup-scope-authored-q2",
+      "absentAtStaticCheck": true
+    },
+    {
+      "id": "followup-scope-default-q0",
+      "absentAtStaticCheck": true
+    },
+    {
+      "id": "followup-scope-authored-q0",
+      "absentAtStaticCheck": true
+    },
+    {
+      "id": "generated-scope-authored-fixed",
+      "absentAtStaticCheck": true
+    },
+    {
+      "id": "generated-scope-authored-random",
+      "absentAtStaticCheck": true
+    }
+  ],
+  "actualBaselineRuns": 0,
+  "actualMutantRuns": 0,
+  "actualDriverSourceEdits": 0,
+  "actualProductionEdits": 0,
+  "scopeNote": "This author audit is not independent review or runtime admission. Complete source/dependency maps are not re-audited."
+}

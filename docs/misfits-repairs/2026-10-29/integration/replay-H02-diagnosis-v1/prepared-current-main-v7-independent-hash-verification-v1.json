@@ -1,0 +1,53 @@
+{
+  "scope": "independent static/hash verification only; no test/build/verifier or receiving execution",
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "manifestSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+  "packetMembers": 62,
+  "packetBytes": 707085,
+  "manifestCountsMatch": true,
+  "packetMismatches": [],
+  "packetMissing": [],
+  "packetExtra": [],
+  "checked": {
+    "productionFiles": 511,
+    "receivingProductionFiles": 161,
+    "instrumentFiles": 26,
+    "sharedInstrumentFiles": 11
+  },
+  "liveFileMismatches": {
+    "productionFiles": [],
+    "receivingProductionFiles": [],
+    "instrumentFiles": [],
+    "sharedInstrumentFiles": []
+  },
+  "sourceCopyMismatches": [],
+  "dependencyPayloadFiles": 2497,
+  "dependencyMismatches": [],
+  "linkMismatches": [],
+  "nodeHashMatches": true,
+  "locksMatch": {
+    "repo": true,
+    "installed": true
+  },
+  "changedAgainstV6": {
+    "productionFiles": [],
+    "receivingProductionFiles": [],
+    "instrumentFiles": [
+      "scripts/h02-progress/receiving-monitor.mjs",
+      "scripts/h02-progress/receiving-monitor.test.mjs",
+      "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "scripts/h02-progress/checker-calibration.test.ts"
+    ],
+    "sharedInstrumentFiles": []
+  },
+  "identities": {
+    "source-freeze-v7.json": "005344d82c3cfeb401da49dc9f70005a3048a47e793f9656462605cead6b3f17",
+    "recipes-v7.json": "65c8dc8d30196508c2af090fc675699f5b60b2b5685ce2c657d957610ad0a8bc",
+    "launcher-v7.zsh": "ea64c0ef3974ce9be100a800f3c236378c56f8f6c792b89712c9859964921252",
+    "handoff-v7.md": "d015c0a0ef148aa620ae867179d69450f529a43ddc2e0eb0ca728f9544265946",
+    "causal-instrument-plan-v7.md": "edaee94d317726a50eef66bdc0d7c0f64f543a1ec4b066a519b6d9d910b91694",
+    "static-checks-v7.json": "e63c60172cb96f312d5291ab33887db1cce12f953b24d58cd30d32b0598dfaf6",
+    "classification-controls-v7.json": "c919c96660d6620b851b7ff2c038fe419ea89c86c04e51fed36c6fe9fa67d58d"
+  },
+  "canonicalReceivingDirectoryExists": false
+}

@@ -1,0 +1,71 @@
+[
+  {
+    "name": "format-candidate-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--write",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.127,
+    "log": "format-candidate-v2.log"
+  },
+  {
+    "name": "typescript-candidate-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+      "--project",
+      "/private/tmp/h02-neighbor-v2-static-tsconfig.json"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 2.044,
+    "log": "typescript-candidate-v2.log"
+  },
+  {
+    "name": "pure-candidate-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.514,
+    "log": "pure-candidate-v2.log"
+  },
+  {
+    "name": "eslint-candidate-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+      "--config",
+      "scripts/h02-progress/eslint.config.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 2.278,
+    "log": "eslint-candidate-v2.log"
+  },
+  {
+    "name": "lint-changed-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "scripts/agent-lint-feedback.mjs"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 13.217,
+    "log": "lint-changed-v2.log"
+  }
+]

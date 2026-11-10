@@ -1,0 +1,69 @@
+import * as IR from "./query/ir.js";
+export * from "./collection/index.js";
+export * from "./transactions";
+export * from "./client.js";
+export { withCollectionConfigFactory } from "./client.js";
+export { collectionOptionsClaim } from "./collection-options.js";
+export { syncWriteNamesWholeRow } from "./collection/sync.js";
+export * from "./types";
+export * from "./proxy";
+export * from "./query/index.js";
+export * from "./optimistic-action";
+export * from "./live-query-adapter";
+export * from "./local-only";
+export * from "./local-storage";
+export {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+  DatabaseRequiredError,
+  ObjectStoreNotFoundError,
+  NameRequiredError,
+  GetKeyRequiredError
+} from "./indexed-db";
+export {
+  openDatabase,
+  createObjectStore,
+  executeTransaction,
+  getAll,
+  getAllKeys,
+  getByKey,
+  put,
+  deleteByKey,
+  clear,
+  deleteDatabase
+} from "./indexed-db-wrapper";
+export * from "./errors";
+export * from "./sync-persistence";
+export * from "./sync-receipt";
+export { deepEquals, equalPersistedSnapshotValues } from "./utils";
+export { reportUncaught } from "./utils/callbacks";
+export * from "./paced-mutations";
+export * from "./strategies/index.js";
+export {
+  hasVirtualProps
+} from "./virtual-props.js";
+export { BaseIndex } from "./indexes/base-index.js";
+export { BasicIndex } from "./indexes/basic-index.js";
+export { BTreeIndex } from "./indexes/btree-index.js";
+export { ReverseIndex } from "./indexes/reverse-index.js";
+export {
+  optimizeExpressionWithIndexes,
+  findIndexForField
+} from "./utils/index-optimization.js";
+export {
+  configureIndexDevMode,
+  isDevModeEnabled,
+  getIndexDevModeConfig,
+  trackQuery,
+  clearQueryPatterns,
+  getQueryPatterns
+} from "./indexes/index-registry.js";
+export * from "./query/expression-helpers.js";
+export {
+  createEffect
+} from "./query/effect.js";
+export { safeRandomUUID } from "./utils/uuid.js";
+export { IR };
+export { operators } from "./query/builder/functions.js";
+export { compareTemporalValues } from "./utils/comparison";
+export { makeComparator } from "./utils/comparison";

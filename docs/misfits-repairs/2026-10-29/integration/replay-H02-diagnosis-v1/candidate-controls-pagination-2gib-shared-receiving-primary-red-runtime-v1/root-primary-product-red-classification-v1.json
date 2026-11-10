@@ -1,0 +1,79 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "confirmed-open production defect; bounded primary controlled product RED",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/result-freeze-v1.json",
+      "sha256": "ec7775de91e14a892dbfe17360cd8d2b73fb2766a0919605c66ee71561a09669"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-review-v1.md",
+      "sha256": "1a995f97683d8240b53260748a25bd16b92f6206c271a649dd72ddf185475923"
+    }
+  ],
+  "rootVerification": "Read independent actual review and exact freeze; rehashed result/review; independently inspected raw JSON exact sole executed assertion, full ancestors, fixed seed suffix and intended shared-checker failure. Actual outer1 and child1 remain unchanged.",
+  "actualTool": {
+    "initial": "e84e86",
+    "session": 26998,
+    "final": "4a9657",
+    "outerExit": 1,
+    "childExit": 1,
+    "permission": "require_escalated"
+  },
+  "law": "Atomic window publication: required refinement failure retains the last complete public snapshot.",
+  "seed": 1665,
+  "path": "0:0:0:0:0",
+  "checkpoint": "First public callback captured after exact required anti-join failure was handled, before original pending/unaborted child peer release; shared checker98 invoked by primary2719.",
+  "expected": [
+    {
+      "id": 1,
+      "rank": 0,
+      "children": [
+        101,
+        102
+      ]
+    }
+  ],
+  "actual": [
+    {
+      "id": 1,
+      "rank": 0,
+      "children": [
+        101,
+        102
+      ]
+    },
+    {
+      "id": 2,
+      "rank": 1,
+      "children": []
+    }
+  ],
+  "reach": "Five cumulative held and failure-handled invocations include original failure plus four shrinks. Remaining three required reach counters0; no completed eight-history campaign or independently checked replay.",
+  "instrumentDefect": {
+    "id": "H02-N-SEED-SUFFIX-REPORT-QUALIFIER",
+    "disposition": "confirmed-open",
+    "cause": "Bound @fast-check/vitest appends exact fixed seed suffix; wrapper expects base title.",
+    "preservation": "Raw JSON, null report field, qualifier secondary, suite reach failure and nonzero exits unchanged.",
+    "next": "Prepare precise separately reviewed title successor with pure valid/corrupted report calibration; do not rerun this admission."
+  },
+  "resourceAndCleanup": "6002ms/43samples/peak1891565568B below2GiB; child reaped1; cleanup group signal attempt found already absent; original named PIDs/PGIDs absent at saved postcheck. No resource cutoff; no universal descendant/resource claim.",
+  "limits": [
+    "RED covers one controlled generated/shrunk failure-first history and callback rows only.",
+    "Current-read/window assertion after first mismatch, peer-first, successful neighbor, retirement, retry and operation settlement not established.",
+    "Real QueryClient full-child failure and same-recorder successful neighbor remain mandatory before production edits.",
+    "No random/all8/replay/hostile-mutant/candidate/progress-class/closure or PR readiness credit.",
+    "Full original verbose input not retained; reduced trace retained.",
+    "Finite expected source/dependency identity retains dynamic-import/runtime-evaluation scope limits."
+  ],
+  "productRed": true,
+  "receivingAccepted": false,
+  "productionEditAuthorized": false,
+  "bugClassClosureCredit": false,
+  "retryAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "next": "Complete separately reviewed real receiving failure/success witnesses and instrument correction; keep production unchanged until pre-edit oracle/receiving gate is met."
+}

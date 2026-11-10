@@ -1,0 +1,38 @@
+{
+  "canonicalRefreshes": 0,
+  "futureRuntimeAndClassificationPathsAbsent": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-scope-default-q2-v1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-root-classification-v1.json",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-root-classification-v1.json"
+  ],
+  "gitOperations": 0,
+  "installs": 0,
+  "nativeListCommands": 0,
+  "nativeProcessProbes": 0,
+  "prUpdates": 0,
+  "productionMutants": 0,
+  "pureControls": {
+    "accepted": 5,
+    "exitCode": 0,
+    "rejected": 29,
+    "sha256": "5c1d1dd19b3b264a6bd1c52e2c5133db800f8382ac23b9beaba56077f4e2b464"
+  },
+  "pythonAstAndCompile": {
+    "bytecodeWritten": false,
+    "modules": 3,
+    "passed": true
+  },
+  "receivingRuns": 0,
+  "sourcePreflight": {
+    "exitCode": 0,
+    "sha256": "e53399927e230aac443f218f850858637786fb5e0983167778bc019aa308e41e"
+  },
+  "status": "SOURCE/STATIC/PURE ONLY",
+  "testRegistrations": 0,
+  "zshSyntax": {
+    "exitCode": 0,
+    "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

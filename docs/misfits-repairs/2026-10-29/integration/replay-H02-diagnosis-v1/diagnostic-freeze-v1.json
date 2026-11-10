@@ -1,0 +1,70 @@
+{
+  "scratch": "/private/tmp/replay-h02-diagnostic-mo8pxcv_",
+  "archiveCommit": "3937a73aeb3a273c95ab77b8d8dd66fc739517c5",
+  "identityLimit": "Historical baseline source reconstructed with explicit source aliases. No build was run and original early built bytes remain unavailable. Dependency clone was from the coordinator, not historical process byte identity.",
+  "node": "v24.19.0",
+  "runtime": {
+    "vitest": {
+      "path": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/package.json",
+      "resolved": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/package.json",
+      "exists": true,
+      "version": "4.1.12",
+      "sha256": "e5a6d55e103f04929442595df0f641f128b02fd706ff01474c094863b44511d0",
+      "resolvesWithinScratch": true
+    },
+    "vite": {
+      "path": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vite/package.json",
+      "resolved": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/package.json",
+      "exists": true,
+      "version": "7.3.7",
+      "sha256": "aae1f593c0e6f320989b60af6e90f8ed4ea5137e5a0b9db663f9b0088333eb3c",
+      "resolvesWithinScratch": true
+    },
+    "query-core": {
+      "path": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection/node_modules/@tanstack/query-core/package.json",
+      "resolved": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/package.json",
+      "exists": true,
+      "version": "5.90.20",
+      "sha256": "b1873c254b19d21a717c047a580c483e053b3233a123ca04a03eacf1b5b58beb",
+      "resolvesWithinScratch": true
+    },
+    "jsdom": {
+      "path": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/jsdom/package.json",
+      "resolved": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/jsdom@27.4.0/node_modules/jsdom/package.json",
+      "exists": true,
+      "version": "27.4.0",
+      "sha256": "e8f4906ea5beba475daa5736d0158f1770092c46718dd04aa2bfe2190808bb7e",
+      "resolvesWithinScratch": true
+    },
+    "tanstack-vite-config": {
+      "path": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/@tanstack/vite-config/package.json",
+      "resolved": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/@tanstack+vite-config@0.4.3_@types+node@25.2.2_rollup@4.64.12_typescript@5.9.3_vite@7.3_7fa0ba48ba2638b1ea807ab04f962ebe/node_modules/@tanstack/vite-config/package.json",
+      "exists": true,
+      "version": "0.4.3",
+      "sha256": "e4fb7de5d887b9f89735b3f54197ab773ab4cec5815c51e4bb613a789a9c12b7",
+      "resolvesWithinScratch": true
+    }
+  },
+  "inputs": {
+    "drivers/h02-cache-observations.test.ts": "0b5e0275e9461532b1d5c9f6238a93109c20c4cc6d6cc3b670ff0d1fc000dee6",
+    "drivers/h02-checkpoints.test.ts": "48b26449007412b08d811432d61f1c2109b566c963e5831b669601d84623a015",
+    "drivers/h02-hardcap.test.ts": "82b386baea70469fb17e5f6d45fabe710a815e6945b1746a579b531c2d808ab8",
+    "drivers/h02-instrumented.test.ts": "022884047c8adb771771d48861ca7785bc3932ecd2a7bb565bff8213819670a9",
+    "drivers/h02-microtask-completion.test.ts": "5ee9e09e371885f77852ba73847ff2b55013d376e5c86d7dbe978c468889110c",
+    "drivers/h02-minimal-records.test.ts": "9fcaa59a38373b87577d212cd734fc2f506fdaaa3bcb895f5966ccb0b5791f23",
+    "drivers/h02-no-include.test.ts": "75664561995cc83a8ff8082a32c32871239b2ed2c2c2169c99b7ac76b0765357",
+    "drivers/h02-no-spy.test.ts": "9448eac20c9e277ddbb50aac64dbf3140d5b1ef37239d00be7d74ad02a666b11",
+    "drivers/h02-no-window.test.ts": "fba5105b08d9763f8ee4fd4053c21a0989e9c97c9a8d82637b3005172a0cc131",
+    "drivers/h02-raw.test.ts": "56e2f2854d978826ad89747f209d4e00db50879f8e065e21ab6d5607359919c8",
+    "drivers/h02-timer-completion.test.ts": "c3764073d3122dd558ed10090a8366cac68648aceeb6ec5b7ac8238f221a3386",
+    "h02.vite.config.ts": "00751e94a37aeeec96bdad7fd300a3a092a1fc0efc45f9e2e4a2ddaf16542cb6",
+    "run-capped.py": "b2eabeafeed43c0873f3ac4a72d72144f3acf720a8ddac1466ed94ff5ee5fbae"
+  },
+  "sourceManifestSha256": "5da64fcd2bad9197ab9b34883696973ab1a84a958868a96b7542d880348de6a6",
+  "productionFiles": {
+    "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+    "packages/db/src/query/live/collection-config-builder.ts": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+    "packages/db/src/query/live/collection-subscriber.ts": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+    "packages/db/src/types.ts": "a5d1eb87fdbd7728ac3d43c37e73f6d580e2831636f5b296fe824de6190f1935"
+  }
+}

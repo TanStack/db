@@ -1,0 +1,19 @@
+{
+  "status": "source-only preparation complete; no runtime admission",
+  "metadataAndRecipePreparation": {
+    "actualToolChunk": "696a36",
+    "exitCode": 0,
+    "elapsedSeconds": 1.773754667,
+    "operation": "filesystem/package JSON read and own-payload hashing only"
+  },
+  "sourceIdentityAndASTValidation": {
+    "actualToolChunk": "45ee07",
+    "exitCode": 0,
+    "elapsedSeconds": 1.047764291,
+    "operation": "static filesystem hashes/JSON/AST only; no launcher/supervisor import"
+  },
+  "nativeProcessesOrProbes": 0,
+  "configOrTestImports": 0,
+  "testOrDiscoveryInvocations": 0,
+  "noInstallOrGitOrPR": true
+}

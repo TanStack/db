@@ -1,0 +1,54 @@
+{
+  "method": "Independent read-only standard-library parse/hash only; no runtime, project checks or process recheck.",
+  "finding": "H02-NEIGHBOR-V2-RUNTIME-IND-01",
+  "scopePacket": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-scope-current-main-v2",
+    "manifestSha256": "fc70002f94b48af89f21438155334074453a6ad403af82e7ada9b1c1b673131a",
+    "members": 7,
+    "bytes": 404200,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "qualificationSha256": "fd3e11ddcace0165d4254e181a1d99d88ae8ade36631365f75b7c9b8983f62f1",
+  "qualification": {
+    "classification": "unreached native test selector; no receiving invocation or product verdict",
+    "launcherInvocations": 1,
+    "outerExitCode": 0,
+    "outerPid": 92750,
+    "outerPgid": 92750,
+    "nativeSummary": {
+      "filesSkipped": 1,
+      "testsSkipped": 5,
+      "testMilliseconds": 0
+    },
+    "selectedTests": 0,
+    "receivingHistories": 0,
+    "childPid": null,
+    "childPgid": null,
+    "perPathRequiredReachCounts": "unmeasured; no body ran",
+    "sourceIdentityAfter": {
+      "production": 511,
+      "instrument": 34,
+      "shared": 17,
+      "matched": 562
+    },
+    "rootAbsenceReceiptSha256": "30000bfe00f15bc00b7eb6a56bbbc21ae23a1e7caf6e41f41aa221f1fdf7eb75",
+    "diagnosis": "Source title $name interpolates through native objDisplay; plain frozen selector did not select the native string-valued table title. Derivation/selection calibration required for successor; no guessed runtime retry.",
+    "limits": "No baseline GREEN/RED, DB path, binding, receipt, provider hold, queued answer, publication or cleanup reach established."
+  },
+  "rootAbsenceSha256": "30000bfe00f15bc00b7eb6a56bbbc21ae23a1e7caf6e41f41aa221f1fdf7eb75",
+  "rootAbsence": {
+    "at": "2026-10-30T06:28:26.326039+00:00",
+    "by": "/root",
+    "PIDsAndPGIDs": [
+      92750
+    ],
+    "method": "separate escalated read-only ps pid/pgid inventory filtered exact original group",
+    "toolChunk": "fffd59",
+    "exitCode": 0,
+    "output": "",
+    "claim": "No outer PID/PGID members at observation; no receiving child was created and no product result follows."
+  },
+  "supersession": "Adds full frozen scope-packet verification after the gap review. Does not alter earlier reports or grant any product/receiving reach credit."
+}

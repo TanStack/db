@@ -1,0 +1,23 @@
+      if (
+        peer.request.appliedLoad !== peer.appliedLoad ||
+        peer.request.options !== peer.options ||
+        peer.request.queryKey !== peer.queryKey ||
+        !isDeepStrictEqual(peer.request.queryKey, peer.queryKeyValue) ||
+        peer.request.source !== peer.source ||
+        peer.request.id !== peer.id ||
+        peer.loads.some((binding) => {
+          const { load } = binding
+          return (
+            !fixture.providers[peer.source].loads().includes(load) ||
+            load.id !== binding.id ||
+            load.source !== binding.source ||
+            load.generation !== binding.generation ||
+            load.enteredAt !== binding.enteredAt ||
+            load.receipt !== binding.receipt ||
+            load.options !== binding.options ||
+            load.options.signal !== binding.signal ||
+            load.queryKey !== binding.queryKey ||
+            !isDeepStrictEqual(load.queryKey, binding.queryKeyValue)
+          )
+        })
+      )

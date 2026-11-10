@@ -1,0 +1,28 @@
+{
+  "receivingMode": "baseline-constituent",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-receiving.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "at": "2026-10-30T09:34:51.207247+00:00",
+  "status": "exact one-singleton source inputs prepared; independent combined/input review and root runtime admission required",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/source-freeze-v3.json",
+  "sourceFreezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "sourcePacket": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v3/packet-sha256-v3.json",
+  "sourcePacketSha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+  "bindingProfile": "completion-baseline-v1",
+  "programs": 1,
+  "recipes": 1,
+  "fixtureConstructionsIfAdmitted": 1,
+  "cells": [
+    {
+      "id": "inline-park-root",
+      "programSha256": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+      "recipeSha256": "75c504604c01c690dda2794de17a12691f598d200bc8dc3368826692c65fa10c",
+      "launchArgvIfAdmitted": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/frozen-inputs-v1/recipes/inline-park-root.json"
+      ],
+      "sourceOnlyValidated": true
+    }
+  ],
+  "limitsPerCell": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "innerReceivingWallMs": 20000,
+  "workers": 1,
+  "serial": true,
+  "stopOnFirstFailureOrUnreachedPremise": true,
+  "automaticReruns": 0,
+  "resourceIncreases": 0,
+  "constructorCalls": 0,
+  "compilerCalls": 0,
+  "runtime": {
+    "semanticActionsExecuted": 0,
+    "modelHistoriesExecuted": 0,
+    "fcSamples": 0,
+    "testCollection": 0,
+    "receiving": 0,
+    "runtimeMutants": 0
+  },
+  "archivePreservation": {
+    "map": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/archive-map-v1.json",
+    "mapSha256": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+    "resolver": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/resolve-historical-input-v1.py",
+    "resolverSha256": "837e9572f5191fab7714eb154a02c7aefdf57cb35211c31a2204ffdcc383b847",
+    "rootPreservationReviewSha256": "29e60b6bb033d252dac16c4db040963ba3bc59188173d28d1c8561006f533b88",
+    "rootRelocationReceiptSha256": "b1ddfe9f148ef2f7c713eb8d260e26f97369c5edb7e4078fec98b688a26258f6",
+    "oldDirectPathsSuperseded": 8,
+    "historicalInputFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json",
+    "historicalInputFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+    "historicalInputPacket": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json",
+    "historicalInputPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+    "oldDirectPathPolicy": "eight mapped constructor emit evidence paths superseded; explicit archive resolver required; other historical keys remain direct",
+    "actualHistoricalConstructorImport": {
+      "path": "/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+      "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d"
+    },
+    "noNewMaterialization": true
+  },
+  "failedFirstSingletonFreezeSha256": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+  "fourSourceIndependentReviewSha256": "0e013e7283dd1f5082bc19d1f06158167301d24614d9cd23993cc1513c48a405",
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "runtimeAdmission": false,
+  "files": {
+    "frozen-inputs-v1/programs/inline-park-root.json": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+    "frozen-inputs-v1/recipes/inline-park-root.json": "75c504604c01c690dda2794de17a12691f598d200bc8dc3368826692c65fa10c",
+    "historical-archive-binding-v1.json": "97c8189780a9e5a0ec0c6510642fd49629675dfcce4fd9bd2230bb0da1c1e44a",
+    "historical-input-resolution-v1.json": "ab93a37ef2a7ca943dda9e4c62cd58648d786f0f8d621b4a2c56c4a998c4886f",
+    "input-report-v1.md": "4e544f038c621232bbb8f2f9b595b9cf3208d7002f40bbab5ec48a94aaad351f",
+    "records/candidate-controls-baseline-batch-preparation-v1/inline-park-root-result-freeze-v1.json": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+    "records/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+    "records/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+    "records/candidate-controls-independent-review-v1/profile-successor-source-review-checklist-v1.json": "1c258a92e51803eb6fed2ae2c2c3b27a32d47b5bbd1ddcac78723b6217f7084e",
+    "records/candidate-controls-independent-review-v1/profile-successor-source-review-v1.md": "0e013e7283dd1f5082bc19d1f06158167301d24614d9cd23993cc1513c48a405",
+    "records/candidate-controls-materialization-archive-v1/archive-map-v1.json": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+    "records/candidate-controls-materialization-archive-v1/root-independent-preservation-review-v1.json": "29e60b6bb033d252dac16c4db040963ba3bc59188173d28d1c8561006f533b88",
+    "records/candidate-controls-materialization-archive-v1/root-relocation-receipt-v1.json": "b1ddfe9f148ef2f7c713eb8d260e26f97369c5edb7e4078fec98b688a26258f6",
+    "selection-plan-v1.json": "69ed5f468ded3bddea586f6b129d90d42041b886d797935c2b33e4659619ef44",
+    "static-input-validation-v1.json": "e96e2215dcb79d444b327a1d63c4f4f5dd2974a7310524547d7353128b2c91b3"
+  }
+}

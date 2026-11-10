@@ -1,0 +1,2020 @@
+{
+  "allCallbacksInOriginalOrder": [
+    {
+      "changes": [
+        {
+          "key": "metadata-root-4",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 83
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-downstream-4",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-downstream-4",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-4",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "sequence": 84,
+      "upstreamEntries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ]
+    },
+    {
+      "changes": [],
+      "entries": [
+        [
+          "metadata-downstream-4",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-4",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "sequence": 85,
+      "upstreamEntries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ]
+    },
+    {
+      "changes": [],
+      "entries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 86
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-root-3",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        },
+        {
+          "key": "metadata-root-4",
+          "type": "delete",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 30
+        }
+      ],
+      "sequence": 159
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-downstream-4",
+          "type": "delete",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        },
+        {
+          "key": "metadata-downstream-3",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 30
+        }
+      ],
+      "sequence": 160,
+      "upstreamEntries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        ]
+      ]
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-root-3",
+          "previousValue": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 182
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-downstream-3",
+          "previousValue": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "sequence": 183,
+      "upstreamEntries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ]
+    }
+  ],
+  "currentRunIdentities": {
+    "downstreamId": "live-query-2",
+    "h02": true,
+    "keyLane": "authored",
+    "phase": "metadata-identities",
+    "rootId": "live-query-1",
+    "sequence": 4,
+    "sourceId": "9ace9960-1b20-4830-b826-1740a8ccfd9f"
+  },
+  "cuts": {
+    "final-publication": {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 30
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          }
+        ]
+      ],
+      "downstreamLoadingSubset": false,
+      "downstreamSubscriptionStatus": "ready",
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        ]
+      ],
+      "h02": true,
+      "health": {
+        "alias": "root",
+        "collectionId": "live-query-1",
+        "error": null,
+        "failureReason": null,
+        "hasErrors": false,
+        "kind": "live-query",
+        "reloading": false,
+        "sources": [
+          {
+            "alias": "row",
+            "collectionId": "9ace9960-1b20-4830-b826-1740a8ccfd9f",
+            "error": null,
+            "failureReason": null,
+            "hasErrors": false,
+            "kind": "source",
+            "reloading": false,
+            "sources": [],
+            "status": "ready"
+          },
+          {
+            "alias": "marker",
+            "collectionId": "h02-progress-markers",
+            "error": null,
+            "failureReason": null,
+            "hasErrors": false,
+            "kind": "source",
+            "reloading": false,
+            "sources": [],
+            "status": "ready"
+          },
+          {
+            "alias": "child",
+            "collectionId": "h02-progress-markers",
+            "error": null,
+            "failureReason": null,
+            "hasErrors": false,
+            "kind": "include",
+            "reloading": false,
+            "sources": [],
+            "status": "ready"
+          }
+        ],
+        "status": "ready"
+      },
+      "phase": "final-publication",
+      "ready": true,
+      "reloadSettled": true,
+      "rootLoadingSubset": false,
+      "rootSubscriptionStatus": "ready",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 30
+        }
+      ],
+      "sequence": 161,
+      "syncError": false
+    },
+    "followup-publication": {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "followup-publication",
+      "ready": true,
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 185,
+      "syncError": false
+    },
+    "initial-publication": {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-4",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "metadata-downstream-4",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "entries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "initial-publication",
+      "ready": true,
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 87
+    },
+    "retained-publication": {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-4",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "metadata-downstream-4",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-4",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "entries": [
+        [
+          "metadata-root-4",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-4",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "pendingProviderAnswers": 3,
+      "phase": "retained-publication",
+      "reason": "provider-hold-before-release",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-4",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 134
+    }
+  },
+  "followupLifecycle": [
+    {
+      "h02": true,
+      "phase": "followup-start",
+      "sequence": 162
+    },
+    {
+      "attempt": 12,
+      "h02": true,
+      "options": {
+        "cursorPresent": false,
+        "keys": [
+          5
+        ],
+        "ownFields": [
+          "limit",
+          "orderBy",
+          "signal",
+          "subscription",
+          "where"
+        ],
+        "signalAborted": false,
+        "signalPresent": true,
+        "subscriptionAtom": 1,
+        "where": {
+          "args": [
+            {
+              "path": [
+                "rowId"
+              ],
+              "type": "ref"
+            },
+            {
+              "type": "val",
+              "value": [
+                5
+              ]
+            }
+          ],
+          "name": "in",
+          "type": "func"
+        }
+      },
+      "phase": "acquisition-attempt",
+      "pivotPresent": false,
+      "sequence": 163
+    },
+    {
+      "atom": "[\"h02-progress-markers\",[5]]",
+      "backendVersion": 1,
+      "h02": true,
+      "key": [
+        "h02-progress-markers",
+        [
+          5
+        ]
+      ],
+      "options": {
+        "cursorPresent": false,
+        "keys": [
+          5
+        ],
+        "ownFields": [
+          "limit",
+          "orderBy",
+          "signal",
+          "where"
+        ],
+        "signalAborted": false,
+        "signalPresent": true,
+        "where": {
+          "args": [
+            {
+              "path": [
+                "rowId"
+              ],
+              "type": "ref"
+            },
+            {
+              "type": "val",
+              "value": [
+                5
+              ]
+            }
+          ],
+          "name": "in",
+          "type": "func"
+        }
+      },
+      "phase": "provider-request",
+      "physicalQuery": 8,
+      "sequence": 173,
+      "startCount": 0
+    },
+    {
+      "answer": {
+        "backendVersion": 1,
+        "rows": [
+          5
+        ],
+        "version": 8
+      },
+      "atom": "[\"h02-progress-markers\",[5]]",
+      "h02": true,
+      "key": [
+        "h02-progress-markers",
+        [
+          5
+        ]
+      ],
+      "phase": "provider-answer",
+      "physicalQuery": 8,
+      "sequence": 174,
+      "startCount": 0
+    },
+    {
+      "attempt": 12,
+      "h02": true,
+      "literalTrue": false,
+      "phase": "acquisition-accepted",
+      "sequence": 175
+    },
+    {
+      "h02": true,
+      "literalTrue": true,
+      "phase": "followup-source-accepted",
+      "sequence": 176
+    },
+    {
+      "h02": true,
+      "phase": "followup-source-applied",
+      "sequence": 177
+    },
+    {
+      "actualRows": [
+        5
+      ],
+      "answer": {
+        "backendVersion": 1,
+        "rows": [
+          5
+        ],
+        "version": 8
+      },
+      "atom": "[\"h02-progress-markers\",[5]]",
+      "dataUpdateCount": 1,
+      "h02": true,
+      "key": [
+        "h02-progress-markers",
+        [
+          5
+        ]
+      ],
+      "phase": "cache-success",
+      "physicalQuery": 8,
+      "sequence": 180
+    },
+    {
+      "attempt": 12,
+      "h02": true,
+      "outcome": "fulfilled",
+      "phase": "followup-acquisition-settled",
+      "sequence": 181
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-root-3",
+          "previousValue": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 182
+    },
+    {
+      "changes": [
+        {
+          "key": "metadata-downstream-3",
+          "previousValue": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "sequence": 183,
+      "upstreamEntries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ]
+    },
+    {
+      "attempts": [
+        [
+          12,
+          "fulfilled"
+        ]
+      ],
+      "downstreamCallbacks": 1,
+      "downstreamLoadingSubset": false,
+      "downstreamSubscriptionStatus": "ready",
+      "h02": true,
+      "phase": "followup-settled",
+      "rootCallbacks": 1,
+      "rootLoadingSubset": false,
+      "rootSubscriptionStatus": "ready",
+      "sequence": 184
+    },
+    {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "metadata-downstream-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "metadata-root-3",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "metadata-downstream-3",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "metadata-downstream-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "metadata-root-3",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "entries": [
+        [
+          "metadata-root-3",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "metadata-root-3",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "followup-publication",
+      "ready": true,
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "metadata-root-3",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 185,
+      "syncError": false
+    }
+  ],
+  "judgmentLimit": "This is recorded-evidence consistency, not another runtime execution of the independent native checker.",
+  "receiptPhases": [
+    [
+      1,
+      "worker-start"
+    ],
+    [
+      2,
+      "actual-key-prefix"
+    ],
+    [
+      3,
+      "query-key-callback"
+    ],
+    [
+      4,
+      "metadata-identities"
+    ],
+    [
+      5,
+      "source-establishing-receipt"
+    ],
+    [
+      6,
+      "actual-key-prefix"
+    ],
+    [
+      7,
+      "query-key-callback"
+    ],
+    [
+      8,
+      "acquisition-attempt"
+    ],
+    [
+      9,
+      "source-stack"
+    ],
+    [
+      10,
+      "actual-key-prefix"
+    ],
+    [
+      11,
+      "query-key-callback"
+    ],
+    [
+      12,
+      "actual-key-prefix"
+    ],
+    [
+      13,
+      "actual-key-prefix"
+    ],
+    [
+      14,
+      "actual-key-prefix"
+    ],
+    [
+      15,
+      "actual-key-prefix"
+    ],
+    [
+      16,
+      "actual-key-prefix"
+    ],
+    [
+      17,
+      "actual-key-prefix"
+    ],
+    [
+      18,
+      "provider-request"
+    ],
+    [
+      19,
+      "provider-answer"
+    ],
+    [
+      20,
+      "acquisition-accepted"
+    ],
+    [
+      21,
+      "acquisition-attempt"
+    ],
+    [
+      22,
+      "actual-key-prefix"
+    ],
+    [
+      23,
+      "query-key-callback"
+    ],
+    [
+      24,
+      "actual-key-prefix"
+    ],
+    [
+      25,
+      "actual-key-prefix"
+    ],
+    [
+      26,
+      "actual-key-prefix"
+    ],
+    [
+      27,
+      "actual-key-prefix"
+    ],
+    [
+      28,
+      "actual-key-prefix"
+    ],
+    [
+      29,
+      "actual-key-prefix"
+    ],
+    [
+      30,
+      "provider-request"
+    ],
+    [
+      31,
+      "provider-answer"
+    ],
+    [
+      32,
+      "acquisition-accepted"
+    ],
+    [
+      33,
+      "acquisition-release"
+    ],
+    [
+      34,
+      "actual-key-prefix"
+    ],
+    [
+      35,
+      "query-key-callback"
+    ],
+    [
+      36,
+      "actual-key-prefix"
+    ],
+    [
+      37,
+      "actual-key-prefix"
+    ],
+    [
+      38,
+      "actual-key-prefix"
+    ],
+    [
+      39,
+      "cache-success"
+    ],
+    [
+      40,
+      "actual-key-prefix"
+    ],
+    [
+      41,
+      "cache-success"
+    ],
+    [
+      42,
+      "acquisition-attempt"
+    ],
+    [
+      43,
+      "actual-key-prefix"
+    ],
+    [
+      44,
+      "query-key-callback"
+    ],
+    [
+      45,
+      "actual-key-prefix"
+    ],
+    [
+      46,
+      "actual-key-prefix"
+    ],
+    [
+      47,
+      "actual-key-prefix"
+    ],
+    [
+      48,
+      "actual-key-prefix"
+    ],
+    [
+      49,
+      "actual-key-prefix"
+    ],
+    [
+      50,
+      "actual-key-prefix"
+    ],
+    [
+      51,
+      "provider-request"
+    ],
+    [
+      52,
+      "provider-answer"
+    ],
+    [
+      53,
+      "acquisition-accepted"
+    ],
+    [
+      54,
+      "acquisition-attempt"
+    ],
+    [
+      55,
+      "actual-key-prefix"
+    ],
+    [
+      56,
+      "query-key-callback"
+    ],
+    [
+      57,
+      "acquisition-accepted"
+    ],
+    [
+      58,
+      "acquisition-release"
+    ],
+    [
+      59,
+      "actual-key-prefix"
+    ],
+    [
+      60,
+      "query-key-callback"
+    ],
+    [
+      61,
+      "actual-key-prefix"
+    ],
+    [
+      62,
+      "actual-key-prefix"
+    ],
+    [
+      63,
+      "cache-success"
+    ],
+    [
+      64,
+      "acquisition-attempt"
+    ],
+    [
+      65,
+      "actual-key-prefix"
+    ],
+    [
+      66,
+      "query-key-callback"
+    ],
+    [
+      67,
+      "actual-key-prefix"
+    ],
+    [
+      68,
+      "actual-key-prefix"
+    ],
+    [
+      69,
+      "actual-key-prefix"
+    ],
+    [
+      70,
+      "actual-key-prefix"
+    ],
+    [
+      71,
+      "actual-key-prefix"
+    ],
+    [
+      72,
+      "actual-key-prefix"
+    ],
+    [
+      73,
+      "provider-request"
+    ],
+    [
+      74,
+      "provider-answer"
+    ],
+    [
+      75,
+      "acquisition-accepted"
+    ],
+    [
+      76,
+      "acquisition-attempt"
+    ],
+    [
+      77,
+      "actual-key-prefix"
+    ],
+    [
+      78,
+      "query-key-callback"
+    ],
+    [
+      79,
+      "acquisition-accepted"
+    ],
+    [
+      80,
+      "actual-key-prefix"
+    ],
+    [
+      81,
+      "actual-key-prefix"
+    ],
+    [
+      82,
+      "cache-success"
+    ],
+    [
+      83,
+      "public-change"
+    ],
+    [
+      84,
+      "downstream-change"
+    ],
+    [
+      85,
+      "downstream-change"
+    ],
+    [
+      86,
+      "public-change"
+    ],
+    [
+      87,
+      "initial-publication"
+    ],
+    [
+      88,
+      "reload-start"
+    ],
+    [
+      89,
+      "actual-key-prefix"
+    ],
+    [
+      90,
+      "actual-key-prefix"
+    ],
+    [
+      91,
+      "actual-key-prefix"
+    ],
+    [
+      92,
+      "actual-key-prefix"
+    ],
+    [
+      93,
+      "actual-key-prefix"
+    ],
+    [
+      94,
+      "actual-key-prefix"
+    ],
+    [
+      95,
+      "actual-key-prefix"
+    ],
+    [
+      96,
+      "query-key-callback"
+    ],
+    [
+      97,
+      "acquisition-attempt"
+    ],
+    [
+      98,
+      "actual-key-prefix"
+    ],
+    [
+      99,
+      "query-key-callback"
+    ],
+    [
+      100,
+      "actual-key-prefix"
+    ],
+    [
+      101,
+      "actual-key-prefix"
+    ],
+    [
+      102,
+      "actual-key-prefix"
+    ],
+    [
+      103,
+      "actual-key-prefix"
+    ],
+    [
+      104,
+      "actual-key-prefix"
+    ],
+    [
+      105,
+      "actual-key-prefix"
+    ],
+    [
+      106,
+      "provider-request"
+    ],
+    [
+      107,
+      "acquisition-accepted"
+    ],
+    [
+      108,
+      "acquisition-attempt"
+    ],
+    [
+      109,
+      "actual-key-prefix"
+    ],
+    [
+      110,
+      "query-key-callback"
+    ],
+    [
+      111,
+      "actual-key-prefix"
+    ],
+    [
+      112,
+      "actual-key-prefix"
+    ],
+    [
+      113,
+      "actual-key-prefix"
+    ],
+    [
+      114,
+      "actual-key-prefix"
+    ],
+    [
+      115,
+      "actual-key-prefix"
+    ],
+    [
+      116,
+      "actual-key-prefix"
+    ],
+    [
+      117,
+      "provider-request"
+    ],
+    [
+      118,
+      "acquisition-accepted"
+    ],
+    [
+      119,
+      "acquisition-attempt"
+    ],
+    [
+      120,
+      "actual-key-prefix"
+    ],
+    [
+      121,
+      "query-key-callback"
+    ],
+    [
+      122,
+      "actual-key-prefix"
+    ],
+    [
+      123,
+      "actual-key-prefix"
+    ],
+    [
+      124,
+      "actual-key-prefix"
+    ],
+    [
+      125,
+      "actual-key-prefix"
+    ],
+    [
+      126,
+      "actual-key-prefix"
+    ],
+    [
+      127,
+      "actual-key-prefix"
+    ],
+    [
+      128,
+      "provider-request"
+    ],
+    [
+      129,
+      "acquisition-accepted"
+    ],
+    [
+      130,
+      "acquisition-attempt"
+    ],
+    [
+      131,
+      "actual-key-prefix"
+    ],
+    [
+      132,
+      "query-key-callback"
+    ],
+    [
+      133,
+      "acquisition-accepted"
+    ],
+    [
+      134,
+      "retained-publication"
+    ],
+    [
+      135,
+      "release-scope"
+    ],
+    [
+      136,
+      "provider-answer"
+    ],
+    [
+      137,
+      "actual-key-prefix"
+    ],
+    [
+      138,
+      "actual-key-prefix"
+    ],
+    [
+      139,
+      "cache-success"
+    ],
+    [
+      140,
+      "release-scope"
+    ],
+    [
+      141,
+      "provider-answer"
+    ],
+    [
+      142,
+      "acquisition-attempt"
+    ],
+    [
+      143,
+      "actual-key-prefix"
+    ],
+    [
+      144,
+      "query-key-callback"
+    ],
+    [
+      145,
+      "acquisition-accepted"
+    ],
+    [
+      146,
+      "acquisition-release"
+    ],
+    [
+      147,
+      "actual-key-prefix"
+    ],
+    [
+      148,
+      "query-key-callback"
+    ],
+    [
+      149,
+      "actual-key-prefix"
+    ],
+    [
+      150,
+      "actual-key-prefix"
+    ],
+    [
+      151,
+      "cache-success"
+    ],
+    [
+      152,
+      "answer-queued"
+    ],
+    [
+      153,
+      "answer-executed"
+    ],
+    [
+      154,
+      "provider-answer"
+    ],
+    [
+      155,
+      "reload-settled"
+    ],
+    [
+      156,
+      "actual-key-prefix"
+    ],
+    [
+      157,
+      "actual-key-prefix"
+    ],
+    [
+      158,
+      "cache-success"
+    ],
+    [
+      159,
+      "public-change"
+    ],
+    [
+      160,
+      "downstream-change"
+    ],
+    [
+      161,
+      "final-publication"
+    ],
+    [
+      162,
+      "followup-start"
+    ],
+    [
+      163,
+      "acquisition-attempt"
+    ],
+    [
+      164,
+      "source-stack"
+    ],
+    [
+      165,
+      "actual-key-prefix"
+    ],
+    [
+      166,
+      "query-key-callback"
+    ],
+    [
+      167,
+      "actual-key-prefix"
+    ],
+    [
+      168,
+      "actual-key-prefix"
+    ],
+    [
+      169,
+      "actual-key-prefix"
+    ],
+    [
+      170,
+      "actual-key-prefix"
+    ],
+    [
+      171,
+      "actual-key-prefix"
+    ],
+    [
+      172,
+      "actual-key-prefix"
+    ],
+    [
+      173,
+      "provider-request"
+    ],
+    [
+      174,
+      "provider-answer"
+    ],
+    [
+      175,
+      "acquisition-accepted"
+    ],
+    [
+      176,
+      "followup-source-accepted"
+    ],
+    [
+      177,
+      "followup-source-applied"
+    ],
+    [
+      178,
+      "actual-key-prefix"
+    ],
+    [
+      179,
+      "actual-key-prefix"
+    ],
+    [
+      180,
+      "cache-success"
+    ],
+    [
+      181,
+      "followup-acquisition-settled"
+    ],
+    [
+      182,
+      "public-change"
+    ],
+    [
+      183,
+      "downstream-change"
+    ],
+    [
+      184,
+      "followup-settled"
+    ],
+    [
+      185,
+      "followup-publication"
+    ],
+    [
+      186,
+      "cleanup-start"
+    ],
+    [
+      187,
+      "acquisition-release"
+    ],
+    [
+      188,
+      "actual-key-prefix"
+    ],
+    [
+      189,
+      "query-key-callback"
+    ],
+    [
+      190,
+      "actual-key-prefix"
+    ],
+    [
+      191,
+      "acquisition-release"
+    ],
+    [
+      192,
+      "actual-key-prefix"
+    ],
+    [
+      193,
+      "query-key-callback"
+    ],
+    [
+      194,
+      "acquisition-release"
+    ],
+    [
+      195,
+      "actual-key-prefix"
+    ],
+    [
+      196,
+      "query-key-callback"
+    ],
+    [
+      197,
+      "actual-key-prefix"
+    ],
+    [
+      198,
+      "acquisition-release"
+    ],
+    [
+      199,
+      "actual-key-prefix"
+    ],
+    [
+      200,
+      "query-key-callback"
+    ],
+    [
+      201,
+      "actual-key-prefix"
+    ],
+    [
+      202,
+      "acquisition-release"
+    ],
+    [
+      203,
+      "actual-key-prefix"
+    ],
+    [
+      204,
+      "query-key-callback"
+    ],
+    [
+      205,
+      "actual-key-prefix"
+    ],
+    [
+      206,
+      "worker-cleaned"
+    ]
+  ]
+}

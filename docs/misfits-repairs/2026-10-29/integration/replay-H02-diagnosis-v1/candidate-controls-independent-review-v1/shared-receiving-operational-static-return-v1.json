@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-30T11:51:20.905626+00:00",
+  "verdict": "bounded ACCEPT of D source preparation; zero blocking source findings",
+  "manifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/packet-manifest-v1.json",
+    "sha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403"
+  },
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-receiving-operational-preparation-independent-review-v1.md",
+    "sha256": "80dbfac42d70033ff958ad60d6bc8dbf9e19f3a3a8da859b39eb9253809ee940"
+  },
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-receiving-operational-preparation-independent-facts-v1.json",
+    "sha256": "c942222cfd0c29471e8643087738fd54b9bc9574da08e85447e7c4d43a3f252a"
+  },
+  "staticAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-shared-receiving-operational-preparation-v1.py",
+    "sha256": "78ae49f419eaeb956e801e67ab6bbb20d6ebdecdd045f1d2ff1ba82ec3e17576",
+    "actual": "7b195d",
+    "session": 26919,
+    "final": "a2f59f",
+    "exit": 0
+  },
+  "firstExactProposal": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+  },
+  "recipe": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+    "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86"
+  },
+  "actualToolPermissionAndReceiptCapture": "ROOT must separately authorize and capture; no specific tool permission is granted by this record",
+  "failureAndSuccessSeparate": true,
+  "successRequiresFailureActualReviewThenOwnAdmission": true,
+  "runtimeAdmission": false,
+  "nativeRunInvocations": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0,
+  "productionAuthority": false,
+  "bugClassClosure": false,
+  "slot2": "returned",
+  "ledgerPrefix": {
+    "rows": 112,
+    "sha256": "29a297b3c178176431c30dd9076fbf3750ec610e864795e4735253c5f6e041ed"
+  }
+}

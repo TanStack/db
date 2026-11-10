@@ -1,0 +1,35 @@
+import hashlib,json,os
+from pathlib import Path
+r=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items');h=r/'docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1';d=h/'candidate-controls-pagination-shared-window-receiving-operational-preparation-v1';n=h/'candidate-controls-pagination-2gib-shared-receiving-containment-v1';f=json.loads((d/'source-freeze-receiving-v1.json').read_text());sup=json.loads((n/'supplemental-tool-inputs.json').read_text());sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+packages={}
+for p in [*f['packages'].values(),*sup['packages']]:
+ root=p['resolved'];mapping=p['regularPayloadFilesMap']
+ if root in packages:assert packages[root]==mapping,root
+ packages[root]=mapping
+payloads=0
+for root,mapping in packages.items():
+ base=Path(root);actual=set()
+ for directory,dirs,files in os.walk(base,followlinks=False):
+  dirs[:]=[name for name in dirs if name!='node_modules' and not (Path(directory)/name).is_symlink()]
+  for name in files:
+   p=Path(directory)/name
+   if p.is_file() and not p.is_symlink():actual.add(str(p.relative_to(base)))
+ assert actual==set(mapping),(root,'own-payload set changed')
+ for name,digest in mapping.items():assert sha(base/name)==digest,(root,name)
+ payloads+=len(mapping)
+for edge in sup['resolutionEdges']:assert str(Path(edge['logical']).resolve())==edge['resolved'],edge
+for item in sup['uninstalledDeclaredOptionalOrPeerDependencies']:
+ base=Path(item['from']);assert not any((ancestor/'node_modules'/item['dependency']).exists() for ancestor in [base,*base.parents]),item
+assert len(packages)==255 and payloads==11974
+
+def pairs(items):
+ out={}
+ for key,value in items:assert key not in out,('duplicate JSON key',key);out[key]=value
+ return out
+
+def constant(value):raise ValueError('non-finite JSON constant '+value)
+jsons=[]
+for p in d.rglob('*.json'):
+ json.loads(p.read_text(),object_pairs_hook=pairs,parse_constant=constant);jsons.append({'path':str(p.relative_to(d)),'sha256':sha(p)})
+record={'scope':'same finite installed metadata closure and own-payload-set algorithm as the frozen N launcher; no imports or module/discovery execution','algorithmSource':{'path':str(n/'launch.py'),'sha256':sha(n/'launch.py'),'functions':'payload_names and verify_inputs dependency loops copied as filesystem judgments only'},'uniquePackageRoots':len(packages),'uniqueOwnRegularPayloadFiles':payloads,'ownPayloadSetsExact':True,'expectedPayloadHashesMatched':True,'declaredResolutionEdgesUnchanged':len(sup['resolutionEdges']),'previouslyAbsentOptionalOrPeerStillAbsent':len(sup['uninstalledDeclaredOptionalOrPeerDependencies']),'strictJsonDuplicateAndNonfiniteCheck':True,'jsonInputs':jsons,'operationalFreezeSha256':sha(d/'source-freeze-receiving-v1.json'),'runtime':0,'imports':0,'testDiscovery':0,'nativeProbes':0}
+p=d/'exact-closure-and-json-audit-v1.json';assert not p.exists();p.write_text(json.dumps(record,indent=2)+'\n');print(json.dumps({k:record[k] for k in ['uniquePackageRoots','uniqueOwnRegularPayloadFiles','declaredResolutionEdgesUnchanged','previouslyAbsentOptionalOrPeerStillAbsent','runtime']},indent=2))

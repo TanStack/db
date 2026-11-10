@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-30T12:14:49.947468+00:00",
+  "strictJsonFilesChecked": 8,
+  "duplicateAndNonfiniteKeysRejected": true,
+  "calibrationResultAnd12RawStreamsRechecked": true,
+  "correctedPathsComparisonExactlyOnce": 4,
+  "controlsRejectedBeforeComparison": 8,
+  "allControlledDescriptorsClosed": true,
+  "activeW596AndInactiveCopies85Rehashed": true,
+  "changedInactiveSources": 1,
+  "validation": "No compile, typecheck, discovery, target/config/model/production import or native receiving execution; diagnostic helper runtime remains UNREACHED; later artifact lint pending ROOT"
+}

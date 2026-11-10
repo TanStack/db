@@ -1,0 +1,30 @@
+{
+  "kind": "h02-ownership-neighbor",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/source-freeze-v3.json",
+  "sourceFreezeSha256": "cc2c1f0c8dee86e95506cfe6bcfd5c948c15c946fe640b86e75485cefba2daeb",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/ownership-neighbor.config.ts",
+    "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+    "-t",
+    "keeps a reacquired lease's result"
+  ],
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3",
+  "finiteHistories": 42,
+  "freshNoRefetch": 6,
+  "staleRefetch": 36,
+  "invocationsAdmitted": 0,
+  "run": false,
+  "provenance": "Exact on-disk source/Node/locks/reuse links/nine named package own payload maps before and after. Explicit verbose+silent:false retains existing finally console reach records; sourceModule/currentTestName supplies bounded positive actual instrumentation/task/source-path observation if retained by a future admitted run. No ownership V8/compiled-body binding claim; no observation of prior V2 effective reporter resolution."
+}

@@ -1,0 +1,39 @@
+{
+  "admittedBy": "/root",
+  "admittedRuntime": true,
+  "cell": "inline-park-root",
+  "maxInvocations": 1,
+  "maxFixtures": 1,
+  "reservedHeavySlot": 2,
+  "workerCount": 1,
+  "inputFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "combinedSourceFreezeSha256": "8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1",
+  "combinedPacketSha256": "548364227e5949d42548b8d8c47f49cca0c8798e06920a26422d6111a044f3de",
+  "sourceReviewSha256": "d3b4af4ea3fcf6636a5793c88472528ff0b8ce1abf16547ca477d3ac872863a5",
+  "firstGateSha256": "4d240624f9271e6be89feb10b8b9ab965d1f07a5b4dd757e254cf2767f753bdd",
+  "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-park-root.json",
+  "recipeSha256": "b16ec72cabaa230e20dfa530a0922c735a9186a7ac880eb86fa50c8ead48ca96",
+  "programSha256": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/frozen-inputs-v1/recipes/inline-park-root.json"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "limits": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "innerReceivingWallMs": 20000,
+  "processVisibilityEvidence": {
+    "toolChunk": "16f7db",
+    "actualExitCode": 0,
+    "stdout": "84329 84329   1424 /bin/ps -o pid=,pgid=,rss=,args= -p 84329"
+  },
+  "stopAfterOne": true,
+  "noRetryOrResourceIncrease": true,
+  "noProductionChangeOrOtherCellAdmitted": true,
+  "requiredResult": "Actual outer return, complete raw semantic/provenance data, positive worker-cleaned and registered-group cleanup, no errors; independent/root classification before next cell"
+}

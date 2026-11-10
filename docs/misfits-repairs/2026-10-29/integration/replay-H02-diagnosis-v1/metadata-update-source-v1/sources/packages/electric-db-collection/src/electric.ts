@@ -1,0 +1,2831 @@
+import {
+  ShapeStream,
+  isChangeMessage,
+  isControlMessage,
+  isVisibleInSnapshot,
+} from '@electric-sql/client'
+import DebugModule from 'debug'
+import {
+  DeduplicatedLoadSubset,
+  LoadSubsetOperationAbortedError,
+  SyncTransactionAbortedError,
+  and,
+  validateSyncPersistenceCapability,
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+  withCollectionSyncConfigCleanup,
+  withCollectionSyncConfigFactory,
+} from '@tanstack/db'
+import {
+  ExpectedNumberInAwaitTxIdError,
+  StreamAbortedError,
+  TimeoutWaitingForMatchError,
+  TimeoutWaitingForTxIdError,
+} from './errors'
+import { compileSQL } from './sql-compiler'
+import {
+  addTagToIndex,
+  deriveDisjunctPositions,
+  findRowsMatchingPattern,
+  getTagLength,
+  isMoveInMessage,
+  isMoveOutMessage,
+  parseTag as parseTagString,
+  removeTagFromIndex,
+  rowVisible,
+  tagMatchesPattern,
+} from './tag-index'
+import type { ColumnEncoder } from './sql-compiler'
+import type {
+  ActiveConditions,
+  DisjunctPositions,
+  MovePattern,
+  MoveTag,
+  ParsedMoveTag,
+  RowId,
+  TagIndex,
+} from './tag-index'
+import type {
+  BaseCollectionConfig,
+  ChangeMessageOrDeleteKeyMessage,
+  CollectionConfig,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
+  LoadSubsetOptions,
+  SyncAppliedReceipt,
+  SyncConfig,
+  SyncMode,
+  UpdateMutationFnParams,
+} from '@tanstack/db'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type {
+  ControlMessage,
+  GetExtensions,
+  Message,
+  Offset,
+  PostgresSnapshot,
+  Row,
+  ShapeStreamOptions,
+} from '@electric-sql/client'
+
+// Re-export for user convenience in custom match functions
+export { isChangeMessage, isControlMessage } from '@electric-sql/client'
+
+const debug = DebugModule.debug(`ts/db:electric`)
+
+/**
+ * Symbol for internal test hooks (hidden from public API)
+ */
+export const ELECTRIC_TEST_HOOKS = Symbol(`electricTestHooks`)
+
+/**
+ * Internal test hooks interface (for testing only)
+ */
+export interface ElectricTestHooks {
+  /**
+   * Called before marking collection ready after first up-to-date in progressive mode
+   * Allows tests to pause and validate snapshot phase before atomic swap completes
+   */
+  beforeMarkingReady?: () => Promise<void>
+}
+
+/**
+ * Type representing a transaction ID in ElectricSQL
+ */
+export type Txid = number
+
+type ElectricResumeState =
+  | {
+      kind: `resume`
+      offset: string
+      handle: string
+      shapeId: string
+      updatedAt: number
+      requiresTagState?: boolean
+    }
+  | {
+      kind: `reset`
+      updatedAt: number
+    }
+
+type ElectricSyncMeta = {
+  version: 1
+  resume?: ElectricResumeState
+  seenTxids: Array<Txid>
+}
+
+type ElectricLifecycleEvidence = {
+  seenTxids: Set<Txid>
+  seenSnapshots: Array<PostgresSnapshot>
+  hydratedResumeState?: ElectricResumeState
+}
+
+type ElectricPendingMatch<T extends Row<unknown>> = {
+  matchFn: (message: Message<T>) => boolean
+  resolve: (value: boolean) => void
+  reject: (error: Error) => void
+  timeoutId: ReturnType<typeof setTimeout>
+  matched: boolean
+}
+
+type ElectricMatchBuffer<T extends Row<unknown>> = {
+  committedMessages: Array<Message<T>>
+  pendingMessages: Array<Message<T>>
+}
+
+function exportElectricSyncMeta(
+  evidence: ElectricLifecycleEvidence,
+): ElectricSyncMeta {
+  const resume = evidence.hydratedResumeState
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(evidence.seenTxids).sort((a, b) => a - b),
+  }
+}
+
+function importElectricSyncMeta(
+  evidence: ElectricLifecycleEvidence,
+  meta: unknown,
+): void {
+  const parsed = parseElectricSyncMeta(meta)
+  if (!parsed) return
+
+  evidence.hydratedResumeState = parsed.resume
+  evidence.seenTxids = new Set(parsed.seenTxids)
+}
+
+function parseElectricResumeState(
+  value: unknown,
+): ElectricResumeState | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.kind === `resume` &&
+    typeof record.offset === `string` &&
+    typeof record.handle === `string` &&
+    typeof record.shapeId === `string` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `resume`,
+      offset: record.offset,
+      handle: record.handle,
+      shapeId: record.shapeId,
+      updatedAt: record.updatedAt,
+      ...(typeof record.requiresTagState === `boolean` && {
+        requiresTagState: record.requiresTagState,
+      }),
+    }
+  }
+
+  if (
+    record.kind === `reset` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `reset`,
+      updatedAt: record.updatedAt,
+    }
+  }
+
+  return undefined
+}
+
+function parseElectricSyncMeta(value: unknown): ElectricSyncMeta | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.version !== 1 ||
+    !Array.isArray(record.seenTxids) ||
+    !record.seenTxids.every(
+      (txid) => typeof txid === `number` && Number.isFinite(txid),
+    )
+  ) {
+    return undefined
+  }
+
+  const resume =
+    record.resume === undefined
+      ? undefined
+      : parseElectricResumeState(record.resume)
+  if (record.resume !== undefined && resume === undefined) {
+    return undefined
+  }
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(new Set(record.seenTxids)).sort((a, b) => a - b),
+  }
+}
+
+function mergeElectricSyncMeta(
+  current: unknown,
+  incoming: unknown,
+): ElectricSyncMeta | unknown {
+  const currentMeta = parseElectricSyncMeta(current)
+  const incomingMeta = parseElectricSyncMeta(incoming)
+
+  if (!incomingMeta) {
+    return current
+  }
+  if (!currentMeta) {
+    return incomingMeta
+  }
+
+  const resume = getNewestElectricResumeState(
+    currentMeta.resume,
+    incomingMeta.resume,
+  )
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(
+      new Set([...currentMeta.seenTxids, ...incomingMeta.seenTxids]),
+    ).sort((a, b) => a - b),
+  }
+}
+
+function getNewestElectricResumeState(
+  current: ElectricResumeState | undefined,
+  incoming: ElectricResumeState | undefined,
+): ElectricResumeState | undefined {
+  if (!current) return incoming
+  if (!incoming) return current
+  if (incoming.updatedAt > current.updatedAt) return incoming
+  if (incoming.updatedAt < current.updatedAt) return current
+
+  const isSameState =
+    current.kind === incoming.kind &&
+    (current.kind === `reset` ||
+      (incoming.kind === `resume` &&
+        current.offset === incoming.offset &&
+        current.handle === incoming.handle &&
+        current.shapeId === incoming.shapeId))
+
+  // Equal timestamps have no causal ordering. Preserve an identical state,
+  // but collapse every conflict to reset so merge order cannot resurrect an
+  // offset that another source has already declared unsafe.
+  return isSameState ? current : { kind: `reset`, updatedAt: current.updatedAt }
+}
+
+/**
+ * Custom match function type - receives stream messages and returns boolean
+ * indicating if the mutation has been synchronized
+ */
+export type MatchFunction<T extends Row<unknown>> = (
+  message: Message<T>,
+) => boolean
+
+/**
+ * Type representing a snapshot end message
+ */
+type SnapshotEndMessage = ControlMessage & {
+  headers: { control: `snapshot-end` }
+}
+// The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
+// but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
+// This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends Row<unknown>
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * The mode of sync to use for the collection.
+ * @default `eager`
+ * @description
+ * - `eager`:
+ *   - syncs all data immediately on preload
+ *   - collection will be marked as ready once the sync is complete
+ *   - there is no incremental sync
+ * - `on-demand`:
+ *   - syncs data in incremental snapshots when the collection is queried
+ *   - collection will be marked as ready immediately after the first snapshot is synced
+ * - `progressive`:
+ *   - syncs all data for the collection in the background
+ *   - uses incremental snapshots during the initial sync to provide a fast path to the data required for queries
+ *   - collection will be marked as ready once the full sync is complete
+ *   - a live query, Suspense, or `skipInitial` effect is ready once its own snapshot loads, before the full sync
+ *     completes; changes to those rows arrive when the full sync completes
+ */
+export type ElectricSyncMode = SyncMode | `progressive`
+
+/**
+ * Configuration interface for Electric collection options
+ * @template T - The type of items in the collection
+ * @template TSchema - The schema type for validation
+ */
+export interface ElectricCollectionConfig<
+  T extends Row<unknown> = Row<unknown>,
+  TSchema extends StandardSchemaV1 = never,
+> extends Omit<
+  BaseCollectionConfig<T, string | number, TSchema, ElectricCollectionUtils<T>>,
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+> {
+  /**
+   * Configuration options for the ElectricSQL ShapeStream
+   */
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+  syncMode?: ElectricSyncMode
+
+  /**
+   * Internal test hooks (for testing only)
+   * Hidden via Symbol to prevent accidental usage in production
+   */
+  [ELECTRIC_TEST_HOOKS]?: ElectricTestHooks
+
+  /**
+   * Optional asynchronous handler function called before an insert operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
+   * @param params Object containing transaction and collection information
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * @example
+   * // Recommended: Wait for txid to sync
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Insert handler with custom timeout
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *   // Wait up to 10 seconds for txid
+   *   await collection.utils.awaitTxId(result.txid, 10000)
+   * }
+   *
+   * @example
+   * // Insert handler with timeout error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *
+   *   try {
+   *     await collection.utils.awaitTxId(result.txid, 5000)
+   *   } catch (error) {
+   *     // Decide sync timeout policy:
+   *     // - Throw to rollback optimistic state
+   *     // - Catch to keep optimistic state (eventual consistency)
+   *     // - Schedule background retry
+   *     console.warn('Sync timeout, keeping optimistic state:', error)
+   *     // Don't throw - allow optimistic state to persist
+   *   }
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   const results = await Promise.all(
+   *     items.map(item => api.todos.create({ data: item }))
+   *   )
+   *   // Wait for all txids to sync
+   *   await Promise.all(
+   *     results.map(r => collection.utils.awaitTxId(r.txid))
+   *   )
+   * }
+   *
+   * @example
+   * // Alternative: Use awaitMatch utility for custom matching logic
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.todos.create({ data: newItem })
+   *   // Wait for specific change to appear in sync stream
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'insert' &&
+   *                  message.value.name === newItem.name
+   *   )
+   * }
+   */
+  onInsert?: (
+    params: InsertMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >,
+  ) => Promise<void>
+
+  /**
+   * Optional asynchronous handler function called before an update operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
+   * @param params Object containing transaction and collection information
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * @example
+   * // Recommended: Wait for txid to sync
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const { original, changes } = transaction.mutations[0]
+   *   const result = await api.todos.update({
+   *     where: { id: original.id },
+   *     data: changes
+   *   })
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Alternative: Use awaitMatch utility for custom matching logic
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const { original, changes } = transaction.mutations[0]
+   *   await api.todos.update({ where: { id: original.id }, data: changes })
+   *   // Wait for specific change to appear in sync stream
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'update' &&
+   *                  message.value.id === original.id
+   *   )
+   * }
+   */
+  onUpdate?: (
+    params: UpdateMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >,
+  ) => Promise<void>
+
+  /**
+   * Optional asynchronous handler function called before a delete operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
+   * @param params Object containing transaction and collection information
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * @example
+   * // Recommended: Wait for txid to sync
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.todos.delete({
+   *     id: mutation.original.id
+   *   })
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Alternative: Use awaitMatch utility for custom matching logic
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   await api.todos.delete({ id: mutation.original.id })
+   *   // Wait for specific change to appear in sync stream
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'delete' &&
+   *                  message.value.id === mutation.original.id
+   *   )
+   * }
+   */
+  onDelete?: (
+    params: DeleteMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >,
+  ) => Promise<void>
+}
+
+function isUpToDateMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is ControlMessage & { up_to_date: true } {
+  return isControlMessage(message) && message.headers.control === `up-to-date`
+}
+
+function isMustRefetchMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is ControlMessage & { headers: { control: `must-refetch` } } {
+  return isControlMessage(message) && message.headers.control === `must-refetch`
+}
+
+function isSnapshotEndMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is SnapshotEndMessage {
+  return isControlMessage(message) && message.headers.control === `snapshot-end`
+}
+
+function isSubsetEndMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is ControlMessage & { headers: { control: `subset-end` } } {
+  return (
+    isControlMessage(message) &&
+    (message.headers.control as string) === `subset-end`
+  )
+}
+
+function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
+  return {
+    xmin: message.headers.xmin,
+    xmax: message.headers.xmax,
+    xip_list: message.headers.xip_list,
+  }
+}
+
+function toStableSerializable(value: unknown): unknown {
+  if (value == null) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toStableSerializable(entry))
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (typeof value === `object`) {
+    const record = value as Record<string, unknown>
+    const stableRecord: Record<string, unknown> = {}
+    const keys = Object.keys(record).sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )
+    for (const key of keys) {
+      stableRecord[key] = toStableSerializable(record[key])
+    }
+    return stableRecord
+  }
+
+  return value
+}
+
+function getStableShapeIdentity(shapeOptions: {
+  url: string
+  params?: Record<string, unknown>
+}): string {
+  return JSON.stringify(
+    toStableSerializable({
+      url: shapeOptions.url,
+      params: shapeOptions.params ?? null,
+    }),
+  )
+}
+
+// Check if a message contains txids in its headers
+function hasTxids<T extends Row<unknown>>(
+  message: Message<T>,
+): message is Message<T> & { headers: { txids?: Array<Txid> } } {
+  return `txids` in message.headers && Array.isArray(message.headers.txids)
+}
+
+const abortReason = (abortedSignal: AbortSignal): unknown =>
+  abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
+
+const waitForDemandOrAbort = <TResult>(
+  work: Promise<TResult>,
+  demandSignal?: AbortSignal,
+): Promise<TResult> => {
+  if (!demandSignal) return work
+  let removeAbortListener = () => {}
+  const aborted = new Promise<never>((_, reject) => {
+    const onAbort = () => reject(abortReason(demandSignal))
+    demandSignal.addEventListener(`abort`, onAbort, { once: true })
+    removeAbortListener = () =>
+      demandSignal.removeEventListener(`abort`, onAbort)
+    if (demandSignal.aborted) onAbort()
+  })
+  return Promise.race([work, aborted]).finally(removeAbortListener)
+}
+
+/**
+ * Creates a deduplicated loadSubset handler for progressive/on-demand modes
+ * Returns null for eager mode, or a DeduplicatedLoadSubset instance for other modes.
+ * Handles fetching snapshots in progressive mode during buffering phase,
+ * and requesting snapshots in on-demand mode.
+ *
+ * When cursor expressions are provided (whereFrom/whereCurrent), makes two
+ * requestSnapshot calls:
+ * - One for whereFrom (rows > cursor) with limit
+ * - One for whereCurrent (rows = cursor, for tie-breaking) without limit
+ */
+function createLoadSubsetDedupe<T extends Row<unknown>>({
+  stream,
+  syncMode,
+  isBufferingInitialSync,
+  waitForFullSnapshot,
+  waitForEstablishedSnapshot,
+  begin,
+  write,
+  commit,
+  getCommitCursor,
+  waitForCommitsAfter,
+  recordSnapshotRow,
+  collectionId,
+  encodeColumnName,
+  signal,
+  isCleanupAbort,
+  beforeSnapshot,
+}: {
+  stream: ShapeStream<T>
+  syncMode: ElectricSyncMode
+  isBufferingInitialSync: () => boolean
+  waitForFullSnapshot?: () => Promise<void>
+  waitForEstablishedSnapshot: () => Promise<void>
+  begin: () => void
+  write: (mutation: {
+    type: `insert` | `update` | `delete`
+    value: T
+    metadata: Record<string, unknown>
+  }) => void
+  commit: (signal?: AbortSignal) => SyncAppliedReceipt
+  getCommitCursor: () => number
+  waitForCommitsAfter: (cursor: number) => Promise<void>
+  recordSnapshotRow?: (row: T, message: Message<T>) => void
+  collectionId?: string
+  /**
+   * Optional function to encode column names (e.g., camelCase to snake_case).
+   * This is typically the `encode` function from shapeOptions.columnMapper.
+   */
+  encodeColumnName?: ColumnEncoder
+  /**
+   * Abort signal to check if the stream has been aborted during cleanup.
+   * When aborted, errors from requestSnapshot are silently ignored.
+   */
+  signal: AbortSignal
+  isCleanupAbort: () => boolean
+  beforeSnapshot?: () => Promise<void>
+}): DeduplicatedLoadSubset | null {
+  if (syncMode === `eager`) {
+    return null
+  }
+
+  const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
+  const logPrefix = collectionId ? `[${collectionId}] ` : ``
+  // ShapeStream advances one stream cursor for every snapshot response.
+  // Overlapping requests must not apply a later offset before an older one.
+  let snapshotTail: Promise<void> | undefined
+
+  /**
+   * Handles errors from snapshot operations. Returns true if the error was
+   * handled (signal aborted during cleanup), false if it should be re-thrown.
+   */
+  function handleSnapshotError(error: unknown, operation: string): boolean {
+    if (signal.aborted && isCleanupAbort()) {
+      debug(`${logPrefix}Ignoring ${operation} error during cleanup: %o`, error)
+      return true
+    }
+    debug(`${logPrefix}Error in ${operation}: %o`, error)
+    return false
+  }
+
+  const loadSubset = async (opts: LoadSubsetOptions) => {
+    const commitCursor = getCommitCursor()
+    const throwIfAborted = () => {
+      if (signal.aborted) throw abortReason(signal)
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+    }
+    const stopAfterStreamAbort = () => {
+      if (!signal.aborted) return false
+      if (!isCleanupAbort()) throw abortReason(signal)
+      return true
+    }
+    const requestSnapshotInOrder = (
+      params: Parameters<typeof stream.requestSnapshot>[0],
+    ) => {
+      const invoke = () => {
+        throwIfAborted()
+        return stream.requestSnapshot(params)
+      }
+      const request = snapshotTail ? snapshotTail.then(invoke) : invoke()
+      snapshotTail = request.then(
+        () => undefined,
+        () => undefined,
+      )
+      // Caller cancellation does not advance the shared SDK cursor. The tail
+      // still waits for the physical request or its queued turn to finish.
+      return waitForDemandOrAbort(request, opts.signal)
+    }
+    throwIfAborted()
+    if (beforeSnapshot) {
+      await beforeSnapshot()
+      throwIfAborted()
+    }
+
+    // A load that installs no rows itself settles when the sync that
+    // establishes them does, so success never precedes its rows.
+    const settleWith = async (establishing: Promise<void>) => {
+      const demandSignal = opts.signal
+      try {
+        await waitForDemandOrAbort(establishing, demandSignal)
+      } catch (error) {
+        if (signal.aborted && isCleanupAbort()) return
+        if (demandSignal?.aborted) throw abortReason(demandSignal)
+        throw error
+      }
+      if (signal.aborted && isCleanupAbort()) return
+      if (demandSignal?.aborted) throw abortReason(demandSignal)
+    }
+
+    if (waitForFullSnapshot) return settleWith(waitForFullSnapshot())
+
+    if (isBufferingInitialSync()) {
+      const snapshotParams = compileSQL<T>(opts, compileOptions)
+      try {
+        const { data: rows } = await stream.fetchSnapshot(snapshotParams)
+        if (!isBufferingInitialSync()) {
+          debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
+          return settleWith(waitForEstablishedSnapshot())
+        }
+        // Check the signal before commit to discard a stale snapshot.
+        throwIfAborted()
+
+        if (rows.length > 0) {
+          begin()
+          for (const row of rows) {
+            write({
+              type: `insert`,
+              value: row.value,
+              metadata: { ...row.headers },
+            })
+          }
+          const applied = commit(opts.signal)
+          for (const row of rows) recordSnapshotRow?.(row.value, row)
+          if (applied !== true) await applied
+          debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
+        }
+      } catch (error) {
+        // Cleanup is quiet; a caller that aborted sees `AbortError`.
+        if (handleSnapshotError(error, `fetchSnapshot`)) {
+          return
+        }
+        if (opts.signal?.aborted) throw abortReason(opts.signal)
+        throw error
+      }
+      // Rows accepted before an abort still apply, but the caller that
+      // aborted sees `AbortError`.
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+      return
+    }
+
+    // Outside its buffered initial sync, a progressive load installs no rows.
+    // A resumed stream or a completed full sync already holds them; a reset
+    // supplies them only when its snapshot completes.
+    if (syncMode === `progressive`)
+      return settleWith(waitForEstablishedSnapshot())
+
+    const { cursor, where, orderBy, limit } = opts
+
+    throwIfAborted()
+
+    // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
+    // through the stream callback before its Promise resolves. It accepts no
+    // request signal and exposes no request identity on those messages, so an
+    // aborted request can already have installed rows before the check below.
+    // Full request-scoped cancellation requires support in the Electric client;
+    // matching snapshots by parameters is unsafe for overlapping equal requests.
+    try {
+      if (cursor) {
+        const whereCurrentOpts: LoadSubsetOptions = {
+          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+          orderBy,
+        }
+        const whereCurrentParams = compileSQL<T>(
+          whereCurrentOpts,
+          compileOptions,
+        )
+
+        const whereFromOpts: LoadSubsetOptions = {
+          where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
+          orderBy,
+          limit,
+        }
+        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
+
+        debug(`${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`)
+        debug(
+          `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+        )
+
+        await requestSnapshotInOrder(whereCurrentParams)
+        await requestSnapshotInOrder(whereFromParams)
+      } else {
+        const snapshotParams = compileSQL<T>(opts, compileOptions)
+        await requestSnapshotInOrder(snapshotParams)
+      }
+    } catch (error) {
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+      if (handleSnapshotError(error, `requestSnapshot`)) {
+        return
+      }
+      throw error
+    }
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
+    if (stopAfterStreamAbort()) return
+    await waitForDemandOrAbort(waitForCommitsAfter(commitCursor), opts.signal)
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
+    if (stopAfterStreamAbort()) return
+  }
+
+  return new DeduplicatedLoadSubset({ loadSubset })
+}
+
+/**
+ * Type for the awaitTxId utility function. It resolves when the txid
+ * appears in the Electric stream (the server's confirmation), before this
+ * tab's persistence accepts the transaction. If that commit later rejects,
+ * the source fails instead, and the Collection's health node records it
+ * (maintainer decision on PR #2265).
+ */
+export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
+
+/**
+ * Type for the awaitMatch utility function
+ */
+export type AwaitMatchFn<T extends Row<unknown>> = (
+  matchFn: MatchFunction<T>,
+  timeout?: number,
+) => Promise<boolean>
+
+/**
+ * Electric collection utilities type
+ */
+export interface ElectricCollectionUtils<
+  T extends Row<unknown> = Row<unknown>,
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
+  awaitTxId: AwaitTxIdFn
+  awaitMatch: AwaitMatchFn<T>
+}
+
+/** Owns evidence and pending work for one materialized Collection. */
+class ElectricLifecycle<T extends Row<unknown>> {
+  private readonly evidence: ElectricLifecycleEvidence = {
+    seenTxids: new Set(),
+    seenSnapshots: [],
+  }
+
+  private readonly pendingMatches = new Map<number, ElectricPendingMatch<T>>()
+  private readonly pendingTxidWaits = new Map<
+    number,
+    {
+      txId: Txid
+      resolve: (value: boolean) => void
+      reject: (error: Error) => void
+      timeoutId: ReturnType<typeof setTimeout>
+    }
+  >()
+  private matchBuffer: ElectricMatchBuffer<T> = {
+    committedMessages: [],
+    pendingMessages: [],
+  }
+  private nextWaiterId = 0
+  private epoch = 0
+  private active = false
+
+  constructor(private readonly collectionId?: string) {}
+
+  readonly utils: ElectricCollectionUtils<T> = {
+    awaitTxId: (txId, timeout) => this.awaitTxId(txId, timeout),
+    awaitMatch: (matchFn, timeout) => this.awaitMatch(matchFn, timeout),
+  }
+
+  start(): number {
+    if (this.active) this.retire()
+    this.active = true
+    this.epoch++
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    return this.epoch
+  }
+
+  isActive(epoch: number): boolean {
+    return this.active && this.epoch === epoch
+  }
+
+  retire(epoch?: number): void {
+    if (epoch !== undefined && !this.isActive(epoch)) return
+    this.active = false
+    this.epoch++
+
+    for (const match of this.pendingMatches.values()) {
+      clearTimeout(match.timeoutId)
+      match.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingMatches.clear()
+
+    for (const waiter of this.pendingTxidWaits.values()) {
+      clearTimeout(waiter.timeoutId)
+      waiter.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingTxidWaits.clear()
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    this.evidence.hydratedResumeState = undefined
+  }
+
+  forgetEvidenceAfterScopedRecovery(): void {
+    this.evidence.seenTxids.clear()
+    this.evidence.seenSnapshots.length = 0
+    this.evidence.hydratedResumeState = undefined
+  }
+
+  exportMeta(): ElectricSyncMeta {
+    return exportElectricSyncMeta(this.evidence)
+  }
+
+  importMeta(meta: unknown): void {
+    importElectricSyncMeta(this.evidence, meta)
+    this.resolveTxidWaiters()
+  }
+
+  get resumeState(): ElectricResumeState | undefined {
+    return this.evidence.hydratedResumeState
+  }
+
+  set resumeState(value: ElectricResumeState | undefined) {
+    this.evidence.hydratedResumeState = value
+  }
+
+  publishEvidence(
+    txids: ReadonlySet<Txid>,
+    snapshots: ReadonlyArray<PostgresSnapshot>,
+  ): void {
+    txids.forEach((txid) => this.evidence.seenTxids.add(txid))
+    this.evidence.seenSnapshots.push(...snapshots)
+    this.resolveTxidWaiters()
+  }
+
+  private hasTxid(txId: Txid): boolean {
+    return (
+      this.evidence.seenTxids.has(txId) ||
+      this.evidence.seenSnapshots.some((snapshot) =>
+        isVisibleInSnapshot(txId, snapshot),
+      )
+    )
+  }
+
+  private resolveTxidWaiters(): void {
+    for (const [waitId, waiter] of this.pendingTxidWaits) {
+      if (!this.hasTxid(waiter.txId)) continue
+      clearTimeout(waiter.timeoutId)
+      this.pendingTxidWaits.delete(waitId)
+      waiter.resolve(true)
+    }
+  }
+
+  private async awaitTxId(
+    txId: Txid,
+    timeout: number = 15000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitTxId called with txid %d`,
+      txId,
+    )
+    if (typeof txId !== `number`) {
+      throw new ExpectedNumberInAwaitTxIdError(typeof txId, this.collectionId)
+    }
+    if (this.hasTxid(txId)) return true
+
+    return new Promise((resolve, reject) => {
+      const waitId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingTxidWaits.delete(waitId)
+        reject(new TimeoutWaitingForTxIdError(txId, this.collectionId))
+      }, timeout)
+      this.pendingTxidWaits.set(waitId, {
+        txId,
+        resolve,
+        reject,
+        timeoutId,
+      })
+    })
+  }
+
+  private async awaitMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number = 15000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitMatch called with custom function`,
+    )
+
+    for (const message of this.matchBuffer.committedMessages) {
+      if (!matchFn(message)) continue
+      return true
+    }
+    for (const message of this.matchBuffer.pendingMessages) {
+      if (matchFn(message)) return this.registerMatch(matchFn, timeout, true)
+    }
+    return this.registerMatch(matchFn, timeout, false)
+  }
+
+  private registerMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number,
+    matched: boolean,
+  ): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const matchId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingMatches.delete(matchId)
+        reject(new TimeoutWaitingForMatchError(this.collectionId))
+      }, timeout)
+      this.pendingMatches.set(matchId, {
+        matchFn,
+        resolve,
+        reject,
+        timeoutId,
+        matched,
+      })
+    })
+  }
+
+  beginMatchGeneration(messages: ReadonlyArray<Message<T>>): void {
+    if (!messages.some(isMustRefetchMessage)) return
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    for (const match of this.pendingMatches.values()) match.matched = false
+  }
+
+  observeMatchMessage(message: Message<T>): void {
+    if (
+      isChangeMessage(message) ||
+      isMoveOutMessage(message) ||
+      isMoveInMessage(message)
+    ) {
+      this.matchBuffer.pendingMessages.push(message)
+      let overflow =
+        this.matchBuffer.committedMessages.length +
+        this.matchBuffer.pendingMessages.length -
+        1000
+      if (overflow > 0) {
+        const committedOverflow = Math.min(
+          overflow,
+          this.matchBuffer.committedMessages.length,
+        )
+        this.matchBuffer.committedMessages.splice(0, committedOverflow)
+        overflow -= committedOverflow
+        if (overflow > 0) {
+          this.matchBuffer.pendingMessages.splice(0, overflow)
+        }
+      }
+    }
+
+    const epoch = this.epoch
+    for (const [matchId, match] of this.pendingMatches) {
+      if (match.matched) continue
+      try {
+        match.matched = match.matchFn(message)
+      } catch (error) {
+        clearTimeout(match.timeoutId)
+        this.pendingMatches.delete(matchId)
+        match.reject(error instanceof Error ? error : new Error(String(error)))
+      }
+      // Reentry can register replacement-session waiters in this same Map.
+      if (!this.isActive(epoch)) return
+    }
+  }
+
+  commitMatches(): void {
+    this.matchBuffer.committedMessages.push(...this.matchBuffer.pendingMessages)
+    this.matchBuffer.pendingMessages = []
+    if (this.matchBuffer.committedMessages.length > 1000) {
+      this.matchBuffer.committedMessages.splice(
+        0,
+        this.matchBuffer.committedMessages.length - 1000,
+      )
+    }
+    for (const [matchId, match] of this.pendingMatches) {
+      if (!match.matched) continue
+      clearTimeout(match.timeoutId)
+      this.pendingMatches.delete(matchId)
+      match.resolve(true)
+    }
+  }
+}
+
+/**
+ * Creates Electric collection options for use with a standard Collection
+ *
+ * @template T - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TFallback - The fallback type if no explicit or schema type is provided
+ * @param config - Configuration options for the Electric collection
+ * @returns Collection options with utilities
+ */
+
+// Overload for when schema is provided
+export function electricCollectionOptions<T extends StandardSchemaV1>(
+  config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
+    schema: T
+  },
+): Omit<
+  CollectionConfig<InferSchemaOutput<T>, string | number, T>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<
+    ElectricCollectionConfig<InferSchemaOutput<T>, T>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > & {
+    id?: string
+    utils: ElectricCollectionUtils<InferSchemaOutput<T>>
+    schema: T
+  }
+
+// Overload for when no schema is provided
+export function electricCollectionOptions<T extends Row<unknown>>(
+  config: ElectricCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  },
+): Omit<
+  CollectionConfig<T, string | number>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<ElectricCollectionConfig<T>, `onInsert` | `onUpdate` | `onDelete`> & {
+    id?: string
+    utils: ElectricCollectionUtils<T>
+    schema?: never // no schema in the result
+  }
+
+export function electricCollectionOptions<T extends Row<unknown>>(
+  config: ElectricCollectionConfig<T, any>,
+): Omit<
+  CollectionConfig<T, string | number, any, ElectricCollectionUtils<T>>,
+  `utils`
+> & {
+  id?: string
+  utils: ElectricCollectionUtils<T>
+  schema?: any
+} {
+  let descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+  let utilityLifecycle = descriptorLifecycle
+  const internalSyncMode = config.syncMode ?? `eager`
+  const finalSyncMode =
+    internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
+  const boundLifecycles = new WeakMap<object, ElectricLifecycle<T>>()
+  const awaitTxId: AwaitTxIdFn = (txId, timeout) =>
+    utilityLifecycle.utils.awaitTxId(txId, timeout)
+
+  const awaitMatch: AwaitMatchFn<T> = (matchFn, timeout) =>
+    utilityLifecycle.utils.awaitMatch(matchFn, timeout)
+
+  const createSync = () =>
+    createElectricSync<T>(config.shapeOptions, {
+      getLifecycle: (collection) =>
+        boundLifecycles.get(collection) ?? descriptorLifecycle,
+      syncMode: internalSyncMode,
+      collectionId: config.id,
+      testHooks: config[ELECTRIC_TEST_HOOKS],
+    })
+  const sync = createSync()
+
+  const { shapeOptions: _shapeOptions, ...restConfig } = config
+
+  const utilityTemplate: ElectricCollectionUtils<T> = {
+    awaitTxId,
+    awaitMatch,
+  }
+  const consumeDescriptorLifecycle = (): ElectricLifecycle<T> => {
+    const lifecycle = descriptorLifecycle
+    descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+    utilityLifecycle = lifecycle
+    return lifecycle
+  }
+  const createBoundSync = (
+    source: SyncConfig<T>,
+    utilities: object,
+  ): SyncConfig<T> => {
+    const lifecycle = consumeDescriptorLifecycle()
+    let collectionKey: object | undefined
+    Object.assign(utilities, lifecycle.utils)
+
+    const boundSync: SyncConfig<T> = {
+      ...source,
+      sync: (params) => {
+        // A copied materialized config may delegate through an older binding.
+        // The outermost binding owns this collection; inner wrappers only run
+        // the source sync and must not retarget either owner's lifecycle.
+        if (!boundLifecycles.has(params.collection)) {
+          collectionKey = params.collection
+          boundLifecycles.set(params.collection, lifecycle)
+        }
+        return source.sync(params)
+      },
+      exportSyncMeta: () => lifecycle.exportMeta(),
+      importSyncMeta: (meta) => lifecycle.importMeta(meta),
+      mergeSyncMeta: mergeElectricSyncMeta,
+    }
+    return withCollectionSyncConfigCleanup(boundSync, () => {
+      lifecycle.retire()
+      if (collectionKey) boundLifecycles.delete(collectionKey)
+    })
+  }
+  const syncTemplate = withCollectionSyncConfigFactory(
+    {
+      ...sync,
+      exportSyncMeta: () => descriptorLifecycle.exportMeta(),
+      importSyncMeta: (meta) => descriptorLifecycle.importMeta(meta),
+      mergeSyncMeta: mergeElectricSyncMeta,
+    },
+    createBoundSync,
+  )
+  const options = {
+    ...restConfig,
+    onInsert: config.onInsert,
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete,
+    syncMode: finalSyncMode,
+    sync: syncTemplate,
+    utils: utilityTemplate,
+  }
+  Object.defineProperty(options, `utils`, {
+    enumerable: true,
+    get: () => ({ ...utilityTemplate }),
+  })
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      electricCollectionOptions as (
+        nextConfig: ElectricCollectionConfig<T, any>,
+      ) => typeof options
+    )(config),
+  )
+}
+
+/**
+ * Internal function to create ElectricSQL sync configuration
+ */
+function createElectricSync<T extends Row<unknown>>(
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
+  options: {
+    syncMode: ElectricSyncMode
+    getLifecycle: (collection: object) => ElectricLifecycle<T>
+    collectionId?: string
+    testHooks?: ElectricTestHooks
+  },
+): SyncConfig<T> {
+  const { getLifecycle, syncMode, collectionId, testHooks } = options
+
+  let relationSchema: string | undefined
+
+  const createTagState = () => {
+    const tagCache = new Map<MoveTag, ParsedMoveTag>()
+
+    // Parses a tag string into a ParsedMoveTag.
+    // It memoizes the result parsed tag such that future calls
+    // for the same tag string return the same ParsedMoveTag array.
+    const parseTag = (tag: MoveTag): ParsedMoveTag => {
+      const cachedTag = tagCache.get(tag)
+      if (cachedTag) {
+        return cachedTag
+      }
+
+      const parsedTag = parseTagString(tag)
+      tagCache.set(tag, parsedTag)
+      return parsedTag
+    }
+
+    // Tag tracking state
+    const rowTagSets = new Map<RowId, Set<MoveTag>>()
+    const tagIndex: TagIndex = []
+    let tagLength: number | undefined = undefined
+
+    // DNF state: active_conditions are per-row, disjunct_positions are global
+    // (fixed by the shape's WHERE clause, derived once from the first tagged message).
+    const rowActiveConditions = new Map<RowId, ActiveConditions>()
+    let disjunctPositions: DisjunctPositions | undefined = undefined
+
+    /**
+     * Initialize the tag index with the correct length
+     */
+    const initializeTagIndex = (length: number): void => {
+      if (tagIndex.length < length) {
+        // Extend the index array to the required length
+        for (let i = tagIndex.length; i < length; i++) {
+          tagIndex[i] = new Map()
+        }
+      }
+    }
+
+    /**
+     * Add tags to a row and update the tag index
+     */
+    const addTagsToRow = (
+      tags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      for (const tag of tags) {
+        const parsedTag = parseTag(tag)
+
+        // Infer tag length from first tag
+        if (tagLength === undefined) {
+          tagLength = getTagLength(parsedTag)
+          initializeTagIndex(tagLength)
+        }
+
+        // Validate tag length matches
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength !== tagLength) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+          )
+          continue
+        }
+
+        rowTagSet.add(tag)
+        addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+    }
+
+    /**
+     * Remove tags from a row and update the tag index
+     */
+    const removeTagsFromRow = (
+      removedTags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      for (const tag of removedTags) {
+        const parsedTag = parseTag(tag)
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        // We aggresively evict the tag from the cache
+        // if this tag is shared with another row
+        // and is not removed from that other row
+        // then next time we encounter the tag it will be parsed again
+        tagCache.delete(tag)
+      }
+    }
+
+    /**
+     * Process tags for a change message (add and remove tags)
+     */
+    const processTagsForChangeMessage = (
+      tags: Array<MoveTag> | undefined,
+      removedTags: Array<MoveTag> | undefined,
+      rowId: RowId,
+      activeConditions?: ActiveConditions,
+    ): Set<MoveTag> => {
+      // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+      if (!rowTagSets.has(rowId)) {
+        rowTagSets.set(rowId, new Set())
+      }
+      const rowTagSet = rowTagSets.get(rowId)!
+
+      // Add new tags
+      if (tags) {
+        addTagsToRow(tags, rowId, rowTagSet)
+
+        // Derive disjunct positions once — they are fixed by the shape's WHERE clause.
+        if (disjunctPositions === undefined) {
+          const parsedTags = tags.map(parseTag)
+          disjunctPositions = deriveDisjunctPositions(parsedTags)
+        }
+      }
+
+      // Remove tags
+      if (removedTags) {
+        removeTagsFromRow(removedTags, rowId, rowTagSet)
+      }
+
+      // Store active conditions if provided (overwrite on re-send)
+      if (activeConditions && activeConditions.length > 0) {
+        rowActiveConditions.set(rowId, [...activeConditions])
+      }
+
+      return rowTagSet
+    }
+
+    /**
+     * Clear all tag tracking state (used when truncating)
+     */
+    const clearTagTrackingState = (): void => {
+      rowTagSets.clear()
+      tagIndex.length = 0
+      tagLength = undefined
+      rowActiveConditions.clear()
+      disjunctPositions = undefined
+    }
+
+    /**
+     * Remove all tags for a row from both the tag set and the index
+     * Used when a row is deleted
+     */
+    const clearTagsForRow = (rowId: RowId): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return
+      }
+
+      // Remove each tag from the index
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength === tagLength) {
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        }
+        tagCache.delete(tag)
+      }
+
+      // Remove the row from the tag sets map
+      rowTagSets.delete(rowId)
+      rowActiveConditions.delete(rowId)
+    }
+
+    /**
+     * Remove matching tags from a row based on a pattern
+     * Returns true if the row should be deleted (no longer visible)
+     */
+    const removeMatchingTagsFromRow = (
+      rowId: RowId,
+      pattern: MovePattern,
+    ): boolean => {
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return false
+      }
+
+      // DNF mode: check visibility using active conditions.
+      // Tag index entries are preserved so that move-in can re-activate positions.
+      const activeConditions = rowActiveConditions.get(rowId)
+      if (activeConditions && disjunctPositions) {
+        // Set the condition at this pattern's position to false
+        activeConditions[pattern.pos] = false
+
+        if (!rowVisible(activeConditions, disjunctPositions)) {
+          // Row is no longer visible — clean up all state including tag index
+          for (const tag of rowTagSet) {
+            const parsedTag = parseTag(tag)
+            removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+            tagCache.delete(tag)
+          }
+          rowTagSets.delete(rowId)
+          rowActiveConditions.delete(rowId)
+          return true
+        }
+        return false
+      }
+
+      // Simple shape (no subquery dependencies — server sends no active_conditions):
+      // Remove matching tags and delete if tag set is empty
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        if (tagMatchesPattern(parsedTag, pattern)) {
+          rowTagSet.delete(tag)
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+        }
+      }
+
+      if (rowTagSet.size === 0) {
+        rowTagSets.delete(rowId)
+        return true
+      }
+
+      return false
+    }
+
+    /**
+     * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+     */
+    const processMoveOutEvent = (
+      patterns: Array<MovePattern>,
+      begin: () => void,
+      write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
+      transactionStarted: boolean,
+      onDelete: (rowId: RowId) => void,
+    ): boolean => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+        )
+        return transactionStarted
+      }
+
+      let txStarted = transactionStarted
+
+      // Process all patterns and collect rows to delete
+      for (const pattern of patterns) {
+        // Find all rows that match this pattern
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+        for (const rowId of affectedRowIds) {
+          if (removeMatchingTagsFromRow(rowId, pattern)) {
+            // Delete rows with empty tag sets
+            if (!txStarted) {
+              begin()
+              txStarted = true
+            }
+
+            write({
+              type: `delete`,
+              key: rowId,
+            })
+            onDelete(rowId)
+          }
+        }
+      }
+
+      return txStarted
+    }
+
+    /**
+     * Process move-in event: re-activate conditions for rows matching the patterns.
+     * This is a silent operation — no messages are emitted to the collection.
+     */
+    const processMoveInEvent = (patterns: Array<MovePattern>): void => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-in message but no tag length set yet, ignoring`,
+        )
+        return
+      }
+
+      for (const pattern of patterns) {
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+        for (const rowId of affectedRowIds) {
+          const activeConditions = rowActiveConditions.get(rowId)
+          if (activeConditions) {
+            activeConditions[pattern.pos] = true
+          }
+        }
+      }
+    }
+
+    return {
+      hasTags: () => tagLength !== undefined,
+      processTagsForChangeMessage,
+      clearTagTrackingState,
+      clearTagsForRow,
+      processMoveOutEvent,
+      processMoveInEvent,
+    }
+  }
+  // Tags belong to a collection, and survive a compatible resume of that
+  // collection. Reusing an options descriptor must not share visibility.
+  const collectionTags = new WeakMap<
+    object,
+    ReturnType<typeof createTagState>
+  >()
+
+  const startSession = (
+    params: Parameters<SyncConfig<T>[`sync`]>[0],
+    freshScopedGeneration = false,
+  ) => {
+    const retainsTagState = collectionTags.has(params.collection)
+    let tagState = collectionTags.get(params.collection)
+    if (!tagState) {
+      tagState = createTagState()
+      collectionTags.set(params.collection, tagState)
+    }
+    const {
+      processTagsForChangeMessage,
+      clearTagTrackingState,
+      clearTagsForRow,
+      processMoveOutEvent,
+      processMoveInEvent,
+    } = tagState
+    if (freshScopedGeneration) clearTagTrackingState()
+    const lifecycle = getLifecycle(params.collection)
+    if (freshScopedGeneration) lifecycle.forgetEvidenceAfterScopedRecovery()
+    const lifecycleEpoch = lifecycle.start()
+    const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
+    Object.assign(params.collection.utils, lifecycle.utils)
+
+    const {
+      begin,
+      write,
+      commit: commitSyncTransaction,
+      fail,
+      truncate,
+      collection,
+      metadata,
+    } = params
+    // Readiness of this sync run. A reload runs `sync` again while the
+    // Collection still shows the previous run's status, so status cannot say
+    // whether this run has reached its first ready.
+    let ready = false
+    const markReady = () => {
+      ready = true
+      params.markReady()
+    }
+    // The stream can give up (fail()) from several places; the first one
+    // stops this sync run. Core ignores a later fail() in the same run, so
+    // the first error stays, and a later markReady(), such as a late
+    // snapshot acceptance, does nothing.
+    let commitSequence = 0
+    const pendingAppliedReceipts = new Map<number, Promise<void>>()
+    const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
+      const sequence = ++commitSequence
+      const applied = commitSyncTransaction(signal)
+      if (applied === true) {
+        return true
+      }
+      pendingAppliedReceipts.set(sequence, applied)
+      const removeReceipt = () => pendingAppliedReceipts.delete(sequence)
+      void applied.then(removeReceipt, removeReceipt)
+      return applied
+    }
+    const waitForCommitsAfter = async (cursor: number): Promise<void> => {
+      await Promise.all(
+        Array.from(pendingAppliedReceipts, ([sequence, applied]) =>
+          sequence > cursor ? applied : undefined,
+        ),
+      )
+    }
+    const persistence =
+      metadata === undefined
+        ? null
+        : validateSyncPersistenceCapability(metadata.persistence)
+    const hydrateBaseline = persistence?.hydrateBaseline
+    const resumeSnapshot = persistence?.resumeSnapshot
+    const certifyResumeSnapshot = resumeSnapshot?.certify
+    const getKeySetEvidence = resumeSnapshot?.getKeySetEvidence
+    const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
+    const expectSourceProgress =
+      syncMode === `eager` ? resumeSnapshot?.expectSourceProgress : undefined
+    const persistedKeySetEvidence = getKeySetEvidence?.()
+
+    const storedResumeRecord = freshScopedGeneration
+      ? undefined
+      : metadata?.collection.get(`electric:resume`)
+    const storedResumeState = parseElectricResumeState(storedResumeRecord)
+    const malformedPersistedResume =
+      storedResumeRecord !== undefined && storedResumeState === undefined
+    const persistedResumeState = getNewestElectricResumeState(
+      storedResumeState,
+      lifecycle.resumeState,
+    )
+    const shapeIdentity = getStableShapeIdentity({
+      url: shapeOptions.url,
+      params: shapeOptions.params as Record<string, unknown> | undefined,
+    })
+    // Handles are opaque. Equality of the complete source position is enough
+    // to detect a broken continuation; wall-clock timestamps are not progress.
+    const progressToken = (state: ElectricResumeState | undefined) =>
+      state?.kind === `resume`
+        ? JSON.stringify([state.shapeId, state.handle, state.offset])
+        : undefined
+    const progressKey = `electric:source-progress`
+    let sourceProgress = progressToken(persistedResumeState)
+    const hasIncompatiblePersistedResume =
+      persistedResumeState?.kind === `resume` &&
+      persistedResumeState.shapeId !== shapeIdentity
+    const hasIncompatibleSourceProgress =
+      persistedResumeState?.kind === `resume` &&
+      expectSourceProgress !== undefined &&
+      (metadata?.collection.get(progressKey) !== sourceProgress ||
+        resumeSnapshot?.getSourceProgressCompatible?.() !== true)
+    const hasPersistedReset =
+      syncMode === `eager` && persistedResumeState?.kind === `reset`
+    // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
+    // One fresh replacement establishes consistent evidence for later resumes.
+    const lacksCompletePersistedResume =
+      persistedResumeState?.kind === `resume` &&
+      ((getKeySetEvidence !== undefined &&
+        persistedKeySetEvidence?.status !== `consistent`) ||
+        hasIncompatibleSourceProgress)
+    // Claim expiry can leave a partial managed cache without a resume record.
+    // Its incompatible key set alone requires a fresh source snapshot.
+    const hasIncompatibleManagedCache =
+      persistence?.managedCacheGeneration === true &&
+      persistedKeySetEvidence?.status === `incompatible`
+    const requiresFreshSourceEvidence =
+      !freshScopedGeneration &&
+      (hasIncompatibleManagedCache ||
+        hasIncompatibleSourceProgress ||
+        hasPersistedReset ||
+        (shapeOptions.offset === undefined &&
+          shapeOptions.handle === undefined &&
+          (persistedResumeState !== undefined || malformedPersistedResume) &&
+          (malformedPersistedResume ||
+            hasIncompatiblePersistedResume ||
+            persistedResumeState?.kind === `reset` ||
+            lacksCompletePersistedResume ||
+            (!retainsTagState &&
+              persistedResumeState?.kind === `resume` &&
+              persistedResumeState.requiresTagState !== false))))
+    const scopedRecovery =
+      syncMode === `on-demand` &&
+      requiresFreshSourceEvidence &&
+      persistence?.managedCacheGeneration === true &&
+      persistence.startScopedRecovery !== undefined
+    // A provider position cannot certify incompatible source progress or
+    // finish an interrupted eager replacement recorded by a reset marker.
+    // Eager recovery overrides the caller's position and replaces its rows.
+    // Other sync modes keep their existing explicit-position behavior.
+    const requestedPosition =
+      hasIncompatibleSourceProgress || hasPersistedReset
+        ? {}
+        : { offset: shapeOptions.offset, handle: shapeOptions.handle }
+    if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
+    const usesChangesOnlyLog =
+      syncMode === `on-demand` &&
+      (!requiresFreshSourceEvidence || scopedRecovery)
+    const usesFullLog = syncMode === `on-demand` && !usesChangesOnlyLog
+    // A full-log on-demand stream waits for this snapshot before any load. A
+    // progressive stream waits for it only outside its buffered initial sync,
+    // where a load installs no rows itself.
+    const tracksFullSnapshot = usesFullLog || syncMode === `progressive`
+    let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
+    let rejectFullSnapshot: (error: unknown) => void = () => {}
+    let fullSnapshotReady = Promise.resolve()
+    const resetFullSnapshot = () => {
+      if (!tracksFullSnapshot) return
+      fullSnapshotReady = new Promise<void>((resolve, reject) => {
+        resolveFullSnapshot = (receipt) =>
+          resolve(receipt === true ? undefined : receipt)
+        rejectFullSnapshot = reject
+      })
+      void fullSnapshotReady.catch(() => undefined)
+    }
+    resetFullSnapshot()
+    const canUsePersistedResume =
+      shapeOptions.offset === undefined &&
+      shapeOptions.handle === undefined &&
+      persistedResumeState?.kind === `resume` &&
+      !hasIncompatiblePersistedResume &&
+      // Cached rows do not contain authoritative tag/active-condition state.
+      // Only a complete adapter ledger can justify a persisted cursor.
+      !requiresFreshSourceEvidence
+    const hasExplicitResumeOffset =
+      requestedPosition.offset !== undefined &&
+      requestedPosition.offset !== `-1`
+    if (!canUsePersistedResume && !hasExplicitResumeOffset) {
+      clearTagTrackingState()
+    }
+    const receivesCompleteRows = shapeOptions.params?.replica === `full`
+    const requiresKeySetCertification =
+      canUsePersistedResume && certifyResumeSnapshot !== undefined
+    // Eager and progressive streams that start after the initial offset can
+    // only apply partial updates when the local materialization is complete.
+    const requiresCompleteResume =
+      syncMode !== `on-demand` &&
+      (canUsePersistedResume ||
+        (hasExplicitResumeOffset && !receivesCompleteRows))
+    // A fresh snapshot replaces the rows the Collection holds: its hydrated
+    // cache, or a reload's kept rows. Omitting the old offset alone would
+    // merge rows that no longer exist on the server. A resumed stream sends
+    // no snapshot, so its changes apply on the rows the Collection holds.
+    let freshSnapshotPending =
+      (syncMode === `eager` ||
+        (requiresFreshSourceEvidence && !scopedRecovery)) &&
+      !canUsePersistedResume &&
+      !hasExplicitResumeOffset &&
+      (hydrateBaseline !== undefined ||
+        !collection._state.acceptedSyncedEntries().next().done)
+
+    // Wrap markReady to wait for test hook in progressive mode
+    let progressiveReadyGate: Promise<void> | null = null
+    let streamErrorVersion = 0
+    const wrappedMarkReady = (
+      isBuffering: boolean,
+      expectedErrorVersion = streamErrorVersion,
+    ) => {
+      if (!isActiveLifecycle() || streamErrorVersion !== expectedErrorVersion)
+        return
+
+      // Only create gate if we're in buffering phase (first up-to-date)
+      if (
+        isBuffering &&
+        syncMode === `progressive` &&
+        testHooks?.beforeMarkingReady
+      ) {
+        // Create a new gate promise for this sync cycle
+        progressiveReadyGate = testHooks.beforeMarkingReady()
+        progressiveReadyGate.then(() => {
+          if (streamErrorVersion === expectedErrorVersion) {
+            markReady()
+          }
+        })
+      } else {
+        // No hook, not buffering, or already past first up-to-date
+        markReady()
+      }
+    }
+
+    // Abort controller for the stream - wraps the signal if provided
+    const abortController = new AbortController()
+    let cleanupAbortedStream = false
+    let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
+    // A final initial failure decides its waiting loads. A cleanup that a
+    // status listener runs inside that failure must not relabel it.
+    let initialSyncFailedFinally = false
+    // Once the first up-to-date is committed, its acceptance alone decides
+    // the initial sync: the Collection becomes ready when the snapshot is
+    // accepted, whatever errors, retries, or give-ups arrive meanwhile, and
+    // fails if the acceptance fails.
+    let firstSnapshotCommitted = false
+    // Cleanup, including a cache rotation's retirement, ends this session's
+    // claim on readiness; a replacement session decides it.
+    let sessionCleanedUp = false
+    const failInitialSync = (cause: unknown) => {
+      if (firstSnapshotCommitted) return
+      initialSyncFailedFinally = true
+      fail(cause)
+    }
+    const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
+      if (sessionCleanedUp || ready) return
+      if (failure !== undefined) {
+        initialSyncFailedFinally = true
+        fail(failure)
+      } else if (isActiveLifecycle()) {
+        wrappedMarkReady(isBuffering, streamErrorVersion)
+      } else markReady()
+    }
+    // An external abort stops the source for good. Before the first ready,
+    // that is the final initial failure; cleanup aborts internally instead.
+    const forwardExternalAbort = () => {
+      const fails = isActiveLifecycle() && !ready
+      abortController.abort()
+      if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      // A source that stops must end its reserved transaction. The initial
+      // failure decides first: abandoning commits.
+      abandonOpenTransaction()
+    }
+
+    if (shapeOptions.signal) {
+      shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
+        once: true,
+      })
+      if (shapeOptions.signal.aborted) forwardExternalAbort()
+    }
+
+    abortController.signal.addEventListener(`abort`, () => {
+      rejectFullSnapshot(new StreamAbortedError(collectionId))
+      lifecycle.retire(lifecycleEpoch)
+    })
+
+    const stream = new ShapeStream({
+      ...shapeOptions,
+      // Uncertified on-demand cache rows are quarantined and loaded only
+      // through fresh subset snapshots.
+      log: usesChangesOnlyLog ? `changes_only` : undefined,
+      // In on-demand mode, we only need the changes from the point of time the collection was created
+      // so we default to `now` when there is no saved offset.
+      offset:
+        requestedPosition.offset ??
+        (canUsePersistedResume
+          ? (persistedResumeState.offset as Offset)
+          : usesChangesOnlyLog
+            ? `now`
+            : undefined),
+      handle:
+        requestedPosition.handle ??
+        (canUsePersistedResume ? persistedResumeState.handle : undefined),
+      signal: abortController.signal,
+      onError: async (errorParams) => {
+        if (!isActiveLifecycle() || abortController.signal.aborted) return
+        streamErrorVersion++
+        // Note that Electric sends a 409 error on a `must-refetch` message, but the
+        // ShapeStream handled this and it will not reach this handler, therefor
+        // this handler will not run for a `must-refetch`.
+        // A stream error fails waiting loads and the initial sync only when no
+        // retry follows. A retry that succeeds is a success: waiting loads
+        // settle on the snapshot it establishes.
+        // Waiting loads and readiness waits reject with the same cause.
+        const failWaits = (cause: unknown) => {
+          rejectFullSnapshot(cause)
+          if (!ready) failInitialSync(cause)
+          // No retry follows, so the open transaction can never commit. A
+          // source that stops must end its reserved transaction.
+          abandonOpenTransaction()
+        }
+
+        if (shapeOptions.onError) {
+          let retry: Awaited<ReturnType<typeof shapeOptions.onError>>
+          try {
+            retry = await shapeOptions.onError(errorParams)
+          } catch (error) {
+            failWaits(error)
+            throw error
+          }
+          if (!retry || typeof retry !== `object`) failWaits(errorParams)
+          return retry
+        } else {
+          const initialSyncFailed = !ready
+          failWaits(errorParams)
+          console.error(
+            `An error occurred while syncing collection: ${collection.id}, \n` +
+              (initialSyncFailed
+                ? `the initial sync has been marked as failed. \n`
+                : `the last ready snapshot has been preserved. \n`) +
+              `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
+            errorParams,
+          )
+        }
+
+        return
+      },
+    })
+    const newTxids = new Set<Txid>()
+    const newSnapshots: Array<PostgresSnapshot> = []
+    // Track if we've completed initial sync in progressive mode. A persisted
+    // resume starts from an already-committed stream offset, so the next
+    // up-to-date message must not run the initial atomic swap again.
+    let hasReceivedUpToDate =
+      syncMode === `progressive` && requiresCompleteResume
+    // A complete resume already holds the established rows.
+    if (hasReceivedUpToDate) resolveFullSnapshot(true)
+    // A must-refetch starts a new snapshot generation. Until its up-to-date
+    // commit is applied, old Collection keys cannot make an update valid and
+    // the durable resume marker must remain reset.
+    let isResettingSnapshot = false
+    let resetGeneration = 0
+
+    // Progressive mode state
+    // Helper to determine if we're buffering the initial sync
+    const isBufferingInitialSync = () =>
+      syncMode === `progressive` && !hasReceivedUpToDate && !isResettingSnapshot
+    const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
+    // Progressive subset rows are provisional: the initial atomic swap
+    // normally discards them. Retain one only when a later stream update
+    // needs that full row as its baseline.
+    const progressiveSnapshotRows = new Map<string | number, Message<T>>()
+
+    // Presence spans the open source transaction and persisted callbacks
+    // whose FIFO receipts have not applied yet. Later callbacks must see
+    // those staged writes even though persistence has not replayed them into
+    // core. Once the newest receipt applies, syncedData is authoritative.
+    const pendingPresence = new Map<string | number, boolean>()
+    let usesBaseline = true
+    let pendingPresenceRevision = 0
+
+    const recordPendingPresence = (
+      rowId: string | number,
+      present: boolean,
+    ) => {
+      pendingPresenceRevision++
+      pendingPresence.set(rowId, present)
+    }
+
+    const recordPendingTruncate = () => {
+      pendingPresenceRevision++
+      pendingPresence.clear()
+      progressiveSnapshotRows.clear()
+      usesBaseline = false
+    }
+
+    // The commit consumes the transaction even if it throws.
+    const commitSourceTransaction = (): SyncAppliedReceipt => {
+      const committedPresenceRevision = pendingPresenceRevision
+      transactionStarted = false
+      const applied = commit()
+      if (metadata?.persistence) {
+        const retireAppliedPresence = () => {
+          if (pendingPresenceRevision === committedPresenceRevision) {
+            pendingPresence.clear()
+            usesBaseline = true
+          }
+        }
+        if (applied === true) retireAppliedPresence()
+        else void applied.then(retireAppliedPresence, () => undefined)
+      }
+      return applied
+    }
+
+    // Subset hydration must not split a stream transaction it overlaps.
+    // Every reserved transaction is marked open, so a stop can abandon it.
+    const beginSourceTransaction = () => {
+      begin()
+      transactionStarted = true
+      metadata?.persistence?.reserveCommitTurn()
+    }
+
+    // Track keys that have been synced to handle overlapping subset queries.
+    // When multiple subset queries return the same row, the server sends `insert`
+    // for each response. We convert subsequent inserts to updates to avoid
+    // duplicate key errors when the row's data has changed between requests.
+    // A reload keeps the retired run's rows, and an insert of a kept key
+    // edits it the same way.
+    const syncedKeys = new Set<string | number>(
+      Array.from(collection._state.acceptedSyncedEntries(), ([key]) => key),
+    )
+    let resumeInvalid = false
+
+    const stageResumeMetadata = () => {
+      if (
+        !isActiveLifecycle() ||
+        resumeInvalid ||
+        scopedRecovery ||
+        freshScopedGeneration
+      ) {
+        return
+      }
+      const shapeHandle = stream.shapeHandle
+      const lastOffset = stream.lastOffset
+      if (!shapeHandle || lastOffset === `-1`) {
+        return
+      }
+
+      const resumeState: ElectricResumeState = {
+        kind: `resume`,
+        offset: lastOffset,
+        handle: shapeHandle,
+        shapeId: shapeIdentity,
+        updatedAt: Date.now(),
+        requiresTagState: tagState.hasTags(),
+      }
+      if (expectSourceProgress) {
+        expectSourceProgress({ key: progressKey, previous: sourceProgress })
+        sourceProgress = progressToken(resumeState)
+        metadata?.collection.set(progressKey, sourceProgress)
+      }
+      lifecycle.resumeState = resumeState
+      metadata?.collection.set(`electric:resume`, resumeState)
+    }
+
+    const commitResetResumeMetadataImmediately = (
+      expectInResumeSnapshot = false,
+    ) => {
+      const resetState: ElectricResumeState = {
+        kind: `reset`,
+        updatedAt:
+          Math.max(
+            Date.now(),
+            persistedResumeState?.updatedAt ?? 0,
+            lifecycle.resumeState?.updatedAt ?? 0,
+          ) + 1,
+      }
+      lifecycle.resumeState = resetState
+
+      if (metadata) {
+        begin()
+        metadata.collection.set(`electric:resume`, resetState)
+        if (expectInResumeSnapshot) {
+          expectCurrentCommit?.()
+        }
+        commit()
+      }
+    }
+
+    // Scoped recovery writes its reset marker into the rotated generation.
+    // Writing it before rotation could alter a warm peer's current cache if
+    // this run's claim expires before SQLite decides rotation ownership.
+    if (
+      requiresFreshSourceEvidence &&
+      !scopedRecovery &&
+      (malformedPersistedResume ||
+        hasIncompatiblePersistedResume ||
+        persistedResumeState?.kind === `resume`)
+    ) {
+      // This reset is part of the current runtime's startup decision. The
+      // persisted wrapper may commit it before loading the atomic baseline,
+      // so carry ownership of exactly this generation into certification.
+      commitResetResumeMetadataImmediately(true)
+    }
+    const scopedResetState: ElectricResumeState | undefined = scopedRecovery
+      ? persistedResumeState?.kind === `reset`
+        ? persistedResumeState
+        : lifecycle.resumeState?.kind === `reset`
+          ? lifecycle.resumeState
+          : {
+              kind: `reset`,
+              updatedAt: Date.now(),
+            }
+      : undefined
+    if (scopedResetState) lifecycle.resumeState = scopedResetState
+    const scopedRecoveryPromise =
+      scopedResetState && persistence?.startScopedRecovery
+        ? persistence.startScopedRecovery({
+            key: `electric:resume`,
+            value: scopedResetState,
+          })
+        : undefined
+
+    // Track synced keys and handle overlapping subset queries. When multiple
+    // subset queries return the same row, the server sends `insert` for each
+    // response, and a subset snapshot row is an `insert` too. An insert of a
+    // key already synced, such as a reload's kept row, becomes an update, to
+    // avoid duplicate key errors when the row's data has changed.
+    const writeSynced = (message: {
+      type: `insert` | `update` | `delete`
+      value: T
+      metadata: Record<string, unknown>
+    }) => {
+      const rowId = collection.getKeyFromItem(message.value)
+      const isDuplicateInsert =
+        message.type === `insert` && syncedKeys.has(rowId)
+      if (message.type === `delete`) syncedKeys.delete(rowId)
+      else syncedKeys.add(rowId)
+      write(isDuplicateInsert ? { ...message, type: `update` } : message)
+    }
+
+    /**
+     * Process a change message: handle tags and write the mutation
+     */
+    const processChangeMessage = (changeMessage: Message<T>) => {
+      if (!isChangeMessage(changeMessage)) {
+        return
+      }
+
+      // Process tags if present
+      const tags = changeMessage.headers.tags
+      const removedTags = changeMessage.headers.removed_tags
+      const hasTags = tags || removedTags
+
+      // Extract active_conditions from headers (DNF support)
+      const activeConditions = changeMessage.headers.active_conditions as
+        ActiveConditions | undefined
+
+      const rowId = collection.getKeyFromItem(changeMessage.value)
+      const operation = changeMessage.headers.operation
+
+      if (operation === `delete`) {
+        clearTagsForRow(rowId)
+      } else if (hasTags) {
+        processTagsForChangeMessage(tags, removedTags, rowId, activeConditions)
+      }
+
+      writeSynced({
+        type: operation,
+        value: changeMessage.value,
+        // Include the primary key and relation info in the metadata
+        metadata: {
+          ...changeMessage.headers,
+        },
+      })
+    }
+
+    // Create deduplicated loadSubset wrapper for non-eager modes
+    // This prevents redundant snapshot requests when multiple concurrent
+    // live queries request overlapping or subset predicates
+    const loadSubsetDedupe = createLoadSubsetDedupe({
+      stream,
+      syncMode,
+      isBufferingInitialSync,
+      waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
+      waitForEstablishedSnapshot: () => fullSnapshotReady,
+      begin,
+      write: writeSynced,
+      commit,
+      getCommitCursor: () => commitSequence,
+      waitForCommitsAfter,
+      recordSnapshotRow: (row, message) => {
+        recordPendingPresence(collection.getKeyFromItem(row), true)
+        progressiveSnapshotRows.set(collection.getKeyFromItem(row), message)
+      },
+      collectionId,
+      // Pass the columnMapper's encode function to transform column names
+      // (e.g., camelCase to snake_case) when compiling SQL for subset queries
+      encodeColumnName: shapeOptions.columnMapper?.encode,
+      // Pass abort ownership so cleanup stays quiet without certifying an
+      // externally aborted acquisition as successful.
+      signal: abortController.signal,
+      isCleanupAbort: () => cleanupAbortedStream,
+      beforeSnapshot: scopedRecoveryPromise
+        ? () => scopedRecoveryPromise
+        : undefined,
+    })
+
+    const resumeKeysPromise =
+      scopedRecoveryPromise ??
+      (requiresCompleteResume || freshSnapshotPending
+        ? hydrateBaseline
+          ? (async () => {
+              await hydrateBaseline()
+              const currentKeySetEvidence = getKeySetEvidence?.()
+              if (
+                canUsePersistedResume &&
+                currentKeySetEvidence?.status !== `consistent`
+              ) {
+                throw new Error(
+                  `Electric persisted resume baseline could not be certified during hydration`,
+                )
+              }
+            })()
+          : undefined
+        : requiresKeySetCertification
+          ? (async () => {
+              await certifyResumeSnapshot()
+              const currentKeySetEvidence = getKeySetEvidence?.()
+              if (currentKeySetEvidence?.status !== `consistent`) {
+                throw new Error(
+                  `Electric persisted resume baseline could not be certified`,
+                )
+              }
+            })()
+          : undefined)
+    let areResumeKeysReady = !resumeKeysPromise
+    const pendingResumeBatches: Array<Array<Message<T>>> = []
+
+    const invalidateResume = () => {
+      resumeInvalid = true
+      abandonOpenTransaction()
+      syncedKeys.clear()
+      newTxids.clear()
+      newSnapshots.length = 0
+      commitResetResumeMetadataImmediately()
+      streamErrorVersion++
+      stream.unsubscribeAll()
+      abortController.abort()
+      fail(
+        new Error(
+          `Electric resume state referenced an unseen row; a full snapshot is required`,
+        ),
+      )
+    }
+
+    const processMessages = (messages: Array<Message<T>>): void => {
+      if (!isActiveLifecycle() || resumeInvalid) {
+        return
+      }
+
+      if (freshSnapshotPending) {
+        freshSnapshotPending = false
+        beginSourceTransaction()
+        truncate()
+        recordPendingTruncate()
+        syncedKeys.clear()
+        clearTagTrackingState()
+        isResettingSnapshot = true
+        resetGeneration++
+      }
+
+      // Without persistence, core owns pending source transactions and can
+      // rebuild this callback's presence overlay from them. Persistence owns
+      // queued source transactions until their FIFO turn, so retain the
+      // overlay across callbacks instead. A queued truncate still fences off
+      // the previous snapshot below.
+      if (!metadata?.persistence && !transactionStarted) {
+        pendingPresence.clear()
+        usesBaseline = true
+        for (const pending of collection._state.pendingSyncedTransactions) {
+          if (pending.truncate) {
+            pendingPresence.clear()
+            usesBaseline = false
+          }
+          for (const operation of pending.operations) {
+            pendingPresence.set(operation.key, operation.type !== `delete`)
+          }
+        }
+        for (const message of bufferedMessages) {
+          if (isChangeMessage(message)) {
+            pendingPresence.set(
+              collection.getKeyFromItem(message.value),
+              message.headers.operation !== `delete`,
+            )
+          }
+        }
+      }
+
+      // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
+      let commitPoint: `up-to-date` | `subset-end` | null = null
+
+      lifecycle.beginMatchGeneration(messages)
+
+      for (const message of messages) {
+        lifecycle.observeMatchMessage(message)
+        // A match predicate can synchronously clean up and restart sync.
+        // Nothing after that boundary belongs to the replacement session.
+        if (!isActiveLifecycle()) return
+
+        // Check for txids in the message and add them to our store
+        // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
+        // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track txids
+        // to avoid losing them when messages are written to the existing transaction.
+        if (
+          hasTxids(message) &&
+          (!isBufferingInitialSync() || transactionStarted)
+        ) {
+          message.headers.txids?.forEach((txid) => newTxids.add(txid))
+        }
+
+        if (isChangeMessage(message)) {
+          const rowId = collection.getKeyFromItem(message.value)
+          const operation = message.headers.operation
+          const hasKnownRow =
+            pendingPresence.get(rowId) ??
+            (usesBaseline && collection._state.syncedData.has(rowId))
+          if (operation === `update` && !hasKnownRow) {
+            // Validate after all earlier events, including tag move-outs.
+            // Cancel staged writes before publishing any part of an invalid
+            // resumed callback; the next lifecycle must take a full snapshot.
+            if (requiresCompleteResume && !isResettingSnapshot) {
+              invalidateResume()
+              return
+            }
+            if (!receivesCompleteRows) continue
+          }
+          recordPendingPresence(rowId, operation !== `delete`)
+          if (operation !== `update`) {
+            progressiveSnapshotRows.delete(rowId)
+          }
+        }
+
+        if (isChangeMessage(message)) {
+          // Check if the message contains schema information
+          const schema = message.headers.schema
+          if (schema && typeof schema === `string`) {
+            // Store the schema for future use if it's a valid string
+            relationSchema = schema
+          }
+
+          // In buffered initial sync of progressive mode, buffer messages instead of writing
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
+          // directly to it instead of buffering. This prevents orphan transactions.
+          if (isBufferingInitialSync() && !transactionStarted) {
+            if (message.headers.operation === `update`) {
+              const rowId = collection.getKeyFromItem(message.value)
+              const snapshotRow = progressiveSnapshotRows.get(rowId)
+              if (snapshotRow) {
+                bufferedMessages.push(snapshotRow)
+                progressiveSnapshotRows.delete(rowId)
+              }
+            }
+            bufferedMessages.push(message)
+          } else {
+            // Normal processing: write changes immediately
+            if (!transactionStarted) {
+              beginSourceTransaction()
+            }
+
+            processChangeMessage(message)
+          }
+        } else if (isSnapshotEndMessage(message)) {
+          // Track postgres snapshot metadata for resolving awaiting mutations
+          // Skip during buffered initial sync (will be extracted during atomic swap)
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track snapshots
+          // to avoid losing them when messages are written to the existing transaction.
+          if (!isBufferingInitialSync() || transactionStarted) {
+            newSnapshots.push(parseSnapshotMessage(message))
+          }
+        } else if (isUpToDateMessage(message)) {
+          // up-to-date takes precedence - also triggers progressive mode atomic swap
+          commitPoint = `up-to-date`
+        } else if (isSubsetEndMessage(message)) {
+          // subset-end triggers commit but not progressive mode atomic swap
+          if (commitPoint !== `up-to-date`) {
+            commitPoint = `subset-end`
+          }
+        } else if (isMoveOutMessage(message)) {
+          // Handle move-out event: buffer if buffering, otherwise process immediately
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), process
+          // immediately to avoid orphan transactions.
+          if (isBufferingInitialSync() && !transactionStarted) {
+            bufferedMessages.push(message)
+          } else {
+            // Normal processing: process move-out immediately
+            transactionStarted = processMoveOutEvent(
+              message.headers.patterns,
+              beginSourceTransaction,
+              write,
+              transactionStarted,
+              (rowId) => {
+                recordPendingPresence(rowId, false)
+                syncedKeys.delete(rowId)
+              },
+            )
+          }
+        } else if (isMoveInMessage(message)) {
+          // Handle move-in event: re-activate conditions for matching rows.
+          // Buffer if buffering, otherwise process immediately.
+          if (isBufferingInitialSync() && !transactionStarted) {
+            bufferedMessages.push(message)
+          } else {
+            processMoveInEvent(message.headers.patterns)
+          }
+        } else if (isMustRefetchMessage(message)) {
+          if (hasReceivedUpToDate) resetFullSnapshot()
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
+          )
+
+          commitResetResumeMetadataImmediately()
+
+          // Start a transaction and truncate the collection
+          if (!transactionStarted) {
+            beginSourceTransaction()
+          }
+
+          truncate()
+
+          // Clear tag tracking state
+          clearTagTrackingState()
+
+          // Clear synced keys tracking since we're starting fresh
+          syncedKeys.clear()
+          recordPendingTruncate()
+          isResettingSnapshot = true
+          resetGeneration++
+
+          // Reset the loadSubset deduplication state since we're starting fresh
+          // This ensures that previously loaded predicates don't prevent refetching after truncate
+          loadSubsetDedupe?.reset()
+
+          // Reset flags so we continue accumulating changes until next up-to-date
+          commitPoint = null
+          hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
+          bufferedMessages.length = 0 // Clear buffered messages
+          progressiveSnapshotRows.clear()
+        }
+      }
+
+      // A subset completion cannot publish a partial cold-recovery snapshot.
+      if (
+        requiresFreshSourceEvidence &&
+        !scopedRecovery &&
+        isResettingSnapshot &&
+        commitPoint === `subset-end`
+      )
+        return
+
+      if (commitPoint !== null) {
+        let applied: SyncAppliedReceipt = true
+        const wasBufferingInitialSync = isBufferingInitialSync()
+        const finishesReset =
+          isResettingSnapshot && commitPoint === `up-to-date`
+        const finishingResetGeneration = resetGeneration
+        // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
+        // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
+        // In that case, do a normal commit to properly close the existing transaction.
+        if (
+          isBufferingInitialSync() &&
+          commitPoint === `up-to-date` &&
+          !transactionStarted
+        ) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
+          )
+
+          // Start atomic swap transaction
+          beginSourceTransaction()
+
+          // Truncate to clear all snapshot data
+          truncate()
+
+          // Clear tag tracking state for atomic swap
+          clearTagTrackingState()
+
+          // Clear synced keys tracking for atomic swap
+          syncedKeys.clear()
+
+          // Apply all buffered change messages and extract txids/snapshots
+          for (const bufferedMsg of bufferedMessages) {
+            if (isChangeMessage(bufferedMsg)) {
+              processChangeMessage(bufferedMsg)
+
+              // Extract txids from buffered messages (will be committed to store after transaction)
+              if (hasTxids(bufferedMsg)) {
+                bufferedMsg.headers.txids?.forEach((txid) => newTxids.add(txid))
+              }
+            } else if (isSnapshotEndMessage(bufferedMsg)) {
+              // Extract snapshots from buffered messages (will be committed to store after transaction)
+              newSnapshots.push(parseSnapshotMessage(bufferedMsg))
+            } else if (isMoveOutMessage(bufferedMsg)) {
+              // Process buffered move-out messages during atomic swap
+              processMoveOutEvent(
+                bufferedMsg.headers.patterns,
+                begin,
+                write,
+                // The swap already opened a transaction.
+                true,
+                (rowId) => {
+                  recordPendingPresence(rowId, false)
+                  syncedKeys.delete(rowId)
+                },
+              )
+            } else if (isMoveInMessage(bufferedMsg)) {
+              // Process buffered move-in messages during atomic swap
+              processMoveInEvent(bufferedMsg.headers.patterns)
+            }
+          }
+
+          // Commit the atomic swap
+          stageResumeMetadata()
+          applied = commitSourceTransaction()
+
+          // Exit buffering phase by marking that we've received up-to-date
+          // isBufferingInitialSync() will now return false
+          bufferedMessages.length = 0
+          progressiveSnapshotRows.clear()
+
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,
+          )
+        } else {
+          // Normal mode or on-demand: commit transaction if one was started
+          // Both up-to-date and subset-end trigger a commit
+          if (transactionStarted) {
+            if (!isResettingSnapshot || finishesReset) {
+              stageResumeMetadata()
+            }
+            applied = commitSourceTransaction()
+          } else if (commitPoint === `up-to-date` && metadata) {
+            beginSourceTransaction()
+            stageResumeMetadata()
+            applied = commitSourceTransaction()
+          }
+        }
+        const readyErrorVersion = streamErrorVersion
+        // Readiness counts accepted rows.
+        const accepted = whenSyncAccepted(applied)
+        const firstSnapshot = commitPoint === `up-to-date` && !ready
+        if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
+        if (accepted === true) {
+          wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+        } else if (firstSnapshot) {
+          firstSnapshotCommitted = true
+          void accepted.then(
+            () => settleFirstSnapshot(wasBufferingInitialSync),
+            (error: unknown) =>
+              settleFirstSnapshot(wasBufferingInitialSync, error),
+          )
+        } else {
+          void accepted.then(
+            () => wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+            () => undefined,
+          )
+        }
+        if (applied !== true) {
+          void applied.then(
+            () => undefined,
+            (error: unknown) => {
+              if (!isActiveLifecycle() || abortController.signal.aborted) {
+                return
+              }
+              streamErrorVersion++
+              stream.unsubscribeAll()
+              abortController.abort()
+              fail(error)
+            },
+          )
+        }
+
+        if (finishesReset) {
+          const finishReset = () => {
+            if (resetGeneration === finishingResetGeneration) {
+              isResettingSnapshot = false
+            }
+          }
+          if (applied === true) {
+            finishReset()
+          } else {
+            void applied.then(finishReset, () => undefined)
+          }
+        }
+
+        // Track that we've received the first up-to-date for progressive mode
+        if (commitPoint === `up-to-date`) {
+          hasReceivedUpToDate = true
+        }
+
+        // Stream evidence is the acknowledgement boundary used by mutation
+        // handlers. It must publish before a parked applied receipt or the
+        // optimistic transaction and its acknowledgement can deadlock.
+        if (newTxids.size > 0) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
+            Array.from(newTxids),
+          )
+        }
+        newSnapshots.forEach((snapshot) =>
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
+            snapshot,
+          ),
+        )
+        lifecycle.publishEvidence(newTxids, newSnapshots)
+        newTxids.clear()
+        newSnapshots.length = 0
+        lifecycle.commitMatches()
+      }
+    }
+
+    stream.subscribe(
+      (messages: Array<Message<T>>) => {
+        if (!areResumeKeysReady) {
+          pendingResumeBatches.push([...messages])
+          return
+        }
+        processMessages(messages)
+      },
+      (error) => {
+        // The SDK gave up: it rejected the retry decision or exhausted its
+        // retry loop. No provider batch will settle the gate.
+        rejectFullSnapshot(error)
+        if (isActiveLifecycle() && !abortController.signal.aborted) {
+          if (!ready) failInitialSync(error)
+          else fail(error)
+        }
+        // A source that stops must end its reserved transaction. The initial
+        // failure decides first: abandoning commits.
+        abandonOpenTransaction()
+      },
+    )
+
+    if (!areResumeKeysReady && resumeKeysPromise) {
+      void resumeKeysPromise.then(
+        () => {
+          if (abortController.signal.aborted) return
+
+          areResumeKeysReady = true
+
+          const queuedBatches = pendingResumeBatches.splice(0)
+          queuedBatches.forEach(processMessages)
+        },
+        (error: unknown) => {
+          if (abortController.signal.aborted) return
+
+          pendingResumeBatches.length = 0
+          resumeInvalid = true
+          rejectFullSnapshot(error)
+          commitResetResumeMetadataImmediately()
+          streamErrorVersion++
+          stream.unsubscribeAll()
+          abortController.abort()
+          fail(error)
+        },
+      )
+    }
+
+    // Return the deduplicated loadSubset if available (on-demand or progressive mode)
+    // The loadSubset method is auto-bound, so it can be safely returned directly
+    return {
+      loadSubset: loadSubsetDedupe?.loadSubset,
+      cleanup: () => {
+        sessionCleanedUp = true
+        if (!abortController.signal.aborted && !initialSyncFailedFinally)
+          cleanupAbortedStream = true
+        shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
+        stream.unsubscribeAll()
+        abortController.abort()
+        abandonOpenTransaction()
+        pendingResumeBatches.length = 0
+        // Reset deduplication tracking so collection can load fresh data if restarted
+        loadSubsetDedupe?.reset()
+        lifecycle.retire(lifecycleEpoch)
+      },
+    }
+  }
+
+  return {
+    getSyncMetadata: () => ({
+      relation: shapeOptions.params?.table
+        ? [relationSchema || `public`, shapeOptions.params.table]
+        : undefined,
+    }),
+    sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      if (
+        syncMode !== `on-demand` ||
+        !params.metadata?.persistence?.managedCacheGeneration
+      ) {
+        return startSession(params)
+      }
+      let session = startSession(params)
+      let retireSession!: () => void
+      let retired = new Promise<void>((resolve) => {
+        retireSession = resolve
+      })
+      let restartInFlight: Promise<void> | undefined
+      let restartFailure: { error: unknown } | undefined
+      let restartSequence = 0
+      let sessionCleaned = false
+      let cleanedUp = false
+      const isCleanedUp = () => cleanedUp
+      const cleanupCurrentSession = (): Promise<void> => {
+        if (sessionCleaned) return Promise.resolve()
+        sessionCleaned = true
+        try {
+          return Promise.resolve(session.cleanup())
+        } catch (error) {
+          return Promise.reject(error)
+        }
+      }
+      const trackRestart = (work: Promise<void>): Promise<void> => {
+        const tracked = work
+          .catch((error: unknown) => {
+            restartFailure = { error }
+            throw error
+          })
+          .finally(() => {
+            if (restartInFlight === tracked) restartInFlight = undefined
+          })
+        restartInFlight = tracked
+        return tracked
+      }
+      const startReplacement = (sequence: number): void => {
+        if (isCleanedUp() || sequence !== restartSequence) return
+        session = startSession(params, true)
+        sessionCleaned = false
+        retired = new Promise<void>((resolve) => {
+          retireSession = resolve
+        })
+      }
+
+      return {
+        loadSubset: async (demand: LoadSubsetOptions) => {
+          while (!isCleanedUp()) {
+            if (restartFailure) throw restartFailure.error
+            if (demand.signal?.aborted) {
+              throw (
+                demand.signal.reason ?? new LoadSubsetOperationAbortedError()
+              )
+            }
+            const current = session
+            const currentRetired = retired
+            const result = current.loadSubset?.(demand) ?? true
+            const outcome = await Promise.race([
+              Promise.resolve(result).then(() => `settled` as const),
+              currentRetired.then(() => `retired` as const),
+            ])
+            if (outcome === `settled`) return
+            if (restartInFlight) {
+              await waitForDemandOrAbort(restartInFlight, demand.signal)
+            }
+          }
+          if (restartFailure) throw restartFailure.error
+        },
+        restartAfterScopedRecovery: (cacheRotated) => {
+          if (isCleanedUp()) return Promise.resolve()
+          if (restartFailure) return Promise.reject(restartFailure.error)
+          const sequence = ++restartSequence
+          retireSession()
+          // Every rotation retires the session currently subscribed to the
+          // SDK, including a replacement started by an earlier rotation.
+          const oldSessionCleanup = cleanupCurrentSession()
+          if (restartInFlight) {
+            const previousRestart = restartInFlight
+            return trackRestart(
+              (async () => {
+                await Promise.all([previousRestart, oldSessionCleanup])
+                await cacheRotated
+                startReplacement(sequence)
+              })(),
+            )
+          }
+          return trackRestart(
+            (async () => {
+              await oldSessionCleanup
+              await cacheRotated
+              startReplacement(sequence)
+            })(),
+          )
+        },
+        cleanup: async () => {
+          cleanedUp = true
+          retireSession()
+          try {
+            await restartInFlight
+          } catch (error) {
+            // Persistence rejects a held rotation when this cleanup replaces
+            // its lifecycle. That cancellation belongs to teardown.
+            if (!(error instanceof SyncTransactionAbortedError)) throw error
+          }
+          await cleanupCurrentSession()
+        },
+      }
+    },
+  }
+}

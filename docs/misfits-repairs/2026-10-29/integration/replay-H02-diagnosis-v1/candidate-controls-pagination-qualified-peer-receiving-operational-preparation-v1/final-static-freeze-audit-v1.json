@@ -1,0 +1,52 @@
+{
+  "at": "2026-10-30T12:34:37.067853+00:00",
+  "status": "PASS static freeze consistency; no execution authority",
+  "strictJsonFiles": [
+    "inert-control-v1/programs/inline-window-failure-first.json.txt",
+    "inert-control-v1/programs/inline-window-success.json.txt",
+    "inert-control-v1/recipes/inline-window-failure-first.json.txt",
+    "inert-control-v1/recipes/inline-window-success.json.txt",
+    "inert-control-v1/source-freeze-v1.json.txt",
+    "inert-control-v1/typecheck.tsconfig.json.txt",
+    "inert-materialization-plan-v1.json",
+    "preparation-read-error-v1.json",
+    "proposed-exact-inline-window-failure-first-command-v1.json",
+    "proposed-exact-inline-window-success-command-v1.json",
+    "proposed-minimum-compile-gate-v1.json",
+    "static-preparation-audit-v1.json"
+  ],
+  "sealedMembersRehashed": {
+    "S": {
+      "manifestSha256": "a56541c3188c6a8348aa1187575e0192410dc3e8d86d1a9697628dc4a9312d25",
+      "memberCount": 120
+    },
+    "U": {
+      "manifestSha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0",
+      "memberCount": 90
+    },
+    "D": {
+      "manifestSha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403",
+      "memberCount": 21
+    },
+    "E": {
+      "manifestSha256": "5dd02625d22a6f096470737b3d09a447cf89c985d91f819e5e30cdda5c5e7b8a",
+      "memberCount": 1996
+    }
+  },
+  "proposalPlanAndControlHashesMatched": true,
+  "sourceBindingUnion596": true,
+  "supportCopies85ExplicitTxtMapsMatched": true,
+  "compilerEntryCount": 7,
+  "recipesDifferOnlyInFiveDeclaredFields": true,
+  "unchangedPrograms": true,
+  "runtimeRootAndOutputRootsAbsent": true,
+  "initialStaticAuditSha256": "e602fdb73c7c8cc41e201e56b85a66d11681f5c132b608befc3dbe004ee68c6a",
+  "toolPayloadReaudit": "Full current 255 roots / 11974 own regular payloads / 405 resolution edges / 112 absent optional peers verified by initial static audit; this final audit rehashes source/control inputs and sealed members, without repeating tool payload traversal.",
+  "laterArtifactLint": "PENDING ROOT",
+  "materialization": 0,
+  "compile": 0,
+  "dynamicImports": 0,
+  "discovery": 0,
+  "nativeInvocations": 0,
+  "probes": 0
+}

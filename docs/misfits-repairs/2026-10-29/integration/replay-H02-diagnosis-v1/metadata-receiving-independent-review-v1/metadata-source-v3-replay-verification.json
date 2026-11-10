@@ -1,0 +1,27 @@
+{
+  "acceptedNeighbors": 12,
+  "artifacts": {
+    "metadata-source-v3-audit.json": "3ec0acae44939a09f3071af1b54c65506239dac3709d2c9c9fe26a9ff26c82bc",
+    "metadata-source-v3-audit.py": "503dcf5424111bd95768240992b63199c410f992e3dc0565dbb641fd13aff169",
+    "metadata-source-v3-legacy-pure-controls.mjs": "fd348ebf3312e0c6dab667acece8a9b2a8412f782c0e55cc26277a2f8ce831b5",
+    "metadata-source-v3-legacy-replayed.json": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125",
+    "metadata-source-v3-roundtrip-replayed.json": "5954c1f320ef8fcfe44f5ab011489425c09847c488a410c8652f46bf9808e6e3",
+    "metadata-source-v3-selector-roundtrip-controls.mjs": "dc70b76acc9fdaf78d64d78f3f5a105e2328f21e4edb8a1e5269039753d302bc"
+  },
+  "correctedExplicitFinalizerPassed": 1,
+  "execution": "Two serial direct Node pure script invocations, each exit0, 384 MiB heap option",
+  "legacyAccepted": 32,
+  "legacyOriginalEquality": "Exact bytes",
+  "legacyRejected": 140,
+  "modeledReceiptHistories": 6720,
+  "nativeLaunches": 0,
+  "newSelectorRetained": 23,
+  "oldSelectorRetained": 21,
+  "processProbes": 0,
+  "pureReachStates": 31,
+  "rejectedControls": 50,
+  "roundtripOriginalEquality": "Exact JSON after replacing only relocated derived-script absolute path in error stacks",
+  "scriptSha256": "1488e1418f13f9b6e3a786865e9ac1157dbb06ace14c15648c96c917f74a5fcb",
+  "status": "INDEPENDENT PURE REPLAYS PASS; FROZEN SOURCE-V3 PACKET UNCHANGED",
+  "toolchainRecoveryAccepted": false
+}

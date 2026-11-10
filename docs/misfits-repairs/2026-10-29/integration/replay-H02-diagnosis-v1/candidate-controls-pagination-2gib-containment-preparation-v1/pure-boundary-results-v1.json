@@ -1,0 +1,43 @@
+{
+  "status": "PASS pure exact-source and threshold checks",
+  "originalSha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+  "successorSha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+  "exactIntegerSubstitutions": 2,
+  "exactDiagnosticSubstitutions": 1,
+  "allOtherBytesIdentical": true,
+  "cases": [
+    {
+      "rssBytes": 0,
+      "allowed": true
+    },
+    {
+      "rssBytes": 1073741824,
+      "allowed": true
+    },
+    {
+      "rssBytes": 1073741825,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483647,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483648,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483649,
+      "allowed": false
+    },
+    {
+      "rssBytes": 3221225472,
+      "allowed": false
+    }
+  ],
+  "oldThresholdSensitivity": "old-limit+1 would be incorrectly rejected",
+  "nativeCalibration": false,
+  "supervisorImported": false,
+  "processCalls": 0,
+  "runtimeAdmitted": false
+}

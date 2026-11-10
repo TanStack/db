@@ -1,0 +1,119 @@
+import { MultiSet } from "@tanstack/db-ivm";
+import { UnsupportedRootScalarSelectError } from "../../errors.js";
+import { normalizeOrderByPaths } from "../compiler/expressions.js";
+import { buildQuery, getQueryIR } from "../builder/index.js";
+import {
+  collectCollectionSources,
+  isExpressionLike,
+  requireCollectionSource
+} from "../ir.js";
+import { isRefProxy } from "../builder/ref-proxy-identity.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+export function extractCollectionsFromQuery(query) {
+  const collections = {};
+  for (const source of collectCollectionSources(query)) {
+    collections[source.collection.id] = source.collection;
+  }
+  return collections;
+}
+export { collectCollectionSources as extractCollectionSources };
+export function sourcePermitsInitialReadiness(collection) {
+  return collection.config.syncMode === `on-demand` || collection.isReady();
+}
+export function extractCollectionFromSource(query) {
+  const from = query.from;
+  if (from.type === `collectionRef`) {
+    return from.collection;
+  } else if (from.type === `descriptorRef`) {
+    return requireCollectionSource(from);
+  } else if (from.type === `queryRef`) {
+    return extractCollectionFromSource(from.query);
+  } else if (from.type === `unionFrom`) {
+    return extractCollectionFromSource({ from: from.sources[0] });
+  } else if (from.type === `unionAll`) {
+    return extractCollectionFromSource(from.queries[0]);
+  }
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}` : codedMessage(160)
+  );
+}
+function isNestedSelectObject(obj) {
+  if (obj === null || typeof obj !== `object`) return false;
+  if (isExpressionLike(obj)) return false;
+  if (isRefProxy(obj)) return false;
+  return true;
+}
+export function buildQueryFromConfig(config) {
+  const query = typeof config.query === `function` ? buildQuery(config.query) : getQueryIR(config.query);
+  if (config.requireObjectResult && query.select && !isNestedSelectObject(query.select)) {
+    throw new UnsupportedRootScalarSelectError();
+  }
+  return query;
+}
+export function sendChangesToInput(input, changes) {
+  const multiSetArray = [];
+  for (const change of changes) {
+    const key = change.key;
+    if (change.type === `insert`) {
+      multiSetArray.push([[key, change.value], 1]);
+    } else if (change.type === `update`) {
+      multiSetArray.push([[key, change.previousValue], -1]);
+      multiSetArray.push([[key, change.value], 1]);
+    } else {
+      multiSetArray.push([[key, change.value], -1]);
+    }
+  }
+  if (multiSetArray.length !== 0) {
+    input.sendData(new MultiSet(multiSetArray));
+  }
+  return multiSetArray.length;
+}
+export function* splitUpdates(changes) {
+  for (const change of changes) {
+    if (change.type === `update`) {
+      yield { type: `delete`, key: change.key, value: change.previousValue };
+      yield { type: `insert`, key: change.key, value: change.value };
+    } else {
+      yield change;
+    }
+  }
+}
+export function reconcileChangesForD2(changes, sentRows) {
+  const reconciled = [];
+  for (const change of changes) {
+    const previousValue = sentRows.get(change.key);
+    if (change.type === `insert`) {
+      if (previousValue !== void 0) continue;
+      sentRows.set(change.key, change.value);
+      reconciled.push(change);
+    } else if (change.type === `delete`) {
+      if (previousValue === void 0) continue;
+      sentRows.delete(change.key);
+      reconciled.push({ ...change, value: previousValue });
+    } else {
+      sentRows.set(change.key, change.value);
+      reconciled.push(
+        previousValue === void 0 ? { type: `insert`, key: change.key, value: change.value } : { ...change, previousValue }
+      );
+    }
+  }
+  return reconciled;
+}
+export function computeSubscriptionOrderByHints(query, alias, queryCompareOptions) {
+  const { orderBy, limit, offset } = query;
+  const effectiveLimit = limit !== void 0 && offset !== void 0 ? limit + offset : limit;
+  const normalizedOrderBy = orderBy ? normalizeOrderByPaths(orderBy, alias) : void 0;
+  const usesCustomLocalOrder = normalizedOrderBy?.some(
+    (clause) => (clause.compareOptions.stringSort ?? queryCompareOptions.stringSort) === `custom`
+  ) ?? false;
+  const canPassOrderBy = !usesCustomLocalOrder && (normalizedOrderBy?.every((clause) => {
+    const exp = clause.expression;
+    if (exp.type !== `ref`) return false;
+    const path = exp.path;
+    return Array.isArray(path) && path.length === 1;
+  }) ?? false);
+  return {
+    orderBy: canPassOrderBy ? normalizedOrderBy : void 0,
+    limit: canPassOrderBy ? effectiveLimit : void 0
+  };
+}

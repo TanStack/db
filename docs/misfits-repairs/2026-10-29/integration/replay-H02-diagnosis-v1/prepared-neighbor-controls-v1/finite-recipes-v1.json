@@ -1,0 +1,202 @@
+{
+  "status": "PROPOSED SOURCE-ONLY RECIPES; NOT ADMISSION READY; no executable launcher or receiving invocation authorized",
+  "prerequisites": [
+    "Install exact reviewed four-file overlay in a separate isolated source checkout; preserve original V7 consumed bytes",
+    "Rehash exact production, proposed instrument inputs, required supporting source/dependencies, Node, locks and reuse links into successor freeze",
+    "Independent source/recipe acceptance and separate root admission for each finite invocation",
+    "For ownership, prepare and accept concrete external process-group watchdog wrapper; command below alone supplies no containment"
+  ],
+  "inheritedRuntime": {
+    "node": {
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "version": "v24.19.0",
+      "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+    },
+    "vitest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "workerCount": 1,
+    "fileParallelism": false,
+    "workerHeapMiB": 384,
+    "progressParentHeapMiB": 1536,
+    "progressReceivingWallMs": 20000,
+    "progressPostEnqueueWindowMs": 1000,
+    "progressSampledGroupRssBytes": 1073741824
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS"
+  ],
+  "envSetAfterInstallation": {
+    "H02_PROGRESS_SOURCE_FREEZE": "Exact separately accepted successor freeze for the installed overlay; must not point to immutable V7 freeze"
+  },
+  "progressInvocations": [
+    {
+      "path": "nonempty conflicting replay",
+      "selector": "checks receiving neighbor nonempty conflicting replay",
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor nonempty conflicting replay"
+      ],
+      "finiteHistories": 1,
+      "testTimeoutMs": 60000,
+      "comparison": "same immutable retained-publication model plus existing progress/checker; per-path reach assertions; complete raw receipt/binding preservation",
+      "progressRedGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "stopAfterInvocation": true,
+      "invocationsAdmitted": 0
+    },
+    {
+      "path": "nonempty scope-key publication",
+      "selector": "checks receiving neighbor nonempty scope-key publication",
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor nonempty scope-key publication"
+      ],
+      "finiteHistories": 1,
+      "testTimeoutMs": 60000,
+      "comparison": "same immutable retained-publication model plus existing progress/checker; per-path reach assertions; complete raw receipt/binding preservation",
+      "progressRedGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "stopAfterInvocation": true,
+      "invocationsAdmitted": 0
+    },
+    {
+      "path": "literal true initial cut",
+      "selector": "checks receiving neighbor literal true initial cut",
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor literal true initial cut"
+      ],
+      "finiteHistories": 1,
+      "testTimeoutMs": 60000,
+      "comparison": "same immutable retained-publication model plus existing progress/checker; per-path reach assertions; complete raw receipt/binding preservation",
+      "progressRedGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "stopAfterInvocation": true,
+      "invocationsAdmitted": 0
+    },
+    {
+      "path": "ordinary synchronous mutation cut",
+      "selector": "checks receiving neighbor ordinary synchronous mutation cut",
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/vitest.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+        "-t",
+        "checks receiving neighbor ordinary synchronous mutation cut"
+      ],
+      "finiteHistories": 1,
+      "testTimeoutMs": 60000,
+      "comparison": "same immutable retained-publication model plus existing progress/checker; per-path reach assertions; complete raw receipt/binding preservation",
+      "progressRedGate": {
+        "requiredFirstKillTrigger": "post-enqueue-window",
+        "requiredReason": "wall",
+        "requiredBindingStatus": "bound",
+        "requiredReceipts": "valid measured conflict followed by exact completed resolving enqueue",
+        "excluded": [
+          "matching execution receipt including final drain",
+          "resource termination",
+          "observation failure",
+          "unresolved source binding"
+        ],
+        "totalRuntimeWall": "containment only; no progress verdict, even if unchanged shared checker prints its generic bounded-failure message",
+        "authority": "root and independent reviewer clarification before V7 source/recipe acceptance"
+      },
+      "stopAfterInvocation": true,
+      "invocationsAdmitted": 0
+    }
+  ],
+  "ownershipInvocation": {
+    "command": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "-t",
+      "keeps a reacquired lease's result"
+    ],
+    "finiteHistories": 42,
+    "perTestTimeoutMs": 20000,
+    "comparison": "existing modelReacquisition and complete observation object; no new expected answers",
+    "provenance": "normal real QueryClient driver plus exact source/Node/dependency hash manifest and emitted per-history reaches; no H02 V8/receipt binding claimed",
+    "containment": "UNPREPARED: separately accepted exact parent watchdog required before root admission",
+    "invocationsAdmitted": 0
+  },
+  "generatedCampaigns": {
+    "admitted": false,
+    "run": false,
+    "registryOrBudgetsChanged": false
+  },
+  "mutationPolicy": "No production edit, oracle expectation change, receipt-priority change, retry, commit or publication is authorized by this packet"
+}

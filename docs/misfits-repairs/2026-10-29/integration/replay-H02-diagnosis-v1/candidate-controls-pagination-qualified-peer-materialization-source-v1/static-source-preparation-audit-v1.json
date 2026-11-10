@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-30T12:49:42.725314+00:00",
+  "status": "PASS filesystem and text-only preparation audit",
+  "sealedMembersUnchanged": {
+    "S": 120,
+    "U": 90,
+    "V": 14,
+    "D": 21,
+    "E": 1996
+  },
+  "activeW596AndQ85Unchanged": true,
+  "proposedRegularCodeAndLock": 597,
+  "proposedControls": 6,
+  "proposedLinks": 4,
+  "destinations": 607,
+  "directoriesIncludingRoot": 227,
+  "sourceMap": {
+    "all": 596,
+    "production": 511,
+    "instruments": 62,
+    "shared": 23,
+    "completion": 18,
+    "receivingProduction": 161
+  },
+  "allPlanOriginsAndHashesMatched": true,
+  "strictJson": true,
+  "exactToolArgvContractAndInterpreterMatched": true,
+  "finiteToolClosure": {
+    "roots": 255,
+    "ownRegularPayloads": 11974,
+    "resolutionEdges": 405,
+    "absentOptionalOrPeer": 112
+  },
+  "sourceTextReview": {
+    "modules": [
+      "hashlib",
+      "json",
+      "os",
+      "stat",
+      "sys",
+      "traceback"
+    ],
+    "lexicalTokenizationPassed": true,
+    "forbiddenExecutionOrRemovalNamesAbsent": true,
+    "candidateNotImportedEvaluatedCompiledOrRun": true,
+    "noSyntaxAcceptanceClaim": true
+  },
+  "runtimeReceiptAndReceivingOutputsAbsent": true,
+  "materialization": 0,
+  "candidateExecution": 0,
+  "importsOfCandidateOrTargetOrConfig": 0,
+  "compile": 0,
+  "nativeInvocations": 0,
+  "processProbes": 0,
+  "laterArtifactLint": "PENDING ROOT",
+  "elapsedSeconds": 1.179,
+  "limits": "Static source/byte/geometry checks only. No copy syscall execution, syntax compilation, actual filesystem materialization, complete Python/OS/native closure or later compiler containment established."
+}

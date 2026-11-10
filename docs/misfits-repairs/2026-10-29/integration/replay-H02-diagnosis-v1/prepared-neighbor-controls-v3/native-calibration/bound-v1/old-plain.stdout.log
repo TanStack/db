@@ -1,0 +1,15 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration
+
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'
+
+ Test Files  1 skipped (1)
+      Tests  5 skipped (5)
+   Start at  00:33:57
+   Duration  111ms (transform 12ms, setup 0ms, import 18ms, tests 0ms, environment 0ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/bound-v1/old-plain.report.json

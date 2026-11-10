@@ -1,0 +1,71 @@
+stderr | packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts > records a source-bound completion receiving gate
+[QueryCollection] Error observing query h02-completion-marked,[object Object]: Error: baseline-source
+    at driveCompletionBaselineProgram (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:120:13)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:11
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts > records a source-bound completion receiving gate
+Error: completion law: coherent public values, handles, health and settled window; expected {"roots":[{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]}],"facades":[],"downstream":[{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]}],"window":{"offset":0,"limit":2},"status":"ready","requestErrors":["baseline-source"]}, got {"roots":[{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]},{"id":3,"rank":30,"children":[]}],"facades":[],"downstream":[{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]},{"id":3,"rank":30,"children":[]}],"window":{"offset":0,"limit":2},"status":"ready","requestErrors":["baseline-source"]}
+ ❯ equal packages/query-db-collection/tests/queued-answer-completion-oracle.ts:175:11
+    173| function equal(actual: unknown, expected: unknown, law: string): void {
+    174|   if (!isDeepStrictEqual(actual, expected))
+    175|     throw new Error(
+       |           ^
+    176|       `completion law: ${law}; expected ${JSON.stringify(expected)}, g…
+    177|     )
+ ❯ checkCompletionPublicState packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1313:3
+ ❯ checkCompletionBaselineObservation packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1399:3
+ ❯ observe packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:911:5
+ ❯ driveCompletionBaselineProgram packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:940:12
+ ❯ packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts:33:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: completion law: callback has complete authored root content; expected [{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]}], got [{"id":1,"rank":10,"children":[101,102]},{"id":2,"rank":20,"children":[201,202]},{"id":3,"rank":30,"children":[]}]
+ ❯ equal packages/query-db-collection/tests/queued-answer-completion-oracle.ts:175:11
+    173| function equal(actual: unknown, expected: unknown, law: string): void {
+    174|   if (!isDeepStrictEqual(actual, expected))
+    175|     throw new Error(
+       |           ^
+    176|       `completion law: ${law}; expected ${JSON.stringify(expected)}, g…
+    177|     )
+ ❯ check packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1721:5
+ ❯ Object.callbackCapture.capture packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:243:7
+ ❯ receiveBoundary packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts:111:50
+ ❯ Object.event packages/query-db-collection/tests/queued-answer-completion-attachments.ts:96:7
+ ❯ packages/query-db-collection/tests/queued-answer-completion-fixture.ts:517:16
+ ❯ packages/db/src/collection/index.ts:1247:20
+ ❯ CollectionSubscription.callbackWithSentKeysTracking [as callback] packages/db/src/collection/subscription.ts:281:7
+ ❯ CollectionSubscription.filteredCallback packages/db/src/collection/subscription.ts:290:16
+ ❯ CollectionSubscription.emitEvents packages/db/src/collection/subscription.ts:1306:17
+ ❯ packages/db/src/collection/changes.ts:274:46
+ ❯ runAllCallbacks packages/db/src/utils/callbacks.ts:6:7
+ ❯ packages/db/src/collection/changes.ts:280:9
+ ❯ withPublicationContext packages/db/src/scheduler.ts:197:14
+ ❯ CollectionChangesManager.publishEvents packages/db/src/collection/changes.ts:272:5
+ ❯ close packages/db/src/collection/changes.ts:242:12
+ ❯ publish packages/db/src/collection/changes.ts:249:22
+ ❯ syncState.flushPendingChanges packages/db/src/query/live/collection-config-builder.ts:1296:11
+ ❯ Object.state.flushPendingChanges packages/query-db-collection/tests/queued-answer-completion-attachments.ts:432:22
+ ❯ CollectionConfigBuilder.maybeRunGraph packages/db/src/query/live/collection-config-builder.ts:889:19
+ ❯ packages/db/src/query/live/collection-config-builder.ts:944:16
+ ❯ Scheduler.schedule packages/db/src/scheduler.ts:66:7
+ ❯ scheduleQueryGraphRun packages/db/src/query/live/graph-scheduler.ts:23:30
+ ❯ CollectionConfigBuilder.scheduleGraphRun packages/db/src/query/live/collection-config-builder.ts:935:5
+ ❯ CollectionConfigBuilder.maybeRunGraphFn packages/db/src/query/live/collection-config-builder.ts:1020:41
+ ❯ CollectionConfigBuilder.failDemand packages/db/src/query/live/collection-config-builder.ts:612:12
+ ❯ packages/db/src/query/live/collection-subscriber.ts:258:38
+
+This error originated in "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+

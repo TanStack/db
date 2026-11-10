@@ -1,0 +1,15 @@
+{
+  "initial": {
+    "chunk_id": "296f35",
+    "session_id": 33547,
+    "output": ""
+  },
+  "completion": {
+    "chunk_id": "77da40",
+    "exit_code": 1,
+    "output": "{\n  \"cellId\": \"inline-source-failed-peer\",\n  \"resultFreeze\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/inline-source-failed-peer-result-freeze-v1.json\",\n  \"resultFreezeSha256\": \"37065c97890248961352332dc1a85ac252ecc4d6cd673a98f2706167b617d4d6\",\n  \"assetCount\": 1975,\n  \"operationalAndTestChecksPassed\": false,\n  \"actualOuterExitCode\": 1,\n  \"parentTestChildExitCode\": 1,\n  \"receivers\": [\n    {\n      \"originalDirectory\": \"/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e\",\n      \"copiedDirectory\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/runtime-output-v1/inline-source-failed-peer/receiving-artifacts\",\n      \"nativeFiles\": 1957,\n      \"allCopiedBytesReadBack\": true,\n      \"receiptCount\": 328,\n      \"epochs\": 4,\n      \"cuts\": 3,\n      \"semanticActions\": 5,\n      \"workerCleaned\": 1,\n      \"nativeExitCode\": null,\n      \"bindingStatus\": \"bound\",\n      \"bindingProfile\": \"completion-baseline-v1\"\n    }\n  ],\n  \"failures\": [\n    \"actual outer tool exit is not zero\",\n    \"outer outcome exitCode differs\",\n    \"native receiving did not exit normally with zero\",\n    \"worker error present\",\n    \"authored epoch starts differ\",\n    \"authored epoch ends differ\",\n    \"authored observation cuts differ\",\n    \"authored semantic action count differs\"\n  ]\n}\n"
+  },
+  "meaning": "exit1 is failed completeness/comparison after full evidence preservation; no additional native invocation",
+  "escalatedReadOnlyProcessVisibility": true,
+  "helperSha256": "83b9f1ae59218874f01122a53985aae220052ca1b27c618ff740c6830ee49cf1"
+}

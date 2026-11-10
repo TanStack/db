@@ -1,0 +1,24 @@
+import { createLiveQueryCollection } from "./live-query-collection.js";
+export async function queryOnce(configOrQuery) {
+  const config = typeof configOrQuery === `function` ? { query: configOrQuery } : configOrQuery;
+  const query = (q) => {
+    const queryConfig = config.query;
+    return typeof queryConfig === `function` ? queryConfig(q) : queryConfig;
+  };
+  const collection = createLiveQueryCollection({
+    query,
+    gcTime: 1
+    // Cleanup in next tick when no subscribers (0 disables GC)
+  });
+  try {
+    await collection.preload();
+    const isSingleResult = collection.config.singleResult === true;
+    if (isSingleResult) {
+      const first = collection.values().next().value;
+      return first;
+    }
+    return collection.toArray;
+  } finally {
+    await collection.cleanup();
+  }
+}

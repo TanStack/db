@@ -1,0 +1,64 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "instrumentation failure; no receiving product RED or GREEN",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/result-freeze-v1.json",
+      "sha256": "5dd02625d22a6f096470737b3d09a447cf89c985d91f819e5e30cdda5c5e7b8a"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/report-v1.md",
+      "sha256": "a996ecb6ba66a560297c19b70fd2fb4efcec581e7c9bceb88a486b2312e089b3"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-failure-actual-independent-review-v1.md",
+      "sha256": "4e0b16b4e0aacddcdd70a20fc9e6c737682260067468887960092763234efe78"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-failure-actual-independent-facts-v1.json",
+      "sha256": "0a01f7f2f65ff02f70601950ed10f64769a7785cbe5b8b912ef4bd4f4df6f88a"
+    }
+  ],
+  "rootVerification": "Read complete author and independent reports; rehashed exact result/report/review/facts. Independent audit supplies all1996members/1972copy-pairs and323receipt reconstruction; no root runtime.",
+  "actualOuter": {
+    "initial": "3be14d",
+    "session": 90331,
+    "final": "d1dc4d",
+    "exit": 1
+  },
+  "parentExit": 1,
+  "innerExit": 1,
+  "newItems": [
+    {
+      "id": "H02-D-CHECKPOINT-PHASE-COLLISION",
+      "disposition": "confirmed-open",
+      "classification": "instrument defect",
+      "cause": "common.phase overrides checkpoint envelope phase before epoch close; raw291 prematurely routes to complete-cut guard before292end and293realcut.",
+      "repair": "Minimal local checkpoint phase preservation, unchanged writer and active-epoch guard; boundary calibration and old-collision/wrong-preclose-cut sensitivity required."
+    },
+    {
+      "id": "H02-D-PEER-GUARD-DIAGNOSTIC-GAP",
+      "disposition": "confirmed-open",
+      "classification": "evidence gap",
+      "cause": "Broad original-peer guard proves a disjunction failed without revealing which clause or whether saved snapshot was faithful.",
+      "repair": "Keep all predicates and same failure; add failed-clause identities/scalars/representation diagnostics at same pre-cleanup point, with immediate snapshot-fidelity selfcheck."
+    }
+  ],
+  "rawCallbacks302315": "UNCLASSIFIED; no failure-applied/cut/shared failure-epoch judgment; no product RED inference",
+  "cleanup": "Positive raw322worker-cleaned and original named identities absent preserved separately from parent omission diagnostics. No universal group claim.",
+  "limits": [
+    "Failure-only admission61d6c5...spent; no receiving retry or success authority.",
+    "Intended original-peer failure premise/cut remains unestablished; lawful retirement remains permitted.",
+    "No required receiving failure/success pair, candidate-state reach, actual-helper reach or class closure.",
+    "Native standalone coverage/typecheck=false and recorded provenance/resource/identity limits remain.",
+    "Later additive artifact lint pending ROOT; historical failures unchanged."
+  ],
+  "sourceSuccessorPreparationAuthorized": true,
+  "sourceScope": "Additive copied-prefix successor only for local checkpoint correction and exact diagnostic gap; do not alter accepted current/frozen source or raw evidence. Load oracle-authoring before driver edits. Bounded pure boundary calibration allowed; independent review/fresh operational binding required.",
+  "productionEditAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "bugClassClosureCredit": false,
+  "wholePrReadiness": "not assessed"
+}

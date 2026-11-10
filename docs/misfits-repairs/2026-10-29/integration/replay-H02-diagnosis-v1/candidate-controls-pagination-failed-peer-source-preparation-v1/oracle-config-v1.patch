@@ -1,0 +1,10 @@
+--- before/packages/db/tests/oracle-config.ts
++++ after/packages/db/tests/oracle-config.ts
+@@ -309,6 +309,7 @@
+   `pagination.ordered-window`,
+   `pagination.pending-history`,
+   `pagination.pending-mutation`,
++  `pagination.joined-window-failure`,
+   `pagination.window-transition`,
+   `persistence.retained-demand`,
+   `subscription-replay.completion`,

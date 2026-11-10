@@ -1,0 +1,82 @@
+{
+  "artifacts": {
+    "additional-support.json": {
+      "bytes": 1788,
+      "sha256": "c841c31d862ec8833c045af9e7d6fba1229217ac82af7bf3fcee3fecf1c590bf"
+    },
+    "changed-members.json": {
+      "bytes": 1185,
+      "sha256": "1098af1213db51f656461687ada025fe26f5a33bca70777e03832f4ad24dc905"
+    },
+    "eslint-final.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "format-final.log": {
+      "bytes": 162,
+      "sha256": "3f01446609453f150e2f5a4f3855211105aef6f9a62961d5e6ff7a8da9eb5a62"
+    },
+    "preparation-authority.json": {
+      "bytes": 827,
+      "sha256": "3ecd4c75d5fdbbba3e0f4a8842a1b8b166866651fa6476cf23a87eff2063fd28"
+    },
+    "pure-controls.mjs": {
+      "bytes": 13561,
+      "sha256": "ae410aa8e51207e66ac45cc90c95ef2142f985f2345e78f913c2fefff19469c6"
+    },
+    "pure-final.log": {
+      "bytes": 6716,
+      "sha256": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125"
+    },
+    "pure-results.json": {
+      "bytes": 6716,
+      "sha256": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125"
+    },
+    "report-v2.md": {
+      "bytes": 11560,
+      "sha256": "49f91b2681df5fd6773f780cf82aadcc74d2a04702224241301bf4353f2603b6"
+    },
+    "required-native-recipes.json": {
+      "bytes": 68830,
+      "sha256": "80c8417d0c884d2d510f57bda14986f4767d41a4c3c600dd872320072f2582f8"
+    },
+    "source-delta.patch": {
+      "bytes": 33375,
+      "sha256": "89929a730c4bfd2a1bbcf1091e45bb1f51f8bc8db58ee7d3f43a15bcd239eeb1"
+    },
+    "source-freeze.json": {
+      "bytes": 398706,
+      "sha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a"
+    },
+    "source-inventory.json": {
+      "bytes": 73565,
+      "sha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2"
+    },
+    "static-results.json": {
+      "bytes": 869,
+      "sha256": "a2047b0e666c0718de62fce11981b064a10f870e97fc4d6ae6731639f7d10532"
+    },
+    "typecheck-final.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-source-review-v2.md",
+    "sha256": "ec2b660912c85f5420e06b805567d51c51f99be996df6bf9098ab28bc019f61d"
+  },
+  "noCanonicalRefresh": true,
+  "noGitOperations": true,
+  "noInstalls": true,
+  "noNativeList": true,
+  "noPrUpdates": true,
+  "noProductionChanges": true,
+  "noReceiving": true,
+  "original573Preserved": true,
+  "production511Unchanged": true,
+  "sourceFiles": 588,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2",
+  "sourceMembers": "All588 individual source identities are in the bound source-inventory.json; node_modules reuse links and named own payloads are in source-freeze.json.",
+  "status": "accepted source/static/pure preparation; all native receiving/update/production-mutant gates remain unexecuted"
+}

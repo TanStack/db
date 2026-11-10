@@ -1,0 +1,789 @@
+{
+  "receivingMode": "baseline-constituent",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-receiving.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  },
+  "phase": "final-with-binding",
+  "pid": 59919,
+  "elapsedMs": 2286,
+  "maxSampledGroupRssBytes": 461602816,
+  "latestGroupRows": [],
+  "killAttempted": false,
+  "heapDiagnosticDetected": false,
+  "postEnqueue": {
+    "postEnqueueWindowMs": 1000,
+    "receiptCount": 444,
+    "acquisitionCount": 0,
+    "releaseCount": 0,
+    "lastSequence": 444,
+    "lastPhase": "worker-cleaned"
+  },
+  "outcome": {
+    "reason": "exited",
+    "exitCode": 0,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "mode": "baseline-constituent",
+        "program": {
+          "gate": "held-window",
+          "parameters": {
+            "keyShift": 0,
+            "rankScale": 10,
+            "nonemptyPrior": true,
+            "partial": "limit",
+            "tie": true,
+            "selectedOutput": "root",
+            "answerScheduler": "microtask"
+          },
+          "setup": {
+            "run": "run-1",
+            "profile": "inline",
+            "facts": {
+              "roots": [
+                {
+                  "id": 1,
+                  "rank": 10
+                },
+                {
+                  "id": 2,
+                  "rank": 10
+                },
+                {
+                  "id": 3,
+                  "rank": 20
+                },
+                {
+                  "id": 4,
+                  "rank": 20
+                },
+                {
+                  "id": 5,
+                  "rank": 30
+                },
+                {
+                  "id": 6,
+                  "rank": 30
+                }
+              ],
+              "marked": [
+                3,
+                4,
+                5,
+                6
+              ],
+              "children": [
+                {
+                  "id": 101,
+                  "parent": 1
+                },
+                {
+                  "id": 102,
+                  "parent": 1
+                },
+                {
+                  "id": 201,
+                  "parent": 2
+                },
+                {
+                  "id": 202,
+                  "parent": 2
+                },
+                {
+                  "id": 301,
+                  "parent": 3
+                },
+                {
+                  "id": 302,
+                  "parent": 3
+                },
+                {
+                  "id": 401,
+                  "parent": 4
+                },
+                {
+                  "id": 402,
+                  "parent": 4
+                },
+                {
+                  "id": 501,
+                  "parent": 5
+                },
+                {
+                  "id": 502,
+                  "parent": 5
+                },
+                {
+                  "id": 601,
+                  "parent": 6
+                },
+                {
+                  "id": 602,
+                  "parent": 6
+                }
+              ]
+            },
+            "window": {
+              "offset": 0,
+              "limit": 2
+            },
+            "ready": true
+          },
+          "changedFacts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 10
+              },
+              {
+                "id": 2,
+                "rank": 10
+              },
+              {
+                "id": 3,
+                "rank": 20
+              },
+              {
+                "id": 4,
+                "rank": 20
+              },
+              {
+                "id": 5,
+                "rank": 30
+              },
+              {
+                "id": 6,
+                "rank": 30
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              },
+              {
+                "id": 103,
+                "parent": 1
+              }
+            ]
+          },
+          "target": "root",
+          "overlay": {
+            "id": "baseline-hold",
+            "kind": "root",
+            "row": {
+              "id": 1,
+              "rank": 9.9,
+              "children": [
+                101,
+                102
+              ]
+            }
+          },
+          "selectedKeys": {
+            "root": 1,
+            "facadeA": 1,
+            "facadeB": 2,
+            "pivot": 3,
+            "optimisticChild": 199
+          },
+          "answerScopes": {
+            "failure": {
+              "source": "marked",
+              "scope": [
+                3
+              ]
+            },
+            "peer": {
+              "source": "children",
+              "scope": [
+                3
+              ]
+            }
+          },
+          "errors": {
+            "source": "baseline-source",
+            "tail": "baseline-tail",
+            "graph": "baseline-graph",
+            "facadeB": "baseline-facade-B"
+          },
+          "steps": [
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "require",
+                "requirement": {
+                  "id": "answer",
+                  "kind": "source"
+                }
+              }
+            },
+            {
+              "kind": "control",
+              "control": "begin-replay"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "request-window",
+                "operation": "window",
+                "options": {
+                  "limit": 3
+                },
+                "requires": [
+                  "answer"
+                ]
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "held-window"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "source-answer",
+                "requirement": "answer",
+                "facts": {
+                  "roots": [
+                    {
+                      "id": 1,
+                      "rank": 10
+                    },
+                    {
+                      "id": 2,
+                      "rank": 10
+                    },
+                    {
+                      "id": 3,
+                      "rank": 20
+                    },
+                    {
+                      "id": 4,
+                      "rank": 20
+                    },
+                    {
+                      "id": 5,
+                      "rank": 30
+                    },
+                    {
+                      "id": 6,
+                      "rank": 30
+                    }
+                  ],
+                  "marked": [
+                    4,
+                    5,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "id": 101,
+                      "parent": 1
+                    },
+                    {
+                      "id": 102,
+                      "parent": 1
+                    },
+                    {
+                      "id": 201,
+                      "parent": 2
+                    },
+                    {
+                      "id": 202,
+                      "parent": 2
+                    },
+                    {
+                      "id": 301,
+                      "parent": 3
+                    },
+                    {
+                      "id": 302,
+                      "parent": 3
+                    },
+                    {
+                      "id": 401,
+                      "parent": 4
+                    },
+                    {
+                      "id": 402,
+                      "parent": 4
+                    },
+                    {
+                      "id": 501,
+                      "parent": 5
+                    },
+                    {
+                      "id": 502,
+                      "parent": 5
+                    },
+                    {
+                      "id": 601,
+                      "parent": 6
+                    },
+                    {
+                      "id": 602,
+                      "parent": 6
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "install",
+                "target": "root",
+                "snapshot": "desired"
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "completed-window"
+            }
+          ],
+          "publicationEpochs": [
+            {
+              "id": "initialization",
+              "kind": "initialization",
+              "fromStep": -1,
+              "throughStep": -1
+            },
+            {
+              "id": "1:held-window",
+              "kind": "publication",
+              "fromStep": 0,
+              "throughStep": 3
+            },
+            {
+              "id": "2:completed-window",
+              "kind": "publication",
+              "fromStep": 4,
+              "throughStep": 6
+            }
+          ],
+          "sourceAnswerPremises": {
+            "answer": [
+              {
+                "source": "marked",
+                "requiredKeys": [
+                  3
+                ],
+                "permittedKeys": [
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                "knowledge": "complete-domain",
+                "since": "answer-release"
+              },
+              {
+                "source": "roots",
+                "requiredKeys": [
+                  3
+                ],
+                "permittedKeys": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6
+                ],
+                "knowledge": "rows",
+                "since": "fixture-start"
+              },
+              {
+                "source": "children",
+                "requiredKeys": [
+                  3
+                ],
+                "permittedKeys": [
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                "knowledge": "complete-domain",
+                "since": "fixture-start"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 186,
+        "phase": "completion-baseline-view",
+        "setup": {
+          "run": "run-1",
+          "profile": "inline",
+          "facts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 10
+              },
+              {
+                "id": 2,
+                "rank": 10
+              },
+              {
+                "id": 3,
+                "rank": 20
+              },
+              {
+                "id": 4,
+                "rank": 20
+              },
+              {
+                "id": 5,
+                "rank": 30
+              },
+              {
+                "id": 6,
+                "rank": 30
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              }
+            ]
+          },
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "ready": true
+        },
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 197,
+        "phase": "completion-baseline-cut",
+        "boundary": "held-window",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        },
+        "operations": [
+          {
+            "operation": "window",
+            "returned": "promise",
+            "outcome": {
+              "state": "pending"
+            }
+          }
+        ],
+        "operation": "window",
+        "pendingProviderAnswers": 1
+      },
+      {
+        "h02": true,
+        "sequence": 440,
+        "phase": "completion-baseline-cut",
+        "boundary": "completed-window",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            },
+            {
+              "id": 3,
+              "rank": 20,
+              "children": [
+                301,
+                302
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            },
+            {
+              "id": 3,
+              "rank": 20,
+              "children": [
+                301,
+                302
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 3
+          },
+          "status": "ready",
+          "requestErrors": []
+        },
+        "operations": [
+          {
+            "operation": "window",
+            "returned": "promise",
+            "outcome": {
+              "state": "fulfilled"
+            }
+          }
+        ],
+        "operation": "window"
+      },
+      {
+        "h02": true,
+        "sequence": 444,
+        "phase": "worker-cleaned",
+        "mode": "baseline-constituent",
+        "gate": "held-window"
+      }
+    ],
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-59916-0a3ccfc6-30fc-4439-a92e-cd61058bcfc3/receipts.jsonl",
+    "bindingStatus": "bound"
+  }
+}

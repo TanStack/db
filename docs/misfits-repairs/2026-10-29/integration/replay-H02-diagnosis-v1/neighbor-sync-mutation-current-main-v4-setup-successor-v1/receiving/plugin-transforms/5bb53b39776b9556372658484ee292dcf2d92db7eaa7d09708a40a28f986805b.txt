@@ -1,0 +1,362 @@
+import { NegativeActiveSubscribersError } from "../errors";
+import { recordPublicationError, withPublicationContext } from "../scheduler.js";
+import { runAllCallbacks } from "../utils/callbacks.js";
+import {
+  createSingleRowRefProxy,
+  toExpression
+} from "../query/builder/ref-proxy.js";
+import { codedMessage, devBuild } from "../error-message.js";
+import { getBuilderFromConfig } from "../query/live/collection-registry.js";
+import { CollectionSubscription } from "./subscription.js";
+export class CollectionChangesManager {
+  /**
+   * Creates a new CollectionChangesManager instance
+   */
+  constructor() {
+    this.activeSubscribersCount = 0;
+    // Subscribers that ask for data: every one except a subscription that still
+    // defers acquisition. `subscriberCount` and `subscribers:change` report it;
+    // garbage collection uses `activeSubscribersCount`.
+    this.acquiringSubscribersCount = 0;
+    this.changeSubscriptions = /* @__PURE__ */ new Set();
+    this.batchedEvents = [];
+    this.shouldBatchEvents = false;
+    this.layoutChangeListeners = /* @__PURE__ */ new Set();
+    // Whether this Collection has had a subscriber or a preload in its current
+    // sync run. A live-query Collection defers acquisition on its own source
+    // subscriptions until then.
+    this.subscriberOrPreload = false;
+    this.subscriberOrPreloadListeners = /* @__PURE__ */ new Set();
+    /**
+     * Monotonic revision of the collection's visible state, advanced once per
+     * committed batch of changes and cleanup — including while nothing is subscribed.
+     * Lets consumers (the live-query observer) cheaply detect "did the data
+     * change" without subscribing, and stays untouched by subscription
+     * bootstrap replays, which do not go through emitEvents.
+     */
+    this.stateRevision = 0;
+    /**
+     * Monotonic revision advanced only for explicit layout-only publications.
+     * Observers use it to detect reordered rows whose values did not change.
+     */
+    this.layoutRevision = 0;
+  }
+  setDeps(deps) {
+    this.lifecycle = deps.lifecycle;
+    this.sync = deps.sync;
+    this.events = deps.events;
+    this.collection = deps.collection;
+    this.state = deps.state;
+  }
+  /**
+   * Emit an empty ready event to notify subscribers that the collection is ready
+   * This bypasses the normal empty array check in emitEvents
+   */
+  emitEmptyReadyEvent() {
+    withPublicationContext(() => {
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([])
+          )
+        );
+      } catch (error) {
+        recordPublicationError(error);
+      }
+    });
+  }
+  /**
+   * Enriches a change message with virtual properties ($hasPendingWrites, $origin, $key, $collectionId).
+   * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
+   */
+  enrichChangeWithVirtualProps(change) {
+    return this.state.enrichChangeMessage(change);
+  }
+  // Reduce unpublished same-key changes relative to the subscriber's last
+  // visible row: keep the earliest previous row and latest value, and cancel
+  // an insert followed by a delete.
+  composeBatchedChange(pending, change) {
+    if (!pending) return change;
+    if (pending.type === `insert`) {
+      if (change.type === `delete`) return void 0;
+      return { ...change, type: `insert`, previousValue: void 0 };
+    }
+    const previousValue = pending.type === `update` ? pending.previousValue ?? pending.value : pending.value;
+    if (change.type === `delete`) {
+      return { ...change, value: previousValue, previousValue: void 0 };
+    }
+    return { ...change, type: `update`, previousValue };
+  }
+  /**
+   * Emit events either immediately or batch them for later emission
+   */
+  emitEvents(changes, forceEmit = false, layoutChanged = false) {
+    if (changes.length > 0) this.stateRevision++;
+    if (layoutChanged) this.layoutRevision++;
+    if (this.shouldBatchEvents && !forceEmit) {
+      this.batchedEvents.push(
+        ...changes.map((change) => this.enrichChangeWithVirtualProps(change))
+      );
+      return;
+    }
+    let rawEvents = changes;
+    if (forceEmit) {
+      if (this.batchedEvents.length > 0) {
+        const combined = /* @__PURE__ */ new Map();
+        for (const change of [...this.batchedEvents, ...changes]) {
+          combined.set(
+            change.key,
+            this.composeBatchedChange(combined.get(change.key), change)
+          );
+        }
+        rawEvents = [...combined.values()].flatMap((change) => {
+          return change ? [change] : [];
+        });
+      }
+      this.batchedEvents = [];
+      this.shouldBatchEvents = false;
+    }
+    if (this.deferral) {
+      this.deferral.publications.push({ changes: rawEvents, layoutChanged });
+      return;
+    }
+    this.publishEvents(rawEvents, layoutChanged);
+  }
+  /**
+   * Defers subscriber delivery while a coherent multi-Collection publication
+   * installs all of its visible state. State and indexes still commit at their
+   * normal transaction boundaries.
+   */
+  deferPublication() {
+    const deferral = this.deferral ??= {
+      depth: 0,
+      discard: false,
+      stateRevision: this.stateRevision,
+      layoutRevision: this.layoutRevision,
+      publications: []
+    };
+    deferral.depth++;
+    let closed = false;
+    const close = (discard) => {
+      if (closed || this.deferral !== deferral) return;
+      closed = true;
+      deferral.discard ||= discard;
+      if (--deferral.depth > 0) return;
+      const publications = deferral.publications;
+      deferral.publications = [];
+      this.deferral = void 0;
+      if (deferral.discard) {
+        this.stateRevision = deferral.stateRevision;
+        this.layoutRevision = deferral.layoutRevision;
+        return;
+      }
+      this.publishEvents(
+        publications.flatMap(({ changes }) => changes),
+        publications.some(({ layoutChanged }) => layoutChanged)
+      );
+    };
+    return {
+      publish: () => close(false),
+      discard: () => close(true)
+    };
+  }
+  publishEvents(rawEvents, layoutChanged) {
+    if (rawEvents.length === 0 && !layoutChanged) {
+      return;
+    }
+    const enrichedEvents = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change));
+    const layoutListeners = [...this.layoutChangeListeners];
+    const subscriptions = [...this.changeSubscriptions];
+    withPublicationContext(() => {
+      const callbacks = subscriptions.map(
+        (subscription) => () => subscription.emitEvents(enrichedEvents)
+      );
+      if (rawEvents.length === 0) {
+        callbacks.unshift(...layoutListeners);
+      }
+      try {
+        runAllCallbacks(callbacks);
+      } catch (error) {
+        recordPublicationError(error);
+      }
+    });
+  }
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  subscribeLayoutChanges(listener) {
+    this.layoutChangeListeners.add(listener);
+    return () => this.layoutChangeListeners.delete(listener);
+  }
+  /**
+   * Subscribe to changes in the collection
+   */
+  subscribeChanges(callback, options = {}) {
+    if (options.where && options.whereExpression) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.` : codedMessage(95)
+      );
+    }
+    const { where, ...opts } = options;
+    let whereExpression = opts.whereExpression;
+    if (where) {
+      const proxy = createSingleRowRefProxy();
+      const result = where(proxy);
+      whereExpression = toExpression(result);
+    }
+    const defersAcquisition = opts.deferAcquisition === true;
+    this.addSubscriber(defersAcquisition);
+    let subscription;
+    const setupState = { closed: false };
+    try {
+      subscription = new CollectionSubscription(this.collection, callback, {
+        ...opts,
+        whereExpression,
+        deferAcquisition: defersAcquisition,
+        onResumeAcquisition: () => this.resumeSubscriber(),
+        onUnsubscribe: () => {
+          setupState.closed = true;
+          this.removeSubscriber(subscription?.isDeferringAcquisition() ?? false);
+          if (subscription) this.changeSubscriptions.delete(subscription);
+        }
+      });
+      if (options.onStatusChange) {
+        subscription.on(`status:change`, options.onStatusChange);
+      }
+      if (options.includeInitialState) {
+        subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          orderBy: options.orderBy,
+          limit: options.limit,
+          onLoadSubsetResult: options.onLoadSubsetResult
+        });
+      } else if (options.includeInitialState === false) {
+        subscription.markAllStateAsSeen();
+      }
+      if (!setupState.closed) this.changeSubscriptions.add(subscription);
+    } catch (error) {
+      if (subscription) {
+        try {
+          subscription.unsubscribe();
+        } catch {
+        }
+      } else {
+        this.removeSubscriber(defersAcquisition);
+      }
+      throw error;
+    }
+    return subscription;
+  }
+  /** Whether this Collection had a subscriber or a preload in this sync run. */
+  hasSubscriberOrPreload() {
+    return this.subscriberOrPreload || this.acquiringSubscribersCount > 0;
+  }
+  /** Listen for the first subscriber or preload in the current sync run. */
+  onFirstSubscriberOrPreload(listener) {
+    this.subscriberOrPreloadListeners.add(listener);
+    return () => this.subscriberOrPreloadListeners.delete(listener);
+  }
+  /**
+   * Record a subscriber or a preload in the current sync run. A live-query
+   * Collection listens for the first one to resume deferred acquisition on its
+   * own source subscriptions.
+   */
+  markSubscriberOrPreload() {
+    if (this.subscriberOrPreload) return;
+    this.subscriberOrPreload = true;
+    const errors = [];
+    for (const listener of [...this.subscriberOrPreloadListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length) throw errors[0];
+  }
+  /** A deferring subscription resumed: it may now start this sync run. */
+  resumeSubscriber() {
+    this.lifecycle.assertCanStartSync();
+    this.startSyncForSubscriber();
+    return () => this.changeAcquiringSubscribers(1);
+  }
+  startSyncForSubscriber() {
+    const syncRunGeneration = this.sync.getSyncRunGeneration();
+    this.markSubscriberOrPreload();
+    if (syncRunGeneration !== this.sync.getSyncRunGeneration()) return;
+    this.startSyncIfStopped();
+    this.sync.resumeStart();
+  }
+  changeAcquiringSubscribers(delta) {
+    const previous = this.acquiringSubscribersCount;
+    this.acquiringSubscribersCount += delta;
+    this.events.emitSubscribersChange(this.acquiringSubscribersCount, previous);
+    if (delta === 1 && this.acquiringSubscribersCount > 0) {
+      this.markSubscriberOrPreload();
+    }
+  }
+  startSyncIfStopped() {
+    if (this.lifecycle.status === `cleaned-up` || this.lifecycle.status === `idle`) {
+      this.sync.startSync();
+    }
+  }
+  /**
+   * Increment the active subscribers count and start sync if needed. A
+   * subscriber that defers acquisition starts no provider work. It still
+   * starts a live-query Collection, whose sync run reads local memory and
+   * defers its own acquisition, but no other Collection's sync run.
+   */
+  addSubscriber(defersAcquisition) {
+    if (!defersAcquisition) this.lifecycle.assertCanStartSync();
+    this.activeSubscribersCount++;
+    this.lifecycle.cancelGCTimer();
+    let acquiring = false;
+    try {
+      if (!defersAcquisition) {
+        this.startSyncForSubscriber();
+      } else if (!this.lifecycle.isCleaningUp() && getBuilderFromConfig(this.collection.config)) {
+        this.startSyncIfStopped();
+      }
+      if (!defersAcquisition) {
+        acquiring = true;
+        this.changeAcquiringSubscribers(1);
+      }
+    } catch (error) {
+      this.activeSubscribersCount--;
+      if (acquiring) {
+        try {
+          this.changeAcquiringSubscribers(-1);
+        } catch {
+        }
+      }
+      if (this.activeSubscribersCount === 0) {
+        this.lifecycle.startGCTimer();
+      }
+      throw error;
+    }
+  }
+  /**
+   * Decrement the active subscribers count and start GC timer if needed
+   */
+  removeSubscriber(wasDeferring) {
+    this.activeSubscribersCount--;
+    if (this.activeSubscribersCount === 0) {
+      this.lifecycle.startGCTimer();
+    } else if (this.activeSubscribersCount < 0) {
+      throw new NegativeActiveSubscribersError();
+    }
+    if (!wasDeferring) this.changeAcquiringSubscribers(-1);
+  }
+  /**
+   * Clean up the collection by stopping sync and clearing data
+   * This can be called manually or automatically by garbage collection
+   */
+  cleanup() {
+    this.subscriberOrPreload = [...this.changeSubscriptions].some(
+      (subscription) => !subscription.isDeferringAcquisition()
+    );
+    this.stateRevision++;
+    this.batchedEvents = [];
+    this.shouldBatchEvents = false;
+    if (this.deferral) this.deferral.publications.length = 0;
+    this.deferral = void 0;
+  }
+}

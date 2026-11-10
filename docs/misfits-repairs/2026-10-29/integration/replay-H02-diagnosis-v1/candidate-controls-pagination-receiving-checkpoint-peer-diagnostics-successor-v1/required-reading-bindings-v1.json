@@ -1,0 +1,51 @@
+{
+  "readBeforeEdits": true,
+  "exception": "Primary shared helper and receiving recipe opening were read before final audit; unchanged and not edited",
+  "bindings": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/.agents/skills/oracle-authoring/SKILL.md",
+      "sha256": "a7fecfa338e18777210948328e589e304b5e7716cf709ba2cd99aaa7e3851d22",
+      "readScope": "full"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/docs/contributing/oracle-rubric.md",
+      "sha256": "4bf86e90348850a66d70c48e47d0d32d0830a6929e132f960eaf5e5de398c1a2",
+      "readScope": "full lines1-1175"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/docs/contributing/glossary.md",
+      "sha256": "f8cec460111439ba9ee65b0c1ecf8a60e466b576c4d94d75af222a9ced4ed02d",
+      "readScope": "full"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/ARCHITECTURE.md",
+      "sha256": "5b5aa10c6672e7e60e38c1d2f5f28fa1f956d60741fb75965808050a256130b1",
+      "readScope": "full lines1-2079"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/docs/contributing/oracle-coverage.md",
+      "sha256": "00572f9ec98ec93864c4a2afa62159baa5abfc7e197de6ee48761258962ecb18",
+      "readScope": "pagination owner and limits lines2350-2435"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-window-publication-oracle.ts",
+      "sha256": "cc7a3ac8bb2b1250f5b13ee8435c5b1bd3565e3d988bec139386c258b683d233",
+      "readScope": "full"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "sha256": "78753e1e7bc7b2f94a3fe957e11a0abb329a7375aa9a32278b076cb1c4c63062",
+      "readScope": "opening contract and receiving program lines1-155"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-failure-actual-independent-review-v1.md",
+      "sha256": "4e0b16b4e0aacddcdd70a20fc9e6c737682260067468887960092763234efe78",
+      "readScope": "full"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/root-actual-instrument-failure-classification-v1.json",
+      "sha256": "16c8d66ede12f5603ac653112cef5a7379a1911bcd27d2f44546361c81be99ff",
+      "readScope": "full"
+    }
+  ]
+}

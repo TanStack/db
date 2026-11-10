@@ -1,0 +1,1706 @@
+import {
+  concat as concatOperator,
+  distinct,
+  filter,
+  join as joinOperator,
+  map,
+  reduce,
+  serializeValue,
+  tap
+} from "@tanstack/db-ivm";
+import { isPlainObject } from "../../utils/type-guards.js";
+import { getOrCreate } from "../../utils/get-or-create.js";
+import { optimizeQuery } from "../optimizer.js";
+import {
+  createParentContext,
+  createValueIdentity,
+  getParentContextIdentity,
+  getParentContextProjectedBindings,
+  getParentContextValue
+} from "../equality-value-identity.js";
+import {
+  CollectionInputNotFoundError,
+  DistinctRequiresSelectError,
+  FnSelectWithGroupByError,
+  GroupingOperatorRequiredError,
+  HavingRequiresGroupByError,
+  IncludeOperatorRequiredError,
+  LimitOffsetRequireOrderByError,
+  NonAggregateExpressionNotInGroupByError,
+  QueryCompilationError,
+  UnsupportedFnSelectResultError,
+  UnsupportedFromTypeError
+} from "../../errors.js";
+import { VIRTUAL_PROP_NAMES } from "../../virtual-props.js";
+import {
+  BaseQueryBuilder,
+  collectExternalRefsFromQuery
+} from "../builder/index.js";
+import { isRefProxy } from "../builder/ref-proxy-identity.js";
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  IncludeWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper
+} from "../builder/functions.js";
+import {
+  ConditionalSelect,
+  IncludesSubquery,
+  PropRef,
+  Value as ValClass,
+  collectCollectionSources,
+  collectPropRefs,
+  getFromSources,
+  getHavingExpression,
+  getWhereExpression,
+  isBasicOrAggregateExpression,
+  isExpressionLike,
+  requireCollectionSource
+} from "../ir.js";
+import { ensureIndexForField } from "../../indexes/auto-index.js";
+import { createSourceRecord } from "../../utils/source-record.js";
+import { deepEquals } from "../../utils.js";
+import { normalizeValue } from "../../utils/comparison.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate
+} from "./evaluators.js";
+import { processJoins, registerLazyDemandPlan } from "./joins.js";
+import { findAggregate } from "./find-aggregate.js";
+import { getLazyLoadTargets } from "./lazy-targets.js";
+import { processOrderBy } from "./order-by.js";
+import { crossJoinParentRoutes } from "./parent-routes.js";
+import { queriesMatchForCaching } from "./query-equivalence.js";
+import {
+  INCLUDES_PUBLIC_KEY,
+  INCLUDES_ROUTING,
+  attachRouteMetadata,
+  attachRouteMetadataToResult,
+  getNamespacedRouteMetadata,
+  getRouteMetadata,
+  getRoutedScalarMetadata,
+  stripInternalCallbackMetadata,
+  stripInternalRouteMetadata,
+  stripRouteMetadata
+} from "./route-metadata.js";
+import { processSelect } from "./select.js";
+export { INCLUDES_PUBLIC_KEY, INCLUDES_ROUTING } from "./route-metadata.js";
+function getUnsupportedFnSelectResultDescription(value, seen = /* @__PURE__ */ new Set()) {
+  if (value instanceof IncludeWrapper) return `include()`;
+  if (value instanceof BaseQueryBuilder) return `a child query builder`;
+  if (value instanceof ToArrayWrapper) return `toArray()`;
+  if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`;
+  if (value instanceof MaterializeWrapper) return `materialize()`;
+  if (value instanceof CaseWhenWrapper) return `caseWhen()`;
+  if (isExpressionLike(value)) {
+    return value && typeof value === `object` && `name` in value && typeof value.name === `string` ? `${value.name}()` : `a query expression`;
+  }
+  if (value === null || typeof value !== `object` || seen.has(value)) {
+    return void 0;
+  }
+  seen.add(value);
+  const keys = [
+    ...Object.keys(value),
+    ...Object.getOwnPropertySymbols(value).filter(
+      (key) => Object.prototype.propertyIsEnumerable.call(value, key)
+    )
+  ];
+  for (const key of keys) {
+    const entry = value[key];
+    const unsupported = getUnsupportedFnSelectResultDescription(entry, seen);
+    if (unsupported) return unsupported;
+  }
+  return void 0;
+}
+export function validateFnSelectResult(value) {
+  const unsupportedValueDescription = getUnsupportedFnSelectResultDescription(value);
+  if (unsupportedValueDescription) {
+    throw new UnsupportedFnSelectResultError(unsupportedValueDescription);
+  }
+}
+function projectParentContext(nsRow, projections, valueIdentity) {
+  const inherited = getRouteMetadata(nsRow)?.parentContext;
+  const inheritedValue = getParentContextValue(inherited);
+  const parentContext = inheritedValue === void 0 ? {} : { ...inheritedValue };
+  const projectedBindings = {
+    ...getParentContextProjectedBindings(inherited)
+  };
+  const projectedIdentity = [];
+  for (const projection of projections) {
+    const projectedValue = projection.compiled(nsRow);
+    projectedIdentity.push([
+      projection.alias,
+      projection.bindingKey,
+      projection.field,
+      valueIdentity.equality(projectedValue)
+    ]);
+    if (projection.bindingKey !== void 0) {
+      projectedBindings[projection.bindingKey] = projectedValue;
+    }
+    if (projection.field.length === 0) {
+      const projectedAlias = projectedValue;
+      parentContext[projection.alias] = projectedAlias != null && typeof projectedAlias === `object` ? { ...projectedAlias } : projectedAlias;
+      continue;
+    }
+    const inheritedAlias = parentContext[projection.alias];
+    const aliasContext = inheritedAlias != null && typeof inheritedAlias === `object` ? { ...inheritedAlias } : {};
+    parentContext[projection.alias] = aliasContext;
+    let target = aliasContext;
+    for (let index = 0; index < projection.field.length - 1; index++) {
+      const segment = projection.field[index];
+      const inheritedNested = target[segment];
+      const nested = inheritedNested != null && typeof inheritedNested === `object` ? { ...inheritedNested } : {};
+      target[segment] = nested;
+      target = nested;
+    }
+    target[projection.field[projection.field.length - 1]] = projectedValue;
+  }
+  return createParentContext(
+    parentContext,
+    [getParentContextIdentity(inherited), projectedIdentity],
+    projectedBindings
+  );
+}
+function parameterizeByParentRoutes(pipeline, parentKeyStream, mainSource, valueIdentity) {
+  return crossJoinParentRoutes(
+    pipeline,
+    parentKeyStream,
+    (rowKey, row, correlationKey, parentContext) => {
+      const namespaced = {
+        ...getParentContextValue(parentContext),
+        ...row
+      };
+      namespaced[mainSource] = {
+        ...namespaced[mainSource],
+        [INCLUDES_PUBLIC_KEY]: namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey
+      };
+      attachRouteMetadata(namespaced, correlationKey, parentContext);
+      return [
+        serializeValue([
+          valueIdentity.equality(rowKey),
+          valueIdentity.equality(correlationKey),
+          getParentContextIdentity(parentContext)
+        ]),
+        namespaced
+      ];
+    }
+  );
+}
+function getRowCorrelationKey(row, mainSource) {
+  return getNamespacedRouteMetadata(row, mainSource)?.correlationKey;
+}
+function getRowParentContext(row, mainSource) {
+  return getNamespacedRouteMetadata(row, mainSource)?.parentContext ?? null;
+}
+function correlationValuesEqual(left, right) {
+  if (left == null || right == null) return false;
+  const normalizedLeft = normalizeValue(left);
+  const normalizedRight = normalizeValue(right);
+  return Object.is(normalizedLeft, normalizedRight) || typeof normalizedLeft === `number` && typeof normalizedRight === `number` && Number.isNaN(normalizedLeft) && Number.isNaN(normalizedRight);
+}
+const valueIdentitiesByCache = /* @__PURE__ */ new WeakMap();
+function getCompilationValueIdentity(cache) {
+  return getOrCreate(valueIdentitiesByCache, cache, createValueIdentity);
+}
+export function compileQuery(...args) {
+  return compileQueryInternal(args, false);
+}
+export function compileCollectionQuery(...args) {
+  return compileQueryInternal(args, false, true);
+}
+function compileQueryInternal([
+  rawQuery,
+  inputs,
+  collections,
+  subscriptions,
+  callbacks,
+  lazySources,
+  optimizableOrderByCollections,
+  setWindowFn,
+  cache = /* @__PURE__ */ new WeakMap(),
+  queryMapping = /* @__PURE__ */ new WeakMap(),
+  parentKeyStream,
+  childCorrelationField,
+  ancestorHasTopK = false
+], scopeValidated, publishCollectionRoot = false) {
+  const cachedResult = parentKeyStream === void 0 ? cache.get(rawQuery) : void 0;
+  if (cachedResult) {
+    return cachedResult;
+  }
+  const valueIdentity = getCompilationValueIdentity(cache);
+  if (!scopeValidated) validateQueryStructure(rawQuery);
+  const rawSources = collectCollectionSources(rawQuery);
+  const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } = optimizeQuery(rawQuery);
+  const sourceWhereClauses = keyWhereClausesBySource(
+    rawQuery,
+    aliasWhereClauses
+  );
+  let query = optimizedQuery;
+  queryMapping.set(query, rawQuery);
+  mapNestedQueries(query, rawQuery, queryMapping);
+  const allInputs = Object.assign(createSourceRecord(), inputs);
+  bindSourceInputs(rawSources, allInputs);
+  const aliasToCollectionId = {};
+  const aliasRemapping = {};
+  const sources = {};
+  const {
+    alias: mainSource,
+    collectionId: mainCollectionId,
+    pipeline: initialPipeline,
+    sources: fromSources,
+    sourceIncludes,
+    directIncludes,
+    isUnionFrom,
+    isParentRouted
+  } = processFromClause(
+    query.from,
+    allInputs,
+    collections,
+    subscriptions,
+    callbacks,
+    lazySources,
+    optimizableOrderByCollections,
+    ignoreWindow,
+    cache,
+    queryMapping,
+    aliasToCollectionId,
+    aliasRemapping,
+    sourceWhereClauses,
+    parentKeyStream,
+    publishCollectionRoot
+  );
+  Object.assign(sources, fromSources);
+  const sourceCarriesInternalRouteState = parentKeyStream !== void 0 || sourceIncludes.length > 0 || directIncludes.length > 0;
+  let pipeline = initialPipeline;
+  const childCorrelationAlias = childCorrelationField?.path[0];
+  const joinsParentDirectly = !isUnionFrom && !isParentRouted && parentKeyStream !== void 0 && childCorrelationField !== void 0 && childCorrelationAlias === mainSource;
+  if (parentKeyStream && childCorrelationField && joinsParentDirectly) {
+    const mainInput = sources[mainSource];
+    let filteredMainInput = mainInput;
+    const childFieldPath = childCorrelationField.path.slice(1);
+    const childRekeyed = mainInput.pipe(
+      map(([key, row]) => {
+        const correlationValue = getNestedValue(row, childFieldPath);
+        return [
+          valueIdentity.serializeEquality(correlationValue),
+          [key, row, correlationValue]
+        ];
+      })
+    );
+    const equalityParentKeys = parentKeyStream.pipe(
+      map(([correlationValue, parentContext]) => [
+        valueIdentity.serializeEquality(correlationValue),
+        parentContext
+      ]),
+      reduce(
+        (values) => values.map(([value, multiplicity]) => [
+          value,
+          multiplicity > 0 ? 1 : 0
+        ])
+      )
+    );
+    const joined = childRekeyed.pipe(joinOperator(equalityParentKeys, `inner`));
+    filteredMainInput = joined.pipe(
+      filter(([_correlationValue, [childSide]]) => {
+        return childSide != null;
+      }),
+      map(([_correlationIdentity, [childSide, parentSide]]) => {
+        const [childKey, childRow, correlationValue] = childSide;
+        const tagged = attachRouteMetadata(
+          {
+            ...childRow,
+            [INCLUDES_PUBLIC_KEY]: childKey
+          },
+          correlationValue,
+          parentSide
+        );
+        const effectiveKey = parentSide != null ? serializeValue([
+          valueIdentity.equality(childKey),
+          getParentContextIdentity(parentSide)
+        ]) : childKey;
+        return [effectiveKey, tagged];
+      })
+    );
+    sources[mainSource] = filteredMainInput;
+    pipeline = wrapInputWithAlias(filteredMainInput, mainSource);
+  } else if (parentKeyStream && !isParentRouted) {
+    pipeline = parameterizeByParentRoutes(
+      initialPipeline,
+      parentKeyStream,
+      mainSource,
+      valueIdentity
+    );
+  }
+  if (query.join && query.join.length > 0) {
+    pipeline = processJoins(
+      pipeline,
+      query.join,
+      sources,
+      mainCollectionId,
+      mainSource,
+      allInputs,
+      cache,
+      queryMapping,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      ignoreWindow,
+      rawQuery,
+      query.from,
+      (...args) => compileQueryInternal(args, true, publishCollectionRoot),
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      joinsParentDirectly,
+      valueIdentity,
+      parentKeyStream
+    );
+  }
+  const canLoseMainSide = query.join?.some(
+    ({ type }) => type === `right` || type === `full`
+  );
+  if (parentKeyStream && childCorrelationField && (!joinsParentDirectly || canLoseMainSide)) {
+    const compiledChildCorrelation = compileExpression(childCorrelationField);
+    pipeline = pipeline.pipe(
+      filter(
+        ([, row]) => correlationValuesEqual(
+          compiledChildCorrelation(row),
+          getRowCorrelationKey(row, mainSource)
+        )
+      )
+    );
+  }
+  if (query.where && query.where.length > 0) {
+    for (const where of query.where) {
+      const whereExpression = getWhereExpression(where);
+      const compiledWhere = compileExpression(whereExpression);
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return toBooleanPredicate(compiledWhere(namespacedRow));
+        })
+      );
+    }
+  }
+  if (query.fnWhere && query.fnWhere.length > 0) {
+    for (const fnWhere of query.fnWhere) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          const callbackRow = sourceCarriesInternalRouteState ? stripInternalCallbackMetadata(namespacedRow) : namespacedRow;
+          return toBooleanPredicate(fnWhere(callbackRow));
+        })
+      );
+    }
+  }
+  const inputIncludes = [
+    ...directIncludes,
+    ...sourceIncludes.map(({ include }) => include)
+  ];
+  const materializeSelectInput = !!query.fnSelect && inputIncludes.length > 0;
+  let includesResults = !query.select ? [...directIncludes] : [];
+  let includesRoutingFns = [];
+  const inheritedIncludes = [
+    ...sourceIncludes.map(({ sourceAlias, include }) => ({
+      include,
+      keyPrefix: `${sourceAlias}.`,
+      paths: query.select != null ? findProjectedIncludePaths(query.select, [
+        sourceAlias,
+        ...include.resultPath
+      ]) : query.fnSelect && !materializeSelectInput ? [] : [{ path: [sourceAlias, ...include.resultPath], guards: [] }],
+      route: (nsRow) => readRouteTag(nsRow[sourceAlias], include.fieldName)
+    })),
+    ...(query.select ? directIncludes : []).map((include) => ({
+      include,
+      keyPrefix: ``,
+      paths: findProjectedIncludePaths(query.select, include.resultPath),
+      route: (nsRow) => readRouteTag(nsRow, include.fieldName)
+    }))
+  ];
+  for (const { include, keyPrefix, paths, route } of inheritedIncludes) {
+    for (const { path: resultPath, guards } of paths) {
+      const fieldName = getUniqueIncludesRoutingKey(
+        keyPrefix + resultPath.join(`.`),
+        includesRoutingFns
+      );
+      includesResults.push({ ...include, fieldName, resultPath });
+      includesRoutingFns.push({
+        fieldName,
+        getRouting: compileGuardedRouting(guards, route)
+      });
+    }
+  }
+  const selectAggregate = findAggregate(query.select);
+  const selectHasAggregates = selectAggregate !== void 0;
+  const hasOrderBy = (query.orderBy?.length ?? 0) > 0;
+  const parentHasTopK = hasOrderBy || !!query.singleResult;
+  const deferredIncludes = [];
+  if (query.select) {
+    const includesEntries = extractIncludesFromSelect(query.select);
+    if (includesEntries.length > 0 && ((query.groupBy?.length ?? 0) > 0 || selectHasAggregates))
+      throw new NonAggregateExpressionNotInGroupByError(
+        includesEntries[0].path.join(`.`)
+      );
+    if (includesEntries.length > 0) {
+      query = { ...query, select: { ...query.select } };
+    }
+    for (const { key, path, subquery, guards } of includesEntries) {
+      const runtime = subquery.runtime;
+      if (typeof runtime?.materializeCompilation !== `function`)
+        throw new IncludeOperatorRequiredError(key);
+      const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns);
+      const compiledCorrelation = compileExpression(subquery.correlationField);
+      const compiledProjections = subquery.parentProjection?.map((ref) => ({
+        alias: ref.path[0],
+        field: ref.path.slice(1),
+        bindingKey: ref.bindingId ? JSON.stringify([ref.bindingId, ref.path.slice(1)]) : void 0,
+        compiled: compileExpression(ref)
+      })) ?? [];
+      const getRouting = compileGuardedRouting(guards, (nsRow) => ({
+        active: true,
+        correlationKey: compiledCorrelation(nsRow),
+        parentContext: compiledProjections.length > 0 ? projectParentContext(nsRow, compiledProjections, valueIdentity) : null
+      }));
+      const compileInclude = (windowRows) => {
+        const routes = windowRows ? windowRows.pipe(map(([, [row]]) => windowRoute(row, fieldName))) : pipeline.pipe(map(([, row]) => getRouting(row)));
+        let parentKeys = routes.pipe(
+          filter((routing) => routing.active),
+          // A parent key may carry no parent context (null).
+          map(
+            (routing) => [routing.correlationKey, routing.parentContext]
+          ),
+          reduce(
+            (values) => values.map(
+              ([v, mult]) => [v, mult > 0 ? 1 : 0]
+            )
+          )
+        );
+        const childSourceAlias = subquery.childCorrelationField.path[0];
+        const directChildCollection = subquery.query.from.type === `collectionRef` ? subquery.query.from.collection : void 0;
+        const lazyTargets = getLazyLoadTargets(
+          subquery.query,
+          subquery.query.from,
+          childSourceAlias,
+          subquery.childCorrelationField,
+          directChildCollection,
+          aliasRemapping
+        );
+        if (lazyTargets.length > 0) {
+          for (const target of lazyTargets) {
+            lazySources.add(target.sourceId);
+            const targetFieldName = target.path[0];
+            if (targetFieldName) {
+              ensureIndexForField(
+                targetFieldName,
+                target.path,
+                target.collection
+              );
+            }
+          }
+          const staticKeys = getStaticDemandKeys(
+            rawQuery,
+            subquery.correlationField
+          );
+          const initialKeys = !ancestorHasTopK && (!windowRows || query.singleResult && query.offset === void 0 && (query.limit ?? 1) > 0 && staticKeys.size === 1) ? staticKeys : /* @__PURE__ */ new Set();
+          const demandPlans = lazyTargets.map(
+            (target) => registerLazyDemandPlan(callbacks, target, initialKeys)
+          );
+          const demandWeights = /* @__PURE__ */ new Map();
+          parentKeys = parentKeys.pipe(
+            tap((data) => {
+              for (const [[correlationValue], weight] of data.getInner()) {
+                if (correlationValue == null) continue;
+                const encoded = valueIdentity.serializeEquality(correlationValue);
+                const nextWeight = (demandWeights.get(encoded)?.weight ?? 0) + weight;
+                if (nextWeight === 0) demandWeights.delete(encoded);
+                else
+                  demandWeights.set(encoded, {
+                    key: correlationValue,
+                    weight: nextWeight
+                  });
+              }
+              const keys = new Set(
+                [...demandWeights.values()].filter(({ weight }) => weight > 0).map(({ key: demandedKey }) => demandedKey)
+              );
+              lazyTargets.forEach(
+                (target, index) => callbacks[target.sourceId]?.setDemand?.(
+                  demandPlans[index],
+                  keys
+                )
+              );
+            })
+          );
+        }
+        const childQuery = subquery.parentFilters && subquery.parentFilters.length > 0 ? {
+          ...subquery.query,
+          where: [
+            ...subquery.query.where || [],
+            ...subquery.parentFilters
+          ]
+        } : subquery.query;
+        const childResult = compileQueryInternal(
+          [
+            childQuery,
+            allInputs,
+            collections,
+            subscriptions,
+            callbacks,
+            lazySources,
+            optimizableOrderByCollections,
+            ignoreWindow,
+            cache,
+            queryMapping,
+            parentKeys,
+            subquery.childCorrelationField,
+            ancestorHasTopK || parentHasTopK
+          ],
+          true,
+          subquery.materialization === `collection`
+        );
+        for (const [alias, whereClause] of childResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause);
+        }
+        includesResults.push({
+          pipeline: childResult.pipeline,
+          fieldName,
+          resultPath: path,
+          correlationField: subquery.correlationField,
+          childCorrelationField: subquery.childCorrelationField,
+          hasOrderBy: (subquery.query.orderBy?.length ?? 0) > 0,
+          childCompilationResult: childResult,
+          parentProjection: subquery.parentProjection,
+          materialization: subquery.materialization,
+          scalarField: subquery.scalarField,
+          runtime: subquery.runtime
+        });
+      };
+      if (parentHasTopK) deferredIncludes.push(compileInclude);
+      else compileInclude();
+      includesRoutingFns.push({ fieldName, getRouting });
+      query = {
+        ...query,
+        select: replaceIncludesInSelectValue(query.select, path).value
+      };
+    }
+  }
+  if (query.distinct && !query.fnSelect && !query.select && query.from.type !== `unionAll`) {
+    throw new DistinctRequiresSelectError();
+  }
+  if (query.fnSelect && query.groupBy && query.groupBy.length > 0) {
+    throw new FnSelectWithGroupByError();
+  }
+  const routingFns = includesRoutingFns;
+  const getRowIncludesRouting = (row) => Object.fromEntries(
+    routingFns.map(({ fieldName, getRouting }) => [
+      fieldName,
+      getRouting(row)
+    ])
+  );
+  if (materializeSelectInput) {
+    if (!inputIncludes.every(isInlineInclude)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.` : codedMessage(128)
+      );
+    }
+    const inputPipeline = pipeline.pipe(
+      map(
+        ([key, row]) => [
+          key,
+          [
+            {
+              ...row,
+              [INCLUDES_ROUTING]: {
+                ...row[INCLUDES_ROUTING],
+                ...getRowIncludesRouting(row)
+              }
+            },
+            void 0
+          ]
+        ]
+      )
+    );
+    const materializedInput = includesResults[0].runtime.materializeCompilation({
+      pipeline: inputPipeline,
+      includes: includesResults,
+      valueIdentity,
+      collectionId: mainCollectionId,
+      sourceWhereClauses,
+      aliasToCollectionId,
+      aliasRemapping
+    });
+    pipeline = materializedInput.pipeline.pipe(
+      map(([key, [value]]) => {
+        const row = { ...value };
+        delete row[INCLUDES_ROUTING];
+        return [key, row];
+      })
+    );
+    includesResults = [];
+    includesRoutingFns = [];
+  }
+  const sourceBindings = new Map(
+    getAllSources(query).map((source) => [source.alias, source.bindingId])
+  );
+  const unionRows = query.from.type === `unionAll`;
+  if (query.fnSelect) {
+    const fnSelect = (row) => {
+      const selected = query.fnSelect(row);
+      validateFnSelectResult(selected);
+      return selected;
+    };
+    const sourceAliases = [...sourceBindings.keys()];
+    const projectRow = (namespacedRow) => {
+      const callbackRow = sourceCarriesInternalRouteState ? stripInternalCallbackMetadata(namespacedRow) : namespacedRow;
+      const selectResults = fnSelect(callbackRow);
+      let selected = selectResults;
+      if (selectResults && typeof selectResults === `object` && (Array.isArray(selectResults) || isPlainObject(selectResults))) {
+        selected = Array.isArray(selectResults) ? [...selectResults] : { ...selectResults };
+        if (publishCollectionRoot && !sourceAliases.some((alias) => selectResults === callbackRow[alias])) {
+          for (const prop of VIRTUAL_PROP_NAMES) delete selected[prop];
+        }
+        const routing = namespacedRow[INCLUDES_ROUTING];
+        if (routing) {
+          selected[INCLUDES_ROUTING] = routing;
+        }
+      }
+      return {
+        ...namespacedRow,
+        $selected: selected
+      };
+    };
+    pipeline = pipeline.pipe(map(([key, row]) => [key, projectRow(row)]));
+  } else if (query.select) {
+    if (!selectHasAggregates && !(query.groupBy && query.groupBy.length > 0))
+      pipeline = processSelect(pipeline, query.select, allInputs);
+  } else {
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]) => {
+        const routedScalar = getRoutedScalarMetadata(namespacedRow);
+        const selectResults = isUnionFrom && routedScalar ? routedScalar.value : !isUnionFrom && !query.join && !query.groupBy ? namespacedRow[mainSource] : namespacedRow;
+        return [
+          key,
+          {
+            ...namespacedRow,
+            $selected: selectResults
+          }
+        ];
+      })
+    );
+  }
+  if (includesRoutingFns.length > 0) {
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]) => {
+        const selected = Array.isArray(namespacedRow.$selected) ? [...namespacedRow.$selected] : { ...namespacedRow.$selected };
+        selected[INCLUDES_ROUTING] = getRowIncludesRouting(namespacedRow);
+        return [key, { ...namespacedRow, $selected: selected }];
+      })
+    );
+  }
+  const groupByMainSource = parentKeyStream ? mainSource : void 0;
+  const isSourceRef = (ref) => {
+    const binding = sourceBindings.get(ref.path[0]);
+    if (binding !== void 0) return (ref.bindingId ?? binding) === binding;
+    return unionRows && ref.bindingId === void 0 && ref.path[0] !== `$selected`;
+  };
+  const aggregate = selectAggregate ?? findAggregate([
+    query.having,
+    query.orderBy?.map((clause) => clause.expression)
+  ]);
+  const grouping = query.grouping ?? aggregate?.grouping;
+  const grouped = (query.groupBy?.length ?? 0) > 0;
+  if ((grouped || aggregate) && !grouping)
+    throw new GroupingOperatorRequiredError();
+  if (grouping && (grouped || selectAggregate)) {
+    pipeline = grouping.processGroupBy(
+      pipeline,
+      query.groupBy ?? [],
+      valueIdentity,
+      isSourceRef,
+      query.having,
+      query.select,
+      query.fnHaving,
+      mainCollectionId,
+      groupByMainSource,
+      sourceCarriesInternalRouteState || includesRoutingFns.length > 0
+    );
+  }
+  if (query.having && (!query.groupBy || query.groupBy.length === 0) && !selectHasAggregates) {
+    throw new HavingRequiresGroupByError();
+  }
+  if (query.fnHaving && query.fnHaving.length > 0 && (!query.groupBy || query.groupBy.length === 0)) {
+    for (const fnHaving of query.fnHaving) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          const callbackRow = sourceCarriesInternalRouteState || includesRoutingFns.length > 0 ? stripInternalCallbackMetadata(namespacedRow) : namespacedRow;
+          return fnHaving(callbackRow);
+        })
+      );
+    }
+  }
+  if (!selectHasAggregates && query.distinct) {
+    pipeline = canonicalizeSelectedRows(
+      pipeline,
+      query,
+      mainSource,
+      parentKeyStream !== void 0
+    );
+  }
+  if (query.distinct) {
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected));
+  }
+  const metadataSource = query.select ? getWholeRowSourceAliases(query.select) : query.from.type === `unionAll` ? void 0 : [mainSource];
+  const finalizeRow = (key, row, orderByIndex) => {
+    const finalResults = query.fnSelect && publishCollectionRoot ? unwrapValue(row.$selected) : attachVirtualPropsToSelected(
+      unwrapValue(row.$selected),
+      row,
+      publishCollectionRoot,
+      metadataSource
+    );
+    if (parentKeyStream) {
+      return [
+        key,
+        [
+          stripInternalRouteMetadata(finalResults),
+          orderByIndex,
+          getRowCorrelationKey(row, mainSource),
+          getRowParentContext(row, mainSource),
+          getIncludesPublicKey(row, mainSource, key)
+        ]
+      ];
+    }
+    return [key, [finalResults, orderByIndex]];
+  };
+  const resultLimit = query.singleResult ? Math.min(query.limit ?? 1, 1) : query.limit;
+  if (!hasOrderBy && (query.limit !== void 0 || query.offset !== void 0)) {
+    throw new LimitOffsetRequireOrderByError();
+  }
+  let resultPipeline;
+  let ownWindowFn;
+  if (hasOrderBy || query.singleResult) {
+    const includesGroupKeyFn = parentKeyStream && (resultLimit !== void 0 || query.offset !== void 0) ? (_key, row) => {
+      const correlationKey = getRowCorrelationKey(
+        row,
+        mainSource
+      );
+      const parentContext = getRowParentContext(
+        row,
+        mainSource
+      );
+      if (parentContext != null) {
+        return serializeValue([
+          valueIdentity.equality(correlationKey),
+          getParentContextIdentity(parentContext)
+        ]);
+      }
+      return valueIdentity.equality(correlationKey);
+    } : void 0;
+    const ordered = processOrderBy(
+      rawQuery,
+      pipeline,
+      // With no explicit order, top-K breaks ties by the public row key.
+      query.orderBy ?? [],
+      query.select || {},
+      grouping,
+      collections[mainCollectionId],
+      optimizableOrderByCollections,
+      (windowFn) => ownWindowFn = windowFn,
+      resultLimit,
+      query.offset,
+      includesGroupKeyFn
+    );
+    for (const compileInclude of deferredIncludes) compileInclude(ordered);
+    if (ownWindowFn) setWindowFn(ownWindowFn);
+    resultPipeline = ordered.pipe(
+      map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex))
+    );
+  } else {
+    resultPipeline = pipeline.pipe(
+      map(([key, row]) => finalizeRow(key, row, void 0))
+    );
+  }
+  const compilationResult = {
+    collectionId: mainCollectionId,
+    pipeline: resultPipeline,
+    valueIdentity,
+    sourceWhereClauses,
+    aliasToCollectionId,
+    aliasRemapping,
+    includes: includesResults.length > 0 ? includesResults : void 0
+  };
+  if (parentKeyStream === void 0) cache.set(rawQuery, compilationResult);
+  return compilationResult;
+}
+function isInlineInclude(include) {
+  return include.materialization !== `collection` && (include.childCompilationResult.includes ?? []).every(isInlineInclude);
+}
+function keyWhereClausesBySource(query, clauses) {
+  const localSources = [
+    ...getFromSources(query.from),
+    ...query.join?.map(({ from }) => from) ?? []
+  ].filter((source) => source.type === `collectionRef`);
+  const localSourceByAlias = new Map(
+    localSources.map((source) => [source.alias, source])
+  );
+  const result = /* @__PURE__ */ new Map();
+  for (const [key, clause] of clauses) {
+    const source = localSourceByAlias.get(key);
+    if (source) result.set(source.sourceId, clause);
+  }
+  return result;
+}
+function bindSourceInputs(sources, inputs) {
+  for (const source of sources) {
+    const input = inputs[source.sourceId] ?? inputs[source.alias];
+    if (input) inputs[source.sourceId] = input;
+  }
+}
+function canonicalizeSelectedRows(pipeline, query, mainSource, isIncludedRelation) {
+  const compiledOrder = (query.orderBy ?? []).map(
+    ({ expression }) => compileExpression(expression)
+  );
+  const signature = (row) => ({
+    value: row.$selected,
+    routing: row.$selected?.[INCLUDES_ROUTING],
+    outerCorrelation: isIncludedRelation ? getRowCorrelationKey(row, mainSource) : void 0,
+    parentContext: isIncludedRelation ? getRowParentContext(row, mainSource) : void 0,
+    order: compiledOrder.map((evaluate) => evaluate(row))
+  });
+  return pipeline.pipe(
+    reduce((values) => {
+      const totalMultiplicity = values.reduce(
+        (total, [, multiplicity]) => total + multiplicity,
+        0
+      );
+      if (totalMultiplicity === 0) return [];
+      if (totalMultiplicity < 0) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Query row has negative multiplicity` : codedMessage(129)
+        );
+      }
+      const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0];
+      if (!visible)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Query row has no positive contributor` : codedMessage(130)
+        );
+      const visibleSignature = signature(visible);
+      for (const [candidate, multiplicity] of values) {
+        if (multiplicity > 0 && !deepEquals(visibleSignature, signature(candidate))) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Query contributors with the same row key are not congruent` : codedMessage(131)
+          );
+        }
+      }
+      return [[visible, 1]];
+    })
+  );
+}
+function validateExpressionBindings(expression, availableBindings) {
+  for (const ref of collectPropRefs(expression)) {
+    if (ref.bindingId !== void 0 && !availableBindings.has(ref.bindingId)) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.` : codedMessage(238, { path: ref.path })
+      );
+    }
+  }
+}
+function validateSelectBindings(value, availableBindings) {
+  if (value instanceof IncludesSubquery) return;
+  if (isBasicOrAggregateExpression(value)) {
+    validateExpressionBindings(value, availableBindings);
+  } else if (value instanceof ConditionalSelect) {
+    for (const branch of value.branches) {
+      validateExpressionBindings(branch.condition, availableBindings);
+      validateSelectBindings(branch.value, availableBindings);
+    }
+    if (value.defaultValue !== void 0) {
+      validateSelectBindings(value.defaultValue, availableBindings);
+    }
+  } else if (isNestedSelectObject(value)) {
+    for (const nested of Object.values(value)) {
+      validateSelectBindings(nested, availableBindings);
+    }
+  }
+}
+function validateQueryStructure(query, ancestorBindings = /* @__PURE__ */ new Set()) {
+  const levelAliases = getAllSources(query).map((source) => source.alias);
+  for (const [index, alias] of levelAliases.entries()) {
+    if (levelAliases.indexOf(alias) !== index) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.` : codedMessage(211, { alias })
+      );
+    }
+  }
+  const availableBindings = new Set(ancestorBindings);
+  if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      validateQueryStructure(branch, ancestorBindings);
+    }
+  } else {
+    for (const source of getFromSources(query.from)) {
+      if (source.type === `queryRef`) {
+        validateQueryStructure(source.query, ancestorBindings);
+      }
+      availableBindings.add(source.bindingId);
+    }
+  }
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `queryRef`) {
+        validateQueryStructure(joinClause.from.query, ancestorBindings);
+      }
+      const joinBindings = new Set(availableBindings);
+      joinBindings.add(joinClause.from.bindingId);
+      validateExpressionBindings(joinClause.on, joinBindings);
+      availableBindings.add(joinClause.from.bindingId);
+    }
+  }
+  for (const where of query.where ?? []) {
+    validateExpressionBindings(getWhereExpression(where), availableBindings);
+  }
+  for (const expression of query.groupBy ?? []) {
+    validateExpressionBindings(expression, availableBindings);
+  }
+  for (const having of query.having ?? []) {
+    validateExpressionBindings(getHavingExpression(having), availableBindings);
+  }
+  for (const { expression } of query.orderBy ?? []) {
+    validateExpressionBindings(expression, availableBindings);
+  }
+  if (query.select) {
+    validateSelectBindings(query.select, availableBindings);
+    for (const { subquery } of extractIncludesFromSelect(query.select)) {
+      validateExpressionBindings(subquery.correlationField, availableBindings);
+      const childBindings = new Set(availableBindings);
+      for (const source of getAllSources(subquery.query)) {
+        childBindings.add(source.bindingId);
+      }
+      validateExpressionBindings(subquery.childCorrelationField, childBindings);
+      for (const where of subquery.parentFilters ?? []) {
+        validateExpressionBindings(getWhereExpression(where), childBindings);
+      }
+      validateQueryStructure(subquery.query, availableBindings);
+      const projected = new Set(
+        (subquery.parentProjection ?? []).map(
+          (ref) => JSON.stringify([ref.bindingId, ref.path])
+        )
+      );
+      const required = [
+        ...collectExternalRefsFromQuery(subquery.query),
+        ...(subquery.parentFilters ?? []).flatMap(
+          (where) => collectPropRefs(getWhereExpression(where))
+        )
+      ];
+      for (const ref of required) {
+        if (ref.bindingId !== void 0 && availableBindings.has(ref.bindingId) && !projected.has(JSON.stringify([ref.bindingId, ref.path]))) {
+          throw new QueryCompilationError(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Include query is missing a captured parent projection for "${ref.path.join(`.`)}".` : codedMessage(239, { path: ref.path })
+          );
+        }
+      }
+    }
+  }
+}
+function processFromClause(from, allInputs, collections, subscriptions, callbacks, lazySources, optimizableOrderByCollections, setWindowFn, cache, queryMapping, aliasToCollectionId, aliasRemapping, sourceWhereClauses, parentKeyStream, publishCollectionRoot = false) {
+  const valueIdentity = getCompilationValueIdentity(cache);
+  if (from.type === `unionAll`) {
+    return processUnionAll(
+      from,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      parentKeyStream,
+      publishCollectionRoot
+    );
+  }
+  if (from.type !== `unionFrom`) {
+    const { alias, input, collectionId, sourceIncludes: sourceIncludes2, isParentRouted } = processFrom(
+      from,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      parentKeyStream,
+      publishCollectionRoot
+    );
+    return {
+      alias,
+      pipeline: wrapInputWithAlias(input, alias),
+      collectionId,
+      sources: { [alias]: input },
+      sourceIncludes: sourceIncludes2,
+      directIncludes: [],
+      isUnionFrom: false,
+      isParentRouted
+    };
+  }
+  if (from.sources.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionFrom`);
+  }
+  const sources = {};
+  const sourceIncludes = [];
+  let pipeline;
+  let mainAlias = ``;
+  let mainCollectionId = ``;
+  for (const source of from.sources) {
+    const {
+      alias,
+      input,
+      collectionId,
+      sourceIncludes: childSourceIncludes,
+      isParentRouted
+    } = processFrom(
+      source,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+      parentKeyStream,
+      publishCollectionRoot
+    );
+    if (!mainAlias) {
+      mainAlias = alias;
+      mainCollectionId = collectionId;
+    }
+    sources[alias] = input;
+    sourceIncludes.push(...childSourceIncludes);
+    const routedBranch = parentKeyStream && !isParentRouted ? parameterizeByParentRoutes(
+      wrapInputWithAlias(input, alias),
+      parentKeyStream,
+      alias,
+      valueIdentity
+    ) : wrapInputWithAlias(input, alias);
+    const branch = routedBranch.pipe(
+      map(([key, row]) => {
+        const branchKey = `${alias}:${encodeKeyForUnionBranch(key)}`;
+        const aliasRow = row[alias];
+        const publicKey = aliasRow?.[INCLUDES_PUBLIC_KEY] ?? key;
+        const branchPublicKey = `${alias}:${encodeKeyForUnionBranch(publicKey)}`;
+        const branchRow = parentKeyStream ? {
+          ...row,
+          [INCLUDES_PUBLIC_KEY]: branchPublicKey,
+          [alias]: {
+            ...row[alias],
+            [INCLUDES_PUBLIC_KEY]: branchPublicKey
+          }
+        } : row;
+        return [branchKey, branchRow];
+      })
+    );
+    pipeline = pipeline ? pipeline.pipe(concatOperator(branch)) : branch;
+  }
+  return {
+    alias: mainAlias,
+    pipeline,
+    collectionId: mainCollectionId,
+    sources,
+    sourceIncludes,
+    directIncludes: [],
+    isUnionFrom: true,
+    isParentRouted: parentKeyStream !== void 0
+  };
+}
+function processUnionAll(from, allInputs, collections, subscriptions, callbacks, lazySources, optimizableOrderByCollections, setWindowFn, cache, queryMapping, aliasToCollectionId, aliasRemapping, sourceWhereClauses, parentKeyStream, publishCollectionRoot = false) {
+  if (from.queries.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionAll`);
+  }
+  const sources = {};
+  const sourceIncludes = [];
+  const directIncludes = [];
+  let pipeline;
+  let mainCollectionId = ``;
+  const branchAliases = /* @__PURE__ */ new Set();
+  for (let index = 0; index < from.queries.length; index++) {
+    const branch = from.queries[index];
+    for (const source of getAllSources(branch)) {
+      if (branchAliases.has(source.alias)) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Duplicate source alias "${source.alias}" in unionAll query branches. Use distinct aliases in each branch before passing them to unionAll().` : codedMessage(132, { alias: source.alias })
+        );
+      }
+      branchAliases.add(source.alias);
+    }
+    const branchResult = compileQueryInternal(
+      [
+        branch,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        parentKeyStream,
+        void 0
+      ],
+      true,
+      publishCollectionRoot
+    );
+    if (!mainCollectionId) {
+      mainCollectionId = branchResult.collectionId;
+    }
+    Object.assign(aliasToCollectionId, branchResult.aliasToCollectionId);
+    Object.assign(aliasRemapping, branchResult.aliasRemapping);
+    directIncludes.push(...branchResult.includes ?? []);
+    Object.assign(sources, allInputs);
+    for (const [alias, where] of branchResult.sourceWhereClauses) {
+      sourceWhereClauses.set(alias, where);
+    }
+    const branchPipeline = branchResult.pipeline.pipe(
+      map((data) => {
+        const [key, [row, _order, correlationKey, parentContext, publicKey]] = data;
+        const branchKey = `${index}:${encodeKeyForUnionBranch(key)}`;
+        const branchPublicKey = `${index}:${encodeKeyForUnionBranch(
+          publicKey ?? key
+        )}`;
+        const routedRow = parentKeyStream ? attachRouteMetadataToResult(
+          row,
+          correlationKey,
+          parentContext,
+          branchPublicKey
+        ) : row;
+        return [branchKey, routedRow];
+      })
+    );
+    pipeline = pipeline ? pipeline.pipe(concatOperator(branchPipeline)) : branchPipeline;
+  }
+  return {
+    alias: ``,
+    pipeline,
+    collectionId: mainCollectionId,
+    sources,
+    sourceIncludes,
+    directIncludes,
+    isUnionFrom: true,
+    isParentRouted: parentKeyStream !== void 0
+  };
+}
+function wrapInputWithAlias(input, alias) {
+  return input.pipe(
+    map(([key, row]) => {
+      const inputRow = row;
+      const scalar = getRoutedScalarMetadata(inputRow);
+      if (scalar) {
+        const nsRow2 = attachRouteMetadata(
+          {
+            ...getParentContextValue(scalar.parentContext),
+            [alias]: scalar.value,
+            [INCLUDES_PUBLIC_KEY]: scalar.publicKey
+          },
+          scalar.correlationKey,
+          scalar.parentContext
+        );
+        return [key, nsRow2];
+      }
+      if (inputRow == null || typeof inputRow !== `object`) {
+        return [key, { [alias]: inputRow }];
+      }
+      const route = getRouteMetadata(inputRow);
+      const cleanRow = route ? stripRouteMetadata(inputRow) : inputRow;
+      const nsRow = {
+        ...getParentContextValue(route?.parentContext),
+        [alias]: cleanRow
+      };
+      if (route) {
+        attachRouteMetadata(nsRow, route.correlationKey, route.parentContext);
+      }
+      return [key, nsRow];
+    })
+  );
+}
+function encodeKeyForUnionBranch(key) {
+  if (typeof key === `string`) {
+    return `string:${key}`;
+  }
+  if (typeof key === `number`) {
+    return `number:${String(key)}`;
+  }
+  if (typeof key === `bigint`) {
+    return `bigint:${String(key)}`;
+  }
+  return `${typeof key}:${JSON.stringify(key)}`;
+}
+function processFrom(from, allInputs, collections, subscriptions, callbacks, lazySources, optimizableOrderByCollections, setWindowFn, cache, queryMapping, aliasToCollectionId, aliasRemapping, sourceWhereClauses, parentKeyStream, publishCollectionRoot = false) {
+  switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from);
+    case `collectionRef`: {
+      const input = allInputs[from.sourceId];
+      if (!input) {
+        throw new CollectionInputNotFoundError(
+          from.alias,
+          from.collection.id,
+          Object.keys(allInputs)
+        );
+      }
+      aliasToCollectionId[from.alias] = from.collection.id;
+      return {
+        alias: from.alias,
+        input,
+        collectionId: from.collection.id,
+        sourceIncludes: [],
+        isParentRouted: false
+      };
+    }
+    case `queryRef`: {
+      const originalQuery = queryMapping.get(from.query);
+      const queryToCompile = originalQuery && queriesMatchForCaching(from.query, originalQuery) ? originalQuery : from.query;
+      const subQueryResult = compileQueryInternal(
+        [
+          queryToCompile,
+          allInputs,
+          collections,
+          subscriptions,
+          callbacks,
+          lazySources,
+          optimizableOrderByCollections,
+          setWindowFn,
+          cache,
+          queryMapping,
+          parentKeyStream,
+          void 0
+        ],
+        true,
+        publishCollectionRoot
+      );
+      Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId);
+      Object.assign(aliasRemapping, subQueryResult.aliasRemapping);
+      const isUserDefinedSubquery = queryMapping.has(from.query);
+      const subqueryFromAlias = getFirstFromAlias(from.query.from);
+      const isOptimizerCreated = !isUserDefinedSubquery && from.alias === subqueryFromAlias;
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause);
+        }
+      }
+      const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
+        (alias) => subQueryResult.aliasToCollectionId[alias] === subQueryResult.collectionId
+      );
+      if (innerAlias && innerAlias !== from.alias) {
+        aliasRemapping[from.alias] = innerAlias;
+      }
+      const subQueryInput = subQueryResult.pipeline;
+      const extractedInput = subQueryInput.pipe(
+        map((data) => {
+          const [
+            key,
+            [value, _orderByIndex, correlationKey, parentContext, publicKey]
+          ] = data;
+          const unwrapped = attachRouteMetadataToResult(
+            unwrapValue(value),
+            correlationKey,
+            parentContext,
+            publicKey
+          );
+          return [key, unwrapped];
+        })
+      );
+      return {
+        alias: from.alias,
+        input: extractedInput,
+        collectionId: subQueryResult.collectionId,
+        sourceIncludes: subQueryResult.includes?.map((include) => ({
+          sourceAlias: from.alias,
+          include
+        })) ?? [],
+        isParentRouted: parentKeyStream !== void 0
+      };
+    }
+    default:
+      throw new UnsupportedFromTypeError(from.type);
+  }
+}
+function unwrapValue(value) {
+  return value instanceof ValClass ? value.value : value;
+}
+function getWholeRowSourceAliases(select) {
+  if (select instanceof PropRef && select.path.length === 1)
+    return [select.path[0]];
+  if (!isPlainObject(select)) return [];
+  return Object.entries(select).flatMap(
+    ([name, value]) => name.startsWith(`__SPREAD_SENTINEL__`) && value instanceof PropRef && value.path.length === 1 ? [value.path[0]] : []
+  );
+}
+function copySelectedRow(selected) {
+  return Array.isArray(selected) ? [...selected] : { ...selected };
+}
+function attachVirtualPropsToSelected(selected, row, isCollectionRoot, metadataSources) {
+  if (!selected || typeof selected !== `object` || !Array.isArray(selected) && !isPlainObject(selected)) {
+    return selected;
+  }
+  const selectedRecord = selected;
+  const source = metadataSources === void 0 ? row : metadataSources.reduce(
+    (prior, alias) => row[alias] ?? prior,
+    void 0
+  );
+  const sourceRecord = isCollectionRoot && source !== null && typeof source === `object` ? source : void 0;
+  let result = selectedRecord;
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (isCollectionRoot && prop in selectedRecord) {
+      const owner = sourceRecord && prop in sourceRecord ? sourceRecord : void 0;
+      if (owner) {
+        const value = owner[prop];
+        if (selectedRecord[prop] !== value) {
+          if (result === selectedRecord)
+            result = copySelectedRow(selectedRecord);
+          result[prop] = value;
+        }
+      } else {
+        if (result === selectedRecord) result = copySelectedRow(selectedRecord);
+        delete result[prop];
+      }
+    } else if (selectedRecord[prop] == null && prop in row) {
+      if (result === selectedRecord) result = copySelectedRow(selectedRecord);
+      result[prop] = row[prop];
+    }
+  }
+  return result;
+}
+function getIncludesPublicKey(row, mainSource, fallback) {
+  return row[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? row[INCLUDES_PUBLIC_KEY] ?? fallback;
+}
+function mapNestedQueries(optimizedQuery, originalQuery, queryMapping) {
+  mapNestedFromQueries(optimizedQuery.from, originalQuery.from, queryMapping);
+  if (optimizedQuery.join && originalQuery.join) {
+    for (let i = 0; i < optimizedQuery.join.length && i < originalQuery.join.length; i++) {
+      const optimizedJoin = optimizedQuery.join[i];
+      const originalJoin = originalQuery.join[i];
+      if (optimizedJoin.from.type === `queryRef` && originalJoin.from.type === `queryRef`) {
+        queryMapping.set(optimizedJoin.from.query, originalJoin.from.query);
+        mapNestedQueries(
+          optimizedJoin.from.query,
+          originalJoin.from.query,
+          queryMapping
+        );
+      }
+    }
+  }
+}
+function getAllSources(query) {
+  return [
+    ...getFromSources(query.from),
+    ...query.join?.map((join) => join.from) ?? []
+  ];
+}
+function getFirstFromAlias(from) {
+  return getFromSources(from)[0]?.alias ?? ``;
+}
+function findProjectedIncludePaths(select, targetPath) {
+  const resultPaths = [];
+  const visitSelectObject = (obj, prefix, guards) => {
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+        visitSpreadSentinel(key, value, prefix, guards);
+        continue;
+      }
+      visitSelectValue(value, [...prefix, key], guards);
+    }
+  };
+  const visitSpreadSentinel = (key, value, path, guards) => {
+    const rest = key.slice(`__SPREAD_SENTINEL__`.length);
+    const splitIndex = rest.lastIndexOf(`__`);
+    const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest;
+    const isRefExpr = value && typeof value === `object` && `type` in value && value.type === `ref`;
+    const sourcePath = isRefExpr ? value.path : pathStr.split(`.`).filter(Boolean);
+    if (pathStartsWith(targetPath, sourcePath)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(sourcePath.length)],
+        guards
+      });
+    }
+  };
+  const visitSelectValue = (value, path, guards) => {
+    if (value instanceof PropRef && pathStartsWith(targetPath, value.path)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(value.path.length)],
+        guards
+      });
+      return;
+    }
+    if (value instanceof ConditionalSelect) {
+      const previousBranchGuards = [];
+      for (const branch of value.branches) {
+        visitSelectValue(branch.value, path, [
+          ...guards,
+          ...previousBranchGuards,
+          { condition: branch.condition, expected: true }
+        ]);
+        previousBranchGuards.push({
+          condition: branch.condition,
+          expected: false
+        });
+      }
+      if (value.defaultValue !== void 0) {
+        visitSelectValue(value.defaultValue, path, [
+          ...guards,
+          ...previousBranchGuards
+        ]);
+      }
+      return;
+    }
+    if (isNestedSelectObject(value)) {
+      visitSelectObject(value, path, guards);
+    }
+  };
+  visitSelectObject(select, [], []);
+  return resultPaths;
+}
+function pathStartsWith(path, prefix) {
+  return prefix.length <= path.length && prefix.every((part, i) => path[i] === part);
+}
+function mapNestedFromQueries(optimizedFrom, originalFrom, queryMapping) {
+  if (optimizedFrom.type === `unionAll` && originalFrom.type === `unionAll`) {
+    for (let i = 0; i < optimizedFrom.queries.length && i < originalFrom.queries.length; i++) {
+      const optimizedBranch = optimizedFrom.queries[i];
+      const originalBranch = originalFrom.queries[i];
+      queryMapping.set(optimizedBranch, originalBranch);
+      mapNestedQueries(optimizedBranch, originalBranch, queryMapping);
+    }
+    return;
+  }
+  const optimizedSources = getFromSources(optimizedFrom);
+  const originalSources = getFromSources(originalFrom);
+  for (let i = 0; i < optimizedSources.length && i < originalSources.length; i++) {
+    const optimizedSource = optimizedSources[i];
+    const originalSource = originalSources[i];
+    if (optimizedSource.type === `queryRef` && originalSource.type === `queryRef`) {
+      queryMapping.set(optimizedSource.query, originalSource.query);
+      mapNestedQueries(
+        optimizedSource.query,
+        originalSource.query,
+        queryMapping
+      );
+    }
+  }
+}
+function extractIncludesFromSelect(select) {
+  const results = [];
+  for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue;
+    if (value instanceof IncludesSubquery) {
+      results.push({
+        key: getIncludesRoutingKey([key], results),
+        path: [key],
+        subquery: value,
+        guards: []
+      });
+    } else if (value instanceof ConditionalSelect) {
+      collectIncludesFromConditionalSelect(value, [key], [], results);
+    } else if (isNestedSelectObject(value)) {
+      assertNoNestedIncludes(value, key);
+    }
+  }
+  return results;
+}
+function collectIncludesFromConditionalSelect(conditional, prefixPath, guards, results) {
+  const previousBranchGuards = [];
+  for (const branch of conditional.branches) {
+    collectIncludesFromSelectValue(
+      branch.value,
+      prefixPath,
+      [
+        ...guards,
+        ...previousBranchGuards,
+        { condition: branch.condition, expected: true }
+      ],
+      results
+    );
+    previousBranchGuards.push({
+      condition: branch.condition,
+      expected: false
+    });
+  }
+  if (conditional.defaultValue !== void 0) {
+    collectIncludesFromSelectValue(
+      conditional.defaultValue,
+      prefixPath,
+      [...guards, ...previousBranchGuards],
+      results
+    );
+  }
+}
+function collectIncludesFromSelectValue(value, prefixPath, guards, results) {
+  if (value instanceof IncludesSubquery) {
+    const key = getIncludesRoutingKey(prefixPath, results);
+    results.push({ key, path: prefixPath, subquery: value, guards });
+    return;
+  }
+  if (value instanceof ConditionalSelect) {
+    collectIncludesFromConditionalSelect(value, prefixPath, guards, results);
+    return;
+  }
+  if (!isNestedSelectObject(value)) {
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue;
+    collectIncludesFromSelectValue(child, [...prefixPath, key], guards, results);
+  }
+}
+function getIncludesRoutingKey(path, entries) {
+  return getUniqueIncludesRoutingKey(path.join(`.`), entries);
+}
+function getUniqueIncludesRoutingKey(baseKey, entries) {
+  const taken = new Set(entries.map((entry) => entry.key ?? entry.fieldName));
+  if (!taken.has(baseKey)) return baseKey;
+  let suffix = entries.length;
+  while (taken.has(`${baseKey}#${suffix}`)) suffix++;
+  return `${baseKey}#${suffix}`;
+}
+function isNestedSelectObject(value) {
+  return value != null && typeof value === `object` && !Array.isArray(value) && !isExpressionLike(value) && !isRefProxy(value);
+}
+function assertNoNestedIncludes(obj, parentPath) {
+  for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue;
+    if (value instanceof IncludesSubquery) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Includes subqueries must be at the top level of select(). Found nested includes at "${parentPath}.${key}".` : codedMessage(133, { parentPath, key })
+      );
+    }
+    if (isNestedSelectObject(value)) {
+      assertNoNestedIncludes(value, `${parentPath}.${key}`);
+    }
+  }
+}
+function replaceIncludesInSelectValue(value, path) {
+  if (path.length === 0 && value instanceof IncludesSubquery) {
+    return { value: new ValClass(null), replaced: true };
+  }
+  if (value instanceof ConditionalSelect) {
+    return replaceIncludesInConditionalSelect(value, path);
+  }
+  if (path.length === 0 || !isNestedSelectObject(value)) {
+    return { value, replaced: false };
+  }
+  const [head, ...rest] = path;
+  const result = replaceIncludesInSelectValue(value[head], rest);
+  if (!result.replaced) {
+    return { value, replaced: false };
+  }
+  return {
+    value: {
+      ...value,
+      [head]: result.value
+    },
+    replaced: true
+  };
+}
+function replaceIncludesInConditionalSelect(conditional, path) {
+  let replaced = false;
+  const branches = conditional.branches.map((branch) => {
+    const result = replaceIncludesInSelectValue(branch.value, path);
+    if (!result.replaced) {
+      return branch;
+    }
+    replaced = true;
+    return { ...branch, value: result.value };
+  });
+  let defaultValue = conditional.defaultValue;
+  if (conditional.defaultValue !== void 0) {
+    const result = replaceIncludesInSelectValue(conditional.defaultValue, path);
+    if (result.replaced) {
+      replaced = true;
+      defaultValue = result.value;
+    }
+  }
+  if (!replaced) {
+    return { value: conditional, replaced: false };
+  }
+  return {
+    value: new ConditionalSelect(branches, defaultValue),
+    replaced: true
+  };
+}
+function getNestedValue(obj, path) {
+  let value = obj;
+  for (const segment of path) {
+    if (value == null) return value;
+    value = value[segment];
+  }
+  return value;
+}
+const ignoreWindow = () => {
+};
+function readRouteTag(value, fieldName) {
+  const tag = value?.[INCLUDES_ROUTING];
+  return tag?.[fieldName];
+}
+function windowRoute(row, fieldName) {
+  const routing = readRouteTag(row.$selected, fieldName);
+  if (!routing)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `A windowed or findOne result row has no include route` : codedMessage(243)
+    );
+  return routing;
+}
+function compileGuardedRouting(guards, resolve) {
+  const compiledGuards = guards.map((guard) => ({
+    condition: compileExpression(guard.condition),
+    expected: guard.expected
+  }));
+  return (nsRow) => {
+    const active = compiledGuards.every(
+      (guard) => isCaseWhenConditionTrue(guard.condition(nsRow)) === guard.expected
+    );
+    return (active ? resolve(nsRow) : void 0) ?? {
+      active: false,
+      correlationKey: null,
+      parentContext: null
+    };
+  };
+}
+function getStaticDemandKeys(query, ref) {
+  const constraints = [];
+  const visit = (expression) => {
+    if (expression.type !== `func`) return;
+    if (expression.name === `and`) {
+      expression.args.forEach(visit);
+      return;
+    }
+    if (expression.name !== `eq` && expression.name !== `in`) return;
+    const [left, right] = expression.args;
+    const value = left?.type === `ref` && pathsEqual(left.path, ref.path) && right instanceof ValClass ? right.value : right?.type === `ref` && pathsEqual(right.path, ref.path) && left instanceof ValClass ? left.value : void 0;
+    if (value === void 0) return;
+    constraints.push(new Set(Array.isArray(value) ? value : [value]));
+  };
+  query.where?.forEach((where) => visit(getWhereExpression(where)));
+  if (constraints.length === 0) return /* @__PURE__ */ new Set();
+  return new Set(
+    [...constraints[0]].filter(
+      (value) => constraints.slice(1).every((constraint) => constraint.has(value))
+    )
+  );
+}
+function pathsEqual(left, right) {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}

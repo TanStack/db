@@ -1,0 +1,184 @@
+{
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  },
+  "phase": "final-with-binding",
+  "pid": 60348,
+  "elapsedMs": 2207,
+  "maxSampledGroupRssBytes": 460177408,
+  "latestGroupRows": [],
+  "killAttempted": false,
+  "heapDiagnosticDetected": false,
+  "postEnqueue": {
+    "postEnqueueWindowMs": 1000,
+    "receiptCount": 5,
+    "acquisitionCount": 0,
+    "releaseCount": 0,
+    "lastSequence": 5,
+    "lastPhase": "worker-cleaned"
+  },
+  "outcome": {
+    "reason": "exited",
+    "exitCode": 0,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "history": {
+          "kind": "sync-mutation",
+          "keyShift": 0,
+          "rankScale": 10
+        },
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+        "execPath": "/Users/kyle.mathews/.n/bin/node"
+      },
+      {
+        "h02": true,
+        "sequence": 2,
+        "phase": "source-establishing-receipt",
+        "literalTrue": true
+      },
+      {
+        "h02": true,
+        "sequence": 3,
+        "phase": "immediate-publication",
+        "rows": [
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 2,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 3,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 4,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 5,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 1,
+            "rank": 60,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 1,
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "ready": true
+      },
+      {
+        "h02": true,
+        "sequence": 4,
+        "phase": "final-publication",
+        "rows": [
+          {
+            "id": 2,
+            "rank": 20,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 2,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 3,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 4,
+            "rank": 40,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 4,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 5,
+            "rank": 50,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 5,
+            "$collectionId": "live-query-1"
+          },
+          {
+            "id": 1,
+            "rank": 60,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": 1,
+            "$collectionId": "live-query-1"
+          }
+        ],
+        "ready": true
+      },
+      {
+        "h02": true,
+        "sequence": 5,
+        "phase": "worker-cleaned"
+      }
+    ],
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-60347-cf149d94-159a-44bb-b029-9f5e8d0b6bcc/receipts.jsonl",
+    "bindingStatus": "bound"
+  }
+}

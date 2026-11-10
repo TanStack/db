@@ -1,0 +1,14 @@
+import {
+  collectionOptionsBrand,
+  hasCollectionOptionsBrandValue
+} from "./collection-options-brand.js";
+export { collectionOptionsBrand };
+export const collectionOptionsFactory = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionOptions.factory`
+);
+export const collectionOptionsClaim = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionOptions.claim`
+);
+export function hasCollectionOptionsBrand(value) {
+  return hasCollectionOptionsBrandValue(value);
+}

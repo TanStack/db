@@ -1,0 +1,224 @@
+{
+  "method": "Independent standard-library parse/hash/text-diff only; no project verifier, build, test, receiving invocation, install, source edit or process check.",
+  "packet": {
+    "sha256": "189e8351e30c258348f9aefd20ea983ae339b04b572cc6e02519927dae70c133",
+    "members": 89,
+    "bytes": 1089389,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "liveSourceMaps": {
+    "productionFiles": {
+      "entries": 511,
+      "mismatches": []
+    },
+    "receivingProductionFiles": {
+      "entries": 161,
+      "mismatches": []
+    },
+    "instrumentFiles": {
+      "entries": 34,
+      "mismatches": []
+    },
+    "sharedInstrumentFiles": {
+      "entries": 17,
+      "mismatches": []
+    }
+  },
+  "sourceSnapshots": {
+    "files": 51,
+    "mismatches": []
+  },
+  "node": {
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+    "matches": true
+  },
+  "locks": {
+    "repoMatches": true,
+    "installedMatches": true
+  },
+  "links": {
+    "node_modules": {
+      "symbolicLinkMatches": true,
+      "resolvedMatches": true
+    },
+    "packages/query-db-collection/node_modules": {
+      "symbolicLinkMatches": true,
+      "resolvedMatches": true
+    },
+    "packages/db/node_modules": {
+      "symbolicLinkMatches": true,
+      "resolvedMatches": true
+    },
+    "packages/db-ivm/node_modules": {
+      "symbolicLinkMatches": true,
+      "resolvedMatches": true
+    }
+  },
+  "payloads": {
+    "vitest": {
+      "files": 114,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": [
+        "node_modules/.bin/vite",
+        "node_modules/.bin/why-is-node-running"
+      ]
+    },
+    "vite": {
+      "files": 39,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": [
+        "node_modules/.bin/esbuild",
+        "node_modules/.bin/jiti",
+        "node_modules/.bin/rollup",
+        "node_modules/.bin/sass",
+        "node_modules/.bin/terser",
+        "node_modules/.bin/tsx",
+        "node_modules/.bin/yaml"
+      ]
+    },
+    "query-core": {
+      "files": 307,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": []
+    },
+    "jsdom": {
+      "files": 533,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": []
+    },
+    "fast-check": {
+      "files": 946,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": []
+    },
+    "typescript": {
+      "files": 132,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": []
+    },
+    "eslint": {
+      "files": 426,
+      "mismatches": [],
+      "missing": [],
+      "extra": [],
+      "outsideOwnPayloadInventory": [
+        "node_modules/.bin/jiti"
+      ]
+    }
+  },
+  "totalPayloadFiles": 2497,
+  "v7Preparation": {
+    "sha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+    "members": 62,
+    "bytes": 707085,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "v7Result": {
+    "sha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+    "members": 1951,
+    "bytes": 43192185,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "productionMapUnchanged": true,
+  "sharedJudgmentUnchanged": true,
+  "modelAndGrammar": {
+    "model": {
+      "unchanged": true,
+      "sha256": "0ce8bca5de51872277fe55aa0882b0847a879d46215262cd508e25f0f0185d4d"
+    },
+    "grammar": {
+      "unchanged": true,
+      "sha256": "f08c27042e4b42b4386fdfa6ecdcb37a7c223154333cd17115e65f4b488c7777"
+    }
+  },
+  "progressRecipes": [
+    {
+      "path": "nonempty conflicting replay",
+      "launcherHashMatches": true,
+      "exactCommandMatches": true,
+      "freezeHashMatches": true,
+      "outputAbsent": true,
+      "selectorAppearsOnce": true
+    },
+    {
+      "path": "nonempty scope-key publication",
+      "launcherHashMatches": true,
+      "exactCommandMatches": true,
+      "freezeHashMatches": true,
+      "outputAbsent": true,
+      "selectorAppearsOnce": true
+    },
+    {
+      "path": "empty scope-key publication",
+      "launcherHashMatches": true,
+      "exactCommandMatches": true,
+      "freezeHashMatches": true,
+      "outputAbsent": true,
+      "selectorAppearsOnce": true
+    },
+    {
+      "path": "literal true initial cut",
+      "launcherHashMatches": true,
+      "exactCommandMatches": true,
+      "freezeHashMatches": true,
+      "outputAbsent": true,
+      "selectorAppearsOnce": true
+    },
+    {
+      "path": "ordinary synchronous mutation cut",
+      "launcherHashMatches": true,
+      "exactCommandMatches": true,
+      "freezeHashMatches": true,
+      "outputAbsent": true,
+      "selectorAppearsOnce": true
+    }
+  ],
+  "ownershipRecipe": {
+    "recipeHashMatches": true,
+    "launcherHashMatches": true,
+    "exactParentCommandMatches": true,
+    "freezeHashMatches": true,
+    "outputAbsent": true,
+    "limits": {
+      "wallMs": 60000,
+      "nodeHeapMiB": 384,
+      "groupRssBytes": 1073741824,
+      "samplingMs": 100
+    },
+    "finiteHistories": 42,
+    "freshNoRefetch": 6,
+    "staleRefetch": 36
+  },
+  "candidate": {
+    "productionSeamExists": false,
+    "moduleDormantInBaseline": true,
+    "receivingReach": 0,
+    "exactFixtureAttachmentsReviewed": false
+  },
+  "hashes": {
+    "source-freeze-v2.json": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+    "finite-recipes-v2.json": "9a1589312199c9176ad2758c9134ef747b22ae30e412f426596c226e5879b66b",
+    "ownership-recipe-v2.json": "59062a2ac0abf4554378120c62eded391f8d06369d3d684d71388c701a452201",
+    "neighbor-contracts-v2.md": "7a904990789ed04e4a771396ef5e5fce611d4cb46469f4779795ce62460d9961",
+    "source-changes-v2.json": "780bb08570174947c0f5cd3d77ecd65cfe701ddf02cbecd23ee89d6112852018"
+  },
+  "payloadBoundary": "Seven named packages own regular payloads, excluding nested node_modules generated bin wrappers; raw out-of-own-package inventory retained separately. No complete transitive/host/native equivalence claim."
+}

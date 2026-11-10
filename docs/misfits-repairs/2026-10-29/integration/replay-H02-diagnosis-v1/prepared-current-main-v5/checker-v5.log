@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  22:45:24
+   Duration  220ms (transform 29ms, setup 0ms, import 106ms, tests 4ms, environment 0ms)
+

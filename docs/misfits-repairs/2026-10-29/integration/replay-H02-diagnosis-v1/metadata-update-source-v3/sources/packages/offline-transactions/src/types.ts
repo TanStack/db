@@ -1,0 +1,196 @@
+import type {
+  Collection,
+  MutationFnParams,
+  PendingMutation,
+  Transaction,
+} from '@tanstack/db'
+
+// Extended mutation function that includes idempotency key
+export type OfflineMutationFnParams<
+  T extends object = Record<string, unknown>,
+> = MutationFnParams<T> & {
+  idempotencyKey: string
+}
+
+export type OfflineMutationFn<T extends object = Record<string, unknown>> = (
+  params: OfflineMutationFnParams<T>,
+) => Promise<any>
+
+// Simplified mutation structure for serialization
+export interface SerializedMutation {
+  globalKey: string
+  type: string
+  modified: any
+  original: any
+  changes: any
+  collectionId: string
+}
+
+export interface SerializedError {
+  name: string
+  message: string
+  stack?: string
+}
+
+export interface SerializedSpanContext {
+  traceId: string
+  spanId: string
+  traceFlags: number
+  traceState?: string
+}
+
+// In-memory representation with full PendingMutation objects
+export interface OfflineTransaction {
+  id: string
+  mutationFnName: string
+  mutations: Array<PendingMutation>
+  keys: Array<string>
+  idempotencyKey: string
+  createdAt: Date
+  retryCount: number
+  nextAttemptAt: number
+  /** Provider work has settled; only durable outbox deletion remains. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
+  lastError?: SerializedError
+  metadata?: Record<string, any>
+  spanContext?: SerializedSpanContext
+  version: 1
+}
+
+// Serialized representation for storage
+export interface SerializedOfflineTransaction {
+  /** Absent for the original Date-marker format. */
+  valueEncoding?: 2 | 3 | 4
+  /** Required for opt-in mutation encoding v4. */
+  mutationEncoding?: string
+  id: string
+  mutationFnName: string
+  mutations: Array<SerializedMutation>
+  keys: Array<string>
+  idempotencyKey: string
+  createdAt: string
+  retryCount: number
+  nextAttemptAt: number
+  /** Absent in older records and while mutationFn may still need to run. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
+  lastError?: SerializedError
+  metadata?: Record<string, any>
+  spanContext?: SerializedSpanContext
+  version: 1
+}
+
+// Storage diagnostics and mode
+export type OfflineMode = `offline` | `online-only`
+
+export type StorageDiagnosticCode =
+  | `STORAGE_AVAILABLE`
+  | `INDEXEDDB_UNAVAILABLE`
+  | `LOCALSTORAGE_UNAVAILABLE`
+  | `STORAGE_BLOCKED`
+  | `QUOTA_EXCEEDED`
+  | `UNKNOWN_ERROR`
+
+export interface StorageDiagnostic {
+  code: StorageDiagnosticCode
+  mode: OfflineMode
+  message: string
+  error?: Error
+}
+
+/** Encodes mutation payloads into JSON-safe values, and restores them on replay. */
+export interface MutationValueCodec {
+  /** Stable format/version identifier, retained in every encoded transaction. */
+  id: string
+  encode: (value: unknown) => string
+  decode: (value: string) => unknown
+}
+
+export interface OfflineConfig {
+  mutationCodec?: MutationValueCodec
+  collections: Record<string, Collection<any, any, any, any, any>>
+  mutationFns: Record<string, OfflineMutationFn>
+  storage?: StorageAdapter
+  maxConcurrency?: number
+  jitter?: boolean
+  /**
+   * Override retry decisions for errors from all named mutation functions.
+   * Return synchronously; undefined uses the default decision. Put any
+   * function-specific context needed by this shared hook on the Error.
+   * NonRetriableError always stops retry.
+   * A throw or invalid return fails only that outbox row and rejects its
+   * waiters with the hook failure. Queued work runs after terminal cleanup.
+   * The default policy still supplies the delay and configured jitter.
+   */
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined
+  beforeRetry?: (
+    transactions: Array<OfflineTransaction>,
+  ) => Array<OfflineTransaction>
+  onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
+  onLeadershipChange?: (isLeader: boolean) => void
+  onStorageFailure?: (diagnostic: StorageDiagnostic) => void
+  leaderElection?: LeaderElection
+  /**
+   * Custom online detector implementation.
+   * Defaults to WebOnlineDetector for browser environments.
+   * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
+   */
+  onlineDetector?: OnlineDetector
+}
+
+export interface StorageAdapter {
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string) => Promise<void>
+  delete: (key: string) => Promise<void>
+  keys: () => Promise<Array<string>>
+  clear: () => Promise<void>
+}
+
+export interface RetryPolicy {
+  calculateDelay: (retryCount: number) => number
+  shouldRetry: (error: Error, retryCount: number) => boolean
+}
+
+export interface LeaderElection {
+  requestLeadership: () => Promise<boolean>
+  releaseLeadership: () => void
+  isLeader: () => boolean
+  onLeadershipChange: (callback: (isLeader: boolean) => void) => () => void
+}
+
+export interface TransactionSignaler {
+  readonly isOfflineEnabled: boolean
+  resolveTransaction: (transactionId: string, result: any) => void
+  rejectTransaction: (transactionId: string, error: Error) => void
+  registerRestorationTransaction: (
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ) => void
+  isOnline: () => boolean
+}
+
+export interface OnlineDetector {
+  subscribe: (callback: () => void) => () => void
+  notifyOnline: () => void
+  isOnline: () => boolean
+  dispose: () => void
+}
+
+export interface CreateOfflineTransactionOptions {
+  id?: string
+  mutationFnName: string
+  autoCommit?: boolean
+  idempotencyKey?: string
+  metadata?: Record<string, any>
+}
+
+export interface CreateOfflineActionOptions<T> {
+  mutationFnName: string
+  onMutate: (variables: T) => void
+}
+
+export class NonRetriableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = `NonRetriableError`
+  }
+}

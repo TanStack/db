@@ -1,0 +1,28 @@
+{
+  "task": "source-only post-recovery old-map audit and successor packet preparation",
+  "actualTool": {
+    "initialChunk": "ae4f78",
+    "session": 36556,
+    "finalChunk": "4e0dce",
+    "exitCode": 0
+  },
+  "actualTargetInvocations": 0,
+  "actualNativeProbes": 0,
+  "configImports": 0,
+  "launcherImports": 0,
+  "supervisorImports": 0,
+  "finiteSupplementReusedSha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+  "sourceValidation": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/source-validation-v1.json",
+    "sha256": "ab15a4408e26b7b8f5e8e97efb32106b2a6ac02ab091fb008a35fc4121b4f428"
+  },
+  "followupPackaging": "Final seal uses filesystem read/hash and JSON/AST validation only; its actual tool receipt is separate from this immutable packet.",
+  "staticPackagingActualTool": {
+    "chunk": "6349d3",
+    "exitCode": 0
+  },
+  "reportSpacingActualTool": {
+    "chunk": "f0f34c",
+    "exitCode": 0
+  }
+}

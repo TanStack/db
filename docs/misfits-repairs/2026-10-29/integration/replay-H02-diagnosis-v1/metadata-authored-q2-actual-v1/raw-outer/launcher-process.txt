@@ -1,0 +1,1 @@
+71010 71010   2496 /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/launcher-scope-authored-q2.zsh 28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c

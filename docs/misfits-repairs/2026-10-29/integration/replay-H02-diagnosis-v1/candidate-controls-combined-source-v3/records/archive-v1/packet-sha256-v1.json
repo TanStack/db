@@ -1,0 +1,15 @@
+{
+  "README-v1.md": "9a7366b6dfe9ddc43733d9ef235b4a177b808f60fad8118728a58e25ea271e99",
+  "archive-map-v1.json": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+  "copy-only-preservation-receipt-v1.json": "1ed6f56cfbd4d4f6706210921704a5e5c400734d16be54f95605bbecdc2969b3",
+  "old-key-resolution-copy-stage-v1.json": "03cad5e8a3030fd43422d88f58f1825df63a9ffdd964424c1df308a5af7008bd",
+  "resolve-historical-input-v1.py": "837e9572f5191fab7714eb154a02c7aefdf57cb35211c31a2204ffdcc383b847",
+  "text/materialization-source-v1/package.json.txt": "48e847860dd4f0907ce91e346dbb00a4a12213163ad3d80a953c343eb9a11979",
+  "text/materialization-source-v1/packages/db/tests/oracle-config.js.txt": "43b444a2f6d45bebae305c02b6778b2cd2b6505543b21072d20fdd8c50cf56cf",
+  "text/materialization-source-v1/packages/db/tests/oracle-declaration.js.txt": "70af56378aa24746e78198bd3ad6ab7f71ed0d5983758db5867dfd041e67cf5b",
+  "text/materialization-source-v1/packages/db/tests/oracle-reach.js.txt": "68f783ceb46df7a4ad25f92c549ca3afa4311f335fac7c746b7ae8d056602eee",
+  "text/materialization-source-v1/packages/db/tests/oracle-replay-witness.js.txt": "fffc2d35e7df584608f8a3ca4bffdcb9717204ff06117d7a8c7bdb7011796d2c",
+  "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js.txt": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d",
+  "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js.txt": "76e9c6686fc06c98260d084ef8359e530a31d9611055fbe6ba6b313e70d45016",
+  "text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js.txt": "8f758c24b37dbf0d5ebe2f8bc16a12b23e8ead4a75803aabf0516a99941f0cf4"
+}

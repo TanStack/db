@@ -1,0 +1,48 @@
+{
+  "at": "2026-10-30T09:11:04.526076+00:00",
+  "verdict": "accept exact combined-v2 source and exact input-v1 static preparation; first-singleton recommendation only; root runtime admission required",
+  "combinedFreezeSha256": "8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1",
+  "combinedPacketSha256": "548364227e5949d42548b8d8c47f49cca0c8798e06920a26422d6111a044f3de",
+  "inputFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "inputPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "reviewArtifacts": {
+    "combined-v2-source-review-v1.md": "d3b4af4ea3fcf6636a5793c88472528ff0b8ce1abf16547ca477d3ac872863a5",
+    "input-v1-first-singleton-gate-v1.md": "4d240624f9271e6be89feb10b8b9ab965d1f07a5b4dd757e254cf2767f753bdd",
+    "combined-v2-input-v1-identity-checks-v1.json": "fff421a96b222ecf51207e5230d52558d188d9b19281675da58a581802bc22cf",
+    "combined-v2-input-v1-identity-checks-v2.json": "fbbc6bcbaca546f4fc0bd6043d9d197e677898bda8773c021246691350c5fc45",
+    "input-v1-static-facts-review-v1.json": "5f7bcd29cb6982eb9bc65bc11da09b0cd12a4586c5661fcc72cde749b57f5899",
+    "combined-v2-pure-independent-result-v1.json": "cd1dacfd81fd94cf3f560e1a558fa85d5f0357d1455adab333723442eaea9ea3",
+    "check-combined-v2-input-v1.py": "e91063c6cb7bab42366875aa769f34fe53ae0250425c666458d3bca07c3b8571",
+    "check-combined-v2-input-v1-v2.py": "ac7c5a54e7eedf184b2a87ffd6a136459b7ac915787b90de2b5c67f0182ece1d",
+    "check-input-v1-static-facts.py": "20d9e3041f940cc8c4c6f488b8eae628754ac99ef53a5aec74f45f4392c0b9e6"
+  },
+  "v1ItemsPreservedAndSourceResolved": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06"
+  ],
+  "ledger": {
+    "previousRows": 73,
+    "previousSha256": "a8f1ddb945f4f8d56d1b9eca0e74a3c05a4fac9b6b8cad359b8508e5c1130f0e",
+    "addedRows": 10,
+    "rows": 83,
+    "sha256": "990c024ef0beea4a91e3ec5651742ff706734ecbcec9224c069939a39fe0edf0",
+    "appendOnlyPrefixVerified": true
+  },
+  "runtime": {
+    "receiving": 0,
+    "processProbes": 0,
+    "testCollection": 0,
+    "generatedHistories": 0,
+    "productMutants": 0,
+    "launcherInvocations": 0,
+    "runtimeOutputDirectoryCreated": false
+  },
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "generalNoActiveOperationNeighbor": "required and UNREACHED",
+  "runtimeAdmission": false
+}

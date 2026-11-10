@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v2/run-pure-source-controls.mjs"
+  ],
+  "exitCode": 0,
+  "slot": 2,
+  "workers": 1,
+  "domainControls": 13,
+  "lawfulAccepted": 3,
+  "hostileRejected": 10,
+  "sequenceControls": 12,
+  "originalFrozenV1SequenceRejections": 8,
+  "runtime": "pure extracted instrument functions only; no production imports, grammar/histories, receiving or testCollection"
+}

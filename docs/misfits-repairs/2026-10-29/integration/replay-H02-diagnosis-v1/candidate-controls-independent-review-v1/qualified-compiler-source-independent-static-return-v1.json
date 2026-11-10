@@ -1,0 +1,40 @@
+{
+  "actualAuditTool": {
+    "chunk_id": "e20e6e",
+    "exit_code": 0,
+    "original_token_count": 121,
+    "wall_time_seconds": 0.336384334
+  },
+  "actualCopyFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-review-freeze-v1.json",
+    "sha256": "1b491a76140b0994bd48c2e0b59385602ee016cc2418ff317fcbedbbb0b0f55e"
+  },
+  "artifactLint": "PENDING ROOT",
+  "at": "2026-10-30T13:06:24.831493+00:00",
+  "audit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-qualified-compiler-source-v1.py",
+    "sha256": "5be118a6e85511fb5b09d419d8eb35a6aa86687672d2315ee960c77ec9fe512b"
+  },
+  "bindingAndPhysicalChecks": 26071,
+  "bindingErrors": 0,
+  "blockingFindings": 1,
+  "candidateExecution": 0,
+  "compilerInvocations": 0,
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-source-independent-facts-v1.json",
+    "sha256": "f4daf7211a537b29f7897f6d53cb7c09b0181e7d7b66e30c9b760a8445bb6016"
+  },
+  "findingId": "H02-COMPILER-STOP-SIGNAL-REENTRANCY",
+  "findingStatus": "confirmed statically; unexecuted",
+  "kind": "Compiler source review supplement; actual-copy report remains separate",
+  "next": "Preparing agent supplies one minimal additive inactive successor; ROOT reviews exact delta/tool. No new procedural stage or runtime authority created.",
+  "processProbes": 0,
+  "productCredit": false,
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-source-independent-review-v1.md",
+    "sha256": "5bd1c92895b308d912b7560954dc8dd2d7d1f782595863cae38b41808b92a47f"
+  },
+  "runtimeAdmission": false,
+  "slot2": "returned",
+  "verdict": "HOLD exact v1 for one stop-lock/signal-handler reentrancy correction"
+}

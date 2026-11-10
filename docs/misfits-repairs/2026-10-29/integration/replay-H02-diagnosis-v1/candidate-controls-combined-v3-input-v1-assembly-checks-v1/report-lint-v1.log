@@ -1,0 +1,268 @@
+node:internal/child_process:1160
+    result.error = new ErrnoException(result.error, 'spawnSync ' + options.file);
+                   ^
+
+<ref *1> Error: spawnSync git ENOBUFS
+    at Object.spawnSync (node:internal/child_process:1160:20)
+    at spawnSync (node:child_process:928:24)
+    at execFileSync (node:child_process:971:15)
+    at git (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/scripts/agent-lint-feedback.mjs:102:10)
+    at changedFiles (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/scripts/agent-lint-feedback.mjs:189:5)
+    at selectFiles (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/scripts/agent-lint-feedback.mjs:354:54)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/scripts/agent-lint-feedback.mjs:381:28
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -55,
+  code: 'ENOBUFS',
+  syscall: 'spawnSync git',
+  path: 'git',
+  spawnargs: [ 'ls-files', '--others', '--exclude-standard' ],
+  error: [Circular *1],
+  status: null,
+  signal: 'SIGTERM',
+  output: [
+    null,
+    'docs/misfits-cluster-investigation-workflow.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/audit-pilot.py\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/audit.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/bug-queue.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/2268-source-fixtures.txt\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/brief.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/calibrate-continuation-ablation.py\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/calibrate-prefix-mutant.py\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/claims.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/experiments.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/input-packet.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/laws.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/oracle.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ordered-lifetimes-receiving-pilot.test.ts\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ordered-ownership-cleanup-pilot.test.ts\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ownership-cleanup-repro.test.ts\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/pilot-feedback.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/report.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/sha256.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/artifact-freeze.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/artifact-freeze.pre-metadata-normalization.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/brief.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/claims.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/code-freeze.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/command-receipts.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/electric-default-replica-trace.zip\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/electric-wire-observations.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/experiments.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/final-verification.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/final-verification.pre-metadata-normalization.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/input-packet.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/laws.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/oracle.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/pilot-feedback.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/query-overlap-observations.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/report.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/scoped-typecheck.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/brief.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claim-summary.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claim-verdicts.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claims.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/experiments.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/frozen-artifacts.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/input-packet.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/laws.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/loss-audit.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/oracle.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/output-hashes.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/pilot-feedback.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/pre-identity-repair.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/report.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/vitest.source.config.mjs\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08-checkpoint-diagnostic.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08a-checkpoint.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08b-checkpoint.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08c-checkpoint.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08d-checkpoint.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E15-positive-drain.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/brief.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/claims.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/experiments.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/historical-driver-comparison.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/input-packet.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/laws.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/ledger-summary.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/oracle.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/output-manifest.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/pilot-feedback.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/receiving-setup.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/report.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/verification.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/completion.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/coordination.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/decision-queue.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/effective-claims.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/feature-queue.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/manifest.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/master-claim-events.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/oracle-queue.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/pilot-evaluation-criteria.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-multitab.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/final-identity.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/final-targeted-executions.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/identity-checkpoint.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-pilot-query.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/review-skill-extension.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/brief.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/claims.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/coverage-map-proposal.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/diagnostic-earlier-cuts.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/diagnostic-original-cuts.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/experiments.jsonl\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/input-packet.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/laws.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/oracle.patch\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/pilot-feedback.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/report.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/source-identity.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/skill-extension/before/SKILL.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/skill-extension/installation.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/skill-extension/misfits-survey/SKILL.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/skill-extension/misfits-survey/reference/cluster-investigation.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/skill-extension/source-state.json\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/summary.md\n' +
+      'docs/misfits-investigations/pilot-2026-10-29/workflow-used.md\n' +
+      'docs/misfits-repairs/2026-10-29/administrative-ledger-validation-v2.json\n' +
+      'docs/misfits-repairs/2026-10-29/claim-timeline.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-research-import-v1.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/lint-v1.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/manifest.json.before.txt\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/receipt-v1.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/status.md.before.txt\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A15-extraction-import-v1.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/claim-timeline.json.before.txt\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/closeout-v1.json\n' +
+      'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/effective-claims.json.before.txt\n' +
+      'docs/misfits-repairs/2026-10-29/c'... 1104112 more characters,
+    ''
+  ],
+  pid: 31473,
+  stdout: 'docs/misfits-cluster-investigation-workflow.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/audit-pilot.py\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/audit.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/bug-queue.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/2268-source-fixtures.txt\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/brief.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/calibrate-continuation-ablation.py\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/calibrate-prefix-mutant.py\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/claims.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/experiments.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/input-packet.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/laws.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/oracle.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ordered-lifetimes-receiving-pilot.test.ts\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ordered-ownership-cleanup-pilot.test.ts\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/ownership-cleanup-repro.test.ts\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/pilot-feedback.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/report.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/sha256.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/artifact-freeze.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/artifact-freeze.pre-metadata-normalization.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/brief.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/claims.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/code-freeze.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/command-receipts.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/electric-default-replica-trace.zip\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/electric-wire-observations.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/experiments.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/final-verification.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/final-verification.pre-metadata-normalization.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/input-packet.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/laws.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/oracle.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/pilot-feedback.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/query-overlap-observations.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/report.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-ordered-refetch-variants/scoped-typecheck.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/brief.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claim-summary.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claim-verdicts.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/claims.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/experiments.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/frozen-artifacts.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/input-packet.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/laws.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/loss-audit.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/oracle.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/output-hashes.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/pilot-feedback.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/pre-identity-repair.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/report.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/vitest.source.config.mjs\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08-checkpoint-diagnostic.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08a-checkpoint.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08b-checkpoint.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08c-checkpoint.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E08d-checkpoint.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/E15-positive-drain.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/brief.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/claims.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/experiments.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/historical-driver-comparison.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/input-packet.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/laws.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/ledger-summary.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/oracle.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/output-manifest.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/pilot-feedback.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/receiving-setup.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/report.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/c-sqlite-electric-peers/verification.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/completion.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/coordination.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/decision-queue.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/effective-claims.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/feature-queue.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/manifest.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/master-claim-events.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/oracle-queue.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/pilot-evaluation-criteria.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-multitab.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/final-identity.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/final-targeted-executions.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered-evidence/identity-checkpoint.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-ordered.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-pilot-query.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/review-skill-extension.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/brief.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/claims.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/coverage-map-proposal.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/diagnostic-earlier-cuts.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/diagnostic-original-cuts.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/experiments.jsonl\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/input-packet.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/laws.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/oracle.patch\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/pilot-feedback.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/report.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/s-2294-replay-retention/source-identity.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/skill-extension/before/SKILL.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/skill-extension/installation.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/skill-extension/misfits-survey/SKILL.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/skill-extension/misfits-survey/reference/cluster-investigation.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/skill-extension/source-state.json\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/summary.md\n' +
+    'docs/misfits-investigations/pilot-2026-10-29/workflow-used.md\n' +
+    'docs/misfits-repairs/2026-10-29/administrative-ledger-validation-v2.json\n' +
+    'docs/misfits-repairs/2026-10-29/claim-timeline.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-research-import-v1.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/lint-v1.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/manifest.json.before.txt\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/receipt-v1.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A14-H02v5-status-refresh-v1/status.md.before.txt\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A15-extraction-import-v1.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/claim-timeline.json.before.txt\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/closeout-v1.json\n' +
+    'docs/misfits-repairs/2026-10-29/coordinator-A20-H02-E7-current-status-v1/effective-claims.json.before.txt\n' +
+    'docs/misfits-repairs/2026-10-29/c'... 1104112 more characters,
+  stderr: ''
+}
+
+Node.js v24.19.0

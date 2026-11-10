@@ -1,0 +1,48 @@
+import { getCollectionBuilder } from "../query/live/collection-registry.js";
+const nodeCache = /* @__PURE__ */ new WeakMap();
+export function buildHealthTree(collection, { alias, id, kind } = {
+  alias: `root`
+}, owner = collection) {
+  const builder = getCollectionBuilder(collection);
+  const sources = builder?.healthSources() ?? [];
+  const { failureReason, error } = collection._lifecycle.problems;
+  const children = sources.map(
+    (source) => buildHealthTree(source.collection, source, collection)
+  );
+  return healthNode(owner, id, {
+    alias,
+    collectionId: collection.id,
+    kind: kind ?? (builder ? `live-query` : `source`),
+    status: collection.status,
+    failureReason,
+    error,
+    reloading: collection._lifecycle.reloading,
+    sources: children
+  });
+}
+export function healthNode(owner, id, fields) {
+  const { failureReason, error, sources } = fields;
+  return cachedNode(owner, id ?? fields.alias, {
+    ...fields,
+    hasErrors: failureReason !== null || error !== null || sources.some((child) => child.hasErrors)
+  });
+}
+export function findProblems(health) {
+  if (!health.hasErrors) return [];
+  const ownProblem = health.failureReason !== null || health.error !== null;
+  return [
+    ...ownProblem ? [health] : [],
+    ...health.sources.flatMap(findProblems)
+  ];
+}
+function cachedNode(owner, key, next) {
+  let nodes = nodeCache.get(owner);
+  if (!nodes) nodeCache.set(owner, nodes = /* @__PURE__ */ new Map());
+  const previous = nodes.get(key);
+  if (previous && sameNode(previous, next)) return previous;
+  nodes.set(key, next);
+  return next;
+}
+function sameNode(a, b) {
+  return a.collectionId === b.collectionId && a.kind === b.kind && a.status === b.status && a.hasErrors === b.hasErrors && a.failureReason === b.failureReason && a.error === b.error && a.reloading === b.reloading && a.sources.length === b.sources.length && a.sources.every((source, index) => source === b.sources[index]);
+}

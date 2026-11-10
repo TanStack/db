@@ -1,0 +1,18 @@
+{
+  "frozen-inputs-v1/programs/inline-park-root.json": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+  "frozen-inputs-v1/recipes/inline-park-root.json": "75c504604c01c690dda2794de17a12691f598d200bc8dc3368826692c65fa10c",
+  "historical-archive-binding-v1.json": "97c8189780a9e5a0ec0c6510642fd49629675dfcce4fd9bd2230bb0da1c1e44a",
+  "historical-input-resolution-v1.json": "ab93a37ef2a7ca943dda9e4c62cd58648d786f0f8d621b4a2c56c4a998c4886f",
+  "input-freeze-v1.json": "b16d79c6f307e59a43f9bd1d06a64693aa98ca189dfd2893a7cb59c176fadcb5",
+  "input-report-v1.md": "4e544f038c621232bbb8f2f9b595b9cf3208d7002f40bbab5ec48a94aaad351f",
+  "records/candidate-controls-baseline-batch-preparation-v1/inline-park-root-result-freeze-v1.json": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+  "records/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "records/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "records/candidate-controls-independent-review-v1/profile-successor-source-review-checklist-v1.json": "1c258a92e51803eb6fed2ae2c2c3b27a32d47b5bbd1ddcac78723b6217f7084e",
+  "records/candidate-controls-independent-review-v1/profile-successor-source-review-v1.md": "0e013e7283dd1f5082bc19d1f06158167301d24614d9cd23993cc1513c48a405",
+  "records/candidate-controls-materialization-archive-v1/archive-map-v1.json": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+  "records/candidate-controls-materialization-archive-v1/root-independent-preservation-review-v1.json": "29e60b6bb033d252dac16c4db040963ba3bc59188173d28d1c8561006f533b88",
+  "records/candidate-controls-materialization-archive-v1/root-relocation-receipt-v1.json": "b1ddfe9f148ef2f7c713eb8d260e26f97369c5edb7e4078fec98b688a26258f6",
+  "selection-plan-v1.json": "69ed5f468ded3bddea586f6b129d90d42041b886d797935c2b33e4659619ef44",
+  "static-input-validation-v1.json": "e96e2215dcb79d444b327a1d63c4f4f5dd2974a7310524547d7353128b2c91b3"
+}

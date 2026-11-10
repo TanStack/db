@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-30T06:24:34.811090+00:00",
+  "admittedBy": "/root",
+  "admittedRuntime": true,
+  "slot": 2,
+  "maxInvocations": 1,
+  "path": "nonempty scope-key publication",
+  "sourceFreezeSha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51",
+  "recipeSha256": "9a1589312199c9176ad2758c9134ef747b22ae30e412f426596c226e5879b66b",
+  "packetSha256": "189e8351e30c258348f9aefd20ea983ae339b04b572cc6e02519927dae70c133",
+  "independentSourceReviewSha256": "8de8cef1f20fedf65541867f7e9d90090224ef7cf39e823d451287097681bfe8",
+  "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v2/launcher-nonempty-scope-v2.zsh",
+  "launcherSha256": "cd7d4a3d68dcc5c67daf33060f0414ee75535b642ae8376c016df16e98b57ce5",
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-scope-current-main-v2",
+  "finiteHistories": 1,
+  "workerCount": 1,
+  "limits": {
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "wallMs": 20000,
+    "postEnqueueWindowMs": 1000,
+    "samplingMs": 100
+  },
+  "outerTestTimeoutMs": 60000,
+  "rootVerifiedLiveEntries": 562,
+  "ownershipPrerequisiteState": "Separate once-run42 command pass; missing per-history logs, no accepted reach GREEN. Does not gate this independent scope-key baseline invocation.",
+  "conditionalGate": "Run this exact singleton finite baseline path only. Preserve prior snapshot, held read, exact enqueue/execution, root/downstream publication, cleanup, complete raw source/receipt evidence and original group identities. Stop after one for root classification. No other launcher/retry/source/production/model/grammar/budget edits/install/commit/publication. Timeout/resource/setup/observation/cleanup failure is operational; no product result from wrapper exit alone."
+}

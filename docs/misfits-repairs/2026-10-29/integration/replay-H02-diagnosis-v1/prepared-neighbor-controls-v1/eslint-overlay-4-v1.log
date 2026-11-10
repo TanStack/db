@@ -1,0 +1,7 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/ownership-neighbor.config.ts
+  0:0  error  Parsing error: "parserOptions.project" has been provided for @typescript-eslint/parser.
+The file was not found in any of the provided project(s): scripts/h02-progress/ownership-neighbor.config.ts
+
+✖ 1 problem (1 error, 0 warnings)
+

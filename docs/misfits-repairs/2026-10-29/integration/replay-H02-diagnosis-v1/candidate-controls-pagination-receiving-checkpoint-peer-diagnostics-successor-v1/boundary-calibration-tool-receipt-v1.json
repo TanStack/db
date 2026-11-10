@@ -1,0 +1,16 @@
+{
+  "scope": "ROOT-authorized pure instrument boundary calibration; no receiving invocation",
+  "actualCommand": "/Users/kyle.mathews/.n/bin/node --input-type=module - '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1' < '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/boundary-calibration-harness-v1.mjs.txt'",
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "sandbox_permissions": "use_default",
+  "yield_time_ms": 1000,
+  "chunkId": "1b31d5",
+  "exitCode": 0,
+  "wallTimeSeconds": 0.15480625,
+  "stdout": "{\"passed\":true,\"cases\":12,\"corrected\":4,\"rejectedControls\":8,\"resultSha256\":\"8dd921eddacd6ca8d12a996f60edc664c952e242f1c65437699d7974196b1ba5\"}\n",
+  "stderr": "",
+  "noTargetConfigModelOrProductionImports": true,
+  "noCompilerOrTestRunnerInvoked": true,
+  "noNativeOrProcessProbe": true,
+  "receivingInvocations": 0
+}

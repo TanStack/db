@@ -1,0 +1,77 @@
+import { InvalidSyncPersistenceCapabilityError } from "./errors";
+export const SYNC_PERSISTENCE_PROTOCOL = `@tanstack/db/sync-persistence`;
+export const SYNC_PERSISTENCE_VERSION = 1;
+function isRecord(value) {
+  return typeof value === `object` && value !== null;
+}
+function requireFunction(value, key, path = key) {
+  if (typeof value[key] !== `function`) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `${path} must be a function`
+    );
+  }
+}
+export function validateSyncPersistenceCapability(value) {
+  if (value === null) return null;
+  if (!isRecord(value)) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `expected null or a complete capability object`
+    );
+  }
+  if (value.protocol !== SYNC_PERSISTENCE_PROTOCOL) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `protocol must be "${SYNC_PERSISTENCE_PROTOCOL}"`
+    );
+  }
+  if (value.version !== SYNC_PERSISTENCE_VERSION) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `version must be ${SYNC_PERSISTENCE_VERSION}`
+    );
+  }
+  if (value.managedCacheGeneration !== void 0 && typeof value.managedCacheGeneration !== `boolean`) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `managedCacheGeneration must be a boolean`
+    );
+  }
+  if (value.startupCacheGenerationRotated !== void 0 && typeof value.startupCacheGenerationRotated !== `boolean`) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `startupCacheGenerationRotated must be a boolean`
+    );
+  }
+  requireFunction(value, `hydrateBaseline`);
+  if (value.startScopedRecovery !== void 0) {
+    requireFunction(value, `startScopedRecovery`);
+  }
+  requireFunction(value, `reserveCommitTurn`);
+  requireFunction(value, `scanPersistedRows`);
+  const resumeSnapshot = value.resumeSnapshot;
+  if (!isRecord(resumeSnapshot)) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `resumeSnapshot must be an object`
+    );
+  }
+  requireFunction(resumeSnapshot, `certify`, `resumeSnapshot.certify`);
+  requireFunction(
+    resumeSnapshot,
+    `getKeySetEvidence`,
+    `resumeSnapshot.getKeySetEvidence`
+  );
+  requireFunction(
+    resumeSnapshot,
+    `expectCurrentCommit`,
+    `resumeSnapshot.expectCurrentCommit`
+  );
+  if (resumeSnapshot.expectSourceProgress !== void 0) {
+    requireFunction(
+      resumeSnapshot,
+      `expectSourceProgress`,
+      `resumeSnapshot.expectSourceProgress`
+    );
+    requireFunction(
+      resumeSnapshot,
+      `getSourceProgressCompatible`,
+      `resumeSnapshot.getSourceProgressCompatible`
+    );
+  }
+  return value;
+}

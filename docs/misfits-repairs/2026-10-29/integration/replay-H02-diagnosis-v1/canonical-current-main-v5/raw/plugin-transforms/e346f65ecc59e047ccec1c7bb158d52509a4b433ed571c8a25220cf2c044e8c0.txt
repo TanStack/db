@@ -1,0 +1,37 @@
+import { LiteQueuer } from "@tanstack/pacer-lite/lite-queuer";
+import { QueueDisposedError } from "../errors";
+import { runWithCommitCompletion } from "./commit-completion";
+export function queueStrategy(options) {
+  let processingChain = Promise.resolve();
+  let disposed = false;
+  const queuer = new LiteQueuer(
+    ({ run, onCommit }) => {
+      processingChain = processingChain.then(async () => {
+        await runWithCommitCompletion(run, onCommit);
+      }).catch(() => {
+      });
+    },
+    {
+      wait: options?.wait ?? 0,
+      maxSize: options?.maxSize,
+      addItemsTo: options?.addItemsTo ?? `back`,
+      // Default FIFO: add to back
+      getItemsFrom: options?.getItemsFrom ?? `front`,
+      // Default FIFO: get from front
+      started: true
+      // Start processing immediately
+    }
+  );
+  return {
+    _type: `queue`,
+    options,
+    execute: (fn, _onAdmit, onCommit) => {
+      if (disposed) throw new QueueDisposedError();
+      return queuer.addItem({ run: fn, onCommit });
+    },
+    cleanup: () => {
+      disposed = true;
+      if (queuer.isEmpty) queuer.stop();
+    }
+  };
+}

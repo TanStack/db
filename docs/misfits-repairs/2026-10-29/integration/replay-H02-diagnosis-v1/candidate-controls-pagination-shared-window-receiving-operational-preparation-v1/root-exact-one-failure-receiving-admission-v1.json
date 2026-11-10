@@ -1,0 +1,45 @@
+{
+  "admittedBy": "/root",
+  "admission": "Exactly one full-child real QueryClient failure-first receiving invocation",
+  "pins": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+      "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-receiving-operational-preparation-independent-review-v1.md",
+      "sha256": "80dbfac42d70033ff958ad60d6bc8dbf9e19f3a3a8da859b39eb9253809ee940"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-followups-v1/validation-account-v1.json",
+      "sha256": "ea0627d641fe84ccb1aa1e9683ffd09715812cca11bba7f8e8fd5d0b6b8d1874"
+    }
+  ],
+  "slot": 2,
+  "maxInvocations": 1,
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "actualToolPermission": "require_escalated on actual exec_command; preserve actual initial/session/final outer return separately from inner/parent receipts and complete stdout/stderr.",
+  "law": "Atomic window publication retains complete prior snapshot at handled-required-failure/pre-peer-release; lawful original peer retirement permitted.",
+  "qualification": "Root read D operational review and exact recipe, rehashed5pins. Q596/85/511 source unchanged; additive18/161 metadata derived exactly. Primary bounded RED ed3825...c498c supplies no receiving evidence. Latest exact lint0 separately recorded. Initial critical-pin read used nonexistent manifest basename and stopped before admission; exact packet-manifest-v1.json discovered with rg and all checks passed on successor read.",
+  "configuration": "Preserve inherited standalone parentNode/childjsdom coverage/typecheck=false, prior scoped TS separate; no ordinary-package-runtime credit. Outer60s/384MiB/1GiB+registeredinnergroup and inner20s/384MiB/1GiB unchanged; no primary2GiB allowance.",
+  "requiredResult": "Exact parent/child plain-it identities, actual full-child roots/downstream/change/previousValue raw callbacks and shared judgments before cleanup. Preserve first mismatch and all cleanup/transport/binding/reach diagnostics; capture exact original peer pending/retired receipt/error/disposition. Fully freeze source/tool/evaluated binding/lifecycle/raw data and original identity absence; operational/setup/resource failure gives no product RED.",
+  "stop": "One invocation only; preserve child/outer nonzero without normalization or automatic retry. Independently review/root-classify failure before distinct success admission. No production edit until required success witness too.",
+  "limits": "Finite first handled-failure barrier; later receiving settlement/retry, candidate states, actual-helper/no-active-operation, hostile calibration and wider closure remain open.",
+  "successAdmitted": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false
+}

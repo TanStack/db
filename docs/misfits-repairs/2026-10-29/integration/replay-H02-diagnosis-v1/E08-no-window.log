@@ -1,0 +1,108 @@
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 29)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 30)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+}
+
+ RUN  v4.1.12 /private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection
+
+{"event":1,"phase":"test-start","heapUsed":64429584}
+{"event":2,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":64471464}
+{"event":3,"phase":"markers-created","heapUsed":64566640}
+{"event":4,"phase":"source-created","heapUsed":64593752}
+{"event":5,"phase":"live-created","heapUsed":65187632}
+{"event":6,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":65468656}
+{"event":7,"phase":"acquisition","acquisitionCount":1,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":65608664}
+{"event":8,"phase":"key","owner":0,"ownerCount":1,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":0,"heapUsed":66047208}
+{"event":9,"phase":"fetch","keys":[1,2,3,4,5],"requestCount":1,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":65782080}
+{"event":10,"phase":"acquisition","acquisitionCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":66076560}
+{"event":11,"phase":"key","owner":1,"ownerCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":65957672}
+{"event":12,"phase":"fetch","keys":[1,2,3,4,5],"requestCount":2,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":66358760}
+{"event":13,"phase":"subscribed","heapUsed":66415344}
+{"event":14,"phase":"preload-start","heapUsed":66416104}
+{"event":15,"phase":"preload-settled","acquisitionCount":2,"requestCount":2,"owners":2,"cacheCount":2,"heapUsed":67575392}
+{"event":16,"phase":"reload-start","heapUsed":67576560}
+{"event":17,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":67663608}
+{"event":18,"phase":"reload-called","heapUsed":67683256}
+{"event":19,"phase":"acquisition","acquisitionCount":3,"owner":0,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":67694984}
+{"event":20,"phase":"key","owner":0,"ownerCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":0,"heapUsed":67699320}
+{"event":21,"phase":"fetch","keys":[1,2,3,4,5],"requestCount":3,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":67737032}
+{"event":22,"phase":"acquisition","acquisitionCount":4,"owner":1,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":68044800}
+{"event":23,"phase":"key","owner":1,"ownerCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":68049048}
+{"event":24,"phase":"fetch","keys":[1,2,3,4,5],"requestCount":4,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":67821328}
+{"event":25,"phase":"reload-initial-flush-settled","heapUsed":68094096}
+{"event":26,"phase":"release-turn","turn":0,"heapUsed":68095152}
+{"event":27,"phase":"release-answer","keys":[1,2,3,4,5],"heapUsed":67838408}
+{"event":28,"phase":"release-flush-settled","turn":0,"heapUsed":67936432}
+{"event":29,"phase":"release-turn","turn":1,"heapUsed":67937216}
+{"event":30,"phase":"release-answer","keys":[1,2,3,4,5],"heapUsed":67938032}
+{"event":31,"phase":"release-flush-settled","turn":1,"heapUsed":68264544}
+{"event":32,"phase":"diagnostic-settled","heapUsed":68265352}
+{"event":33,"phase":"cleanup-start","heapUsed":68266128}
+{"event":34,"phase":"unload","owner":0,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":68328040}
+{"event":35,"phase":"key","owner":0,"ownerCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":68333056}
+{"event":36,"phase":"unload","owner":1,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"heapUsed":68824112}
+{"event":37,"phase":"key","owner":1,"ownerCount":2,"keys":[1,2,3,4,5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":68828264}
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  16:25:38
+   Duration  1.12s (transform 633ms, setup 0ms, import 752ms, tests 26ms, environment 249ms)
+

@@ -1,0 +1,23 @@
+{
+  "freshOutputAbsent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-v2",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "pureCalibration": {
+    "accepted": 5,
+    "exitCode": 0,
+    "rejected": 16,
+    "sha256": "dd9129d0bd4fe1544d18dad25c8fec6ac4bfd710f1e3fa920572288bd22cea01"
+  },
+  "pythonAstAndCompile": {
+    "bytecodeWritten": false,
+    "modules": 3,
+    "passed": true
+  },
+  "receivingPrepared": false,
+  "sourceAndPriorEpochPreflight": "passed under forbidden native/PID/group/signal APIs; unchanged complete source gate and original clean-result judgment",
+  "sourceCopies": 0,
+  "sourceRefreezes": 0,
+  "status": "SOURCE/STATIC/PURE ONLY; no selector native execution"
+}

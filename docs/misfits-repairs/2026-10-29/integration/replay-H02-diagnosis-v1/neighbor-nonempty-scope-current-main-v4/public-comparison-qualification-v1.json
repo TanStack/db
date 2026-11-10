@@ -1,0 +1,26 @@
+{
+  "status": "Live root/downstream payload and event comparisons passed at all original cuts; trace values audited without altering raw metadata",
+  "priorPayload": [
+    {
+      "id": 4,
+      "rank": 40,
+      "markers": []
+    }
+  ],
+  "finalPayload": [
+    {
+      "id": 3,
+      "rank": 30,
+      "markers": []
+    }
+  ],
+  "initialSequence": 86,
+  "heldSequence": 133,
+  "reloadRootEventSequence": 157,
+  "reloadDownstreamEventSequence": 158,
+  "finalSequence": 159,
+  "eventTransitions": "Both event batches remove prior row4 and install final row3; each callback read is the complete final ordered payload. Opposite within-batch operation order is preserved raw.",
+  "liveEvidence": "Outer exact finite test passed, primaryObservationError absent, worker normal exit0, all eight assertReached predicates satisfied. Original shared checkReplayPublication/model remain unchanged; V4 adapter observes authored payload.",
+  "rawMetadata": "All four public VirtualRowProps remain on raw snapshots and change values. Actual values are retained, not copied into model expectations.",
+  "limits": "This payload evidence does not establish temporal virtual-metadata coherence or exact generated key encoding; that receiving gap remains in coverage map under virtual-row-fields owner."
+}

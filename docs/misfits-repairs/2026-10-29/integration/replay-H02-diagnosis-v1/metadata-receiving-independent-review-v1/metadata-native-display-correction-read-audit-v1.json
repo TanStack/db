@@ -1,0 +1,80 @@
+{
+  "bytecodeWritten": false,
+  "filterSelectionCredit": false,
+  "fourNameDelta": [
+    [
+      2,
+      "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 0",
+      "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0"
+    ],
+    [
+      7,
+      "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 0",
+      "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0"
+    ],
+    [
+      12,
+      "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter 0",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'default' quarter +0"
+    ],
+    [
+      17,
+      "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter 0",
+      "queued-answer metadata receiving > checks source followup 'subscription' 'authored' quarter +0"
+    ]
+  ],
+  "freshSourceGateIdentity": {
+    "canonicalProgramSha256": "bb837d81114314f37f2d8383f471aedbd3d2a3350c84db4075a5d3b79247b213",
+    "dependencyReuseLinks": 4,
+    "namedDependencyOwnPayloads": 2544,
+    "nativeLaunches": 0,
+    "nativeProcessProbes": 0,
+    "originalSourceFiles": 573,
+    "perHistoryFinalizer": {
+      "callSite": "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "callSiteSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "definition": "packages/query-db-collection/tests/queued-answer-metadata-oracle.ts",
+      "definitionSha256": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+      "requirement": "After successful outcome validation, every fixed/generated/direct-replay history calls metadata.finish(); declared optional followup requires completed shared publication comparison and normal worker cleanup regardless of aggregate reach."
+    },
+    "productionFiles": 511,
+    "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2",
+    "successorSourceFiles": 588
+  },
+  "independentAuthorCalibrationReplay": {
+    "accepted": 2,
+    "exactResultMatchesFrozen": true,
+    "rejected": 8
+  },
+  "independentWrongActualObservationsRejected": {
+    "duplicate actual name": "wrong native list names",
+    "extra actual entry": "wrong native list count",
+    "missing actual entry": "wrong native list count",
+    "non-list actual output": "wrong native list count",
+    "non-string actual name": "wrong native list entry/module",
+    "wrong actual module": "wrong native list entry/module",
+    "wrong actual zero display": "wrong native list names"
+  },
+  "inputs": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/binding.json": "a8427c94643a8dbbe25f3242ab1aa56c125831555765c4cb0596a67dca800fe8",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/calibrate.py": "76a580203840650def8fe5d5814f551c58543899c6674439dd48ef011d0ec814",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/check.py": "bc4c9bccff2917e8fa7aebe495c209d22040ef7ca83d325e1b4183ff723aad66",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/corrected-universe-recipe.json": "9165f918ea443103ae87ce15af2fd75c9741cf1848c500b1b11004943b2cee0d",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/packet-manifest.json": "c2445689e8fb7f5e931d490487a0eff0ef2b3e17173388ebd25bbbf18c277b4d",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/pure-results.json": "80a599dd0e9e0bcd2b82ae15ddc743ebc312bca3222ab16e59ed2ff65aa99b94",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-display-correction-v1/report.md": "369ffe59c97bd617c2b316cead6ede6e47648893883ff1976f01805eaffd833c",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/program.json": "987b3443ec258b12d24e24969efbf0a201ce851c6e5bf00fdfe5a392f03e2966",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/recipes.json": "5347e895f55ebec7c689898bb14072e0015f99c51772ec6d64c2edf5a58ac8b9"
+  },
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "originalNativeChildExitCode": 0,
+  "originalObservedOuterExitCode": 1,
+  "originalStopPreserved": true,
+  "productRedGreenCredit": false,
+  "receivingReachCredit": false,
+  "runtimeAdmission": false,
+  "status": "ACCEPT bounded captured DISPLAY correction only; no runtime admission",
+  "testPassCredit": false
+}

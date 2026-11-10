@@ -1,0 +1,373 @@
+{
+  "schema": "h02-qualified-inactive-source-packet-v1",
+  "status": "FROZEN inactive qualified-comment derivative; no runtime authority",
+  "sourceFreezeSha256": "37e2dcffb845cdbb771fd6d67a117b5cc8b988ff998663a26edd24d697d0f187",
+  "reportSha256": "cd6cdbebfc1c01cda29815af0a27d73f0c3a7227b2c20fdef8dfb08c0c85a3f4",
+  "fileCount": 90,
+  "files": {
+    "copy-prefix-map-v1.json": {
+      "sha256": "3ca9ba25024c1c2f775705042ab7dbc7a5aca73089e7835c73a4e48735bbff04",
+      "bytes": 58668
+    },
+    "qualified-comment-change-v1.diff.txt": {
+      "sha256": "29c72125dbc9c02329fb17775720a978420c45fc8abff6bd03a5d47f3c7c38b7",
+      "bytes": 843
+    },
+    "report-v1.md": {
+      "sha256": "cd6cdbebfc1c01cda29815af0a27d73f0c3a7227b2c20fdef8dfb08c0c85a3f4",
+      "bytes": 13451
+    },
+    "source-freeze-v1.json": {
+      "sha256": "37e2dcffb845cdbb771fd6d67a117b5cc8b988ff998663a26edd24d697d0f187",
+      "bytes": 283091
+    },
+    "source-preservation-audit-v1.json": {
+      "sha256": "944a2eb66c6b88bdad8945ab207ea8dbf89a85a759c75821ad195a628f5dc338",
+      "bytes": 823
+    },
+    "sources/docs/contributing/oracle-coverage.md.txt": {
+      "sha256": "00572f9ec98ec93864c4a2afa62159baa5abfc7e197de6ee48761258962ecb18",
+      "bytes": 903271
+    },
+    "sources/eslint.config.js.txt": {
+      "sha256": "76c22c3fb0225bde82d7f14dcd6277985c2ff2092d4b38efc55d218abb03d1fc",
+      "bytes": 1498
+    },
+    "sources/package.json.txt": {
+      "sha256": "05bc097286073da15ec85d317c62afb35a19906d41b864ab8e21737aa9768ea9",
+      "bytes": 3801
+    },
+    "sources/packages/db/mangle-cache.json.txt": {
+      "sha256": "9e1565bfe6476f115632491e3bf3ac671e8a2cd4d777533819f6ab88d9886126",
+      "bytes": 12810
+    },
+    "sources/packages/db/package.json.txt": {
+      "sha256": "f70a15504d3bb6ea6dac3658838c774e896f94e65468e248eb387b3e713684bf",
+      "bytes": 6601
+    },
+    "sources/packages/db/tests/indexed-db/setup.ts.txt": {
+      "sha256": "e2774ae3ae7c2dfb40ade3eae7d50a45a063e5624985a7f2fe4f095d25aef718",
+      "bytes": 29
+    },
+    "sources/packages/db/tests/mutation-confirmation-oracle.ts.txt": {
+      "sha256": "a521be9b638934556542837670261c1cb0eee0eae44c9912968c1add40a14e8d",
+      "bytes": 8942
+    },
+    "sources/packages/db/tests/mutation-confirmation-support.ts.txt": {
+      "sha256": "e3dd22c1d36e47d66892dec1ac4c34f9e657e862c2a68e48e98139df432f13c9",
+      "bytes": 632
+    },
+    "sources/packages/db/tests/optimistic-history-oracle.ts.txt": {
+      "sha256": "e3df9fb84cbe0ca4212d8f314ddc34f9d7e9d20879db2651c056c56765028892",
+      "bytes": 65971
+    },
+    "sources/packages/db/tests/oracle-config.ts.txt": {
+      "sha256": "2549b168c978ab0d6adfabf95cf02ac70b54097b4ee4261d7c45f6a304ca9827",
+      "bytes": 27006
+    },
+    "sources/packages/db/tests/oracle-declaration.ts.txt": {
+      "sha256": "4dc22be210d46ce1d6590b911cf6bc077a78bfef1e54a98c637688b54830139c",
+      "bytes": 1504
+    },
+    "sources/packages/db/tests/oracle-reach.ts.txt": {
+      "sha256": "f32b74e0adfaf8d869edaa8aeb2d1d8ac0a413ddd61b91ff706bde1767959283",
+      "bytes": 2602
+    },
+    "sources/packages/db/tests/oracle-replay-witness.ts.txt": {
+      "sha256": "c8f80722bd46b2a1439aa4c7f145b18c7c724a281a776169fdd715a27d8aae70",
+      "bytes": 4027
+    },
+    "sources/packages/db/tests/query/load-subset-retained-publication-oracle.ts.txt": {
+      "sha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+      "bytes": 2880
+    },
+    "sources/packages/db/tests/query/pagination-oracle.property.test.ts.txt": {
+      "sha256": "bf6dc9beee9c3815fa5cf1e963a9d0de3df824472082605e3d687a271b70ac08",
+      "bytes": 230739
+    },
+    "sources/packages/db/tests/query/pagination-support.ts.txt": {
+      "sha256": "ed3773b0037a21407744c676faf7a50c68e41204abcbc1e34269bc5dcdb13503",
+      "bytes": 746
+    },
+    "sources/packages/db/tests/query/pagination-window-publication-oracle.ts.txt": {
+      "sha256": "cc7a3ac8bb2b1250f5b13ee8435c5b1bd3565e3d988bec139386c258b683d233",
+      "bytes": 4039
+    },
+    "sources/packages/db/tests/reference-expression-oracle.ts.txt": {
+      "sha256": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "bytes": 2299
+    },
+    "sources/packages/db/tests/test-setup.ts.txt": {
+      "sha256": "146c43aeec1c092534083a9d3bf647df8c526a58bd66a720d2207bcbf581fbc9",
+      "bytes": 235
+    },
+    "sources/packages/db/tests/trace-runner.ts.txt": {
+      "sha256": "07cac56121e12e986bfb22b3a526ff6d4aa2a7c11315738c75d905d75c945550",
+      "bytes": 3821
+    },
+    "sources/packages/db/tests/utils.ts.txt": {
+      "sha256": "d08f778d9f40f813ef57e6479fa6219fecee71ec7981e2cae90a3ea4938e96c3",
+      "bytes": 22443
+    },
+    "sources/packages/db/tsconfig.json.txt": {
+      "sha256": "b759b1caa96020777b7833f756a9591c65939c467c4cb10b55f307ba325d7538",
+      "bytes": 829
+    },
+    "sources/packages/db/tsconfig.test.json.txt": {
+      "sha256": "5168aca44188a9be3b0bee215bfc2f222010dedb8f4e1fc08029c6873dcb6cf1",
+      "bytes": 86
+    },
+    "sources/packages/db/vite.config.ts.txt": {
+      "sha256": "e2818ba9341d237d7511e7fd05ec2bf49ae087c332c81b08094b589168b0e264",
+      "bytes": 2018
+    },
+    "sources/packages/db-ivm/package.json.txt": {
+      "sha256": "0c13f25c570090f92158a931f4fb20b0626d2e9b1235ca5ec6fcc4a1a50aad1a",
+      "bytes": 1555
+    },
+    "sources/packages/db-sqlite-persistence-core/package.json.txt": {
+      "sha256": "a7703dc7f203029ac7814187c27da10027253f1fa9e059cd28cfec857d3ba141",
+      "bytes": 1775
+    },
+    "sources/packages/db-sqlite-persistence-core/tsconfig.json.txt": {
+      "sha256": "580f6ac852b0c86bc6636ef2d3d7e4dbba03a7901248bd8054596d83f08a6c18",
+      "bytes": 599
+    },
+    "sources/packages/query-db-collection/package.json.txt": {
+      "sha256": "831b2604979ace0fc524a2860a83ddfb4626eb4283ac38947bfc1edb8701a7a5",
+      "bytes": 2029
+    },
+    "sources/packages/query-db-collection/tests/ownership-lifecycle-support.ts.txt": {
+      "sha256": "a54b473be435f9cc35c6963bcb356e53b16437b7e780a469a11a6da287a1c68c",
+      "bytes": 25652
+    },
+    "sources/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts.txt": {
+      "sha256": "6146871f28ffbb468e36fff565b55f9e8fc4a0df1800821e0e023b1bcaec5472",
+      "bytes": 211490
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-attachments.ts.txt": {
+      "sha256": "4bc16d539153129b5ad960f84199ca07f6f2d0baeb157088d97c77e5ec624f6c",
+      "bytes": 32340
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts.txt": {
+      "sha256": "4a4ef825b3b255e5c2c777d086d767727d740e361a2925ead9c6bd6a6b04db5c",
+      "bytes": 52257
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts.txt": {
+      "sha256": "78753e1e7bc7b2f94a3fe957e11a0abb329a7375aa9a32278b076cb1c4c63062",
+      "bytes": 22015
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts.txt": {
+      "sha256": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235",
+      "bytes": 21132
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-driver.ts.txt": {
+      "sha256": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+      "bytes": 420
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-fixture.ts.txt": {
+      "sha256": "fca27cdb8e8253518a0677a6186a655d59b17bef842c188ddd090ec8afa8cde2",
+      "bytes": 22448
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts.txt": {
+      "sha256": "5e1902e7ea02b8f11521c8ef5cc5b63c426fe3b92b50174e5c755be9b3c892fc",
+      "bytes": 29043
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-oracle.ts.txt": {
+      "sha256": "c95d63bf25ae1361452d9c788a25e6bc7d0a94f825601707531c8e7e2ac6f76a",
+      "bytes": 62542
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts.txt": {
+      "sha256": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a",
+      "bytes": 17194
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts.txt": {
+      "sha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "bytes": 1791
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-driver.ts.txt": {
+      "sha256": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+      "bytes": 24266
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts.txt": {
+      "sha256": "0854dc788327a45badfefc5199c0f1adc5a9ae76e54b74b32d21204bc7bb7436",
+      "bytes": 6705
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts.txt": {
+      "sha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+      "bytes": 3631
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-oracle.ts.txt": {
+      "sha256": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e",
+      "bytes": 18399
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts.txt": {
+      "sha256": "d379c3a27681722693de7b63f3f782630ccb632cedfb3c840061e22d492ba342",
+      "bytes": 7577
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts.txt": {
+      "sha256": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524",
+      "bytes": 12214
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts.txt": {
+      "sha256": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+      "bytes": 1619
+    },
+    "sources/packages/query-db-collection/tests/queued-answer-root-setup-probe.ts.txt": {
+      "sha256": "7fc098f239803bbd02a17190e812c14c44b62784b6db7c9d85b535ba965a3a71",
+      "bytes": 837
+    },
+    "sources/packages/query-db-collection/tsconfig.json.txt": {
+      "sha256": "0bb0d09dfe5d1b3cb4f518cfecd1f5591b3948ab2982a234b934fbb0cc63b291",
+      "bytes": 867
+    },
+    "sources/scripts/commonjs-declarations.mjs.txt": {
+      "sha256": "3dae7c394287bd5d74467947267ab35207a6290b2fb5b12dcf7b2664115b9d66",
+      "bytes": 1649
+    },
+    "sources/scripts/eslint-plugin-oracle/index.js.txt": {
+      "sha256": "d59b5d3288f17ebc78c2340862a763c67b88f3abbbf20ea0749a5a182c639a6c",
+      "bytes": 1251
+    },
+    "sources/scripts/eslint-plugin-oracle/registration.js.txt": {
+      "sha256": "87b868c0791f85d914bf54a1a44cfba67692732388e4375df51bf34983ea665c",
+      "bytes": 6482
+    },
+    "sources/scripts/eslint-plugin-oracle/rules/no-disabled.js.txt": {
+      "sha256": "3d89c5073b0a3eba5847357fdd0b34ae76d3af217aeb095210a79dc85aad10fa",
+      "bytes": 28851
+    },
+    "sources/scripts/eslint-plugin-oracle/rules/no-unit-test.js.txt": {
+      "sha256": "3f113fa82bfd39c397073dd32f8b9a991f6175c1ed6b7f1b2d9079f52275ceb0",
+      "bytes": 48013
+    },
+    "sources/scripts/h02-progress/bindings-calibration.test.mjs.txt": {
+      "sha256": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd",
+      "bytes": 22112
+    },
+    "sources/scripts/h02-progress/calibration.config.ts.txt": {
+      "sha256": "2c6f5c42a9b4c67211604ac3f6f92188597d4c7c0a71e976ba010c83aa01328d",
+      "bytes": 511
+    },
+    "sources/scripts/h02-progress/candidate-controls.config.ts.txt": {
+      "sha256": "edef50ca95f1ad023f4285ff3f99e82e0c76b0519e25a10f3f55463dfb10e046",
+      "bytes": 446
+    },
+    "sources/scripts/h02-progress/candidate-controls.test.ts.txt": {
+      "sha256": "5d8416aca20ceffcbaf9481769ba14a58889068e76466cb9e42a67406b5d23aa",
+      "bytes": 5767
+    },
+    "sources/scripts/h02-progress/candidate-controls.ts.txt": {
+      "sha256": "d1b3f65b082cf18112df6531d0372b25b2e64d98052a1b8fd899f0beb64c3cb7",
+      "bytes": 9733
+    },
+    "sources/scripts/h02-progress/checker-calibration.test.ts.txt": {
+      "sha256": "268c738cd9b1452f188892e435fe66086124884cd9647b1e79e2c5f7c2d6bca4",
+      "bytes": 9993
+    },
+    "sources/scripts/h02-progress/completion-checker-controls.ts.txt": {
+      "sha256": "e65fa3ed827b1c1eb3db2da64dc9328a09b9eb83db89a428c5f6f523317522de",
+      "bytes": 22478
+    },
+    "sources/scripts/h02-progress/completion-eslint.config.mjs.txt": {
+      "sha256": "a4837103c5a8a5d203c031003eecbd20ecd7724c547f7f09394badf1336ab5b4",
+      "bytes": 590
+    },
+    "sources/scripts/h02-progress/completion-parent.config.ts.txt": {
+      "sha256": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+      "bytes": 559
+    },
+    "sources/scripts/h02-progress/completion-parent.mjs.txt": {
+      "sha256": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70",
+      "bytes": 23855
+    },
+    "sources/scripts/h02-progress/completion-receiving.config.ts.txt": {
+      "sha256": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+      "bytes": 515
+    },
+    "sources/scripts/h02-progress/completion-tsconfig.json.txt": {
+      "sha256": "1767c6ce1c2a4411549d8debc6501835aadd95c3600ae96710b6f738ebb3f89f",
+      "bytes": 156
+    },
+    "sources/scripts/h02-progress/eslint.config.mjs.txt": {
+      "sha256": "71e94882843c94560d64eb0a58cd7dc469f4a97f999ff31c2624c67ad87d06b2",
+      "bytes": 450
+    },
+    "sources/scripts/h02-progress/ownership-neighbor.config.ts.txt": {
+      "sha256": "955405bf0eef37e5bd82327694fb1d474da54f50c14fe02561faa3c5d809b27f",
+      "bytes": 1046
+    },
+    "sources/scripts/h02-progress/ownership-parent.mjs.txt": {
+      "sha256": "0a7e145856aae03a3ecee668f87a0e3cdade3ff64035c4796b0c32e2824e786e",
+      "bytes": 16330
+    },
+    "sources/scripts/h02-progress/ownership-parent.test.mjs.txt": {
+      "sha256": "98c48876f8b5e9dbbced72e0364d2dedf6494279b84ca85d9a7107d4b977c430",
+      "bytes": 6781
+    },
+    "sources/scripts/h02-progress/receipt-transport.mjs.txt": {
+      "sha256": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da",
+      "bytes": 10393
+    },
+    "sources/scripts/h02-progress/receipt-transport.test.mjs.txt": {
+      "sha256": "f5520c40b8ca33369046ada7dd3ff148398177e852d186270243e6ec96bb3d49",
+      "bytes": 14693
+    },
+    "sources/scripts/h02-progress/receiving-monitor.mjs.txt": {
+      "sha256": "1bb6427d29290e12270a09140d36584f3cd3ab8e5bde37cef1f00eb921f8d338",
+      "bytes": 7894
+    },
+    "sources/scripts/h02-progress/receiving-monitor.test.mjs.txt": {
+      "sha256": "879243ccf34f1d531783117f397cef6947b0b39842afe4079b8b030648b82e29",
+      "bytes": 9591
+    },
+    "sources/scripts/h02-progress/root-setup-calibration.config.ts.txt": {
+      "sha256": "abc424c53103e46bc83bcb9519033f0fae84070a4fb388c61b3c385cf487c58a",
+      "bytes": 594
+    },
+    "sources/scripts/h02-progress/root-setup-calibration.test.ts.txt": {
+      "sha256": "aad1a39bac493e5a25bf777c2eb63ce67e88d6fb8dd42d4af35d3f66f4644dfe",
+      "bytes": 6391
+    },
+    "sources/scripts/h02-progress/source-binding.setup.ts.txt": {
+      "sha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13",
+      "bytes": 9184
+    },
+    "sources/scripts/h02-progress/startup-inspector.mjs.txt": {
+      "sha256": "e3e6748f8c2fb673779e7c1143b2c4afe10d2688bc7ffa226b7bbc01754ad905",
+      "bytes": 1484
+    },
+    "sources/scripts/h02-progress/startup-inspector.test.mjs.txt": {
+      "sha256": "c83d5564cc600296fea8f6d526410a70506310a1f7e5adf1cc6534b4a5c33590",
+      "bytes": 3196
+    },
+    "sources/scripts/h02-progress/tsconfig.json.txt": {
+      "sha256": "ba1fe0c807d4bbfb91185d25fc338bab2511c695d472682f885373df5165bf08",
+      "bytes": 406
+    },
+    "sources/scripts/h02-progress/verify-bindings.mjs.txt": {
+      "sha256": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+      "bytes": 14051
+    },
+    "sources/scripts/h02-progress/vitest.config.ts.txt": {
+      "sha256": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6",
+      "bytes": 2966
+    },
+    "sources/scripts/h02-progress/witness-calibration.config.ts.txt": {
+      "sha256": "4eebc8fb8ae696bdfe91738a5b35d700f8b4703de133d718fee6c730fbd9c40b",
+      "bytes": 573
+    },
+    "sources/scripts/h02-progress/witness-premise.ts.txt": {
+      "sha256": "28b1abc8d502b50f96ce4bb18bdeee47955a7bf5ed160b4f38c80e1f8fb1966f",
+      "bytes": 3285
+    },
+    "sources/tsconfig.json.txt": {
+      "sha256": "79e4282995ed94ce7e73583a6ef896db6dd8968b276f2a900de8d63493ace99b",
+      "bytes": 1063
+    }
+  },
+  "selfExcluded": true,
+  "runtime": 0,
+  "compile": 0,
+  "discovery": 0
+}

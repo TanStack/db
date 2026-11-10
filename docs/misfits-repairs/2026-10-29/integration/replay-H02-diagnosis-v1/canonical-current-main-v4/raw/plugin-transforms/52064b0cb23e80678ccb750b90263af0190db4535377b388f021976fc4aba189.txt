@@ -1,0 +1,11 @@
+import { LIVE_QUERY_INTERNAL } from "./internal.js";
+const collectionBuilderRegistry = /* @__PURE__ */ new WeakMap();
+export function getBuilderFromConfig(config) {
+  return config.utils?.[LIVE_QUERY_INTERNAL]?.getBuilder?.();
+}
+export function registerCollectionBuilder(collection, builder) {
+  collectionBuilderRegistry.set(collection, builder);
+}
+export function getCollectionBuilder(collection) {
+  return collectionBuilderRegistry.get(collection);
+}

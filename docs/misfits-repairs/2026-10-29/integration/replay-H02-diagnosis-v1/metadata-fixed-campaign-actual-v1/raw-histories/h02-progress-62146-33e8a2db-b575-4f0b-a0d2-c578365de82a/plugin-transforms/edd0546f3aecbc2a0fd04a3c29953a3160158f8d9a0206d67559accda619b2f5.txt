@@ -1,0 +1,655 @@
+import { safeRandomUUID } from "./utils/uuid";
+import { deepEquals } from "./utils";
+import { withCollectionConfigFactory } from "./client.js";
+import { collectionOptionsClaim } from "./collection-options.js";
+import { registerTransactionCommitWork } from "./transaction-commit-work.js";
+import {
+  InvalidStorageDataFormatError,
+  InvalidStorageObjectFormatError,
+  LocalStorageCollectionError,
+  SerializationError,
+  StorageKeyRequiredError
+} from "./errors";
+import { codedMessage, codedWarning, devBuild } from "./error-message.js";
+const sameTabListeners = /* @__PURE__ */ new WeakMap();
+function subscribeToSameTabWrites(storage, key, refresh) {
+  let byKey = sameTabListeners.get(storage);
+  if (!byKey) {
+    byKey = /* @__PURE__ */ new Map();
+    sameTabListeners.set(storage, byKey);
+  }
+  let listeners = byKey.get(key);
+  if (!listeners) {
+    listeners = /* @__PURE__ */ new Set();
+    byKey.set(key, listeners);
+  }
+  listeners.add(refresh);
+  return () => {
+    listeners.delete(refresh);
+    if (listeners.size === 0) byKey.delete(key);
+    if (byKey.size === 0) sameTabListeners.delete(storage);
+  };
+}
+function publishSameTabWrite(storage, key, writer) {
+  for (const refresh of [...sameTabListeners.get(storage)?.get(key) ?? []]) {
+    try {
+      if (refresh === writer?.listener) writer.refresh();
+      else refresh();
+    } catch (error) {
+      console.warn(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":` : codedWarning(232, { storageKey: key }),
+        error
+      );
+    }
+  }
+}
+function validateJsonSerializable(parser, value, operation) {
+  try {
+    parser.stringify(value);
+  } catch (error) {
+    throw new SerializationError(
+      operation,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+const opaqueTypes = [
+  Map,
+  Set,
+  WeakMap,
+  WeakSet,
+  RegExp,
+  Promise,
+  ArrayBuffer,
+  ...typeof SharedArrayBuffer === `undefined` ? [] : [SharedArrayBuffer]
+];
+function describeJsonLoss(holder, value, path) {
+  if (value === void 0) {
+    return Array.isArray(holder) || path === `row` ? `${path} is undefined` : void 0;
+  }
+  if (typeof value === `function` || typeof value === `symbol`) {
+    return `${path} is a ${typeof value}`;
+  }
+  const number = value instanceof Number ? value.valueOf() : value;
+  if (typeof number === `number` && !Number.isFinite(number)) {
+    return `${path} is ${number}`;
+  }
+  if (typeof value !== `object` || value === null) return void 0;
+  if (ArrayBuffer.isView(value) || opaqueTypes.some((type) => value instanceof type)) {
+    return `${path} is a ${value.constructor.name}`;
+  }
+  if (Object.getOwnPropertySymbols(value).some(
+    (key) => Object.prototype.propertyIsEnumerable.call(value, key)
+  )) {
+    return `${path} has a symbol key`;
+  }
+  if (Array.isArray(value) && Object.keys(value).length > value.length) {
+    return `${path} has a property other than its elements`;
+  }
+  return void 0;
+}
+function validateStorableRow(parser, value, operation) {
+  if (parser !== JSON) {
+    validateJsonSerializable(parser, value, operation);
+    return void 0;
+  }
+  const paths = /* @__PURE__ */ new Map();
+  let loss;
+  let json;
+  function replacer(key, item) {
+    if (loss) return void 0;
+    const parent = paths.get(this);
+    const path = parent === void 0 ? `row` : Array.isArray(this) ? `${parent}[${key}]` : `${parent}.${key}`;
+    loss = describeJsonLoss(this, item, path);
+    if (typeof item === `object` && item !== null) paths.set(item, path);
+    return item;
+  }
+  const stringify = (row) => json = JSON.stringify(row, replacer);
+  validateJsonSerializable({ parse: JSON.parse, stringify }, value, operation);
+  if (loss) throw new SerializationError(operation, loss);
+  return json;
+}
+function serializeJsonSnapshot(dataMap, rowJson) {
+  const entries = Array.from(dataMap, ([key, { versionKey, data }]) => {
+    const row = rowJson.get(key) ?? JSON.stringify(data);
+    const item = `{"versionKey":${JSON.stringify(versionKey)},"data":${row}}`;
+    return `${JSON.stringify(encodeStorageKey(key))}:${item}`;
+  });
+  return `{${entries.join(`,`)}}`;
+}
+function generateUuid() {
+  return safeRandomUUID();
+}
+function encodeStorageKey(key) {
+  if (typeof key === `number`) {
+    return `n:${key}`;
+  }
+  return `s:${key}`;
+}
+function decodeStorageKey(encodedKey) {
+  if (encodedKey.startsWith(`n:`)) {
+    return Number(encodedKey.slice(2));
+  }
+  if (encodedKey.startsWith(`s:`)) {
+    return encodedKey.slice(2);
+  }
+  return encodedKey;
+}
+function sameStorageKey(left, right) {
+  return left === right || Number.isNaN(left) && Number.isNaN(right);
+}
+function createInMemoryStorage() {
+  const storage = /* @__PURE__ */ new Map();
+  return {
+    getItem(key) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key, value) {
+      storage.set(key, value);
+    },
+    removeItem(key) {
+      storage.delete(key);
+    }
+  };
+}
+function createNoOpStorageEventApi() {
+  return {
+    addEventListener: () => {
+    },
+    removeEventListener: () => {
+    }
+  };
+}
+export function localStorageCollectionOptions(config) {
+  if (!config.storageKey) {
+    throw new StorageKeyRequiredError();
+  }
+  const storage = config.storage || (typeof window !== `undefined` ? window.localStorage : null) || createInMemoryStorage();
+  const storageEventApi = config.storageEventApi || (typeof window !== `undefined` ? window : null) || createNoOpStorageEventApi();
+  const parser = config.parser || JSON;
+  const lastKnownData = /* @__PURE__ */ new Map();
+  const sync = createLocalStorageSync(
+    config.storageKey,
+    storage,
+    storageEventApi,
+    parser,
+    config.getKey,
+    lastKnownData,
+    (collection) => {
+      const claim = collection.config[collectionOptionsClaim];
+      if (claim !== optionsClaim) {
+        throw new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production` ? `LocalStorage sync belongs to its options Collection.` : codedMessage(242)
+        );
+      }
+    }
+  );
+  const saveToStorage = (dataMap, mutations, rowJson) => {
+    try {
+      const objectData = {};
+      dataMap.forEach((storedItem, key) => {
+        objectData[encodeStorageKey(key)] = storedItem;
+      });
+      const serialized = parser === JSON ? serializeJsonSnapshot(dataMap, rowJson) : parser.stringify(objectData);
+      const persisted = parser === JSON ? dataMap : readFromStorage(
+        config.storageKey,
+        storage,
+        parser,
+        config.getKey,
+        serialized
+      );
+      for (const mutation of mutations) {
+        const storedItem = persisted.get(mutation.key);
+        if (mutation.type === `delete` ? storedItem : !storedItem) {
+          throw new InvalidStorageDataFormatError(
+            config.storageKey,
+            encodeStorageKey(mutation.key)
+          );
+        }
+      }
+      storage.setItem(config.storageKey, serialized);
+      return { serialized, persisted };
+    } catch (error) {
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":` : codedMessage(218, { storageKey: config.storageKey }),
+        error
+      );
+      throw error;
+    }
+  };
+  const clearStorage = () => {
+    storage.removeItem(config.storageKey);
+    publishSameTabWrite(storage, config.storageKey);
+  };
+  const getStorageSize = () => {
+    const data = storage.getItem(config.storageKey);
+    return data ? new Blob([data]).size : 0;
+  };
+  const persistMutations = (mutations) => {
+    const staged = readFromStorage(
+      config.storageKey,
+      storage,
+      parser,
+      config.getKey
+    );
+    const rowJson = /* @__PURE__ */ new Map();
+    for (const mutation of mutations) {
+      if (mutation.type === `delete`) staged.delete(mutation.key);
+      else {
+        if (parser === JSON) {
+          const json = checkedRows.get(mutation) ?? JSON.stringify(mutation.modified);
+          rowJson.set(mutation.key, json);
+          const restored = JSON.parse(json);
+          if (!sameStorageKey(config.getKey(restored), mutation.key)) {
+            throw new InvalidStorageDataFormatError(
+              config.storageKey,
+              encodeStorageKey(mutation.key)
+            );
+          }
+        }
+        staged.set(mutation.key, {
+          versionKey: generateUuid(),
+          data: mutation.modified
+        });
+      }
+    }
+    const { serialized: savedRaw, persisted } = saveToStorage(
+      staged,
+      mutations,
+      rowJson
+    );
+    try {
+      for (const mutation of mutations) {
+        const storedItem = persisted.get(mutation.key);
+        if (storedItem) lastKnownData.set(mutation.key, storedItem);
+        else lastKnownData.delete(mutation.key);
+      }
+      sync.confirmOperationsSync(mutations, persisted);
+    } finally {
+      const writerRefresh = sync.manualTrigger;
+      publishSameTabWrite(
+        storage,
+        config.storageKey,
+        writerRefresh ? {
+          listener: writerRefresh,
+          refresh: () => writerRefresh(
+            storage.getItem(config.storageKey) === savedRaw ? persisted : void 0
+          )
+        } : void 0
+      );
+    }
+  };
+  let writeTail;
+  const reserveWrite = () => {
+    const previous = writeTail;
+    let release;
+    const slot = new Promise((resolve) => {
+      release = resolve;
+    });
+    writeTail = slot;
+    const retire = () => {
+      release();
+      if (writeTail === slot) writeTail = void 0;
+    };
+    return { previous, retire };
+  };
+  const persistAutomatic = (mutations, handler) => {
+    const { previous, retire } = reserveWrite();
+    if (!handler && previous === void 0) {
+      try {
+        persistMutations(mutations);
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(error);
+      } finally {
+        retire();
+      }
+    }
+    let result;
+    try {
+      result = handler?.();
+    } catch (error) {
+      if (previous) void previous.then(retire);
+      else retire();
+      return Promise.reject(error);
+    }
+    return Promise.resolve(result).then(
+      async () => {
+        await previous;
+        try {
+          persistMutations(mutations);
+        } finally {
+          retire();
+        }
+      },
+      (error) => {
+        if (previous) void previous.then(retire);
+        else retire();
+        throw error;
+      }
+    );
+  };
+  const persistManual = (mutations) => {
+    const { previous, retire } = reserveWrite();
+    if (previous === void 0) {
+      try {
+        persistMutations(mutations);
+        return Promise.resolve();
+      } finally {
+        retire();
+      }
+    }
+    return previous.then(() => {
+      try {
+        persistMutations(mutations);
+      } finally {
+        retire();
+      }
+    });
+  };
+  const checkedRows = /* @__PURE__ */ new WeakMap();
+  const checkRow = (mutation, operation) => {
+    const json = validateStorableRow(parser, mutation.modified, operation);
+    if (json !== void 0) checkedRows.set(mutation, json);
+  };
+  const wrappedOnInsert = (params) => {
+    params.transaction.mutations.forEach((mutation) => {
+      checkRow(mutation, `insert`);
+    });
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onInsert ? () => config.onInsert(params) : void 0
+    );
+  };
+  const wrappedOnUpdate = (params) => {
+    params.transaction.mutations.forEach((mutation) => {
+      checkRow(mutation, `update`);
+    });
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onUpdate ? () => config.onUpdate(params) : void 0
+    );
+  };
+  const wrappedOnDelete = (params) => persistAutomatic(
+    params.transaction.mutations,
+    config.onDelete ? () => config.onDelete(params) : void 0
+  );
+  const {
+    storageKey: _storageKey,
+    storage: _storage,
+    storageEventApi: _storageEventApi,
+    parser: _parser,
+    onInsert: _onInsert,
+    onUpdate: _onUpdate,
+    onDelete: _onDelete,
+    id,
+    ...restConfig
+  } = config;
+  const collectionId = id ?? `local-collection:${config.storageKey}`;
+  const persistAcceptedMutations = async (transaction, owner) => {
+    const collectionMutations = transaction.mutations.filter(
+      (mutation) => mutation.collection === owner
+    );
+    if (collectionMutations.length === 0) {
+      return Promise.resolve();
+    }
+    for (const mutation of collectionMutations) {
+      switch (mutation.type) {
+        case `insert`:
+        case `update`:
+          checkRow(mutation, mutation.type);
+          break;
+        case `delete`:
+          validateJsonSerializable(parser, mutation.original, mutation.type);
+          break;
+      }
+    }
+    await persistManual(collectionMutations);
+  };
+  const materializedAcceptors = /* @__PURE__ */ new WeakSet();
+  const acceptMutations = (transaction) => {
+    const candidates = new Set(
+      transaction.mutations.filter((mutation) => mutation.collection.id === collectionId).map((mutation) => mutation.collection)
+    );
+    const owned = [...candidates].filter((candidate) => {
+      const candidateAccept = candidate.utils.acceptMutations;
+      return candidateAccept === acceptMutations || materializedAcceptors.has(candidateAccept);
+    });
+    if (owned.length > 1 || candidates.size > 0 && owned.length === 0) {
+      const work2 = Promise.reject(
+        new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production` ? `LocalStorage manual acceptance belongs to a different Collection.` : codedMessage(231)
+        )
+      );
+      registerTransactionCommitWork(transaction, work2);
+      return work2;
+    }
+    const owner = owned[0];
+    const ownerAccept = owner ? owner.utils.acceptMutations : void 0;
+    if (ownerAccept && ownerAccept !== acceptMutations)
+      return ownerAccept(transaction);
+    const work = persistAcceptedMutations(transaction, owner);
+    registerTransactionCommitWork(transaction, work);
+    return work;
+  };
+  const options = {
+    ...restConfig,
+    id: collectionId,
+    sync,
+    onInsert: wrappedOnInsert,
+    onUpdate: wrappedOnUpdate,
+    onDelete: wrappedOnDelete,
+    utils: {
+      clearStorage,
+      getStorageSize,
+      acceptMutations
+    }
+  };
+  let claimed = false;
+  function optionsClaim() {
+    if (claimed)
+      throw new LocalStorageCollectionError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.` : codedMessage(230)
+      );
+    claimed = true;
+    return () => {
+      sync.abortFailedConstruction();
+      claimed = false;
+    };
+  }
+  Object.defineProperty(options, collectionOptionsClaim, {
+    enumerable: true,
+    value: optionsClaim
+  });
+  return withCollectionConfigFactory(options, () => {
+    const materialized = localStorageCollectionOptions({
+      ...config,
+      id: collectionId
+    });
+    materializedAcceptors.add(materialized.utils.acceptMutations);
+    return materialized;
+  });
+}
+function readFromStorage(storageKey, storage, parser, getKey, knownRaw) {
+  const rawData = knownRaw ?? storage.getItem(storageKey);
+  if (rawData === null) {
+    return /* @__PURE__ */ new Map();
+  }
+  const parsed = parser.parse(rawData);
+  const dataMap = /* @__PURE__ */ new Map();
+  if (typeof parsed === `object` && parsed !== null && !Array.isArray(parsed)) {
+    Object.entries(parsed).forEach(([encodedKey, value]) => {
+      if (value && typeof value === `object` && `versionKey` in value && typeof value.versionKey === `string` && `data` in value && value.data !== null && typeof value.data === `object`) {
+        const storedItem = value;
+        const decodedKey = decodeStorageKey(encodedKey);
+        if (!sameStorageKey(getKey(storedItem.data), decodedKey) || dataMap.has(decodedKey)) {
+          throw new InvalidStorageDataFormatError(storageKey, encodedKey);
+        }
+        dataMap.set(decodedKey, storedItem);
+      } else {
+        throw new InvalidStorageDataFormatError(storageKey, encodedKey);
+      }
+    });
+  } else {
+    throw new InvalidStorageObjectFormatError(storageKey);
+  }
+  return dataMap;
+}
+function createLocalStorageSync(storageKey, storage, storageEventApi, parser, getKey, lastKnownData, assertOwner) {
+  let syncParams = null;
+  let collection = null;
+  let activeCleanup = null;
+  const findChanges = (oldData, newData, compareContent) => {
+    const changes = [];
+    oldData.forEach((oldStoredItem, key) => {
+      const newStoredItem = newData.get(key);
+      if (!newStoredItem) {
+        changes.push({ type: `delete`, key, value: oldStoredItem.data });
+      } else if (oldStoredItem.versionKey !== newStoredItem.versionKey || compareContent && !deepEquals(oldStoredItem.data, newStoredItem.data) && // A default-JSON writer may retain a native Date while the stored
+      // row contains its ISO string. A peer's unrelated write must not
+      // publish that representation change as an update.
+      (parser !== JSON || JSON.stringify(oldStoredItem.data) !== JSON.stringify(newStoredItem.data))) {
+        changes.push({ type: `update`, key, value: newStoredItem.data });
+      }
+    });
+    newData.forEach((newStoredItem, key) => {
+      if (!oldData.has(key)) {
+        changes.push({ type: `insert`, key, value: newStoredItem.data });
+      }
+    });
+    return changes;
+  };
+  const processStorageChanges = (knownSnapshot) => {
+    if (!syncParams) return;
+    const { begin, write, commit } = syncParams;
+    let newData;
+    try {
+      newData = knownSnapshot ?? readFromStorage(storageKey, storage, parser, getKey);
+    } catch (error) {
+      console.warn(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":` : codedWarning(219, { storageKey }),
+        error
+      );
+      return;
+    }
+    const changes = findChanges(
+      lastKnownData,
+      newData,
+      knownSnapshot === void 0 || parser !== JSON
+    );
+    if (changes.length > 0) {
+      changes.forEach(({ type, value }) => {
+        if (value) validateJsonSerializable(parser, value, type);
+      });
+      begin();
+      changes.forEach(({ type, value }) => {
+        if (value) {
+          write({ type, value });
+        }
+      });
+      lastKnownData.clear();
+      newData.forEach((storedItem, key) => {
+        lastKnownData.set(key, storedItem);
+      });
+      commit();
+    }
+  };
+  const syncConfig = {
+    rowUpdateMode: `full`,
+    sync: (params) => {
+      assertOwner(params.collection);
+      const { begin, write, commit, markReady } = params;
+      const initialData = readFromStorage(
+        storageKey,
+        storage,
+        parser,
+        getKey
+      );
+      initialData.forEach((storedItem) => {
+        validateJsonSerializable(parser, storedItem.data, `load`);
+      });
+      syncParams = params;
+      collection = params.collection;
+      lastKnownData.clear();
+      initialData.forEach((storedItem, key) => {
+        lastKnownData.set(key, storedItem);
+      });
+      const handleStorageEvent = (event) => {
+        if (event.key !== storageKey || event.storageArea !== storage) {
+          return;
+        }
+        processStorageChanges();
+      };
+      const unsubscribeSameTab = subscribeToSameTabWrites(
+        storage,
+        storageKey,
+        processStorageChanges
+      );
+      try {
+        begin({ snapshot: true });
+        initialData.forEach((storedItem) => {
+          write({ type: `insert`, value: storedItem.data });
+        });
+        commit();
+        markReady();
+        storageEventApi.addEventListener(`storage`, handleStorageEvent);
+      } catch (error) {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent);
+        unsubscribeSameTab();
+        if (syncParams === params) {
+          syncParams = null;
+          collection = null;
+        }
+        throw error;
+      }
+      const cleanup = () => {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent);
+        unsubscribeSameTab();
+        if (syncParams === params) {
+          syncParams = null;
+          collection = null;
+        }
+        if (activeCleanup === cleanup) activeCleanup = null;
+      };
+      activeCleanup = cleanup;
+      return {
+        cleanup
+      };
+    },
+    /**
+     * Get sync metadata - returns storage key information
+     * @returns Object containing storage key and storage type metadata
+     */
+    getSyncMetadata: () => ({
+      storageKey,
+      storageType: storage === (typeof window !== `undefined` ? window.localStorage : null) ? `localStorage` : `custom`
+    }),
+    // Manual trigger function for local updates
+    manualTrigger: processStorageChanges
+  };
+  const confirmOperationsSync = (mutations, persisted) => {
+    if (!syncParams) {
+      return;
+    }
+    const { begin, write, commit } = syncParams;
+    begin();
+    mutations.forEach((mutation) => {
+      write({
+        // A peer may have inserted the same key while this local mutation
+        // was pending. Full-row update confirms the accepted stored value in
+        // either case without a duplicate insert.
+        type: mutation.type === `delete` ? `delete` : `update`,
+        value: mutation.type === `delete` ? mutation.original : persisted.get(mutation.key).data
+      });
+    });
+    commit();
+  };
+  return {
+    ...syncConfig,
+    abortFailedConstruction: () => activeCleanup?.(),
+    get collection() {
+      return collection;
+    },
+    confirmOperationsSync
+  };
+}

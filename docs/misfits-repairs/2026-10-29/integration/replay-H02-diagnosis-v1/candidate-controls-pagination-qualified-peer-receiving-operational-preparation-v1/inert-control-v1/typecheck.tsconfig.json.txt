@@ -1,0 +1,27 @@
+{
+  "extends": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/db/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+    "noEmit": true,
+    "incremental": false,
+    "typeRoots": [
+      "/private/tmp/h02-qualified-peer-receiving-v1/code/node_modules/@types"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/source-binding.setup.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.config.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-receiving.config.ts",
+    "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

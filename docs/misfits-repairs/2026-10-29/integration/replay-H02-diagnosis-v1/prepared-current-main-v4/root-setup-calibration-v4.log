@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ✓ scripts/h02-progress/root-setup-calibration.test.ts > separates client URL normalization from module and global URL semantics 2ms
+ ✓ scripts/h02-progress/root-setup-calibration.test.ts > derives the actual supervisor root and rejects stale or substituted paths 1ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  22:24:27
+   Duration  321ms (transform 24ms, setup 0ms, import 32ms, tests 4ms, environment 191ms)
+

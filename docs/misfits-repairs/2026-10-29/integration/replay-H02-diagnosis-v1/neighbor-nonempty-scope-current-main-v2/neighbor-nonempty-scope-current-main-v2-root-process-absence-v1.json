@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-30T06:28:26.326039+00:00",
+  "by": "/root",
+  "PIDsAndPGIDs": [
+    92750
+  ],
+  "method": "separate escalated read-only ps pid/pgid inventory filtered exact original group",
+  "toolChunk": "fffd59",
+  "exitCode": 0,
+  "output": "",
+  "claim": "No outer PID/PGID members at observation; no receiving child was created and no product result follows."
+}

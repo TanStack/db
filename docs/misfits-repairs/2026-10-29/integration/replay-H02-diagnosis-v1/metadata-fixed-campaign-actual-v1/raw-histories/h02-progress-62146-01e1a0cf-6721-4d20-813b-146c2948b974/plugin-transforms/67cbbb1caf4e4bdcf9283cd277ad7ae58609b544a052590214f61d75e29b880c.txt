@@ -1,0 +1,17 @@
+const commitWork = /* @__PURE__ */ new WeakMap();
+export function registerTransactionCommitWork(transaction, work) {
+  if (!("state" in transaction) || transaction.state !== `persisting`) return;
+  const registered = commitWork.get(transaction) ?? [];
+  registered.push(work);
+  commitWork.set(transaction, registered);
+  void work.catch(() => void 0);
+}
+export function takeTransactionCommitWork(transaction) {
+  const registered = commitWork.get(transaction);
+  if (!registered) return;
+  commitWork.delete(transaction);
+  return Promise.allSettled(registered).then((results) => {
+    const failure = results.find((result) => result.status === `rejected`);
+    if (failure?.status === `rejected`) throw failure.reason;
+  });
+}

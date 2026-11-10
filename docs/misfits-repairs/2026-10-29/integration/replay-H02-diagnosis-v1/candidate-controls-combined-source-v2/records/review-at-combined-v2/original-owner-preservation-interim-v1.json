@@ -1,0 +1,48 @@
+{
+  "scope": "Python stdlib source-only read/hash/diff; not runtime, invocation or final freeze acceptance",
+  "sources": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+      "candidate_sha256": "f69881fb6efd007d5a25ba939aa2b4973a85e7fe6b3173efb183e64e5f1535ef",
+      "frozen_v4_sha256": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+      "equal": false
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "candidate_sha256": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+      "frozen_v4_sha256": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+      "equal": true
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+      "candidate_sha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+      "frozen_v4_sha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+      "equal": true
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "candidate_sha256": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+      "frozen_v4_sha256": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526",
+      "equal": true
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "candidate_sha256": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524",
+      "frozen_v4_sha256": "5bdeeb6cdc15931817a253e0cc411a48201497ea3c7a7227faa85b3579c31524",
+      "equal": true
+    },
+    {
+      "path": "scripts/h02-progress/candidate-controls.ts",
+      "candidate_sha256": "d1b3f65b082cf18112df6531d0372b25b2e64d98052a1b8fd899f0beb64c3cb7",
+      "frozen_v4_sha256": "d1b3f65b082cf18112df6531d0372b25b2e64d98052a1b8fd899f0beb64c3cb7",
+      "equal": true
+    },
+    {
+      "path": "scripts/h02-progress/candidate-controls.test.ts",
+      "candidate_sha256": "5d8416aca20ceffcbaf9481769ba14a58889068e76466cb9e42a67406b5d23aa",
+      "frozen_v4_sha256": "5d8416aca20ceffcbaf9481769ba14a58889068e76466cb9e42a67406b5d23aa",
+      "equal": true
+    }
+  ],
+  "primary_delta": "Additive companion family import/wrapper and candidate semantic phase guard. Existing history construction, arbitrary, examples and runner budgets unmodified in inspected diff. Intended companion campaign axes/registration still require frozen source review."
+}

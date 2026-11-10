@@ -1,0 +1,52 @@
+{
+  "classification": "finite ownership test command passed42; required per-history capture absent; baseline GREEN qualification remains open",
+  "invocations": 1,
+  "outerExitCode": 0,
+  "outerPid": 85463,
+  "outerPgid": 85463,
+  "childPid": 85477,
+  "childOriginalPgid": 85477,
+  "vitestSummary": {
+    "passed": 42,
+    "skipped": 220,
+    "totalDiscovered": 262,
+    "testFilesPassed": 1
+  },
+  "perHistoryReachRecordsObserved": 0,
+  "perHistoryResultsOrExactTestNamesObserved": 0,
+  "expectedFiniteHistories": 42,
+  "expectedFreshNoRefetch": 6,
+  "expectedStaleRefetch": 36,
+  "perHistoryFreshStaleCounts": "UNESTABLISHED from retained runtime records;6/36 is unchanged static grammar only",
+  "assertions": "Summary reports42 passing selected tests. Each frozen selected runner calls full model comparison and reach.assertReached, but individual outcomes/counts/names were not recorded.",
+  "recordingGap": "console.info reach output absent from stdout290bytes/stderr0; no invented records or retrospective source-based reach counts",
+  "wrapperOutcome": {
+    "classification": "finite test command passed; inspect assertions and reach evidence",
+    "heap": false,
+    "identityMatched": true,
+    "remainingGroup": 0,
+    "cleanupErrors": 0,
+    "exitCode": 0,
+    "signal": null,
+    "cleanupDiagnostics": [],
+    "elapsedMonotonicMs": 2603.0015,
+    "maxSampledGroupRssBytes": 441499648,
+    "originalPgid": 85477,
+    "stdoutSha256": "fa75a503e8b9c6f0a799ac6bb9f1775c393134e55d56f62ec2a4f283e42fa1ff",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "limits": "Finite ownership assertions and reaches require review. Operational failures never supply product RED. Only the original process group is captured; no escaped-group claim."
+  },
+  "identityBefore": {
+    "diskSourcesMatched": 562,
+    "payloadFilesMatched": 2497,
+    "nodeAndLocksAndLinksMatched": true
+  },
+  "identityAfter": {
+    "diskSourcesMatched": 562,
+    "payloadFilesMatched": 2497,
+    "nodeAndLocksAndLinksMatched": true
+  },
+  "firstKillRecordPresent": false,
+  "rootIndependentAbsenceReceiptSha256": "396271b99fe12ace147afd0249ba4c7a6e7f176a07e335a28c65065ff2f05294",
+  "limits": "No product GREEN, bug-class closure, generated coverage, complete per-history observation, or V8 loaded-source identity is established. No retry/source edit occurred."
+}

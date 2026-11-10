@@ -1,0 +1,15 @@
+{
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+    "-p",
+    "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/tsconfig.json"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "log": "typescript-full-1536-v1.log",
+  "toolLaunchChunk": "6b6a2a",
+  "toolCompletionChunk": "8260b8",
+  "receivingExecuted": false
+}

@@ -1,0 +1,70 @@
+{
+  "status": "PASS bounded pure instrument calibration only; no product GREEN or native admission",
+  "cases": [
+    {
+      "case": "original raw JSON with original base-title recipe",
+      "outcome": "REJECTED",
+      "error": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "original raw JSON with exact seed-title successor",
+      "outcome": "CAPTURED_FAILED_ASSERTION",
+      "capture": {
+        "sha256": "1fc0f3b2588d3a09cb0101f8995a3180bbecf6ba3be44a345780f49a98d65646",
+        "bytes": 3413917,
+        "selectedStatus": "failed",
+        "selectedFullName": "pagination recomputation oracle joined window failure for a fixed seed retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+        "selectedTitle": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+        "testResultFiles": 1,
+        "reportSuccess": false,
+        "productVerdict": "UNCLASSIFIED"
+      }
+    },
+    {
+      "case": "wrong seed title",
+      "outcome": "REJECTED",
+      "error": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "wrong ancestry",
+      "outcome": "REJECTED",
+      "error": "selected campaign ancestry changed"
+    },
+    {
+      "case": "missing selected assertion",
+      "outcome": "REJECTED",
+      "error": "report does not identify exactly the selected executed fixed campaign"
+    },
+    {
+      "case": "second executed assertion",
+      "outcome": "REJECTED",
+      "error": "report does not identify exactly the selected executed fixed campaign"
+    }
+  ],
+  "caseCount": 6,
+  "rejectedCorruptions": 4,
+  "exactOriginalCaptureFunctions": [
+    "capture_report",
+    "digest",
+    "read_json",
+    "require"
+  ],
+  "launcherImported": false,
+  "supervisorImported": false,
+  "configOrTestImports": 0,
+  "targetExecutions": 0,
+  "nativeProbes": 0,
+  "wideSourceOrDependencyAudit": false,
+  "originalPacketMembersRehashedAndUnchanged": 26,
+  "historicalOuterExit": 1,
+  "historicalChildExit": 1,
+  "historicalOuterReport": null,
+  "historicalQualifierSecondaryPreserved": true,
+  "newGuardsAdded": [],
+  "limits": [
+    "Only the observed pinned @fast-check/vitest fixed-seed title encoding is calibrated.",
+    "No general JSON schema/status/module hardening is added or claimed.",
+    "No future runtime, actual config evaluation, new source epoch, receiving, reach, campaign or bug-class closure is established.",
+    "The successor recipe is a title-only calibration/template component, not an executable launch packet."
+  ]
+}

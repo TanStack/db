@@ -1,0 +1,27 @@
+{
+  "name": "E06-minimal-records",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-minimal-records.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "9fcaa59a38373b87577d212cd734fc2f506fdaaa3bcb895f5966ccb0b5791f23",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": -9,
+  "termination": "event-cap",
+  "elapsedSeconds": 1.575,
+  "maximumGroupRssBytes": 596213760,
+  "rssSamples": 11,
+  "pgid": 351
+}

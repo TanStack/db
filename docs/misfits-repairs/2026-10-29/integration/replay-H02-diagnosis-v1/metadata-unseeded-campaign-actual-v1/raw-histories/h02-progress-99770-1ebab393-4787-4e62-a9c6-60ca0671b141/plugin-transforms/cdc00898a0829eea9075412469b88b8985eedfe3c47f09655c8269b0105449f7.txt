@@ -1,0 +1,17 @@
+const requestIdleCallbackPolyfill = (callback) => {
+  const timeout = 0;
+  const timeoutId = setTimeout(() => {
+    callback({
+      didTimeout: true,
+      // Always indicate timeout for the polyfill
+      timeRemaining: () => 50
+      // Return some time remaining for polyfill
+    });
+  }, timeout);
+  return timeoutId;
+};
+const cancelIdleCallbackPolyfill = (id) => {
+  clearTimeout(id);
+};
+export const safeRequestIdleCallback = typeof window !== `undefined` && `requestIdleCallback` in window ? (callback, options) => window.requestIdleCallback(callback, options) : (callback, _options) => requestIdleCallbackPolyfill(callback);
+export const safeCancelIdleCallback = typeof window !== `undefined` && `cancelIdleCallback` in window ? (id) => window.cancelIdleCallback(id) : cancelIdleCallbackPolyfill;

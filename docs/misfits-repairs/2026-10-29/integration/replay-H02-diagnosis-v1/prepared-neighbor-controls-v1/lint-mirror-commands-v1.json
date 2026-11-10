@@ -1,0 +1,58 @@
+{
+  "scope": "temporary filesystem mirror with identical repository rules and actual staged TypeScript files; copied config changes only TypeScript project/resolver paths; no production/test execution",
+  "mirror": "/private/tmp/h02-neighbor-static-v1",
+  "outcomes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/overlay-eslint.config.mjs",
+        "/private/tmp/h02-neighbor-static-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts"
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "log": "eslint-mirror-1-v1.log"
+    },
+    {
+      "path": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/overlay-eslint.config.mjs",
+        "/private/tmp/h02-neighbor-static-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "log": "eslint-mirror-2-v1.log"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/overlay-eslint.config.mjs",
+        "/private/tmp/h02-neighbor-static-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "log": "eslint-mirror-3-v1.log"
+    },
+    {
+      "path": "scripts/h02-progress/ownership-neighbor.config.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/overlay-eslint.config.mjs",
+        "/private/tmp/h02-neighbor-static-v1/scripts/h02-progress/ownership-neighbor.config.ts"
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "log": "eslint-mirror-4-v1.log"
+    }
+  ]
+}

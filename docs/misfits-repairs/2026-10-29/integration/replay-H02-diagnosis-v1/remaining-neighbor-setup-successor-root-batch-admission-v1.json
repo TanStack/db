@@ -1,0 +1,32 @@
+{
+  "status": "three exact singleton setup-successor admissions; original failures and held admissions preserved",
+  "admittedBy": "/root",
+  "slot": 2,
+  "maxActiveHeavyCommands": 1,
+  "workerCount": 1,
+  "requiredToolSandboxPermissions": "require_escalated",
+  "orderedAdmissions": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1-root-admission-v1.json",
+      "sha256": "0882ce970815e02b95374dd88867878e1d865363d46428e65e9a906ee993e1ef"
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1-root-admission-v1.json",
+      "sha256": "b7ecb66bd6a416d0c9406e3b0879b29d4b73f13a670a777a6fba1960754df7f1"
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1-root-admission-v1.json",
+      "sha256": "c6cef179e450300c7dd987a1cd9ce8a24c722bee5db9f6bf458b8d2e29a4fa13"
+    }
+  ],
+  "sourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1-independent-source-review-v1.md",
+  "sourceReviewSha256": "0c65783ceb0741c60a1ab6310669d5493259887d75d92efb14a9dd41cac2fef8",
+  "successorPacketSha256": "f25da3e002c69934d8c8d16f0880e76ecace90514e2ba650df3f1152bef5a4a8",
+  "stopFirstSurprise": true,
+  "noRetry": true,
+  "noSourceMutation": true,
+  "noPublication": true
+}

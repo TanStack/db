@@ -1,0 +1,236 @@
+import { InvalidKeyError, UndefinedKeyError } from "./errors";
+export const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`
+];
+export function deepEquals(a, b) {
+  return deepEqualsInternal(a, b, void 0);
+}
+export function equalPersistedSnapshotValues(a, b) {
+  return deepEqualsInternal(a, b, void 0, true, true);
+}
+function isPlainPrototype(prototype) {
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+function enumerableOwnKeys(value) {
+  const keys = Object.keys(value);
+  for (const key of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, key)) keys.push(key);
+  }
+  return keys;
+}
+export function deepEqualsInternal(a, b, visited, draft = false, persistedSnapshot = false) {
+  if (a === b || Object.is(a, b)) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+  if (persistedSnapshot && typeof a === `object` && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) {
+    return false;
+  }
+  if (a instanceof Date) {
+    if (!(b instanceof Date)) return false;
+    return Object.is(a.getTime(), b.getTime());
+  }
+  if (b instanceof Date) return false;
+  if (a instanceof RegExp) {
+    if (!(b instanceof RegExp)) return false;
+    return a.source === b.source && a.flags === b.flags && (!draft || a.lastIndex === b.lastIndex);
+  }
+  if (b instanceof RegExp) return false;
+  if (a instanceof Map) {
+    if (!(b instanceof Map)) return false;
+    if (a.size !== b.size) return false;
+    if (visited?.has(a)) {
+      return visited.get(a) === b;
+    }
+    visited ??= /* @__PURE__ */ new Map();
+    visited.set(a, b);
+    const bEntries = draft && Array.from(b.entries());
+    const result = Array.from(a.entries()).every(
+      ([key, val], index) => bEntries ? Object.is(key, bEntries[index][0]) && deepEqualsInternal(
+        val,
+        bEntries[index][1],
+        visited,
+        true,
+        persistedSnapshot
+      ) : b.has(key) && deepEqualsInternal(
+        val,
+        b.get(key),
+        visited,
+        draft,
+        persistedSnapshot
+      )
+    );
+    visited.delete(a);
+    return result;
+  }
+  if (b instanceof Map) return false;
+  if (a instanceof Set) {
+    if (!(b instanceof Set)) return false;
+    if (a.size !== b.size) return false;
+    if (visited?.has(a)) {
+      return visited.get(a) === b;
+    }
+    visited ??= /* @__PURE__ */ new Map();
+    visited.set(a, b);
+    const aValues = Array.from(a);
+    const bValues = Array.from(b);
+    if (draft) {
+      const result2 = aValues.every(
+        (val, index) => deepEqualsInternal(
+          val,
+          bValues[index],
+          visited,
+          draft,
+          persistedSnapshot
+        )
+      );
+      visited.delete(a);
+      return result2;
+    }
+    if (aValues.every((val) => typeof val !== `object`)) {
+      visited.delete(a);
+      return aValues.every((val) => b.has(val));
+    }
+    const matchValues = (index, remaining, branchVisited) => {
+      if (index === aValues.length) return true;
+      const value = aValues[index];
+      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
+        const candidateVisited = new Map(branchVisited);
+        if (deepEqualsInternal(
+          value,
+          bValues[candidateIndex],
+          candidateVisited,
+          draft,
+          persistedSnapshot
+        ) && matchValues(
+          index + 1,
+          remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
+          candidateVisited
+        )) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const result = matchValues(
+      0,
+      bValues.map((_, index) => index),
+      visited
+    );
+    visited.delete(a);
+    return result;
+  }
+  if (b instanceof Set) return false;
+  if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b) && !(a instanceof DataView) && !(b instanceof DataView)) {
+    const typedA = a;
+    const typedB = b;
+    if (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b) || typedA.length !== typedB.length)
+      return false;
+    for (let i = 0; i < typedA.length; i++) {
+      const x = typedA[i];
+      const y = typedB[i];
+      if (x !== y && !(x !== x && y !== y)) return false;
+    }
+    return true;
+  }
+  if (ArrayBuffer.isView(b) && !(b instanceof DataView) && !ArrayBuffer.isView(a)) {
+    return false;
+  }
+  if (isTemporal(a) && isTemporal(b)) {
+    const aTag = a[Symbol.toStringTag];
+    const bTag = b[Symbol.toStringTag];
+    if (aTag !== bTag) return false;
+    if (aTag === `Temporal.Duration`) {
+      const durationA = a;
+      const durationB = b;
+      return durationFields.every(
+        (field) => durationA[field] === durationB[field]
+      );
+    }
+    if (typeof a.equals === `function`) {
+      return a.equals(b);
+    }
+    return a.toString() === b.toString();
+  }
+  if (isTemporal(b)) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && a.length !== b.length) return false;
+  if (Array.isArray(a) && !draft) {
+    if (visited?.has(a)) {
+      return visited.get(a) === b;
+    }
+    visited ??= /* @__PURE__ */ new Map();
+    visited.set(a, b);
+    const result = a.every(
+      (item, index) => deepEqualsInternal(item, b[index], visited, draft, persistedSnapshot)
+    );
+    visited.delete(a);
+    return result;
+  }
+  if (typeof a === `object`) {
+    const prototype = Object.getPrototypeOf(a);
+    const prototypeB = Object.getPrototypeOf(b);
+    const plain = isPlainPrototype(prototype);
+    const plainB = isPlainPrototype(prototypeB);
+    if (prototype !== prototypeB && !plain && !plainB) return false;
+    if (visited?.has(a)) {
+      return visited.get(a) === b;
+    }
+    const keysA = enumerableOwnKeys(a);
+    const keysB = enumerableOwnKeys(b);
+    if (keysA.length !== keysB.length) return false;
+    if (keysA.length === 0 && !Array.isArray(a) && !(plain && plainB)) {
+      return a instanceof URL && a.href === b.href;
+    }
+    let registered = false;
+    let result = true;
+    for (const key of keysA) {
+      const value = a[key];
+      if (!registered && value !== null && typeof value === `object`) {
+        visited ??= /* @__PURE__ */ new Map();
+        visited.set(a, b);
+        registered = true;
+      }
+      if (!Object.prototype.propertyIsEnumerable.call(b, key) || !deepEqualsInternal(value, b[key], visited, draft, persistedSnapshot)) {
+        result = false;
+        break;
+      }
+    }
+    if (registered) visited.delete(a);
+    return result;
+  }
+  return false;
+}
+const temporalTypes = /* @__PURE__ */ new Set([
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`
+]);
+export function isTemporal(a) {
+  if (a == null || typeof a !== `object`) return false;
+  const tag = a[Symbol.toStringTag];
+  return typeof tag === `string` && temporalTypes.has(tag);
+}
+export const DEFAULT_COMPARE_OPTIONS = {
+  direction: `asc`,
+  nulls: `first`,
+  stringSort: `locale`
+};
+export function assertCollectionKey(key, item) {
+  if (typeof key !== `string` && typeof key !== `number`) {
+    throw key === void 0 ? new UndefinedKeyError(item) : new InvalidKeyError(key, item);
+  }
+}

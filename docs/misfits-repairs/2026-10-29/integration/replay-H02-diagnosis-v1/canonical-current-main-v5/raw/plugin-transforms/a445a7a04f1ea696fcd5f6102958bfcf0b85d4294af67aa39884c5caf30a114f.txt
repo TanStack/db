@@ -1,0 +1,151 @@
+import {
+  CollectionRequiresConfigError,
+  CollectionRequiresSyncConfigError
+} from "../errors";
+import { devBuild } from "../error-message";
+import {
+  CollectionRequiresGetKeyError,
+  InvalidCallbackOptionError,
+  InvalidGetKeyError,
+  InvalidOptionTypeError,
+  InvalidSyncConfigError,
+  InvalidSyncFunctionError
+} from "./config-errors";
+const KNOWN_CONFIG_KEYS = /* @__PURE__ */ new Set([
+  `id`,
+  `schema`,
+  `getKey`,
+  `sync`,
+  `gcTime`,
+  `startSync`,
+  `autoIndex`,
+  `defaultIndexType`,
+  `compare`,
+  `syncMode`,
+  `defaultStringCollation`,
+  `onInsert`,
+  `onUpdate`,
+  `onDelete`,
+  `utils`,
+  `singleResult`,
+  // Metadata returned by persistedCollectionOptions.
+  `persistence`
+]);
+function findLikelyTypo(key, config) {
+  for (const knownKey of KNOWN_CONFIG_KEYS) {
+    if (knownKey in config) continue;
+    if (key.toLowerCase() === knownKey.toLowerCase()) return knownKey;
+    if (key.length < 5 || key.length !== knownKey.length) continue;
+    for (let i = 0; i < key.length - 1; i++) {
+      const swapped = key.slice(0, i) + key[i + 1] + key[i] + key.slice(i + 2);
+      if (swapped === knownKey) return knownKey;
+    }
+  }
+  return void 0;
+}
+function describeType(value) {
+  if (value === null) return `null`;
+  if (value === void 0) return `undefined`;
+  if (Array.isArray(value)) return `an array`;
+  return typeof value;
+}
+export function validateCollectionConfig(config) {
+  if (!config || typeof config !== `object` || Array.isArray(config)) {
+    throw new CollectionRequiresConfigError();
+  }
+  const configObj = config;
+  if (devBuild() && process.env.NODE_ENV !== `production`)
+    for (const key of Object.keys(configObj)) {
+      if (KNOWN_CONFIG_KEYS.has(key) || key.startsWith(`_`)) continue;
+      const suggestion = findLikelyTypo(key, configObj);
+      if (suggestion) {
+        console.warn(
+          `Possible misspelling in collection config: "${key}". Did you mean "${suggestion}"?`
+        );
+      }
+    }
+  if (!(`getKey` in configObj) || configObj.getKey === void 0) {
+    throw new CollectionRequiresGetKeyError();
+  }
+  if (typeof configObj.getKey !== `function`) {
+    throw new InvalidGetKeyError(describeType(configObj.getKey));
+  }
+  if (!configObj.sync) {
+    throw new CollectionRequiresSyncConfigError();
+  }
+  if (typeof configObj.sync !== `object` || Array.isArray(configObj.sync)) {
+    throw new InvalidSyncConfigError(describeType(configObj.sync));
+  }
+  const syncObj = configObj.sync;
+  if (typeof syncObj.sync !== `function`) {
+    throw new InvalidSyncFunctionError(describeType(syncObj.sync));
+  }
+  const callbackOptions = [
+    `onInsert`,
+    `onUpdate`,
+    `onDelete`,
+    `compare`
+  ];
+  for (const optionName of callbackOptions) {
+    if (optionName in configObj && configObj[optionName] !== void 0 && typeof configObj[optionName] !== `function`) {
+      throw new InvalidCallbackOptionError(
+        optionName,
+        describeType(configObj[optionName])
+      );
+    }
+  }
+  if (`id` in configObj && configObj.id !== void 0) {
+    if (typeof configObj.id !== `string`) {
+      throw new InvalidOptionTypeError(
+        `id`,
+        `a string`,
+        describeType(configObj.id)
+      );
+    }
+  }
+  if (`gcTime` in configObj && configObj.gcTime !== void 0) {
+    if (typeof configObj.gcTime !== `number`) {
+      throw new InvalidOptionTypeError(
+        `gcTime`,
+        `a number`,
+        describeType(configObj.gcTime)
+      );
+    }
+  }
+  if (`startSync` in configObj && configObj.startSync !== void 0) {
+    if (typeof configObj.startSync !== `boolean`) {
+      throw new InvalidOptionTypeError(
+        `startSync`,
+        `a boolean`,
+        describeType(configObj.startSync)
+      );
+    }
+  }
+  if (`autoIndex` in configObj && configObj.autoIndex !== void 0) {
+    if (configObj.autoIndex !== `off` && configObj.autoIndex !== `eager`) {
+      throw new InvalidOptionTypeError(
+        `autoIndex`,
+        `"off" or "eager"`,
+        String(configObj.autoIndex)
+      );
+    }
+  }
+  if (`syncMode` in configObj && configObj.syncMode !== void 0) {
+    if (configObj.syncMode !== `eager` && configObj.syncMode !== `on-demand`) {
+      throw new InvalidOptionTypeError(
+        `syncMode`,
+        `"eager" or "on-demand"`,
+        String(configObj.syncMode)
+      );
+    }
+  }
+  if (`utils` in configObj && configObj.utils !== void 0) {
+    if (typeof configObj.utils !== `object` || configObj.utils === null || Array.isArray(configObj.utils)) {
+      throw new InvalidOptionTypeError(
+        `utils`,
+        `an object`,
+        describeType(configObj.utils)
+      );
+    }
+  }
+}

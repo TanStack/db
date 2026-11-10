@@ -1,0 +1,10 @@
+{
+  "kind": "query",
+  "scheduler": "microtask",
+  "cacheIdentity": "subscription",
+  "includes": true,
+  "window": true,
+  "nonemptyPrior": true,
+  "keyShift": 0,
+  "rankScale": 10
+}

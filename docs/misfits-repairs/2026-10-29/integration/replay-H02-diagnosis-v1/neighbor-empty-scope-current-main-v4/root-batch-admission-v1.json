@@ -1,0 +1,28 @@
+{
+  "status": "three separate singleton admissions, serial slot2, stop first surprise",
+  "slot": 2,
+  "maxActiveHeavyCommands": 1,
+  "workerCount": 1,
+  "orderedAdmissions": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-root-admission-v1.json",
+      "sha256": "91115cb67d5fe297126b5b23fd345bb418c90d2d6f1850322d662ba9c1612a71"
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-root-admission-v1.json",
+      "sha256": "090ddc3e7327edb1656200bde36aa8b5b3d24e7b9087bbbbbed4c5db330751e0"
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-root-admission-v1.json",
+      "sha256": "5a781b91b0a2f78229261ae9b9ad1d18711485a19b1432e738dee474e0b4b8ed"
+    }
+  ],
+  "rootConflictClassification": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-nonempty-conflict-current-main-v4-root-classification-v1.json",
+  "rootConflictClassificationSha256": "c5ba99318bfd2d58793b5c331d10aaa71fed70cda1d067aeda811d53ff35c70a",
+  "noSourceMutation": true,
+  "noRetry": true,
+  "noPublication": true
+}

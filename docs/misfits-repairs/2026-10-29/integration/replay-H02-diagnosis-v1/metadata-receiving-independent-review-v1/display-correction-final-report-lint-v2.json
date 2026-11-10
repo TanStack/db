@@ -1,0 +1,11 @@
+{
+  "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "exitCode": 0,
+  "stdout": "$ node scripts/agent-lint-feedback.mjs\n",
+  "stderr": "",
+  "preload": "Previously inspected; only git output-buffer capacity changes, no lint scope/rule change.",
+  "nativeLists": 0,
+  "nativeProcessProbes": 0,
+  "receivingRuns": 0
+}

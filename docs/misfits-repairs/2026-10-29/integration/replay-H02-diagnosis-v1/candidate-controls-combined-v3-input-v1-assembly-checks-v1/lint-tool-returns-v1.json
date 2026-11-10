@@ -1,0 +1,54 @@
+{
+  "source": {
+    "command": "/Users/kyle.mathews/.n/bin/node scripts/agent-lint-feedback.mjs",
+    "initial": {
+      "chunk_id": "60bc27",
+      "wall_time_seconds": 1.003166334,
+      "session_id": 55900,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "completion": {
+      "chunk_id": "f1029e",
+      "wall_time_seconds": 0.498085459,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    }
+  },
+  "reportBeforeBuffer": {
+    "command": "/Users/kyle.mathews/.n/bin/node scripts/agent-lint-feedback.mjs",
+    "completion": {
+      "chunk_id": "5016df",
+      "wall_time_seconds": 0.682771083,
+      "exit_code": 1,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "classification": "git ls-files output capture exceeded default 1 MiB; lint selection never completed; raw failed log preserved"
+  },
+  "reportAfterBuffer": {
+    "command": "/Users/kyle.mathews/.n/bin/node --import=/tmp/misfits-lint-git-buffer-v1.mjs scripts/agent-lint-feedback.mjs",
+    "initial": {
+      "chunk_id": "a92c76",
+      "wall_time_seconds": 1.00097425,
+      "session_id": 55886,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "completion": {
+      "chunk_id": "d98225",
+      "wall_time_seconds": 0.000007167,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "authorization": "Root explicitly selected its existing read-only-inspected buffer shim for one report changed-lint invocation",
+    "scope": "unchanged changed-file selection, oracle rules and budget report",
+    "adjustment": "git output capture maxBuffer only, 8 MiB; no native runtime bound changed"
+  },
+  "packageScript": "lint:changed = node scripts/agent-lint-feedback.mjs",
+  "pnpmWrapper": "Not invoked again because the earlier author invocation attempted an unauthorized automatic install and aborted; exact direct script used",
+  "slot2": "returned after actual final exit",
+  "compilerConstructorPureTestCollectionReceivingExecutions": 0
+}

@@ -1,0 +1,45 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/queued_progress_design",
+  "admittedRuntime": true,
+  "reservedHeavySlot": 2,
+  "maxInvocations": 1,
+  "cell": "inline-source-failed-peer",
+  "launcher": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/launcher-recipe-v1.json",
+    "sha256": "38d5a85214e1ebfe5d8d60f850f6e159c6141b5b225883f09a73a2b546162124"
+  },
+  "exactExecCommand": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the exact admitted H02 baseline launcher outside the sandbox so its owned native process groups can be contained and cleaned up.",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 3000
+  },
+  "sourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/source-freeze-v1.json",
+    "sha256": "0a1978c5a8856da7aab49379462dd5f258f75b7ba910454eed320f3018f13779"
+  },
+  "inputFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/input-freeze-v1.json",
+    "sha256": "2777d9652b05480948130b228c9c4bf8c204cb7906b3fa4e8720decb31c1277c"
+  },
+  "nativeRecipe": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+    "sha256": "a454b52a8c6fae157b154d203ee7c976e93f6bb99e75e1565ac8982692038a45"
+  },
+  "independentSourceReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-successor-source-independent-review-v1.md",
+    "sha256": "ac453877b1d6f0c3cc11591cfdb8d08ab87b949dc03b0edb150ccd1922f1ea1a"
+  },
+  "parentPreparation": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/output-parent-preparation-receipt-v1.json",
+    "sha256": "3151981a4c8373221512336123e76a973fc77e4ea7395b17eb7fd15c67f7eec2"
+  },
+  "priorFailedResultPreserved": true,
+  "innerFailureKillValidation": "OPEN; escalation requirement is operational correction, no causal EPERM proof",
+  "after": "Stop after one actual completion; preserve complete outputs/actual return/original identifiers absence/current identities and independent full actual review before root classification. No remaining13/candidates/retry.",
+  "canonicalImport": false,
+  "publishing": false
+}

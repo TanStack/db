@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-30T07:09:14.459579+00:00",
+  "rootClassified": true,
+  "classifiedBy": "/root",
+  "classification": "accepted bounded V4 nonempty scope-key real Query payload and atomic publication GREEN",
+  "resultManifestSha256": "131e0b62f992152ac09781b268e3b11c53880c2937d55612b443acae85960068",
+  "independentResultReviewSha256": "8c20a57124f55a910f6267e139c23e6a5310a9298b65819172fe3901fe99282f",
+  "independentVerificationSha256": "572eab858cecfa4dc391b113f6cc78312acda786f4f7aef4c9a36ad658b13ad4",
+  "actualPassedHistories": 1,
+  "skipped": 4,
+  "rawReceipts": 176,
+  "reachCounts": {
+    "nonempty-prior": 1,
+    "held-provider-read": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 1,
+    "downstream-change": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "rootRehashedResultMembers": 1960,
+  "rootIndependentProcessAbsenceReceiptSha256": "7e3c91b1c4aa47f6a7ca7afd1e89c614573cedae0d28d17eab7113a41f610f09",
+  "preservedPriorV3": true,
+  "limits": [
+    "One finite scope-key history; no conflicting-cache progress or generated closure.",
+    "Actual calibrated selection and raw history, no captured successful verbose name.",
+    "Temporal virtual-metadata real QueryClient receiving gap remains open.",
+    "Candidate 20 states remain UNREACHED; production progress fix unimplemented."
+  ]
+}

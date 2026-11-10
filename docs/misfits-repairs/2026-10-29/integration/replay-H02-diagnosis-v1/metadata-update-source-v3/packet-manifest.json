@@ -1,0 +1,87 @@
+{
+  "artifacts": {
+    "changed-members.json": {
+      "bytes": 431,
+      "sha256": "b57b921c360312acd01334545a87815ceb987725af0d0b059b44691dcc400239"
+    },
+    "eslint-final.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "format-attempt1.log": {
+      "bytes": 66,
+      "sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+    },
+    "legacy-pure-controls.mjs": {
+      "bytes": 13561,
+      "sha256": "ae410aa8e51207e66ac45cc90c95ef2142f985f2345e78f913c2fefff19469c6"
+    },
+    "legacy-pure-final.log": {
+      "bytes": 6716,
+      "sha256": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125"
+    },
+    "preparation-authority.json": {
+      "bytes": 780,
+      "sha256": "3666768806d97773ceb3606e5d71f42d673238862278810ce178719d912d3e8d"
+    },
+    "pure-results.json": {
+      "bytes": 6716,
+      "sha256": "687508678bf2c2811cdbcba370cc44eb1863b57d7437fbe207fee86c172c0125"
+    },
+    "report-v3.md": {
+      "bytes": 9405,
+      "sha256": "dc2986071e815ed4bf720ce73249ef0a8fe7c8bc83726ef1a8c4be511d251050"
+    },
+    "selector-roundtrip-attempt1.log": {
+      "bytes": 277,
+      "sha256": "87b8ca81d491b826f73b8e18786ef181cc1d063547789bc5398e85a04947872e"
+    },
+    "selector-roundtrip-controls.mjs": {
+      "bytes": 16092,
+      "sha256": "ac8cadd930e2be04d6673d70b6d11d81264de27b5fed6535e566036800a6a3e9"
+    },
+    "selector-roundtrip-results.json": {
+      "bytes": 156055,
+      "sha256": "f7f81b3f0dfe93231493acdccc3f668cbb1537ca07e46de0d2444149c633872c"
+    },
+    "source-delta.patch": {
+      "bytes": 2504,
+      "sha256": "7cb143d7cc98f9fc1e2444834cfa0deefa877599114073481eadfb261bf81669"
+    },
+    "source-freeze.json": {
+      "bytes": 399285,
+      "sha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd"
+    },
+    "source-inventory.json": {
+      "bytes": 73708,
+      "sha256": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84"
+    },
+    "static-results.json": {
+      "bytes": 1823,
+      "sha256": "6a33246c0dd427b7bd4127027af8e97a11a0599dbc4f77c4eb38bcf399ba42fc"
+    },
+    "typecheck-final.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "failedRawInner1948AndOuter3Preserved": true,
+  "failedReceivingResultFreezeSha256": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb",
+  "noCanonicalRefresh": true,
+  "noGitOperations": true,
+  "noInstalls": true,
+  "noNativeList": true,
+  "noPrUpdates": true,
+  "noProductionChanges": true,
+  "noReceiving": true,
+  "predecessorSourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "production511Unchanged": true,
+  "rawManifestSha256": "091d5b2cec5155f52003ee629758b2ce69e0bd20a6f56ea15eda012d15432803",
+  "rootQualificationSha256": "a7122694df31dbbea26314c0a3268e4a81e74a13d92d4abd9904498ccf6e037f",
+  "sourceFiles": 589,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceInventorySha256": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84",
+  "sourceMembersUnchangedFromPrevious": 587,
+  "status": "source/static/pure successor prepared for independent source review; no native or dependency-recovery acceptance",
+  "toolchainRecoveryGate": "Root must accept recovery/full toolchain re-audit separately. Predecessor dependency preimage unchanged; this packet accepts no changed wrapper bytes."
+}

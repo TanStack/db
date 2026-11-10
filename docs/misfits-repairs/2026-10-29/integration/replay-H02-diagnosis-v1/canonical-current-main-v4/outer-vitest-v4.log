@@ -1,0 +1,36 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts (4 tests | 1 failed | 3 skipped) 2373ms
+     × replays the finite five-root queued-answer history 2373ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts > queued backend answer progress > replays the finite five-root queued-answer history
+AssertionError: receiving worker exits successfully: expected 1 to deeply equal +0
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ checkReplayPublication packages/db/tests/query/load-subset-retained-publication-oracle.ts:17:25
+     15|   label: string,
+     16| ) {
+     17|   expect(actual, label).toEqual(expected)
+       |                         ^
+     18| }
+     19|
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:373:3
+ ❯ run packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:60:5
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:65:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  22:29:08
+   Duration  2.71s (transform 44ms, setup 19ms, import 72ms, tests 2.37s, environment 175ms)
+

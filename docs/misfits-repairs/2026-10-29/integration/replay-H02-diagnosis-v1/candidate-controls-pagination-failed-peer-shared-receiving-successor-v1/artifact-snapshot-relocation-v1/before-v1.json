@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-30T11:21:47.915936+00:00",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "historicalPacketSha256": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+  "historicalPacketEntriesVerified": 126,
+  "activeSourceBindingsVerified": 596,
+  "sourcePath": "before/packages/db/tests/query/pagination-oracle.property.test.ts",
+  "sourceSha256": "6f26a439c6bcf949364e6c32c238a72b98d1d29d929c355622e32232c56e4f32",
+  "sourceBytes": 230217,
+  "targetPath": "before/packages/db/tests/query/pagination-oracle.property.test.ts.txt",
+  "targetExisted": false,
+  "requiredLintActual": {
+    "initial": "49a854",
+    "session": 94183,
+    "final": "b5a770",
+    "exit": 1,
+    "log": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/exact-pnpm-lint-changed-v1.log",
+    "logSha256": "ac1bb41ec638eb0f0fdbb9b2fd95b609f86afa48a1f4d8668ba7642386e79511",
+    "rule": "oracle/no-unit-test",
+    "findings": 33,
+    "allFindingsOnlyHistoricalBackup": true
+  },
+  "authorization": "ROOT explicitly authorized one task-owned historical backup relocation with immutable bytes; reviewer/native author notified before mutation"
+}

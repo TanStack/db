@@ -1,0 +1,29 @@
+{
+  "status": "PASS source-only static read/hash/JSON/AST validation; launcher and supervisor not imported or executed",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "activeSourceBindings": 596,
+  "sourceCopies": 85,
+  "namedPackageRoots": 255,
+  "namedPackageOwnPayloads": 11974,
+  "supplementalResolutionEdges": 405,
+  "absentOptionalOrPeers": 112,
+  "locksVerified": 2,
+  "reuseLinksVerified": 4,
+  "twoGiBSupervisorSha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+  "rootAcceptedRecoverySha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+  "finiteOldSupplementByteForByteReused": true,
+  "dependencyCensusBroadened": false,
+  "runtimeOutputAbsent": true,
+  "ASTSyntaxParsed": true,
+  "supervisorImported": false,
+  "launcherImported": false,
+  "nativeProcessesOrProbes": 0,
+  "testsOrDiscoveryOrConfigImports": 0,
+  "pureGaps": [
+    "No mocked execution of wrapper or report parser; no native containment calibration.",
+    "Actual PGID/signal/reap/report shape and selected test count remain unvalidated until separately admitted command.",
+    "Static own-payload identity is not runtime evaluated-source binding or host/native equivalence.",
+    "Q independent source review and required report-worktree lint remain external admission gates."
+  ]
+}

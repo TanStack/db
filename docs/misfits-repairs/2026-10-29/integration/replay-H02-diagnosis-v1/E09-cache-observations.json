@@ -1,0 +1,27 @@
+{
+  "name": "E09-cache-observations",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-cache-observations.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "0b5e0275e9461532b1d5c9f6238a93109c20c4cc6d6cc3b670ff0d1fc000dee6",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": -9,
+  "termination": "event-cap",
+  "elapsedSeconds": 1.582,
+  "maximumGroupRssBytes": 589037568,
+  "rssSamples": 11,
+  "pgid": 3545
+}

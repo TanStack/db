@@ -1,0 +1,25 @@
+--- before/docs/contributing/oracle-coverage.md
++++ after/docs/contributing/oracle-coverage.md
+@@ -2398,6 +2398,22 @@
+   rechecks rows while bounding eager indexed and joined work.
+   These finite matrices do not establish arbitrary overlapping optimistic
+   histories, ties, or provider-specific cursor behavior.
++  The source-prepared `pagination.joined-window-failure` family adds held
++  anti-join and inline-child loads, failure-first/peer-first/success schedules,
++  and complete child contents through the nonregistering
++  `pagination-window-publication-oracle.ts` companion. The corresponding real
++  QueryClient receiving successors reuse its recomputation and retained-window
++  comparison, with raw callback/event recording before checkpoint comparisons.
++  The failure receiver ends at the first handled-failure/pre-peer-release
++  barrier and then cleans up; real-provider later settlement and retry remain
++  open under this pagination owner. Its successful neighbor must calibrate the
++  same recorder before any production repair. All successor reaches are
++  UNREACHED until exact-source admission and execution. The new, unrun
++  pending-only reach was replaced with `source-failure-handled`: a failed move
++  may retire its peer, so pending and observable AbortError retirement are
++  measured separately and owe the same retained snapshot. No campaign budget
++  was lowered. This preparation supplies no additional runtime coverage,
++  candidate-state, host-progress, metadata, or bug-class closure credit.
+ - The [IR identity oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ir-stable-identity-oracle.test.ts)
+   owns demand-key encoding in only two generated tests. The fixed demand-key cases live in [ir-stable-identity.test.ts](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ir-stable-identity.test.ts), not in this owner. The
+   [load-subset oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-oracle.property.test.ts)

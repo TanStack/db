@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+umask 077
+set -C
+/bin/mkdir /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1
+exec /Users/kyle.mathews/.n/bin/node /private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.mjs /private/tmp/h02-qualified-peer-receiving-v1/control/recipes/inline-window-failure-first.json > /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stdout.log 2> /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1/outer.stderr.log

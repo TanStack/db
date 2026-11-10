@@ -1,0 +1,27 @@
+{
+  "checkerTestConfigTraceBytesUnchanged": true,
+  "findings": {
+    "OMIT-SOURCE-F01": "Addressed in inactive exact command: -I -S -B; actual dispatch not yet observed",
+    "OMIT-SOURCE-F02": "Addressed in inactive tool metadata: require_escalated plus justification; actual dispatch not yet observed"
+  },
+  "freshWorkspaceAbsent": true,
+  "invocationDeltaKeys": [
+    "bindingSha256",
+    "cmd",
+    "justification",
+    "materializationIfLaterAdmitted",
+    "pythonStartupFlags",
+    "sandbox_permissions",
+    "supersedesInactiveProposalSha256"
+  ],
+  "kind": "Passive exact delta checks only; no import/compile/runtime",
+  "launcherByteIdentical": true,
+  "materializedOutputNamesAndHashesUnchanged": true,
+  "nativeArgvUnchanged": true,
+  "predecessorBoundInputsAllMatch": true,
+  "predecessorFreezeMembersAllMatch": true,
+  "reviewFreezeSha256": "2a871c19f12f2af9fbfc5a82af56508df8a612ca991089b1d3f0aacf9a94c3b5",
+  "reviewReportSha256": "d22ce61aa019bbe2d19dfa8b7459791c32c08099cd7c98f4e26b689d176b01a1",
+  "rootOwnsLintAdmission": true,
+  "runtimeMaterializationProbesImportsCompilerPerformed": false
+}

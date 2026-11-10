@@ -1,0 +1,20 @@
+{
+  "admittedBy": "/root",
+  "admissionFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v7-root-admission-v1.json",
+  "admissionSha256": "495cacbca9f98eacb0c96dae116d2d4e0e0e5730ad9bebb15a98016342593347",
+  "exactLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/launcher-v7.zsh",
+  "launcherSha256": "ea64c0ef3974ce9be100a800f3c236378c56f8f6c792b89712c9859964921252",
+  "recipeSha256": "65c8dc8d30196508c2af090fc675699f5b60b2b5685ce2c657d957610ad0a8bc",
+  "sourceFreezeSha256": "005344d82c3cfeb401da49dc9f70005a3048a47e793f9656462605cead6b3f17",
+  "preparationPacketSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+  "invocations": 1,
+  "outerExitCode": 1,
+  "outerToolSession": 88567,
+  "outerToolChunk": "a82954",
+  "completionToolChunk": "42d5af",
+  "outerPid": 66719,
+  "outerPgid": 66719,
+  "receivingPid": 66812,
+  "receivingPgid": 66812,
+  "rootIndependentAbsenceCheck": "Root reported ps output empty/exit0 for outer66719 and receiving66812 after invocation; no child-side recheck or runtime retry"
+}

@@ -1,0 +1,44 @@
+{
+  "bindingSha256": "cf38c8a9e5f7df342e88813a7de8ae456f7474a1f5a8dedd9eab9683602967dc",
+  "bugClassClosureCredit": false,
+  "canonicalImport": false,
+  "cmd": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -I -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/launch-calibration.py.txt cf38c8a9e5f7df342e88813a7de8ae456f7474a1f5a8dedd9eab9683602967dc",
+  "executableSha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+  "expectedNativeExitCode": 0,
+  "expectedNativeTests": {
+    "passed": 1,
+    "skipped": 0,
+    "title": "rejects an omitted root previous value at the shared metadata delta comparison"
+  },
+  "expectedSemanticResult": "One healthy checker replay completes finish/reach; one cloned-observation omission is caught at sequence185 root metadata delta comparison. Intended assertion failure is captured internally; outer test passes only when exact classification assertions pass.",
+  "hardOuterWatchdog": false,
+  "materializationIfLaterAdmitted": {
+    "freshDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-run-v1",
+    "frozenSourceChanged": false,
+    "newOutputs": [
+      "source-prelaunch.json",
+      "outer-vitest.log",
+      "calibration-result.json",
+      ".vite/"
+    ],
+    "onlyFiles": {
+      "calibration.config.mjs": "calibration-config.mjs.txt",
+      "metadata-previous-value-calibration-oracle.test.ts": "metadata-previous-value-calibration-oracle.test.ts.txt",
+      "package.json": "package.json.txt"
+    },
+    "reuseSymlink": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-run-v1/node_modules",
+      "target": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/node_modules"
+    }
+  },
+  "maxInvocations": 1,
+  "max_output_tokens": 3000,
+  "onAnyOutcome": "Stop after one invocation. Preserve all output and actual initial/final tool results separately; no retry, next lane, receiving invocation, compiler, probes, product/source edit, production mutant, Git/PR/install or canonical action follows. Root decides further review/identity observations.",
+  "productDeadline": null,
+  "productionMutantRedCredit": false,
+  "sandbox_permissions": "use_default",
+  "status": "INERT EXACT ONE-SHOT PROPOSAL; independent review and separate root admission required",
+  "tool": "exec_command",
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "yield_time_ms": 1000
+}

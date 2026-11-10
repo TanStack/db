@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-30T09:33:17.553676+00:00",
+  "status": "source-and-offline-accepted",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/completion-binding-profile-successor-v1/source-freeze-v1.json",
+  "sourceFreezeSha256": "512408885f77e90d3a8374452e044f0216a2f803ff97dfe31894dba7b66d02db",
+  "packetSha256": "04315917d06fa4e674efce03fe222632265261aa9ebc5684294136999abfdfc2",
+  "independentReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/profile-successor-source-review-v1.md",
+  "independentReviewSha256": "0e013e7283dd1f5082bc19d1f06158167301d24614d9cd23993cc1513c48a405",
+  "ledgerPrefix": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/completion-binding-profile-successor-v1/finding-ledger-v1.jsonl",
+  "ledgerPrefixSha256": "27612f92494c1049a292e575d0caec7bcdcf53eec6dac8ff9348d92fbb0dfa18",
+  "ledgerTail": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/completion-binding-profile-successor-v1/finding-ledger-closeout-v1.jsonl",
+  "ledgerTailSha256": "b8cef09e103371c6ed8c6580aaf41c7cb9630136c434f12b2511657389aa340a",
+  "rawFindings": 6,
+  "sourceFindingsFixed": 6,
+  "newRemainingOperationalGates": 1,
+  "reviewerAssessment": "Accurate, high-signal independent diagnosis and exact source review; recommend for this scoped provenance review. Independently separated worker-test success, instrumentation validity, source readiness and native admission.",
+  "checks": {
+    "pureTests": 87,
+    "passed": 87,
+    "skipped": 0,
+    "verifierCases": 83,
+    "verifierAllowed": 6,
+    "verifierRejected": 77,
+    "recipeCases": 4,
+    "recipeAllowed": 1,
+    "recipeRejected": 3,
+    "tsc": "pass",
+    "eslint": "pass",
+    "directLintFeedback": "pass",
+    "pnpmLintChanged": "exit1 automatic install attempt aborted before module removal; preserved separately"
+  },
+  "exactInputChanges": {
+    "recipe.bindingProfile": "completion-baseline-v1",
+    "programBytes": "unchanged original inline-park-root",
+    "output": "new singleton leaf; preserve failed original",
+    "sourceFreeze": "new combined successor containing exact four-source packet",
+    "command": "same pinned completion-parent.mjs command with new recipe path; internal verifier gains explicit third profile argument"
+  },
+  "runtimeAdmission": false,
+  "candidate20": "all UNREACHED",
+  "slot2": "returned",
+  "productionChanges": false
+}

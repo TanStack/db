@@ -1,0 +1,428 @@
+{
+  "at": "2026-10-30T09:21:18.062808+00:00",
+  "scope": "Independent Python stdlib read/hash/parse of selected preserved assets and 20 relevant pre-history loaded-source bindings only; no verifier execution, native receiving, model stepping or process probes",
+  "resultFreezeSha256": "cfd7d4c32192a39d315c7318bc599aeeedc167f4f729cd919ab23a17257b572c",
+  "assetCountInFreeze": 1974,
+  "selectedAssetsIndependentlyRehashed": {
+    "outcome.json": "5bdcfa9af44de2ed7b70327361ec98d6e9ad691ac907a742f9229728f948ec9d",
+    "root-actual-tool-return.json": "f95b7a931963faddf24ce1b1ffcfa0559689ce30616cde1c8e3baaf11c8fa96d",
+    "root-original-identities-absence.json": "c88a4eb5b8f16b5874ebd84d0a93737be679eba36821b3bdddc042b44774a1ff",
+    "root-postreturn-source-identity.json": "351ee81892fcd7f954059b5030e81156912df8477466ed3934cdcf2d4f61e951",
+    "invocation.json": "a7c759443a1401681615d0d63e11b041d273a1721e1f5c478c83a7c4a31415db",
+    "source-freeze.json": "8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1",
+    "baseline-program.json": "947022590b784aa2cf2783ee08a03053ef407da9f4e34beb15190dbf5c335664",
+    "recipe.json": "b16ec72cabaa230e20dfa530a0922c735a9186a7ac880eb86fa50c8ead48ca96",
+    "worker.stdout.log": "b648d9838b4859b3a7c5226e42ed9359ea816b7020387f83dc8ecbd65b948ce9",
+    "worker.stderr.log": "e4d4fc9ec36ad37619f37b4a5555511bd28d25e0cdfc42f019e281dd7d065672",
+    "final-group.json": "194c80aab2d54d869392d1e0e39a0c66959e88ab61c147cde34f3d5bd51b3c58",
+    "owned-worker-groups.jsonl": "91747c3f7e0f88cccd9004ec70ea1455cdd272c731de43ad4deeaafb4012ef18",
+    "receiving-artifacts/binding-verification.json": "0f7dc0ea941684bda4527eb0250ea79a3e0fc8e9ae14cf21661e989080cb1c0b",
+    "receiving-artifacts/binding-seal.json": "3b466b42493c3385cd2e1bb144e2224c98fc424206590dd344a235a3f2fcf8b9",
+    "receiving-artifacts/evaluated-pre-history.json": "8fa02dd83c5aac0c12e6797759545f2c2040e7938df290202513e65c136ea0eb",
+    "receiving-artifacts/evaluated-after-all.json": "306d5bbcc289348152a6a342fc2b7d9d6954ce18c51ad42666ccc0b6afe90ffd",
+    "receiving-artifacts/receipts.jsonl": "571a9d3e236e4133365e0c83c2e7f3e01aa56422fa287117d1165c9e7e4353e7",
+    "receiving-artifacts/receipts.jsonl.writer.json": "eb843154bd7602aabf64100ac7b6fb06ac985ffb6b52c94efa23e9ed4d50a4d2",
+    "receiving-artifacts/v8-binding.jsonl": "a5afe4bd47ad459f18fc8212766a796153fb6c2b6858ff782e3cc5e889dd6172",
+    "receiving-artifacts/worker.stdout.log": "ad4ef9f15a34aca97fa46182fe57d7d12daca09cb729092d47b1e480d54508d4",
+    "receiving-artifacts/worker.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "receiving-artifacts/supervisor.json": "3699a80d4ac74b7bb2c38f015b891814e70b662c32cc09d23869d7fbff68324e",
+    "receiving-artifacts/prepared.json": "c9af02e3ae66f81d2638870d1c675bf524e43d1110bbec01cdc403df8a34e074",
+    "receiving-artifacts/history.json": "8a3f112ef35d090a88a9588bb326faa0f12a3038cdfc5c2641453a7d54e98511",
+    "../inline-park-root-root.stdout.log": "cb42784f7a6a16f4856b090050e25bc7221c0d36c384f58b16f5c0ce05ca6610",
+    "../inline-park-root-root.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "sourceIdentity": {
+    "scripts/h02-progress/verify-bindings.mjs": {
+      "frozenSha256": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe",
+      "currentSha256": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe",
+      "manifestSha256": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe"
+    },
+    "scripts/h02-progress/bindings-calibration.test.mjs": {
+      "frozenSha256": "c49292cb606fd65484aa2cfd7046916f9d1590a10f5395bdeb4ca02567250dc9",
+      "currentSha256": "c49292cb606fd65484aa2cfd7046916f9d1590a10f5395bdeb4ca02567250dc9",
+      "manifestSha256": "c49292cb606fd65484aa2cfd7046916f9d1590a10f5395bdeb4ca02567250dc9"
+    },
+    "scripts/h02-progress/source-binding.setup.ts": {
+      "frozenSha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13",
+      "currentSha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13",
+      "manifestSha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": {
+      "frozenSha256": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+      "currentSha256": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+      "manifestSha256": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts": {
+      "frozenSha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "currentSha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "manifestSha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts": {
+      "frozenSha256": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+      "currentSha256": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+      "manifestSha256": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06"
+    }
+  },
+  "outerActualCompletion": {
+    "chunk_id": "714eb7",
+    "wall_time_seconds": 1.7042e-05,
+    "exit_code": 1,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "outerOutcome": {
+    "classification": "finite test command failed; inspect original assertion diagnostics",
+    "heap": false,
+    "identityMatched": true,
+    "remainingGroup": 0,
+    "cleanupErrors": 0,
+    "exitCode": 1,
+    "signal": null,
+    "cleanupDiagnostics": [],
+    "elapsedMonotonicMs": 3376.059083,
+    "maxSampledGroupRssBytes": 713981952,
+    "originalPgid": 86058,
+    "registeredReceivingGroups": [
+      {
+        "pid": 86065,
+        "pgid": 86065,
+        "parentPid": 86062,
+        "detached": true,
+        "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "--max-old-space-size=384",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "scripts/h02-progress/completion-receiving.config.ts",
+          "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+        ],
+        "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6"
+      }
+    ],
+    "stdoutSha256": "b648d9838b4859b3a7c5226e42ed9359ea816b7020387f83dc8ecbd65b948ce9",
+    "stderrSha256": "e4d4fc9ec36ad37619f37b4a5555511bd28d25e0cdfc42f019e281dd7d065672",
+    "limits": "Finite baseline assertions and reaches require review. Operational failures never supply product RED. RSS aggregates the original group and each synchronously registered receiving group without double-counting. Cleanup verifies these owned groups only. A supervisor interrupted between spawn and registration can leave an unknown group; no unregistered/escaped-group claim is made."
+  },
+  "receivingOutcome": {
+    "reason": "exited",
+    "exitCode": 0,
+    "signal": null,
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/receipts.jsonl",
+    "bindingStatus": "unresolved"
+  },
+  "bindingVerifierFailures": [
+    "actual evaluated-module startup inventory missing",
+    "required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+    "required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+    "required evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+    "required evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "required evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts"
+  ],
+  "inventoryNames": [
+    "evaluated-pre-history.json",
+    "evaluated-after-all.json"
+  ],
+  "preHistoryModules": 179,
+  "afterAllModules": 179,
+  "preHistoryApprovedInstruments": 17,
+  "selectedBindings": [
+    {
+      "relative": "scripts/h02-progress/source-binding.setup.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1198",
+          "sourceSha256": "a0c84966bbd58262d90adde482e036810356647551dade0545c8dd7445f8afeb"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "scripts/h02-progress/startup-inspector.mjs",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1202",
+          "sourceSha256": "c0e825d79fbc0e1f5f623686a0d01756050b9490c6792a8557b6291b7891d62f"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1203",
+          "sourceSha256": "0dae225fa5d765196a9dd7fd83b606a5bc224faf0ac6c184bfe09c2391099c61"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "scripts/h02-progress/receipt-transport.mjs",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1204",
+          "sourceSha256": "a57a2dd301f17c3bb65325c02b1a8f33fd6ac2e4611f3f12ea096d567dc895f5"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1205",
+          "sourceSha256": "dcb799319ebd3356175a3f87127aee750c72a726db7c65dbf7c02e2cf46042fc"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1206",
+          "sourceSha256": "fde0fea0860a44c930a03cc8b94eec677bc735bd8550bc3ad638360d01db3493"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1207",
+          "sourceSha256": "bf0cdb4182d870e1b5f716776483fe0cf5ee04ae3fe8a1279559b6d0c15a9af6"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "scripts/h02-progress/candidate-controls.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1358",
+          "sourceSha256": "31e0be152fd2436094d2b4e1091186d03c5b103afa9dfaa6eed719975f7de668"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/tests/oracle-reach.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1359",
+          "sourceSha256": "7aa8322b98b00e3172d9371e93f1fb53643846c9639311aad1180bf4d13a4f30"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/tests/oracle-config.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1360",
+          "sourceSha256": "e6a0040dd5e3a0f8f9c9c44b06ba138cf66796a38e07fb096a22e59ccc2233ad"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/tests/oracle-replay-witness.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1361",
+          "sourceSha256": "91d39cdb9503a2df38ab8c822ec5e4cce8b4c4cbd5fcd89b7eb92f2eedf6427a"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/tests/oracle-declaration.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1601",
+          "sourceSha256": "62c62491be3b1fbcfc55be82abdbed6100330e6a412ee04dc65272f730f147e1"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1602",
+          "sourceSha256": "8f5616b07ffe9f4bbf2563aca6f4b7da8d07b1c3f27f4601b6fede3c48340957"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/tests/reference-expression-oracle.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1626",
+          "sourceSha256": "0efc2b4e20efcf650745ba64bd59a3b2d17a29ac798a2c25050a3a408cd04fd3"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1631",
+          "sourceSha256": "8c5cd31c513f13f7425772f539795ede4ae09043d35f7e97cef712801748a3cc"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1632",
+          "sourceSha256": "7d2048404ca2f7f4ea6caa4d406a1884dbd7cfdbbcb16e66448df7aec9117b86"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1633",
+          "sourceSha256": "ebeffd294e3a7ee9ce126dcab60751d931e8612346c453be050d2248c2aa105a"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db/src/index.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1208",
+          "sourceSha256": "75fdd9ab5308533e431c4f269630604f38d493ca40f02e36e65b03b48e30501c"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/db-ivm/src/index.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1213",
+          "sourceSha256": "bdd98bae2a1fd7f9f1c99ce128ef5daf5297b7d08de8bb2635891c55cd5b4122"
+        }
+      ],
+      "sealedMatch": true
+    },
+    {
+      "relative": "packages/query-db-collection/src/query.ts",
+      "evaluated": true,
+      "originalHashMatches": true,
+      "loaderHashMatches": true,
+      "exactV8Matches": [
+        {
+          "scriptId": "1627",
+          "sourceSha256": "461530048f0c7356cf10de8a11b15d9e41b85dbb04a460b9eaa2042be954d87a"
+        }
+      ],
+      "sealedMatch": true
+    }
+  ],
+  "bindingSeal": {
+    "selectedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "sealed": true,
+    "skipAllPausesAcknowledged": true,
+    "debuggerDisableAcknowledged": true,
+    "inspectorDisconnectedBeforeHistory": true,
+    "inventorySha256": "8fa02dd83c5aac0c12e6797759545f2c2040e7938df290202513e65c136ea0eb"
+  },
+  "v8Phases": {
+    "inspector-ack": 3,
+    "v8-compiled-script": 1626,
+    "binding-started": 1,
+    "evaluated-registry-captured": 2,
+    "inspector-disconnected-before-history": 1
+  },
+  "receiptPhaseCounts": {
+    "worker-start": 1,
+    "completion-baseline-epoch-start": 3,
+    "completion-boundary": 303,
+    "completion-baseline-delivery": 8,
+    "completion-baseline-epoch-end": 3,
+    "completion-baseline-view": 1,
+    "completion-baseline-action": 6,
+    "completion-baseline-cut": 2,
+    "worker-cleaned": 1
+  },
+  "actualProgramMatchesAccepted": true,
+  "positiveWorkerCleaned": 1,
+  "failures": [],
+  "productClassification": "none: first singleton provenance failed; worker pass and physical records do not become product GREEN",
+  "candidateRaw20": "all UNREACHED",
+  "retryAdmission": false
+}

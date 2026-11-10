@@ -1,0 +1,35 @@
+{
+  "classifiedBy": "/root",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "rootVerification": "Read independent report and result; rehashed critical result/review/completion pins. No root runtime or source edit. Detailed raw reconstruction remains the independently audited evidence.",
+  "productionEditAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "bugClassClosureCredit": false,
+  "wholePrReadiness": "not assessed",
+  "disposition": "accepted source-only exact fixed-seed title correction and pure calibration",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-seed-title-qualifier-successor-v1/packet-manifest.json",
+      "sha256": "0a2f48c30e4477ed3cd7355db8abb5d3c43ed378cb9772683608b4268be9d904"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-seed-title-qualifier-independent-review-v1/report-v1.md",
+      "sha256": "9ff63588f39a1945fd2d39932f87fbafd1442fef1812572dadcbac2473d409f9"
+    }
+  ],
+  "instrumentItem": "H02-N-SEED-SUFFIX-REPORT-QUALIFIER",
+  "itemDisposition": "already-fixed within sealed source component; operational rebind still required",
+  "qualifiedFacts": [
+    "Exactly one recipe field changes: expectedOutput.title adds (with seed=1665), derived from authored seed and bound runner.",
+    "Original exact capture rejects old title and four corruptions; successor captures failed assertion with reportSuccess=false/productVerdict=UNCLASSIFIED.",
+    "All8 successor members rehashed; original N10/actual16 preservation independently audited."
+  ],
+  "limits": [
+    "Template retains consumed historical output path and cannot be launched as a fresh runtime.",
+    "Historical outer1/child1/null-report/qualifier-secondary remain intact.",
+    "No native execution, product GREEN, receiving, campaign, schema-hardening or closure credit."
+  ],
+  "next": "Use only in a separately frozen fresh-output/source operational successor with independent review and separate admission."
+}

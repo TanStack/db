@@ -1,0 +1,117 @@
+{
+  "status": "ROOT ADMITTED exact setup-successor singleton once, serial stop-on-surprise batch",
+  "at": "2026-10-30T07:26:05.744104+00:00",
+  "admittedBy": "/root",
+  "admittedRuntime": true,
+  "slot": 2,
+  "maxInvocations": 1,
+  "selectedPath": "ordinary synchronous mutation cut",
+  "finiteHistories": 1,
+  "finiteRecipes": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/finite-recipes-v1.json",
+  "finiteRecipesSha256": "8ab3d7d760a58d7b456e2dd847363ef1fdaedf711cc9e207d11f240a34e1cbf2",
+  "recipeEntry": 2,
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/source-freeze-v4.json",
+  "sourceFreezeSha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d",
+  "packetManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/packet-sha256-v4.json",
+  "packetSha256": "5a3d1e13e8dc71e8ae48c36c3cd4a669e1fb93b5458a017050ac7b2f7ccf1b42",
+  "independentSourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-independent-source-acceptance-v1.md",
+  "independentSourceReviewSha256": "e7e05f479573ebfa204eb601b48fd27a8550d507d83024710445602ef260f6d2",
+  "independentVerification": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-independent-verification-v1.json",
+  "independentVerificationSha256": "d5abb81d2f574902b9b339b7e70126df5ce50d18bd2963a69eae76d83407dbf7",
+  "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-mutation-v4.zsh",
+  "launcherSha256": "a92494e092f0cd88c63fa9a25a71b5b085ba0a944a9ac878391692b2ec1ae7bf",
+  "runnerCommand": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-mutation-v4.zsh",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+  "exactOuterCommand": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=1536",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/vitest.config.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+    "-t",
+    "^queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'$"
+  ],
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS"
+  ],
+  "envSet": {
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/source-freeze-v4.json"
+  },
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1",
+  "outputPolicy": "Only after exact successor admission, create the fresh setup-successor outputDirectory exclusively once. Preserve failed setup packet and all original launcher/output bytes. Keep actual unique child receipt/source-binding directory and all raw bytes. No overwrite/reuse/retry.",
+  "nativeSelector": "^queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'$",
+  "nativeSelectionReceipt": {
+    "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/bound-v1/native-selection-results.json",
+    "sha256": "bdd48b87e801e8a5aa64e6ea018120f2e7458711cb175732b097adcf409b2edf",
+    "entry": 4,
+    "selected": 1,
+    "skipped": 4
+  },
+  "receivingLimits": {
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "wallMs": 20000,
+    "postEnqueueWindowMs": 1000,
+    "samplingMs": 100
+  },
+  "outerTestTimeoutMs": 60000,
+  "receivingPostRunVerifier": {
+    "nodeHeapMiB": 384,
+    "timeoutMs": 20000
+  },
+  "expectedReach": [
+    "ordinary-mutation-return-before-host-turn",
+    "final-publication",
+    "worker-cleaned"
+  ],
+  "requiredCapture": "Exactly one native selected test (four skipped) and one matching actual worker history; full contiguous raw child receipts and effective-source binding. Apply unchanged V4 authored-payload comparisons at every reached cut, preserve full raw public metadata and event payloads, and require every declared finite reach for normal complete success. Successful console may be suppressed; reconstruct exact source predicates from raw cuts when needed. Exit status alone gives no verdict.",
+  "sourceBinding": "Require actual strict startup seal/reconciliation and later source inventories, required binding status bound; callback paths alone do not establish V8 byte identity. Retain all raw binding inputs and post-run verifier result.",
+  "conditionalGate": "Three separate exact singleton admissions may execute serially in index order, one active heavy command in slot2, each max1/fresh output. Tool must request require_escalated; stop entire batch on automatic approval rejection or first setup/identity/reach/comparison/resource/cleanup surprise. No fallback, ps substitution, retry or source edit. Freeze each actual result and send original outer/child PID and PGID for independent root absence. Root and independent result acceptance remains required.",
+  "forbiddenByThisTemplate": "No other progress/ownership invocation, retry, candidate activation, source/production/model/grammar/budget edit, install, commit, push, PR or publication.",
+  "payloadObservationScope": "The shared unchanged model judges authored id/rank/markers, with one validating projection preserving every selected payload value/occurrence/position at all original cuts. Full raw snapshots/change payloads keep public VirtualRowProps. Temporal virtual-metadata coherence through real QueryClient reload/events remains explicitly open under virtual-row-fields owner; no metadata closure claim.",
+  "actualHistoryRequired": {
+    "kind": "sync-mutation",
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "controlVerdictGate": {
+    "normalSuccess": "All declared finite reaches plus unchanged shared comparison, bound effective sources, no observation/resource/identity/setup/recording/cleanup errors and absent original process groups.",
+    "assertionFailure": "Preserve original diagnostic and all raw observations; root independently classifies any law violation at its intended cut.",
+    "containmentFailure": "Timeout, heap/RSS/resource termination, observation or identity/binding/setup/recording/cleanup failure gives no normal-success or product-progress verdict. These paths do not establish the strict conflicting-cache premise, so the post-enqueue containment gate cannot itself supply conflicting-progress RED.",
+    "forcedTermination": "Does not establish final publication or direct adapter cleanup."
+  },
+  "sourcePreparationAcceptanceOnly": "Original exact V4 test/source/recipe acceptance is linked. Successor output-path review is still required and supplies no runtime admission or product evidence.",
+  "freshOutputDirectoryCurrentlyAbsent": true,
+  "originalRecipeEntry": 4,
+  "successorPacketManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/packet-sha256-v1.json",
+  "successorPacketSha256": "f25da3e002c69934d8c8d16f0880e76ecace90514e2ba650df3f1152bef5a4a8",
+  "executionPolicy": {
+    "sandbox_permissions": "require_escalated",
+    "justification": "May I run this exact bounded local test launcher with read-only process identity and resource supervision, which the sandbox blocked?",
+    "cmd": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-mutation-v4.zsh",
+    "authority": "Root setup-successor preparation authorization; execution still requires independent static acceptance, exact root singleton admission, and automatic approval review.",
+    "onRejected": "Stop; preserve rejection and do not bypass, catch, skip or replace ps. No further control or retry."
+  },
+  "originalTemplate": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-root-admission-template-v1.json",
+    "sha256": "eef44006a693dbdde7f6712fdadfe88d753e4012a9877ebea449f907ddf84a50"
+  },
+  "successorIndependentReview": null,
+  "successorIndependentReviewSha256": null,
+  "successorIndependentSourceReview": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1-independent-source-review-v1.md",
+  "successorIndependentSourceReviewSha256": "0c65783ceb0741c60a1ab6310669d5493259887d75d92efb14a9dd41cac2fef8",
+  "successorIndependentVerification": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1-independent-verification-v1.json",
+  "successorIndependentVerificationSha256": "d3b688a96156e5dd438353e0d0a0a261ef36d6082ef517521e2465c409bc1c89",
+  "requiredToolSandboxPermissions": "require_escalated"
+}

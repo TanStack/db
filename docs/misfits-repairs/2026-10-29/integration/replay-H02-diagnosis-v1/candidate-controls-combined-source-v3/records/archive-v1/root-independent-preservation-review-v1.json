@@ -1,0 +1,70 @@
+{
+  "verifiedBy": "/root",
+  "at": "2026-10-30T09:27:28.151648+00:00",
+  "archiveMapSha256": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+  "historicalFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "historicalPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "checks": [
+    {
+      "key": "materialization-source-v1/package.json",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/package.json.txt",
+      "sha256": "48e847860dd4f0907ce91e346dbb00a4a12213163ad3d80a953c343eb9a11979",
+      "bytes": 19,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/db/tests/oracle-config.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/db/tests/oracle-config.js.txt",
+      "sha256": "43b444a2f6d45bebae305c02b6778b2cd2b6505543b21072d20fdd8c50cf56cf",
+      "bytes": 27226,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/db/tests/oracle-declaration.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/db/tests/oracle-declaration.js.txt",
+      "sha256": "70af56378aa24746e78198bd3ad6ab7f71ed0d5983758db5867dfd041e67cf5b",
+      "bytes": 964,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/db/tests/oracle-reach.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/db/tests/oracle-reach.js.txt",
+      "sha256": "68f783ceb46df7a4ad25f92c549ca3afa4311f335fac7c746b7ae8d056602eee",
+      "bytes": 2624,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/db/tests/oracle-replay-witness.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/db/tests/oracle-replay-witness.js.txt",
+      "sha256": "fffc2d35e7df584608f8a3ca4bffdcb9717204ff06117d7a8c7bdb7011796d2c",
+      "bytes": 3645,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js.txt",
+      "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d",
+      "bytes": 16519,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js.txt",
+      "sha256": "76e9c6686fc06c98260d084ef8359e530a31d9611055fbe6ba6b313e70d45016",
+      "bytes": 26471,
+      "equalBeforeRemoval": true
+    },
+    {
+      "key": "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js",
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/text/materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js.txt",
+      "sha256": "8f758c24b37dbf0d5ebe2f8bc16a12b23e8ead4a75803aabf0516a99941f0cf4",
+      "bytes": 47107,
+      "equalBeforeRemoval": true
+    }
+  ],
+  "freezeEntriesResolved": 45,
+  "packetEntriesResolved": 46,
+  "acceptedForExactEightRemoval": true,
+  "historicalFailedFreezeUnchanged": true,
+  "scope": "Exact-byte closed evidence relocation only; no budget/rule/ignore/oracle change"
+}

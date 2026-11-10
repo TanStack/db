@@ -1,0 +1,39 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "bounded source-plan qualification with F01 checkpoint correction open; no runtime admitted",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-v1/plan-freeze.json",
+      "sha256": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-next-gap-independent-review-v1.md",
+      "sha256": "3c553b4b95871e18d8f7117eae1c82a2087f9c25fc1130c2beb70609be479c5d"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-next-gap-independent-review-freeze-v1.json",
+      "sha256": "a6fa5509ba1e466cc167154e54c7771f278d8ae7190928e1e4dac65c69713728"
+    }
+  ],
+  "rootVerification": "Read complete independent plan review; rehashed plan/review/review-freeze. Independent static audit supplies190 checks, seven members, five selectors, eight specifications and15 fresh outputs.",
+  "finding": {
+    "id": "F01",
+    "disposition": "confirmed-open plan/classifier error",
+    "repair": "In an additive successor, assign four full-current previousValue mutants to the first ordinary previous-value assertion at the actual target callback. This is a valid complete-prior-row-law kill with no metadata-comparator invocation credit. Keep the omission targets separate and stop at first divergence.",
+    "notAuthorized": "No checker relaxation, continuation past valid mismatch, new equivalence expectation or actual mutant."
+  },
+  "sourcePreparationAuthorized": "Prepare one exact existing-v3 authored q2 outer packet and the additive inert plan/checkpoint correction. Fresh operational source review and separate root admission remain required.",
+  "remaining": [
+    "M01 deterministic-role driver and two unchanged-production controls uncreated.",
+    "All eight hostile mutants unimplemented and unexecuted; canonical-trace sensitivity only if later qualified.",
+    "No-op generated extension and hostile spurious-change sensitivity remain separate and unimplemented.",
+    "Existing five baseline selectors are source-coherent, with no new receiving result."
+  ],
+  "nativeProgressionAuthorized": false,
+  "productionEditAuthorized": false,
+  "mutantAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "bugClassClosureCredit": false,
+  "wholePrReadiness": "not assessed"
+}

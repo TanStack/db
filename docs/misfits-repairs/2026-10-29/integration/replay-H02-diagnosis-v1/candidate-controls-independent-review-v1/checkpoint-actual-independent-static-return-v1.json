@@ -1,0 +1,20 @@
+{
+  "mode": "static Python evidence audit only",
+  "actual": {
+    "chunk_id": "55dad5",
+    "exit_code": 0
+  },
+  "failedPredecessorActual": {
+    "chunk_id": "1b6d99",
+    "exit_code": 1,
+    "kind": "reviewer schema lookup error; not product evidence"
+  },
+  "script": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-inline-source-failed-peer-checkpoint-actual-v2.py",
+  "scriptSha256": "ef7e4e662b6db0bbad2781000a5b858cd5925e8fd34fd9e376a19db8a83129e8",
+  "factsSha256": "ecc54f059aa9e133cc974aa73662ac2b8eaff3814016440c74f327f1684fbbe9",
+  "reportSha256": "d41d903daef37da930046d1f7b21e896edf959d7545207dc7496d4df59e3a96c",
+  "nativeExecutions": 0,
+  "processProbes": 0,
+  "productionEdits": 0,
+  "oracleEdits": 0
+}

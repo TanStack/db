@@ -1,0 +1,27 @@
+{
+  "name": "E02-instrumented",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-instrumented.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "022884047c8adb771771d48861ca7785bc3932ecd2a7bb565bff8213819670a9",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": 1,
+  "termination": null,
+  "elapsedSeconds": 2.283,
+  "maximumGroupRssBytes": 595951616,
+  "rssSamples": 14,
+  "pgid": 92316
+}

@@ -1,0 +1,29 @@
+--- packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts (combined-v3)
++++ packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts (checkpoint-successor-v1)
+@@ -569,6 +569,26 @@
+   const physicalAction = async (action: CompletionAction) => {
+     if (action.type === `request-window`) {
+       callWindow(action)
++      if (program.gate === `source-failed-peer`)
++        // The held cut needs both exact descendant requests and their original
++        // pending applied-load receipts; setWindow can return before they enter.
++        await waitFor(() =>
++          [program.answerScopes.failure, program.answerScopes.peer].every(
++            (scope) => {
++              const request = selectedRequest(scope)
++              if (
++                request === undefined ||
++                request.appliedLoad?.receipt === undefined ||
++                request.appliedLoad.receipt === true
++              )
++                return false
++              return establishingLoads(request).every(
++                (load) =>
++                  load.read() === undefined && load.settledAt === undefined,
++              )
++            },
++          ),
++        )
+       return
+     }
+     if (action.type === `request-initial`) {

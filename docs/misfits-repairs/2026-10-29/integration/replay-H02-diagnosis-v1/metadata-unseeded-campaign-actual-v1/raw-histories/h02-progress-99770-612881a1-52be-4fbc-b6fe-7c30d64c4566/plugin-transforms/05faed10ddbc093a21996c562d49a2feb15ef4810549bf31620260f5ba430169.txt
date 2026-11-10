@@ -1,0 +1,66 @@
+export {
+  BaseQueryBuilder,
+  Query
+} from "./builder/index.js";
+export {
+  pooledLiveQueries
+} from "./pooled-live-query.js";
+export { groupKeys } from "./builder/group-keys.js";
+export {
+  grouping as groupingCompiler
+} from "./compiler/grouping.js";
+export {
+  includesRuntime
+} from "./live/includes-runtime.js";
+export {
+  eq,
+  gt,
+  gte,
+  lt,
+  lte,
+  and,
+  or,
+  not,
+  inArray,
+  like,
+  ilike,
+  isUndefined,
+  isNull,
+  upper,
+  lower,
+  length,
+  concat,
+  coalesce,
+  caseWhen,
+  add,
+  subtract,
+  multiply,
+  divide,
+  count,
+  avg,
+  sum,
+  min,
+  max
+} from "./builder/functions.js";
+export { include, materialize, toArray } from "./builder/include-functions.js";
+export { compileQuery } from "./compiler/index.js";
+export {
+  compileExpression,
+  compileSingleRowExpression,
+  toBooleanPredicate
+} from "./compiler/evaluators.js";
+export {
+  createLiveQueryCollection,
+  liveQueryCollectionOptions
+} from "./live-query-collection.js";
+export { queryOnce } from "./query-once.js";
+export {
+  UnhashableQueryIRError,
+  canonicalizeQueryIR,
+  getLoadSubsetDemandKey,
+  getQueryIdentity,
+  getStableQueryBuilderHash,
+  getStableQueryIRHash,
+  getStableValueHash
+} from "./ir-stable-identity.js";
+export { DeduplicatedLoadSubset } from "./subset-dedupe.js";

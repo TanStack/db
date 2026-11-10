@@ -1,0 +1,136 @@
+import { codedMessage, devBuild } from "./error-message.js";
+import { UnhashableQueryIRError } from "./errors.js";
+import { getLiveQueryHash } from "./live-query-options.js";
+import { isFailedStatus } from "./live-query-primitives.js";
+import { createLiveQueryCollection } from "./query/live-query-collection.js";
+import {
+  assertLiveQueryWindowManyResult,
+  compareLiveQueryWindowDependencies,
+  createLiveQueryWindowController,
+  getLiveQueryWindowCollectionWarning,
+  getLiveQueryWindowInputKind,
+  liveQueryWindowMatches,
+  normalizeLiveQueryWindowPageSize,
+  resolveLiveQueryWindowInput,
+  shouldPreserveLiveQueryWindowPageCount
+} from "./live-query-window-controller.js";
+const WINDOW_COLLECTION_GC_TIME_MS = 1;
+export function readLiveQueryWindowPageShape(config) {
+  if (`getNextPageParam` in config) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.` : codedMessage(246)
+    );
+  }
+  return {
+    pageSize: normalizeLiveQueryWindowPageSize(config.pageSize),
+    initialPageParam: config.initialPageParam ?? 0
+  };
+}
+export function bindLiveQueryWindow(previous, update, uncommitted) {
+  const resolved = update.recompile === `always` ? resolveLiveQueryWindowInput(update.input) : void 0;
+  const supplied = resolved === void 0 ? getLiveQueryWindowInputKind(update.input) === `collection` ? update.input : void 0 : resolved.kind === `collection` ? resolved.collection : void 0;
+  const inputKind = supplied ? `collection` : `query`;
+  const previousKind = previous ? previous.supplied ? `collection` : `query` : void 0;
+  const dependencies = supplied ? void 0 : [...update.dependencies ?? []];
+  const change = compareUpdate(previous, update, dependencies);
+  const needsNewCollection = previous === null || previousKind !== inputKind || (supplied ? previous.supplied !== supplied : change.recompile);
+  const pageShapeChanged = previous === null || previous.pageSize !== update.pageSize || previous.initialPageParam !== update.initialPageParam;
+  if (!needsNewCollection && !pageShapeChanged) return previous;
+  const initialPageCount = shouldPreserveLiveQueryWindowPageCount({
+    hasPreviousController: previous !== null,
+    previousInputKind: previousKind,
+    inputKind,
+    sameCollection: supplied !== void 0 && previous?.supplied === supplied,
+    dependenciesChanged: change.dependenciesChanged,
+    dependenciesStructurallyEqual: change.dependenciesStructurallyEqual,
+    pageShapeChanged
+  }) ? Math.max(1, previous.controller.getSnapshot().pages.length) : 1;
+  const requiredLimit = initialPageCount * update.pageSize + 1;
+  let collection = previous?.collection;
+  let queryHash = previous?.queryHash;
+  let ownsCollection = previous?.ownsCollection ?? false;
+  let warning;
+  if (needsNewCollection) {
+    if (!supplied && uncommitted?.ownsCollection && !compareUpdate(uncommitted, update, dependencies).recompile && uncommitted.collection.status !== `cleaned-up` && !isFailedStatus(uncommitted.collection.status) && liveQueryWindowMatches(uncommitted.collection, requiredLimit)) {
+      collection = uncommitted.collection;
+      queryHash = uncommitted.queryHash;
+      ownsCollection = true;
+    } else {
+      const window = openWindowCollection(
+        resolved ?? resolveLiveQueryWindowInput(update.input),
+        requiredLimit,
+        update
+      );
+      collection = window.collection;
+      queryHash = window.queryHash;
+      ownsCollection = window.ownsCollection;
+      warning = window.warning;
+    }
+  }
+  return {
+    supplied,
+    dependencies,
+    scope: update.scope,
+    pageSize: update.pageSize,
+    initialPageParam: update.initialPageParam,
+    collection,
+    queryHash,
+    ownsCollection,
+    controller: createLiveQueryWindowController(collection, {
+      pageSize: update.pageSize,
+      initialPageParam: update.initialPageParam,
+      initialPageCount,
+      client: update.client,
+      queryHash
+    }),
+    warning
+  };
+}
+function compareUpdate(binding, update, dependencies) {
+  const comparison = compareLiveQueryWindowDependencies(
+    binding?.dependencies,
+    dependencies ?? []
+  );
+  const scopeChanged = binding?.scope !== update.scope;
+  const dependenciesChanged = scopeChanged || (update.recompile === `identity` ? !comparison.structurallyEqual : comparison.changed);
+  return {
+    recompile: update.recompile === `always` || dependenciesChanged,
+    dependenciesChanged,
+    // An identity that changed differs by structure by definition.
+    dependenciesStructurallyEqual: !scopeChanged && update.recompile !== `identity` && comparison.structurallyEqual
+  };
+}
+function openWindowCollection(input, requiredLimit, update) {
+  const prepared = input.kind === `collection` ? input.collection : { query: input.query.limit(requiredLimit).offset(0) };
+  let queryHash;
+  if (update.client) {
+    try {
+      queryHash = getLiveQueryHash(prepared, update.queryKey);
+    } catch (error) {
+      if (!(error instanceof UnhashableQueryIRError) || update.queryKey?.length)
+        throw error;
+    }
+  }
+  if (input.kind === `collection`) {
+    const warning = getLiveQueryWindowCollectionWarning(
+      input.collection,
+      update.pageSize + 1
+    );
+    if (liveQueryWindowMatches(input.collection, requiredLimit)) {
+      input.collection.startSyncImmediate();
+    }
+    return {
+      collection: input.collection,
+      queryHash,
+      ownsCollection: false,
+      warning
+    };
+  }
+  const collection = createLiveQueryCollection({
+    query: prepared.query,
+    gcTime: WINDOW_COLLECTION_GC_TIME_MS
+  });
+  assertLiveQueryWindowManyResult(collection);
+  collection.startSyncImmediate();
+  return { collection, queryHash, ownsCollection: true, warning: void 0 };
+}

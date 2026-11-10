@@ -1,0 +1,28 @@
+import { DuplicateDbInstanceError } from "./errors";
+function isBrowserTopWindow() {
+  const w = globalThis.window;
+  if (!w || !(`document` in w)) return false;
+  try {
+    return w === w.top;
+  } catch {
+    return true;
+  }
+}
+const DB_INSTANCE_MARKER = /* @__PURE__ */ Symbol.for(`@tanstack/db/instance-marker`);
+function readEnv(read) {
+  try {
+    return read();
+  } catch {
+    return null;
+  }
+}
+const nodeEnv = readEnv(() => process.env.NODE_ENV);
+const DEV = nodeEnv !== null && nodeEnv !== `production`;
+const DISABLED = readEnv(() => process.env.TANSTACK_DB_DISABLE_DUP_CHECK) === `1`;
+if (DEV && !DISABLED && isBrowserTopWindow()) {
+  if (globalThis[DB_INSTANCE_MARKER]) {
+    throw new DuplicateDbInstanceError();
+  }
+  ;
+  globalThis[DB_INSTANCE_MARKER] = true;
+}

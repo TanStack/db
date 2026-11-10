@@ -1,0 +1,570 @@
+import { createDeferred } from "./deferred";
+import { deepEquals } from "./utils";
+import { safeRandomUUID } from "./utils/uuid";
+import { normalizeError } from "./utils/error.js";
+import "./duplicate-instance-check";
+import {
+  MissingMutationFunctionError,
+  TransactionAlreadyCompletedRollbackError,
+  TransactionNotPendingCommitError,
+  TransactionNotPendingMutateError
+} from "./errors";
+import { transactionScopedScheduler } from "./scheduler.js";
+import { takeTransactionCommitWork } from "./transaction-commit-work.js";
+import { codedMessage, devBuild } from "./error-message.js";
+export class TransactionScope {
+  constructor() {
+    this.transactions = [];
+    this.transactionStack = [];
+    this.sequenceNumber = 0;
+  }
+  createTransaction(config) {
+    const transaction = new Transaction(config, this, this.sequenceNumber++);
+    this.transactions.push(transaction);
+    return transaction;
+  }
+  getActiveTransaction() {
+    return this.transactionStack.at(-1);
+  }
+  getActiveTransactionForCollection() {
+    const activeTransaction = this.getActiveTransaction();
+    if (activeTransaction) {
+      return activeTransaction;
+    }
+    if (this === defaultTransactionScope) {
+      return void 0;
+    }
+    return defaultTransactionScope.claimActiveTransaction(this);
+  }
+  claimActiveTransaction(targetScope) {
+    const transaction = this.getActiveTransaction();
+    if (!transaction) {
+      return void 0;
+    }
+    const owner = getTransactionScope(transaction);
+    if (owner === targetScope) {
+      return transaction;
+    }
+    if (owner !== this) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.` : codedMessage(162)
+      );
+    }
+    this.removeTransaction(transaction);
+    targetScope.transactions.push(transaction);
+    targetScope.transactionStack.push(transaction);
+    transaction.sequenceNumber = targetScope.sequenceNumber++;
+    transactionScopes.set(transaction, targetScope);
+    return transaction;
+  }
+  registerTransaction(transaction) {
+    transactionScopedScheduler.clear(transaction.id);
+    this.transactionStack.push(transaction);
+  }
+  unregisterTransaction(transaction, contextAlreadyCleared = false) {
+    try {
+      transactionScopedScheduler.flush(transaction.id);
+    } finally {
+      if (!contextAlreadyCleared) this.clearTransactionContext(transaction);
+    }
+  }
+  clearTransactionContext(transaction) {
+    const index = this.transactionStack.lastIndexOf(transaction);
+    if (index !== -1) this.transactionStack.splice(index, 1);
+  }
+  removeTransaction(transaction) {
+    const index = this.transactions.indexOf(transaction);
+    if (index !== -1) {
+      this.transactions.splice(index, 1);
+    }
+  }
+  /** Rolls back every conflicting candidate, then throws the first error. */
+  rollbackConflictingTransactions(transaction, mutationIds) {
+    const errors = [];
+    for (const candidate of [...this.transactions]) {
+      if (candidate !== transaction && candidate.state === `pending` && candidate.mutations.some(
+        (mutation) => mutationIds.has(mutation.globalKey)
+      )) {
+        try {
+          candidate.rollback({ isSecondaryRollback: true });
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    }
+    if (errors.length > 0) throw errors[0];
+  }
+  clear() {
+    const transactionIds = /* @__PURE__ */ new Set([
+      ...this.transactions.map((transaction) => transaction.id),
+      ...this.transactionStack.map((transaction) => transaction.id)
+    ]);
+    for (const transactionId of transactionIds) {
+      transactionScopedScheduler.clear(transactionId);
+    }
+    this.transactions = [];
+    this.transactionStack = [];
+  }
+}
+const defaultTransactionScope = new TransactionScope();
+const transactionScopes = /* @__PURE__ */ new WeakMap();
+const transactionAmbientScopes = /* @__PURE__ */ new WeakMap();
+function getTransactionScope(transaction) {
+  const scope = transactionScopes.get(transaction);
+  if (!scope) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Transaction is not associated with a TransactionScope.` : codedMessage(163)
+    );
+  }
+  return scope;
+}
+function getTransactionAmbientScope(transaction) {
+  const scope = transactionAmbientScopes.get(transaction);
+  if (!scope) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Transaction is not associated with an ambient scope.` : codedMessage(164)
+    );
+  }
+  return scope;
+}
+function mergePendingMutations(existing, incoming) {
+  switch (incoming.type) {
+    case `update`: {
+      if (existing.type === `delete`) break;
+      const inserted = existing.type === `insert`;
+      return {
+        ...inserted ? existing : incoming,
+        original: inserted ? {} : existing.original,
+        modified: incoming.modified,
+        changes: { ...existing.changes, ...incoming.changes },
+        // Merge metadata (last-write-wins)
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+        // Update tracking info
+        mutationId: incoming.mutationId,
+        updatedAt: incoming.updatedAt
+      };
+    }
+    case `delete`:
+      return existing.type === `insert` ? null : incoming;
+    case `insert`: {
+      if (existing.type === `insert`) return incoming;
+      if (existing.type !== `delete`) break;
+      const original = existing.collection._state.syncedData.get(existing.key);
+      if (original === void 0) return incoming;
+      if (deepEquals(original, incoming.modified)) {
+        return null;
+      }
+      const modified = incoming.modified;
+      const keys = /* @__PURE__ */ new Set([...Object.keys(original), ...Object.keys(modified)]);
+      const changes = {};
+      for (const key of keys) {
+        if (Object.hasOwn(original, key) !== Object.hasOwn(modified, key) || !deepEquals(original[key], modified[key])) {
+          changes[key] = modified[key];
+        }
+      }
+      return {
+        ...incoming,
+        type: `update`,
+        original,
+        changes,
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata }
+      };
+    }
+  }
+  const _exhaustive = `${existing.type}-${incoming.type}`;
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `Unhandled mutation combination: ${_exhaustive}` : codedMessage(165, { combination: _exhaustive })
+  );
+}
+export function createTransaction(config) {
+  return defaultTransactionScope.createTransaction(config);
+}
+export function getActiveTransaction() {
+  return defaultTransactionScope.getActiveTransaction();
+}
+const transactionSettlements = /* @__PURE__ */ new WeakMap();
+function settlementFor(transaction) {
+  return transactionSettlements.get(transaction);
+}
+class Transaction {
+  constructor(config, scope, sequenceNumber) {
+    /**
+     * Every Collection that has tracked this transaction. Settlement recomputes
+     * each of them, including one whose mutations merged away.
+     */
+    this.collections = /* @__PURE__ */ new Set();
+    if (typeof config.mutationFn === `undefined`) {
+      throw new MissingMutationFunctionError();
+    }
+    this.id = config.id ?? safeRandomUUID();
+    this.mutationFn = config.mutationFn;
+    this.state = `pending`;
+    this.mutations = [];
+    const settlement = createDeferred();
+    transactionSettlements.set(this, settlement);
+    settlement.promise.catch(() => void 0);
+    this.autoCommit = config.autoCommit ?? true;
+    this.createdAt = /* @__PURE__ */ new Date();
+    this.sequenceNumber = sequenceNumber;
+    this.metadata = config.metadata ?? {};
+    transactionScopes.set(this, scope);
+    transactionAmbientScopes.set(this, scope);
+  }
+  /**
+   * Wait for this transaction to complete successfully or fail.
+   *
+   * The promise resolves with this transaction on success and rejects with
+   * the original error on failure (or `undefined` for a rollback without an
+   * error). For non-empty commits, this
+   * boundary is the mutation function's completion; it does not inherently
+   * prove backend acknowledgement or read-back unless the mutation function
+   * or an adapter-registered commit work item waits for it.
+   */
+  when(_state) {
+    return settlementFor(this).promise;
+  }
+  /** Complete a transaction whose work was already applied outside commit(). @internal */
+  completeWithoutCommit() {
+    if (this.state !== `pending`) throw new TransactionNotPendingCommitError();
+    this.setState(`completed`);
+    settlementFor(this).resolve(this);
+  }
+  setState(newState) {
+    this.state = newState;
+    if (newState === `completed` || newState === `failed`) {
+      getTransactionScope(this).removeTransaction(this);
+    }
+  }
+  /**
+   * Execute collection operations within this transaction
+   * @param callback - Synchronous function containing collection operations to group together.
+   * The transaction context is active only for the synchronous duration of this callback.
+   * Async work should happen in `mutationFn`; collection operations after `await` boundaries
+   * inside this callback will not be part of this transaction. For manual transactions, call
+   * `mutate` multiple times before committing to add more synchronous operations to the same
+   * transaction. If this callback throws, its mutations are removed before the
+   * error reaches the caller; mutations from earlier successful calls remain.
+   * @returns This transaction for chaining
+   * @example
+   * // Group multiple operations
+   * const tx = createTransaction({ mutationFn: async () => {
+   *   // Send to API
+   * }})
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   *   collection.update("2", draft => { draft.completed = true })
+   *   collection.delete("3")
+   * })
+   *
+   * await tx.when('settled')
+   *
+   * @example
+   * // Handle mutate errors
+   * try {
+   *   tx.mutate(() => {
+   *     collection.insert({ id: "invalid" }) // This might throw
+   *   })
+   * } catch (error) {
+   *   console.log('Mutation failed:', error)
+   * }
+   *
+   * @example
+   * // Manual commit control
+   * const tx = createTransaction({ autoCommit: false, mutationFn: async () => {} })
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Item" })
+   * })
+   *
+   * // Add more synchronous mutations to the same transaction
+   * tx.mutate(() => {
+   *   collection.update("1", draft => { draft.text = "Updated item" })
+   * })
+   *
+   * // Commit later when ready
+   * await tx.commit()
+   */
+  mutate(callback) {
+    if (this.state !== `pending`) {
+      throw new TransactionNotPendingMutateError();
+    }
+    const initialScope = getTransactionScope(this);
+    const registeredScopes = /* @__PURE__ */ new Set([
+      initialScope,
+      getTransactionAmbientScope(this)
+    ]);
+    for (const scope of registeredScopes) {
+      scope.registerTransaction(this);
+    }
+    let previousMutations;
+    const captureOuter = this.captureMutations;
+    this.captureMutations = () => {
+      captureOuter?.();
+      previousMutations ??= [...this.mutations];
+    };
+    let contextAlreadyCleared = false;
+    try {
+      callback();
+    } catch (error) {
+      const before = previousMutations ?? this.mutations;
+      const touched = new Set(
+        [...before, ...this.mutations].map((mutation) => mutation.collection)
+      );
+      if (previousMutations)
+        this.mutations.splice(0, this.mutations.length, ...previousMutations);
+      registeredScopes.add(getTransactionScope(this));
+      for (const scope of registeredScopes) scope.clearTransactionContext(this);
+      contextAlreadyCleared = true;
+      const restorationErrors = [];
+      for (const collection of touched) {
+        try {
+          collection._state.onTransactionStateChange();
+        } catch (restorationError) {
+          restorationErrors.push(restorationError);
+        }
+      }
+      if (restorationErrors.length)
+        throw new AggregateError(
+          [error, ...restorationErrors],
+          devBuild() && process.env.NODE_ENV !== `production` ? `Mutation callback and restoration failed` : codedMessage(174),
+          { cause: error }
+        );
+      throw error;
+    } finally {
+      this.captureMutations = captureOuter;
+      registeredScopes.add(getTransactionScope(this));
+      for (const scope of registeredScopes) {
+        scope.unregisterTransaction(this, contextAlreadyCleared);
+      }
+    }
+    if (this.autoCommit) {
+      this.commit().catch(() => {
+      });
+    }
+    return this;
+  }
+  /**
+   * Apply new mutations to this transaction, intelligently merging with existing mutations
+   *
+   * When mutations operate on the same item (same globalKey), they are merged according to
+   * the following rules:
+   *
+   * - **insert + update** → insert (merge changes, keep empty original)
+   * - **insert + delete** → removed (mutations cancel each other out)
+   * - **update + delete** → delete (delete dominates)
+   * - **update + update** → update (union changes, keep first original)
+   * - **delete + insert** → removed if restored, otherwise update
+   * - **same type** → replace with latest
+   *
+   * This merging reduces over-the-wire churn and keeps the optimistic local view
+   * aligned with user intent.
+   *
+   * @param mutations - Array of new mutations to apply
+   */
+  applyMutations(mutations) {
+    this.captureMutations?.();
+    const merged = /* @__PURE__ */ new Map();
+    for (const mutation of this.mutations) {
+      merged.set(mutation.globalKey, mutation);
+    }
+    for (const newMutation of mutations) {
+      const globalKey = newMutation.globalKey;
+      const existingMutation = merged.get(globalKey);
+      const mergeResult = existingMutation ? mergePendingMutations(existingMutation, newMutation) : newMutation;
+      if (mergeResult === null) {
+        merged.delete(globalKey);
+      } else {
+        merged.set(globalKey, mergeResult);
+      }
+    }
+    this.mutations.length = 0;
+    for (const mutation of merged.values()) {
+      this.mutations.push(mutation);
+    }
+  }
+  /**
+   * Rollback the transaction and any conflicting transactions
+   * @param config - Configuration for rollback behavior
+   * @returns This transaction for chaining
+   * @example
+   * // Manual rollback
+   * const tx = createTransaction({ mutationFn: async () => {
+   *   // Send to API
+   * }})
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   * })
+   *
+   * // Rollback if needed
+   * if (shouldCancel) {
+   *   tx.rollback()
+   * }
+   *
+   * @example
+   * // Handle rollback cascade (automatic)
+   * const tx1 = createTransaction({ mutationFn: async () => {} })
+   * const tx2 = createTransaction({ mutationFn: async () => {} })
+   *
+   * tx1.mutate(() => collection.update("1", draft => { draft.value = "A" }))
+   * tx2.mutate(() => collection.update("1", draft => { draft.value = "B" })) // Same item
+   *
+   * tx1.rollback() // This will also rollback tx2 due to conflict
+   *
+   * @example
+   * // Handle rollback in error scenarios
+   * try {
+   *   await tx.when('settled')
+   * } catch (error) {
+   *   console.log('Transaction was rolled back:', error)
+   *   // Transaction automatically rolled back on mutation function failure
+   * }
+   */
+  rollback(config) {
+    const isSecondaryRollback = config?.isSecondaryRollback ?? false;
+    if (this.state === `completed`) {
+      throw new TransactionAlreadyCompletedRollbackError();
+    }
+    if (this.state === `failed`) return this;
+    if (config?.error) {
+      this.error = { message: config.error.message, error: config.error };
+    }
+    const wasPersisting = this.state === `persisting`;
+    this.setState(`failed`);
+    try {
+      if (!isSecondaryRollback) {
+        const mutationIds = new Set(
+          this.mutations.map((mutation) => mutation.globalKey)
+        );
+        getTransactionScope(this).rollbackConflictingTransactions(
+          this,
+          mutationIds
+        );
+      }
+    } finally {
+      settlementFor(this).reject(this.error?.error);
+      this.touchCollection(wasPersisting);
+    }
+    return this;
+  }
+  /**
+   * Tell every Collection that tracked this transaction that it changed. A
+   * failure in one Collection must not leave the others showing this
+   * transaction's settled optimistic state, so each one recomputes before the
+   * first error is thrown. A settled transaction then empties its set of
+   * tracking Collections. Its mutations still name their Collection.
+   */
+  touchCollection(releasedHold = false) {
+    const collections = new Set(this.collections);
+    for (const mutation of this.mutations) collections.add(mutation.collection);
+    const settled = this.state === `completed` || this.state === `failed`;
+    if (settled) this.collections.clear();
+    const errors = [];
+    for (const collection of collections) {
+      try {
+        collection._state.onTransactionStateChange();
+        if (releasedHold) collection._lifecycle.startGCTimer(true);
+        if (collection._state.pendingSyncedTransactions.length > 0) {
+          collection._state.commitPendingTransactions();
+        }
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) throw errors[0];
+  }
+  /**
+   * Commit the transaction and execute the mutation function
+   * @returns Promise that resolves to this transaction when complete
+   * @example
+   * // Manual commit (when autoCommit is false)
+   * const tx = createTransaction({
+   *   autoCommit: false,
+   *   mutationFn: async ({ transaction }) => {
+   *     await api.saveChanges(transaction.mutations)
+   *   }
+   * })
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   * })
+   *
+   * await tx.commit() // Manually commit
+   *
+   * @example
+   * // Handle commit errors
+   * try {
+   *   const tx = createTransaction({
+   *     mutationFn: async () => { throw new Error("API failed") }
+   *   })
+   *
+   *   tx.mutate(() => {
+   *     collection.insert({ id: "1", text: "Item" })
+   *   })
+   *
+   *   await tx.commit()
+   * } catch (error) {
+   *   console.log('Commit failed, transaction rolled back:', error)
+   * }
+   *
+   * @example
+   * // Check transaction state after commit
+   * await tx.commit()
+   * console.log(tx.state) // "completed" or "failed"
+   */
+  async commit() {
+    if (this.state !== `pending`) {
+      throw new TransactionNotPendingCommitError();
+    }
+    this.setState(`persisting`);
+    if (this.mutations.length > 0) {
+      try {
+        await this.mutationFn({
+          transaction: this
+        });
+        const commitWork = takeTransactionCommitWork(this);
+        if (commitWork) await commitWork;
+      } catch (error) {
+        if (this.state !== `persisting`) return this;
+        const originalError = normalizeError(error);
+        try {
+          await takeTransactionCommitWork(this);
+        } catch {
+        }
+        this.error = {
+          message: originalError.message,
+          error: originalError
+        };
+        try {
+          this.rollback();
+        } catch {
+        }
+        throw originalError;
+      }
+      if (this.state !== `persisting`) return this;
+    }
+    this.setState(`completed`);
+    try {
+      this.touchCollection(true);
+    } finally {
+      settlementFor(this).resolve(this);
+    }
+    return this;
+  }
+  /**
+   * Compare two transactions by their createdAt time and sequence number in order
+   * to sort them in the order they were created.
+   * @param other - The other transaction to compare to
+   * @returns -1 if this transaction was created before the other, 1 if it was created after, 0 if they were created at the same time
+   */
+  compareCreatedAt(other) {
+    const createdAtComparison = this.createdAt.getTime() - other.createdAt.getTime();
+    if (createdAtComparison !== 0) {
+      return createdAtComparison;
+    }
+    return this.sequenceNumber - other.sequenceNumber;
+  }
+}

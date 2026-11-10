@@ -1,0 +1,44 @@
+{
+  "format": "relative-path bytes SHA256; excludes this manifest only",
+  "status": "frozen additive output-path-only setup-successor preparation; runtime unadmitted",
+  "members": 9,
+  "bytes": 48446,
+  "files": {
+    "admission-plan-v1.md": {
+      "bytes": 2300,
+      "sha256": "fc2f7f49871a9893fce8864566e4c7d64d4e1ad54aae8b883bdbb03a2f314ec2"
+    },
+    "finite-recipes-v1.json": {
+      "bytes": 19278,
+      "sha256": "8ab3d7d760a58d7b456e2dd847363ef1fdaedf711cc9e207d11f240a34e1cbf2"
+    },
+    "launcher-changes-v1.json": {
+      "bytes": 4189,
+      "sha256": "fc540cf5edec234b7902dfed28e41216841a46e0df657c4c678e14153eeb9ad8"
+    },
+    "launcher-empty-scope-v4.zsh": {
+      "bytes": 1763,
+      "sha256": "770f1dc51af09e40044ab57b3c764c1759ef9bc90d1f085e83d03f09975444d1"
+    },
+    "launcher-output-path-diffs-v1.patch": {
+      "bytes": 11223,
+      "sha256": "f904c4dd3493255e6dd9a4d49e0a613325fe079bdb42fcf6d931e6829eb1f768"
+    },
+    "launcher-sync-initial-v4.zsh": {
+      "bytes": 1762,
+      "sha256": "77256cb66200cf4a9b4cea1523a30e7020e5b3159d735931786f8400b562f918"
+    },
+    "launcher-sync-mutation-v4.zsh": {
+      "bytes": 1773,
+      "sha256": "a92494e092f0cd88c63fa9a25a71b5b085ba0a944a9ac878391692b2ec1ae7bf"
+    },
+    "output-path-validation-v1.json": {
+      "bytes": 4540,
+      "sha256": "500f311b8f9117b4da5e0d00201339a6b02785aabadd35ac4673d37290a0c190"
+    },
+    "source-preservation-v1.json": {
+      "bytes": 1618,
+      "sha256": "81b7d201dafb701304de8ecd7698a567e275f26575478649a83836f39a49b557"
+    }
+  }
+}

@@ -1,0 +1,229 @@
+import { getLiveQueryRowOptions } from "./live-query-options.js";
+import { codedMessage, devBuild } from "./error-message.js";
+import { getBuilderFromConfig } from "./query/live/collection-registry.js";
+import { getPooledLiveQuerySource } from "./query/pooled-source.js";
+import { isFailedStatus } from "./live-query-primitives.js";
+export class LiveQueryObserverClient {
+  constructor(client, collection, queryHash, usesSettledHydration, host) {
+    this.client = client;
+    this.collection = collection;
+    this.queryHash = queryHash;
+    this.usesSettledHydration = usesSettledHydration;
+    this.host = host;
+    this.failed = false;
+    this.authoritative = false;
+    this.handoffScheduled = false;
+  }
+  get seed() {
+    return this.authoritative ? void 0 : this.hydrationSeed;
+  }
+  get query() {
+    return this.queryHash ? this.client._getLiveQuery(this.queryHash) : void 0;
+  }
+  sync(forServerSnapshot = false) {
+    if (!this.queryHash || this.authoritative) return false;
+    this.client._waitForSsrLiveQuery(this.queryHash);
+    const query = this.client._getLiveQuery(this.queryHash, forServerSnapshot);
+    if (!query) return false;
+    if (this.host.isAttached() && !this.hydrationSeed && this.collection?.status === `ready` && !this.collection.isLoadingSubset) {
+      return this.markAuthoritative(query.dehydratedAt);
+    }
+    if (query.status === `error` && (this.usesSettledHydration || !forServerSnapshot || !query.initialSnapshot)) {
+      const changed = !this.failed || this.error !== query.error;
+      this.error = query.error;
+      this.failed = true;
+      if (changed) this.host.dirty();
+      return changed;
+    }
+    const snapshot = !this.usesSettledHydration && query.initialSnapshot || query.snapshot;
+    if (!snapshot || this.hydrationSeed?.snapshot === snapshot) return false;
+    this.hydrationSeed = {
+      dehydratedAt: query.dehydratedAt,
+      snapshot,
+      entries: snapshot.rows.map((row) => [row.key, row.value])
+    };
+    this.error = void 0;
+    this.failed = false;
+    this.host.dirty();
+    return true;
+  }
+  getServerSnapshot(preloadRequested) {
+    preloadRequested &&= this.client._isSsrStreamingEnabled();
+    if (typeof window !== `undefined` && !this.authoritative && this.queryHash) {
+      const waiting = this.client._waitForSsrLiveQuery(this.queryHash, true);
+      if (waiting) throw waiting;
+      const query = this.client._getLiveQuery(this.queryHash, true);
+      const snapshot2 = this.usesSettledHydration ? query?.snapshot : query?.initialSnapshot ?? query?.snapshot;
+      if (query?.status === `pending` && !snapshot2) {
+        if (this.usesSettledHydration)
+          void this.host.observer.preload().catch(() => {
+          });
+        throw query.promise;
+      }
+    }
+    if (preloadRequested) {
+      void this.host.observer.preload().catch(() => {
+      });
+    }
+    if (typeof window === `undefined`) this.assertSources();
+    const snapshot = this.host.read(true);
+    const collection = this.collection;
+    if (!collection || this.seed) return snapshot;
+    if (typeof window !== `undefined`) return snapshot;
+    if (preloadRequested && !snapshot.isReady) return snapshot;
+    const { sources } = this.getSourceInfo();
+    const entries = this.host.entries();
+    if (!this.queryHash || !preloadRequested && (entries.length > 0 || snapshot.isReady) && !(sources ?? [collection]).every(
+      (source) => this.client._hasSsrCollectionSnapshot(source)
+    )) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.` : codedMessage(252)
+      );
+    }
+    this.client._captureServerQuery(
+      this.queryHash,
+      {
+        rows: entries.map(([key, value]) => ({ key, value })),
+        ...snapshot.isReady ? {} : {
+          status: snapshot.isLoadingError || snapshot.isCrashed ? `error` : `loading`
+        }
+      },
+      sources,
+      getLiveQueryRowOptions(collection)
+    );
+    return this.host.read(true);
+  }
+  diffEntries(previous, next) {
+    const previousByKey = new Map(previous);
+    const nextByKey = new Map(next);
+    const changes = [];
+    for (const [key, value] of previous) {
+      if (!nextByKey.has(key)) changes.push({ type: `delete`, key, value });
+    }
+    for (const [key, value] of next) {
+      const previousValue = previousByKey.get(key);
+      if (previousValue === void 0)
+        changes.push({ type: `insert`, key, value });
+      else if (previousValue !== value)
+        changes.push({ type: `update`, key, value, previousValue });
+    }
+    return changes;
+  }
+  markAuthoritative(dehydratedAt) {
+    if (this.authoritative) return false;
+    dehydratedAt ??= this.query?.dehydratedAt;
+    const changed = this.failed;
+    this.error = void 0;
+    this.failed = false;
+    this.authoritative = true;
+    if (dehydratedAt !== void 0 && this.queryHash)
+      this.client._consumeLiveQueryResult(this.queryHash, dehydratedAt);
+    if (changed) this.host.dirty();
+    return changed;
+  }
+  scheduleHandoff() {
+    if (this.handoffScheduled) return;
+    this.handoffScheduled = true;
+    queueMicrotask(() => {
+      this.handoffScheduled = false;
+      this.handoff();
+    });
+  }
+  handoff() {
+    const collection = this.collection;
+    if (this.host.isDisposed() || !this.host.isAttached() || !collection || !this.seed || // A failure ends the sync run whose result the seed stood in for.
+    !isFailedStatus(collection.status) && (collection.status !== `ready` || collection.isLoadingSubset))
+      return;
+    const previous = this.seed.entries;
+    const dehydratedAt = this.seed.dehydratedAt;
+    const entries = Array.from(collection.entries());
+    this.hydrationSeed = void 0;
+    this.markAuthoritative(dehydratedAt);
+    this.host.publish(this.diffEntries(previous, entries), entries);
+  }
+  assertSources() {
+    const { sources } = this.getSourceInfo();
+    if (this.queryHash && sources)
+      this.client._assertLiveQuerySources(
+        this.queryHash,
+        sources,
+        getLiveQueryRowOptions(this.collection)
+      );
+  }
+  subscribe() {
+    if (!this.queryHash) return () => {
+    };
+    return this.client.subscribe((event) => {
+      if (event.type === `liveQueryStreamError` || event.query.queryHash !== this.queryHash)
+        return;
+      const previous = this.host.entries();
+      if (this.sync())
+        this.host.publish(this.diffEntries(previous, this.host.entries()));
+    });
+  }
+  registerResource() {
+    const config = this.collection?.config;
+    if (this.unregisterResource || !this.client._isSsrServerCleanupEnabled() || !config || !getBuilderFromConfig(config))
+      return;
+    this.unregisterResource = this.client._registerLiveQueryResource(
+      this.host.observer,
+      async () => {
+        this.host.observer.dispose();
+        await this.collection?.cleanup({ dependents: true });
+      }
+    );
+  }
+  takeResourceRelease() {
+    const release = this.unregisterResource;
+    this.unregisterResource = void 0;
+    return release;
+  }
+  getSourceInfo() {
+    const collection = this.collection;
+    const config = collection?.config;
+    const pooledSource = collection && getPooledLiveQuerySource(collection);
+    const sources = config ? getBuilderFromConfig(config)?.getSourceCollections() : pooledSource ? [pooledSource] : void 0;
+    return { sources, pooledSource: pooledSource || void 0 };
+  }
+  preload() {
+    if (this.preloadPromise) return this.preloadPromise;
+    const { sources, pooledSource } = this.getSourceInfo();
+    if (this.queryHash) {
+      const query = this.query;
+      try {
+        this.client._waitForSsrLiveQuery(this.queryHash);
+        if (sources)
+          this.client._assertLiveQuerySources(
+            this.queryHash,
+            sources,
+            getLiveQueryRowOptions(this.collection)
+          );
+        if (query?.status === `pending` || query?.status === `success` && query.snapshot?.status === void 0) {
+          if (pooledSource && this.collection)
+            return Promise.all([query.promise, this.collection.preload()]).then(
+              () => {
+              }
+            );
+          this.collection?._markPreload();
+          return query.status === `pending` ? query.promise : Promise.resolve();
+        }
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
+    this.registerResource();
+    const collectionPromise = this.host.preload();
+    const promise = this.client._isSsrStreamingEnabled() && this.queryHash ? this.client._registerLiveQuery(
+      this.queryHash,
+      collectionPromise.then(() => this.host.observer.dehydrate()),
+      sources,
+      getLiveQueryRowOptions(this.collection)
+    ) : collectionPromise;
+    this.preloadPromise = promise;
+    const clear = () => {
+      if (this.preloadPromise === promise) this.preloadPromise = void 0;
+    };
+    void promise.then(clear, clear);
+    return promise;
+  }
+}

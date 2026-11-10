@@ -1,0 +1,8 @@
+{
+  "verifiedBy": "/root",
+  "sourceFiles": 584,
+  "payloadFiles": 2544,
+  "errors": [],
+  "allMatch": true,
+  "scope": "finite bound source/payload map; no escaped-group census"
+}

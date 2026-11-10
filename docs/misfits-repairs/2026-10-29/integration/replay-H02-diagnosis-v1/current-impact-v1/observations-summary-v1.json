@@ -1,0 +1,782 @@
+[
+  {
+    "label": "current-main",
+    "productionIdentity": "ebf2eb723161c3ea7073c1f4de55ceb4ff02bf284bd1e2ea1e6b76db9230c0a4",
+    "duration": 2.597,
+    "maxGroupRSS": 590118912,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 20,
+      "acquisition-state": 20,
+      "key": 32,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 12,
+      "unload-state": 12,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1,
+      "microtask-completion-armed": 1
+    },
+    "checkpoints": [
+      {
+        "event": 53,
+        "phase": "preload-settled",
+        "elapsedMs": 20.07858299999998,
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 69265952
+      },
+      {
+        "event": 75,
+        "phase": "release-answer",
+        "elapsedMs": 21.31279100000006,
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69708088
+      },
+      {
+        "event": 76,
+        "phase": "release-flush-settled",
+        "elapsedMs": 22.7437910000001,
+        "turn": 0,
+        "heapUsed": 69792464
+      },
+      {
+        "event": 78,
+        "phase": "release-answer",
+        "elapsedMs": 22.756875000000036,
+        "keys": [
+          3
+        ],
+        "heapUsed": 69794424
+      },
+      {
+        "event": 83,
+        "phase": "microtask-completion-armed",
+        "elapsedMs": 23.25566600000002,
+        "heapUsed": 69975648
+      }
+    ],
+    "pivotCacheStates": [
+      {
+        "event": 80,
+        "phase": "acquisition-state",
+        "elapsedMs": 23.095458000000008,
+        "acquisitionCount": 13,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 70324440
+      },
+      {
+        "event": 88,
+        "phase": "acquisition-state",
+        "elapsedMs": 23.91041599999994,
+        "acquisitionCount": 14,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 70508736
+      },
+      {
+        "event": 94,
+        "phase": "acquisition-state",
+        "elapsedMs": 24.448374999999942,
+        "acquisitionCount": 15,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 70963776
+      },
+      {
+        "event": 100,
+        "phase": "acquisition-state",
+        "elapsedMs": 24.964333000000124,
+        "acquisitionCount": 16,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 71454496
+      },
+      {
+        "event": 106,
+        "phase": "acquisition-state",
+        "elapsedMs": 25.426832999999988,
+        "acquisitionCount": 17,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 72129216
+      },
+      {
+        "event": 112,
+        "phase": "acquisition-state",
+        "elapsedMs": 25.898083000000042,
+        "acquisitionCount": 18,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 72384640
+      },
+      {
+        "event": 118,
+        "phase": "acquisition-state",
+        "elapsedMs": 26.333875000000035,
+        "acquisitionCount": 19,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 72820104
+      },
+      {
+        "event": 124,
+        "phase": "acquisition-state",
+        "elapsedMs": 26.73937500000011,
+        "acquisitionCount": 20,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 73658792
+      }
+    ],
+    "unloadPivotMembership": [
+      {
+        "event": 85,
+        "phase": "unload-state",
+        "elapsedMs": 23.588999999999942,
+        "marker3Present": true,
+        "heapUsed": 70235560
+      },
+      {
+        "event": 91,
+        "phase": "unload-state",
+        "elapsedMs": 24.178916000000072,
+        "marker3Present": true,
+        "heapUsed": 71018280
+      },
+      {
+        "event": 97,
+        "phase": "unload-state",
+        "elapsedMs": 24.72395800000004,
+        "marker3Present": true,
+        "heapUsed": 71226840
+      },
+      {
+        "event": 103,
+        "phase": "unload-state",
+        "elapsedMs": 25.208624999999984,
+        "marker3Present": true,
+        "heapUsed": 71679280
+      },
+      {
+        "event": 109,
+        "phase": "unload-state",
+        "elapsedMs": 25.667290999999977,
+        "marker3Present": true,
+        "heapUsed": 72336240
+      },
+      {
+        "event": 115,
+        "phase": "unload-state",
+        "elapsedMs": 26.128208000000086,
+        "marker3Present": true,
+        "heapUsed": 72595200
+      },
+      {
+        "event": 121,
+        "phase": "unload-state",
+        "elapsedMs": 26.527708000000075,
+        "marker3Present": true,
+        "heapUsed": 73024104
+      },
+      {
+        "event": 127,
+        "phase": "unload-state",
+        "elapsedMs": 26.934708,
+        "marker3Present": true,
+        "heapUsed": 73482712
+      }
+    ],
+    "lastEvent": {
+      "event": 128,
+      "phase": "key",
+      "elapsedMs": 26.94487500000014,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 73486896
+    }
+  },
+  {
+    "label": "accepted-replay",
+    "productionIdentity": "d7fa2b44615b883fcc3da8971c45da8848e1a6921e4ff2e7f2c2983eec6f3ae0",
+    "duration": 2.229,
+    "maxGroupRSS": 595476480,
+    "phaseCounts": {
+      "test-start": 1,
+      "key-prefix": 3,
+      "markers-created": 1,
+      "source-created": 1,
+      "live-created": 1,
+      "acquisition": 20,
+      "acquisition-state": 20,
+      "key": 32,
+      "fetch": 13,
+      "subscribed": 1,
+      "preload-start": 1,
+      "unload": 12,
+      "unload-state": 12,
+      "preload-settled": 1,
+      "reload-start": 1,
+      "reload-called": 1,
+      "reload-initial-flush-settled": 1,
+      "release-turn": 2,
+      "release-answer": 2,
+      "release-flush-settled": 1,
+      "microtask-completion-armed": 1
+    },
+    "checkpoints": [
+      {
+        "event": 53,
+        "phase": "preload-settled",
+        "elapsedMs": 20.767499999999927,
+        "acquisitionCount": 8,
+        "requestCount": 8,
+        "owners": 2,
+        "cacheCount": 8,
+        "heapUsed": 69306944
+      },
+      {
+        "event": 75,
+        "phase": "release-answer",
+        "elapsedMs": 22.041458000000148,
+        "keys": [
+          1,
+          2
+        ],
+        "heapUsed": 69749000
+      },
+      {
+        "event": 76,
+        "phase": "release-flush-settled",
+        "elapsedMs": 23.474541000000045,
+        "turn": 0,
+        "heapUsed": 69833272
+      },
+      {
+        "event": 78,
+        "phase": "release-answer",
+        "elapsedMs": 23.485875000000078,
+        "keys": [
+          3
+        ],
+        "heapUsed": 69835240
+      },
+      {
+        "event": 83,
+        "phase": "microtask-completion-armed",
+        "elapsedMs": 24.01587500000005,
+        "heapUsed": 70018568
+      }
+    ],
+    "pivotCacheStates": [
+      {
+        "event": 80,
+        "phase": "acquisition-state",
+        "elapsedMs": 23.859290999999985,
+        "acquisitionCount": 13,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 69963992
+      },
+      {
+        "event": 88,
+        "phase": "acquisition-state",
+        "elapsedMs": 24.726666000000023,
+        "acquisitionCount": 14,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 70561688
+      },
+      {
+        "event": 94,
+        "phase": "acquisition-state",
+        "elapsedMs": 25.312374999999975,
+        "acquisitionCount": 15,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 71023928
+      },
+      {
+        "event": 100,
+        "phase": "acquisition-state",
+        "elapsedMs": 25.893790999999965,
+        "acquisitionCount": 16,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 71523024
+      },
+      {
+        "event": 106,
+        "phase": "acquisition-state",
+        "elapsedMs": 26.404749999999922,
+        "acquisitionCount": 17,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 71979152
+      },
+      {
+        "event": 112,
+        "phase": "acquisition-state",
+        "elapsedMs": 27.06549999999993,
+        "acquisitionCount": 18,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 72465336
+      },
+      {
+        "event": 118,
+        "phase": "acquisition-state",
+        "elapsedMs": 27.686500000000024,
+        "acquisitionCount": 19,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 72914640
+      },
+      {
+        "event": 124,
+        "phase": "acquisition-state",
+        "elapsedMs": 28.186541000000034,
+        "acquisitionCount": 20,
+        "marker3Present": false,
+        "queryStates": [
+          {
+            "owner": 1,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "fetching",
+            "rowIds": [
+              3
+            ]
+          },
+          {
+            "owner": 0,
+            "keys": [
+              3
+            ],
+            "status": "success",
+            "fetchStatus": "idle",
+            "rowIds": []
+          }
+        ],
+        "heapUsed": 73370008
+      }
+    ],
+    "unloadPivotMembership": [
+      {
+        "event": 85,
+        "phase": "unload-state",
+        "elapsedMs": 24.358124999999973,
+        "marker3Present": true,
+        "heapUsed": 70281984
+      },
+      {
+        "event": 91,
+        "phase": "unload-state",
+        "elapsedMs": 25.023957999999993,
+        "marker3Present": true,
+        "heapUsed": 71078928
+      },
+      {
+        "event": 97,
+        "phase": "unload-state",
+        "elapsedMs": 25.633583000000044,
+        "marker3Present": true,
+        "heapUsed": 71292264
+      },
+      {
+        "event": 103,
+        "phase": "unload-state",
+        "elapsedMs": 26.160583000000088,
+        "marker3Present": true,
+        "heapUsed": 71747520
+      },
+      {
+        "event": 109,
+        "phase": "unload-state",
+        "elapsedMs": 26.65274999999997,
+        "marker3Present": true,
+        "heapUsed": 72189376
+      },
+      {
+        "event": 115,
+        "phase": "unload-state",
+        "elapsedMs": 27.422958000000108,
+        "marker3Present": true,
+        "heapUsed": 72853184
+      },
+      {
+        "event": 121,
+        "phase": "unload-state",
+        "elapsedMs": 27.932625000000144,
+        "marker3Present": true,
+        "heapUsed": 73120888
+      },
+      {
+        "event": 127,
+        "phase": "unload-state",
+        "elapsedMs": 28.406750000000102,
+        "marker3Present": true,
+        "heapUsed": 73581368
+      }
+    ],
+    "lastEvent": {
+      "event": 128,
+      "phase": "key",
+      "elapsedMs": 28.413375000000087,
+      "owner": 1,
+      "ownerCount": 2,
+      "keys": [
+        3
+      ],
+      "subscriptionPresent": true,
+      "signalPresent": true,
+      "signalAborted": true,
+      "wherePresent": true,
+      "orderPresent": false,
+      "cacheCount": 8,
+      "heapUsed": 73585568
+    }
+  }
+]

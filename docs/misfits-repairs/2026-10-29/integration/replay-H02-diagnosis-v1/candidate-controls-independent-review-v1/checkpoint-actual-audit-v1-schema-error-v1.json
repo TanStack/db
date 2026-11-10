@@ -1,0 +1,9 @@
+{
+  "actualChunk": "1b6d99",
+  "exitCode": 1,
+  "stage": "static review audit",
+  "error": "KeyError signalPresent: reviewer looked at detail.signalPresent, actual schema is detail.options.signalPresent",
+  "productVerdict": false,
+  "supersededBy": "audit-inline-source-failed-peer-checkpoint-actual-v2.py",
+  "originalScriptSha256": "be8ab4f788997bfb20ca08823ac28c7072429a6757ba3c0e61882251bf7788df"
+}

@@ -1,0 +1,888 @@
+import {
+  CollectionConfigurationError,
+  CollectionIsInErrorStateError,
+  CollectionPreloadAbortedError,
+  CollectionReloadCrashedError,
+  CollectionReloadDuringSyncEntryError,
+  DuplicateKeySyncError,
+  LoadSubsetOperationAbortedError,
+  NoPendingSyncTransactionCommitError,
+  NoPendingSyncTransactionWriteError,
+  SyncCleanupError,
+  SyncRowReusedWithoutPreviousValueError,
+  SyncTransactionAlreadyCommittedError,
+  SyncTransactionAlreadyCommittedWriteError
+} from "../errors";
+import { createDeferred } from "../deferred";
+import { codedMessage, devBuild } from "../error-message";
+import { withAcceptedReceipt } from "../sync-receipt";
+import { assertCollectionKey } from "../utils";
+import { isPromiseLike } from "../utils/type-guards";
+import { reportUncaught } from "../utils/callbacks";
+import { LIVE_QUERY_INTERNAL } from "../query/live/internal.js";
+import { isFailedStatus } from "../live-query-primitives.js";
+import { automaticRowMetadataWrite, truncatesSourceKey } from "./state";
+export const syncWriteNamesWholeRow = /* @__PURE__ */ Symbol();
+function shallowEqual(left, right) {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]));
+}
+export class CollectionSyncManager {
+  /**
+   * Creates a new CollectionSyncManager instance
+   */
+  constructor(config, id) {
+    this.preloadPromise = null;
+    this.syncCleanupFn = null;
+    this.syncLoadSubsetFn = null;
+    this.syncUnloadSubsetFn = null;
+    this.pendingLoadSubsetPromises = /* @__PURE__ */ new Set();
+    this.loadSubsetOperations = /* @__PURE__ */ new Set();
+    this.syncStartDeferred = false;
+    this.syncStartRequested = false;
+    this.deferredLoadSubsets = [];
+    // Fences callbacks retained across reentrant sync entry and cleanup. This
+    // changes at both boundaries; syncRunGeneration changes at cleanup and when
+    // a reload retires a run.
+    this.syncCallbackEpoch = 0;
+    this.syncRunGeneration = 0;
+    this.syncEntryActive = false;
+    // A loadSubset call of the adapter is running; a reload from it would
+    // retire the run under the call.
+    this.loadSubsetDepth = 0;
+    this.config = config;
+    this.id = id;
+    this.syncMode = config.syncMode ?? `eager`;
+  }
+  setDeps(deps) {
+    this.collection = deps.collection;
+    this.state = deps.state;
+    this.lifecycle = deps.lifecycle;
+    this._events = deps.events;
+  }
+  /**
+   * Core keeps the object a source writes as the stored row. A source that
+   * changes that object in place and writes it again has already
+   * overwritten the previous value core would publish, unless it passes
+   * `previousValue`. Rewriting an unchanged object stays valid.
+   */
+  checkReusedRow(key, type, message) {
+    const value = message.value;
+    const writtenRows = this.writtenRows ??= /* @__PURE__ */ new WeakMap();
+    try {
+      const written = writtenRows.get(value);
+      if (written && type === `update` && // A write that names its previous value declares the reuse.
+      !(`previousValue` in message) && !shallowEqual(written, value)) {
+        throw new SyncRowReusedWithoutPreviousValueError(key);
+      }
+      writtenRows.set(value, { ...value });
+    } catch (error) {
+      if (error instanceof SyncRowReusedWithoutPreviousValueError) throw error;
+      writtenRows.delete(value);
+    }
+  }
+  createDuplicateKeyError(key) {
+    const utils = this.config.utils;
+    const internal = utils?.[LIVE_QUERY_INTERNAL];
+    return new DuplicateKeySyncError(key, this.id, {
+      hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+      hasJoins: internal?.hasJoins ?? false,
+      hasDistinct: internal?.hasDistinct ?? false
+    });
+  }
+  /** Mark the active sync transaction as changing collection layout. */
+  markLayoutChange() {
+    this.getActivePendingSyncTransaction().layoutChanged = true;
+  }
+  /**
+   * Start the sync process for this collection
+   * This is called when the collection is first accessed or preloaded
+   */
+  startSync() {
+    this.lifecycle.assertCanStartSync();
+    if (this.lifecycle.status !== `idle` && this.lifecycle.status !== `cleaned-up`) {
+      return;
+    }
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true;
+      return;
+    }
+    const syncCallbackEpoch = ++this.syncCallbackEpoch;
+    this.lifecycle.setStatus(`loading`);
+    if (syncCallbackEpoch !== this.syncCallbackEpoch) return;
+    const readyFailure = this.enterSync(syncCallbackEpoch);
+    if (readyFailure) throw readyFailure.error;
+  }
+  /**
+   * Start a new sync run while everything visible stays: the rows, the
+   * status, and the node's problems. The new run replaces the rows only with
+   * a snapshot or its own truncate, and every other write applies on the
+   * kept rows. The reload completes when a replacement applies, or at the
+   * run's `markReady()`. A reload in flight returns its promise; a crashed
+   * Collection cannot reload.
+   */
+  reload() {
+    const status = this.lifecycle.status;
+    if (status === `crashed`) {
+      return Promise.reject(new CollectionReloadCrashedError(this.id));
+    }
+    try {
+      this.lifecycle.assertCanStartSync();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (this.lifecycle.reloading) return this.lifecycle.beginReload();
+    if (status === `idle` || status === `cleaned-up`) return this.preload();
+    if (this.syncEntryActive || this.loadSubsetDepth > 0) {
+      return Promise.reject(new CollectionReloadDuringSyncEntryError(this.id));
+    }
+    const syncCallbackEpoch = ++this.syncCallbackEpoch;
+    const reload = this.lifecycle.beginReload();
+    void this.retireSyncRun().catch(
+      (error) => this.lifecycle.crash(error)
+    );
+    this.lifecycle.retireSubscriptionDemand();
+    if (syncCallbackEpoch !== this.syncCallbackEpoch) return reload;
+    try {
+      const readyFailure = this.enterSync(syncCallbackEpoch);
+      if (readyFailure) reportUncaught(readyFailure.error);
+    } catch (error) {
+      this.lifecycle.abandonReload(error);
+    }
+    return reload;
+  }
+  /**
+   * Run the sync function. A sync function that throws crashes the run and
+   * rethrows; a ready callback that throws while it runs is returned.
+   */
+  enterSync(syncCallbackEpoch) {
+    const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch;
+    let loadedSubsetsInvalidationQueued = false;
+    const finishReadyFailures = this.lifecycle.deferReadyFailures();
+    let readyFailure;
+    this.syncEntryActive = true;
+    try {
+      const syncRes = normalizeSyncFnResult(
+        this.config.sync.sync({
+          collection: this.collection,
+          begin: (options) => {
+            if (!isCurrentSync()) return;
+            const applied = createDeferred();
+            void applied.promise.catch(() => void 0);
+            const snapshot = options?.snapshot === true;
+            this.state.pendingSyncedTransactions.push({
+              committed: false,
+              applicationStarted: false,
+              layoutChanged: false,
+              operations: [],
+              rowMetadataWrites: /* @__PURE__ */ new Map(),
+              explicitRowMetadataWrites: /* @__PURE__ */ new Map(),
+              collectionMetadataWrites: /* @__PURE__ */ new Map(),
+              applied,
+              duplicateKeyError: (key) => this.createDuplicateKeyError(key),
+              truncate: snapshot,
+              truncateMarkReady: false
+            });
+            if (snapshot) this.state.refreshPendingSyncedProjection();
+          },
+          write: (messageWithOptionalKey) => {
+            if (!isCurrentSync()) return;
+            const pendingTransaction = this.getWritableSyncTransaction();
+            if (!pendingTransaction) return;
+            const key = `key` in messageWithOptionalKey ? messageWithOptionalKey.key : this.config.getKey(messageWithOptionalKey.value);
+            assertCollectionKey(key, messageWithOptionalKey);
+            let messageType = messageWithOptionalKey.type;
+            if (messageWithOptionalKey.type === `insert`) {
+              const disposition = this.state.classifyPendingSyncedInsert(
+                key,
+                messageWithOptionalKey.value
+              );
+              if (disposition === `duplicate`)
+                throw this.createDuplicateKeyError(key);
+              messageType = disposition;
+            }
+            if (`value` in messageWithOptionalKey && devBuild() && process.env.NODE_ENV !== `production`) {
+              this.checkReusedRow(key, messageType, messageWithOptionalKey);
+            }
+            const message = {
+              ...messageWithOptionalKey,
+              type: messageType,
+              key,
+              originalSyncType: messageWithOptionalKey.type === `insert` || messageWithOptionalKey[syncWriteNamesWholeRow] ? `insert` : void 0
+            };
+            pendingTransaction.operations.push(message);
+            this.state.stagePendingSyncOperation(
+              message,
+              pendingTransaction.preserveHydrationSeedKeys?.has(key)
+            );
+            const metadataWrite = automaticRowMetadataWrite(message);
+            if (metadataWrite) {
+              pendingTransaction.rowMetadataWrites.set(key, metadataWrite);
+            }
+          },
+          commit: (signal) => {
+            if (!isCurrentSync()) return true;
+            const pendingTransaction = this.state.pendingSyncedTransactions.at(-1);
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionCommitError();
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedError();
+            }
+            if (signal?.aborted || pendingTransaction.invalidationError !== void 0) {
+              this.state.cancelPendingSyncedTransaction(
+                pendingTransaction,
+                signal?.aborted ? void 0 : pendingTransaction.invalidationError
+              );
+              return pendingTransaction.applied.promise;
+            }
+            pendingTransaction.committed = true;
+            this.state.acceptSyncTransaction(pendingTransaction);
+            if (!pendingTransaction.applied.isPending()) return true;
+            return withAcceptedReceipt(pendingTransaction.applied.promise, true);
+          },
+          markReady: () => {
+            if (isCurrentSync()) this.lifecycle.markReady();
+          },
+          fail: (error) => {
+            if (isCurrentSync()) this.lifecycle.fail(error);
+          },
+          reportError: (error) => {
+            if (isCurrentSync()) this.lifecycle.reportError(error);
+          },
+          reportHealthy: (error) => {
+            if (isCurrentSync()) this.lifecycle.reportHealthy(error);
+          },
+          truncate: (options) => {
+            if (!isCurrentSync()) return;
+            const pendingTransaction = this.getWritableSyncTransaction();
+            if (!pendingTransaction) return;
+            pendingTransaction.operations = [];
+            pendingTransaction.rowMetadataWrites.clear();
+            pendingTransaction.explicitRowMetadataWrites.clear();
+            pendingTransaction.truncate = true;
+            pendingTransaction.truncateMarkReady = options?.markReady ?? true;
+            this.state.refreshPendingSyncedProjection();
+          },
+          invalidateLoadedSubsets: () => {
+            if (!isCurrentSync() || loadedSubsetsInvalidationQueued) return;
+            loadedSubsetsInvalidationQueued = true;
+            queueMicrotask(() => {
+              loadedSubsetsInvalidationQueued = false;
+              if (!isCurrentSync()) return;
+              this._events.emit(`loadedSubsets:invalidated`, {
+                type: `loadedSubsets:invalidated`,
+                collection: this.collection
+              });
+            });
+          },
+          metadata: this.createSyncMetadataApi(isCurrentSync)
+        })
+      );
+      this.syncEntryActive = false;
+      readyFailure = finishReadyFailures();
+      if (!isCurrentSync()) {
+        if (syncRes?.cleanup) {
+          this.registerPendingSyncEntryCleanup(syncRes.cleanup);
+        }
+        this.completePendingSyncEntryCleanup();
+        return readyFailure;
+      }
+      this.syncCleanupFn = syncRes?.cleanup ?? null;
+      this.syncLoadSubsetFn = syncRes?.loadSubset ?? null;
+      this.syncUnloadSubsetFn = syncRes?.unloadSubset ?? null;
+      if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
+        throw new CollectionConfigurationError(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. Either provide a loadSubset handler or use syncMode "eager".` : codedMessage(210, { id: this.id })
+        );
+      }
+      this.lifecycle.startGCTimerIfUnsubscribed();
+    } catch (error) {
+      this.syncEntryActive = false;
+      this.completePendingSyncEntryCleanup();
+      finishReadyFailures();
+      if (isCurrentSync() && !this.lifecycle.stoppedThisRun)
+        this.lifecycle.crash(error);
+      throw error;
+    }
+    return readyFailure;
+  }
+  deferStart() {
+    if (this.lifecycle.status !== `idle` && this.lifecycle.status !== `cleaned-up`) {
+      return false;
+    }
+    this.syncStartDeferred = true;
+    return true;
+  }
+  resumeStart() {
+    if (!this.syncStartDeferred) {
+      return;
+    }
+    this.syncStartDeferred = false;
+    const shouldStart = this.syncStartRequested || this.deferredLoadSubsets.length > 0;
+    this.syncStartRequested = false;
+    const deferredLoadSubsets = this.deferredLoadSubsets;
+    this.deferredLoadSubsets = [];
+    const syncRunGeneration = this.syncRunGeneration;
+    try {
+      if (shouldStart) {
+        this.startSync();
+      }
+    } catch (error) {
+      for (const { deferred } of deferredLoadSubsets) {
+        deferred.reject(error);
+      }
+      throw error;
+    }
+    for (const { options, deferred } of deferredLoadSubsets) {
+      const loadSubset = this.syncLoadSubsetFn;
+      try {
+        if (syncRunGeneration !== this.syncRunGeneration || options.signal?.aborted) {
+          throw new LoadSubsetOperationAbortedError();
+        }
+        const result = loadSubset ? this.callLoadSubset(loadSubset, options) : true;
+        if (result instanceof Promise) {
+          void result.then(
+            (sourceResult) => deferred.resolve(sourceResult),
+            (error) => deferred.reject(error)
+          );
+        } else {
+          deferred.resolve(void 0);
+        }
+      } catch (error) {
+        deferred.reject(error);
+      }
+    }
+  }
+  getActivePendingSyncTransaction() {
+    const pendingTransaction = this.state.pendingSyncedTransactions.at(-1);
+    if (!pendingTransaction) {
+      throw new NoPendingSyncTransactionWriteError();
+    }
+    if (pendingTransaction.committed) {
+      throw new SyncTransactionAlreadyCommittedWriteError();
+    }
+    return pendingTransaction;
+  }
+  /**
+   * The open transaction that takes a row write or truncate. A replay can
+   * invalidate an open transaction between writes. Its commit receipt owns
+   * that failure; later writes, a truncate included, cannot revive it, so
+   * they are ignored. Its metadata writes need no check: no read includes an
+   * invalid transaction, and it never applies.
+   */
+  getWritableSyncTransaction() {
+    const pendingTransaction = this.getActivePendingSyncTransaction();
+    return pendingTransaction.invalidationError === void 0 ? pendingTransaction : void 0;
+  }
+  /** Record an explicit row metadata write and its place among the operations. */
+  writeExplicitRowMetadata(key, write) {
+    const pendingTransaction = this.getActivePendingSyncTransaction();
+    pendingTransaction.explicitRowMetadataWrites.set(key, {
+      position: pendingTransaction.operations.length,
+      write
+    });
+    pendingTransaction.rowMetadataWrites.set(key, write);
+  }
+  createSyncMetadataApi(isCurrentSync) {
+    return {
+      persistence: null,
+      row: {
+        get: (key) => {
+          if (!isCurrentSync()) return void 0;
+          const pending = this.state.pendingSyncedTransactions;
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const transaction = pending[index];
+            if (transaction.invalidationError !== void 0) continue;
+            const write = transaction.rowMetadataWrites.get(key);
+            if (write) return write.type === `delete` ? void 0 : write.value;
+            if (truncatesSourceKey(transaction, key)) return void 0;
+          }
+          return this.state.syncedMetadata.get(key);
+        },
+        set: (key, metadata) => {
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `set`, value: metadata });
+        },
+        delete: (key) => {
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `delete` });
+        }
+      },
+      collection: {
+        get: (key) => {
+          if (!isCurrentSync()) return void 0;
+          const pending = this.state.pendingSyncedTransactions;
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const transaction = pending[index];
+            if (transaction.invalidationError !== void 0) continue;
+            const write = transaction.collectionMetadataWrites.get(key);
+            if (write) return write.type === `delete` ? void 0 : write.value;
+          }
+          return this.state.syncedCollectionMetadata.get(key);
+        },
+        set: (key, value) => {
+          if (!isCurrentSync()) return;
+          this.getActivePendingSyncTransaction().collectionMetadataWrites.set(
+            key,
+            { type: `set`, value }
+          );
+        },
+        delete: (key) => {
+          if (!isCurrentSync()) return;
+          this.getActivePendingSyncTransaction().collectionMetadataWrites.set(
+            key,
+            { type: `delete` }
+          );
+        },
+        list: (prefix) => {
+          if (!isCurrentSync()) return [];
+          const merged = new Map(this.state.syncedCollectionMetadata);
+          for (const transaction of this.state.pendingSyncedTransactions) {
+            if (transaction.invalidationError !== void 0) continue;
+            for (const [key, write] of transaction.collectionMetadataWrites) {
+              if (write.type === `delete`) merged.delete(key);
+              else merged.set(key, write.value);
+            }
+          }
+          return Array.from(merged.entries()).filter(([key]) => prefix ? key.startsWith(prefix) : true).map(([key, value]) => ({
+            key,
+            value
+          }));
+        }
+      }
+    };
+  }
+  /** Whether a caller is still waiting for the initial sync to finish. */
+  get hasPendingPreload() {
+    return this.rejectPreload !== void 0;
+  }
+  /**
+   * Preload the collection data by starting sync if not already started
+   * Multiple concurrent calls will share the same promise
+   */
+  preload() {
+    try {
+      this.lifecycle.assertCanStartSync();
+      if (this.syncStartDeferred) this.resumeStart();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (this.lifecycle.status === `ready`) {
+      this.lifecycle.cancelGCTimer();
+      this.lifecycle.startGCTimerIfUnsubscribed();
+    }
+    if (this.preloadPromise) {
+      return this.preloadPromise;
+    }
+    if (devBuild() && process.env.NODE_ENV !== `production` && this.syncMode === `on-demand`) {
+      console.warn(
+        `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. In on-demand mode, data is only loaded when queries request it. Instead, create a live query and call .preload() on that to load the specific data you need. See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details.`
+      );
+    }
+    const attempt = new Promise((resolve, reject) => {
+      if (this.lifecycle.status === `ready`) {
+        resolve();
+        return;
+      }
+      if (isFailedStatus(this.lifecycle.status)) {
+        reject(this.getPreloadError());
+        return;
+      }
+      let settled = false;
+      const syncStartState = { active: false, ready: false };
+      let unsubscribeError = () => {
+      };
+      let unsubscribeReady = () => {
+      };
+      const finishPreload = () => {
+        settled = true;
+        unsubscribeError();
+        unsubscribeReady();
+        if (this.rejectPreload === rejectError) this.rejectPreload = void 0;
+        this.lifecycle.startGCTimerIfUnsubscribed();
+      };
+      const resolveReady = () => {
+        if (syncStartState.active) {
+          syncStartState.ready = true;
+          return;
+        }
+        if (settled) return;
+        finishPreload();
+        resolve();
+      };
+      const rejectError = (error) => {
+        if (settled) return;
+        finishPreload();
+        reject(error);
+      };
+      this.rejectPreload = rejectError;
+      this.lifecycle.cancelGCTimer();
+      unsubscribeReady = this.lifecycle.onFirstReady(resolveReady);
+      const onFailure = () => {
+        if (syncStartState.active) {
+          return;
+        }
+        rejectError(this.getPreloadError());
+      };
+      const unsubscribeFailed = this.collection.on(`status:error`, onFailure);
+      const unsubscribeCrashed = this.collection.on(`status:crashed`, onFailure);
+      unsubscribeError = () => {
+        unsubscribeFailed();
+        unsubscribeCrashed();
+      };
+      if (this.lifecycle.status === `idle` || this.lifecycle.status === `cleaned-up`) {
+        syncStartState.active = true;
+        let startFailure;
+        try {
+          this.startSync();
+        } catch (error) {
+          startFailure = { error };
+        } finally {
+          syncStartState.active = false;
+        }
+        if (isFailedStatus(this.collection.status)) {
+          rejectError(this.getPreloadError());
+        } else if (syncStartState.ready) {
+          if (startFailure) reportUncaught(startFailure.error);
+          resolveReady();
+        } else if (startFailure) {
+          rejectError(startFailure.error);
+        }
+      }
+    });
+    this.preloadPromise = attempt;
+    void attempt.then(void 0, () => {
+      if (this.preloadPromise === attempt) {
+        this.preloadPromise = null;
+      }
+    });
+    return attempt;
+  }
+  getPreloadError() {
+    const syncError = this.lifecycle.getSyncError();
+    return syncError === void 0 ? new CollectionIsInErrorStateError() : syncError;
+  }
+  /**
+   * Gets whether the collection is currently loading more data
+   */
+  get isLoadingSubset() {
+    return this.pendingLoadSubsetPromises.size > 0;
+  }
+  /** @internal Observe subset requests caused by one imperative operation. */
+  beginLoadSubsetOperation() {
+    const previousOperation = this.activeLoadSubsetOperation;
+    const operation = {
+      pending: /* @__PURE__ */ new Set(),
+      waiting: false,
+      completed: false,
+      hasError: false
+    };
+    this.activeLoadSubsetOperation = operation;
+    this.loadSubsetOperations.add(operation);
+    return {
+      wait: () => this.waitForLoadSubsetOperation(operation),
+      cancel: () => {
+        operation.completed = true;
+        this.loadSubsetOperations.delete(operation);
+        if (this.activeLoadSubsetOperation === operation) {
+          this.activeLoadSubsetOperation = previousOperation?.completed ? void 0 : previousOperation;
+        }
+      }
+    };
+  }
+  waitForLoadSubsetOperation(operation) {
+    operation.waiting = true;
+    if (operation.pending.size === 0) {
+      this.completeLoadSubsetOperation(operation);
+      return operation.hasError ? Promise.reject(operation.error) : true;
+    }
+    operation.deferred = createDeferred();
+    return operation.deferred.promise;
+  }
+  settleLoadSubsetOperation(operation, promise, outcome) {
+    if (operation.completed) return;
+    operation.pending.delete(promise);
+    if (!outcome.ok && !operation.hasError) {
+      operation.hasError = true;
+      operation.error = outcome.error;
+    }
+    if (!operation.waiting || operation.pending.size > 0) return;
+    queueMicrotask(() => {
+      if (operation.completed || operation.pending.size > 0) return;
+      this.completeLoadSubsetOperation(operation);
+      if (operation.hasError) {
+        operation.deferred.reject(operation.error);
+      } else {
+        operation.deferred.resolve();
+      }
+    });
+  }
+  completeLoadSubsetOperation(operation) {
+    operation.completed = true;
+    this.loadSubsetOperations.delete(operation);
+    if (this.activeLoadSubsetOperation === operation) {
+      this.activeLoadSubsetOperation = void 0;
+    }
+  }
+  emitLoadingSubsetChange(isLoadingSubset) {
+    this._events.emit(`loadingSubset:change`, {
+      type: `loadingSubset:change`,
+      collection: this.collection,
+      isLoadingSubset,
+      previousIsLoadingSubset: !isLoadingSubset,
+      loadingSubsetTransition: isLoadingSubset ? `start` : `end`
+    });
+  }
+  /** @internal Attach a relevant existing request to the active operation. */
+  trackLoadSubsetOperationPromise(promise) {
+    const operation = this.activeLoadSubsetOperation;
+    if (!operation || operation.pending.has(promise)) return;
+    operation.pending.add(promise);
+    void promise.then(
+      () => this.settleLoadSubsetOperation(operation, promise, { ok: true }),
+      (error) => this.settleLoadSubsetOperation(operation, promise, {
+        ok: false,
+        error
+      })
+    );
+  }
+  /**
+   * Tracks a load promise for isLoadingSubset state.
+   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
+   */
+  trackLoadPromise(promise) {
+    const syncRunGeneration = this.syncRunGeneration;
+    const loadingStarting = !this.isLoadingSubset;
+    this.pendingLoadSubsetPromises.add(promise);
+    this.trackLoadSubsetOperationPromise(promise);
+    if (loadingStarting) {
+      this.emitLoadingSubsetChange(true);
+    }
+    const finish = () => {
+      if (syncRunGeneration !== this.syncRunGeneration) return;
+      const loadingEnding = this.pendingLoadSubsetPromises.size === 1 && this.pendingLoadSubsetPromises.has(promise);
+      this.pendingLoadSubsetPromises.delete(promise);
+      if (loadingEnding) {
+        this.emitLoadingSubsetChange(false);
+      }
+    };
+    void promise.then(finish, finish);
+  }
+  /** @internal Generation fence for subscription-owned async work. */
+  getSyncRunGeneration() {
+    return this.syncRunGeneration;
+  }
+  /**
+   * Requests the sync layer to load more data.
+   * @param options Options to control what data is being loaded
+   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
+   *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
+   */
+  loadSubset(options) {
+    if (options.signal?.aborted) {
+      return Promise.reject(new LoadSubsetOperationAbortedError());
+    }
+    if (this.syncMode === `eager`) {
+      return true;
+    }
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true;
+      const deferred = createDeferred();
+      this.deferredLoadSubsets.push({ options, deferred });
+      this.trackLoadPromise(deferred.promise);
+      return deferred.promise;
+    }
+    if (this.syncLoadSubsetFn) {
+      const result = this.callLoadSubset(this.syncLoadSubsetFn, options);
+      if (result instanceof Promise) {
+        this.trackLoadPromise(result);
+        return result;
+      }
+    }
+    return true;
+  }
+  /**
+   * Run the adapter's loadSubset; a reload from inside it rejects. A
+   * synchronous throw is a rejection: the load failed.
+   */
+  callLoadSubset(loadSubset, options) {
+    this.loadSubsetDepth++;
+    try {
+      return loadSubset(options);
+    } catch (error) {
+      return Promise.reject(error);
+    } finally {
+      this.loadSubsetDepth--;
+    }
+  }
+  /**
+   * Notifies the sync layer that a subset is no longer needed.
+   * @param options Options that identify what data is being unloaded
+   */
+  unloadSubset(options) {
+    if (this.syncMode === `eager`) return;
+    if (this.syncStartDeferred) {
+      this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
+        if (request.options !== options) {
+          return true;
+        }
+        request.deferred.reject(new LoadSubsetOperationAbortedError());
+        return false;
+      });
+      return;
+    }
+    if (this.syncUnloadSubsetFn) {
+      this.syncUnloadSubsetFn(options);
+    }
+  }
+  wrapCleanupError(error) {
+    const wrappedError = new SyncCleanupError(this.id, error);
+    wrappedError.cause = error;
+    if (error instanceof Error) wrappedError.stack = error.stack;
+    return wrappedError;
+  }
+  invokeCleanup(cleanup) {
+    if (!cleanup) return true;
+    try {
+      const result = cleanup();
+      if (!isPromiseLike(result)) return true;
+      return Promise.resolve(result).then(
+        () => void 0,
+        (error) => {
+          throw this.wrapCleanupError(error);
+        }
+      );
+    } catch (error) {
+      throw this.wrapCleanupError(error);
+    }
+  }
+  registerPendingSyncEntryCleanup(cleanup) {
+    const pending = this.pendingSyncEntryCleanup;
+    if (!pending) return;
+    try {
+      const result = this.invokeCleanup(cleanup);
+      if (result !== true) {
+        pending.tasks.push(result);
+        void result.catch(() => void 0);
+      }
+    } catch (error) {
+      pending.failure ??= { error };
+    }
+  }
+  completePendingSyncEntryCleanup() {
+    const pending = this.pendingSyncEntryCleanup;
+    if (!pending) return;
+    this.pendingSyncEntryCleanup = void 0;
+    const settle = (failure) => {
+      const outcome = pending.failure ?? failure;
+      pending.onSettled?.(outcome);
+      if (outcome) pending.completion?.reject(outcome.error);
+      else pending.completion?.resolve();
+    };
+    if (pending.tasks.length === 0) {
+      settle();
+      return;
+    }
+    void Promise.allSettled(pending.tasks).then((outcomes) => {
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === `rejected`
+      );
+      settle(rejected ? { error: rejected.reason } : void 0);
+    });
+  }
+  /**
+   * Retire the current adapter run for a reload: its callbacks, loaders, and
+   * resources, but not the visible state, the status, or a waiting preload.
+   */
+  retireSyncRun() {
+    this.syncRunGeneration++;
+    this.state.discardOpenSyncTransactions();
+    const cleanup = this.syncCleanupFn;
+    this.syncCleanupFn = null;
+    this.syncLoadSubsetFn = null;
+    this.syncUnloadSubsetFn = null;
+    this.abortLoadSubsetWork();
+    try {
+      const result = this.invokeCleanup(cleanup);
+      return result === true ? Promise.resolve() : result;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  abortLoadSubsetWork() {
+    const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0;
+    this.pendingLoadSubsetPromises.clear();
+    if (wasLoadingSubset) {
+      this.emitLoadingSubsetChange(false);
+    }
+    this.activeLoadSubsetOperation = void 0;
+    for (const operation of this.loadSubsetOperations) {
+      if (!operation.completed) {
+        operation.completed = true;
+        operation.pending.clear();
+        operation.hasError = true;
+        operation.error = new LoadSubsetOperationAbortedError();
+        operation.deferred?.reject(operation.error);
+      }
+    }
+    this.loadSubsetOperations.clear();
+    const deferredLoadSubsets = this.deferredLoadSubsets;
+    this.deferredLoadSubsets = [];
+    for (const request of deferredLoadSubsets) {
+      request.deferred.reject(new LoadSubsetOperationAbortedError());
+    }
+  }
+  cleanup(onSettled) {
+    ++this.syncCallbackEpoch;
+    this.syncRunGeneration++;
+    this.rejectPreload?.(new CollectionPreloadAbortedError());
+    const cleanup = this.syncCleanupFn;
+    this.syncCleanupFn = null;
+    this.syncLoadSubsetFn = null;
+    this.syncUnloadSubsetFn = null;
+    let cleanupResult = true;
+    let cleanupFailure;
+    try {
+      cleanupResult = this.invokeCleanup(cleanup);
+    } catch (error) {
+      cleanupFailure = { error };
+    }
+    this.preloadPromise = null;
+    this.syncStartDeferred = false;
+    this.syncStartRequested = false;
+    this.abortLoadSubsetWork();
+    if (this.syncEntryActive) {
+      const completion = onSettled ? void 0 : createDeferred();
+      const pending = {
+        tasks: [],
+        failure: cleanupFailure,
+        onSettled,
+        completion
+      };
+      if (cleanupResult !== true) {
+        pending.tasks.push(cleanupResult);
+        void cleanupResult.catch(() => void 0);
+      }
+      this.pendingSyncEntryCleanup = pending;
+      return onSettled ? false : completion.promise;
+    }
+    if (cleanupFailure) throw cleanupFailure.error;
+    if (cleanupResult === true) return true;
+    if (!onSettled) return cleanupResult;
+    void cleanupResult.then(
+      () => onSettled(),
+      (error) => onSettled({ error })
+    );
+    return false;
+  }
+}
+function normalizeSyncFnResult(result) {
+  if (typeof result === `function`) {
+    return { cleanup: result };
+  }
+  if (typeof result === `object`) {
+    return result;
+  }
+  return void 0;
+}

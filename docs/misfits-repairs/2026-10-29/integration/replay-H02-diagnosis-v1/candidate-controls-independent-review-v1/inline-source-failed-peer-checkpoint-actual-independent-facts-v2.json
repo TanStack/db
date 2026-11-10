@@ -1,0 +1,510 @@
+{
+  "at": "2026-10-30T10:23:16.215586+00:00",
+  "mode": "static read/hash/JSON/source only; no JS/product/model/native execution, probes, Git, install or canonical accounting edits",
+  "classification": "bounded product RED at first public root callback, before live checker throws; no bug-class closure",
+  "resultFreezeSha256": "37065c97890248961352332dc1a85ac252ecc4d6cd673a98f2706167b617d4d6",
+  "resultFiles": 1975,
+  "packetEntries": 88,
+  "sourceSnapshots": 73,
+  "recordSnapshots": 199,
+  "preservedOriginalEntries": 4294,
+  "currentSourceFiles": 584,
+  "payloadFiles": 2544,
+  "Node": 1,
+  "locks": 2,
+  "links": 4,
+  "v8CompiledBodies": 1626,
+  "inventoryFacts": {
+    "evaluated-pre-history.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "d36bfe5f3c01b54648ecea06e4de54f26e26cd63d5eea41815c01c6983e07f9b"
+    },
+    "evaluated-after-all.json": {
+      "allModules": 179,
+      "selectedModules": 169,
+      "externalOrNonselected": 10,
+      "sha256": "e140b0668f9254930f0ba1225342d2be727e0ee53c2a0f5d9ba3b6a604277832"
+    }
+  },
+  "derivedBindingRows": 338,
+  "requiredPrehistoryModules": 20,
+  "rawReceipts": 328,
+  "boundaries": 306,
+  "phaseCounts": {
+    "worker-start": 1,
+    "completion-baseline-epoch-start": 3,
+    "completion-boundary": 306,
+    "completion-baseline-delivery": 6,
+    "completion-baseline-epoch-end": 3,
+    "completion-baseline-view": 1,
+    "completion-baseline-action": 4,
+    "completion-baseline-cut": 2,
+    "worker-cleaned": 1,
+    "worker-error": 1
+  },
+  "completeBaseline": [
+    {
+      "id": 1,
+      "rank": 10,
+      "children": [
+        101,
+        102
+      ]
+    },
+    {
+      "id": 2,
+      "rank": 20,
+      "children": [
+        201,
+        202
+      ]
+    }
+  ],
+  "heldCut": {
+    "h02": true,
+    "sequence": 291,
+    "phase": "completion-baseline-cut",
+    "boundary": "held-window",
+    "run": "run-1",
+    "view": {
+      "roots": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        }
+      ],
+      "facades": [],
+      "downstream": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        }
+      ],
+      "window": {
+        "offset": 0,
+        "limit": 2
+      },
+      "status": "ready",
+      "requestErrors": []
+    },
+    "operations": [
+      {
+        "operation": "window",
+        "returned": "promise",
+        "outcome": {
+          "state": "pending"
+        }
+      }
+    ],
+    "operation": "window",
+    "pendingProviderAnswers": 2
+  },
+  "heldRequests": [
+    {
+      "h02": true,
+      "sequence": 212,
+      "phase": "completion-boundary",
+      "boundaryEvent": {
+        "sequence": 200,
+        "boundary": "provider-request",
+        "detail": {
+          "source": "marked",
+          "request": 2,
+          "queryKey": [
+            "h02-completion-marked",
+            {
+              "requested": [
+                3
+              ],
+              "where": {
+                "name": "in",
+                "args": [
+                  {
+                    "path": [
+                      "rowId"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": [
+                      3
+                    ],
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              }
+            }
+          ],
+          "requested": [
+            3
+          ],
+          "initiatingLoad": 2,
+          "options": {
+            "where": {
+              "name": "in",
+              "args": [
+                {
+                  "path": [
+                    "rowId"
+                  ],
+                  "type": "ref"
+                },
+                {
+                  "value": [
+                    3
+                  ],
+                  "type": "val"
+                }
+              ],
+              "type": "func"
+            },
+            "signalPresent": true
+          }
+        }
+      }
+    },
+    {
+      "h02": true,
+      "sequence": 240,
+      "phase": "completion-boundary",
+      "boundaryEvent": {
+        "sequence": 228,
+        "boundary": "provider-request",
+        "detail": {
+          "source": "children",
+          "request": 2,
+          "queryKey": [
+            "h02-completion-children",
+            {
+              "requested": [
+                3
+              ],
+              "where": {
+                "name": "in",
+                "args": [
+                  {
+                    "path": [
+                      "parent"
+                    ],
+                    "type": "ref"
+                  },
+                  {
+                    "value": [
+                      3
+                    ],
+                    "type": "val"
+                  }
+                ],
+                "type": "func"
+              }
+            }
+          ],
+          "requested": [
+            3
+          ],
+          "initiatingLoad": 2,
+          "options": {
+            "where": {
+              "name": "in",
+              "args": [
+                {
+                  "path": [
+                    "parent"
+                  ],
+                  "type": "ref"
+                },
+                {
+                  "value": [
+                    3
+                  ],
+                  "type": "val"
+                }
+              ],
+              "type": "func"
+            },
+            "signalPresent": true
+          }
+        }
+      }
+    }
+  ],
+  "exactFailedLoad": {
+    "h02": true,
+    "sequence": 294,
+    "phase": "completion-boundary",
+    "boundaryEvent": {
+      "sequence": 279,
+      "boundary": "source-load-applied-settled",
+      "detail": {
+        "source": "marked",
+        "load": 2,
+        "outcome": {
+          "state": "rejected",
+          "error": "baseline-source"
+        }
+      }
+    }
+  },
+  "firstBadPublicCallback": {
+    "h02": true,
+    "sequence": 301,
+    "phase": "completion-boundary",
+    "boundaryEvent": {
+      "sequence": 286,
+      "boundary": "root-callback",
+      "detail": {
+        "changes": [
+          {
+            "key": "[3,null]",
+            "type": "insert",
+            "value": {
+              "id": 3,
+              "rank": 30,
+              "children": [],
+              "$hasPendingWrites": false,
+              "$origin": "remote",
+              "$key": "[3,null]",
+              "$collectionId": "h02-completion-root"
+            }
+          }
+        ],
+        "read": [
+          {
+            "id": 1,
+            "rank": 10,
+            "children": [
+              101,
+              102
+            ],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[1,null]",
+            "$collectionId": "h02-completion-root"
+          },
+          {
+            "id": 2,
+            "rank": 20,
+            "children": [
+              201,
+              202
+            ],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[2,null]",
+            "$collectionId": "h02-completion-root"
+          },
+          {
+            "id": 3,
+            "rank": 30,
+            "children": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "h02-completion-root"
+          }
+        ]
+      }
+    }
+  },
+  "firstBadNormalizedDelivery": {
+    "h02": true,
+    "sequence": 302,
+    "phase": "completion-baseline-delivery",
+    "delivery": {
+      "phase": "candidate-delivery",
+      "layer": "root",
+      "rows": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        },
+        {
+          "id": 3,
+          "rank": 30,
+          "children": []
+        }
+      ],
+      "read": [
+        {
+          "id": 1,
+          "rank": 10,
+          "children": [
+            101,
+            102
+          ]
+        },
+        {
+          "id": 2,
+          "rank": 20,
+          "children": [
+            201,
+            202
+          ]
+        },
+        {
+          "id": 3,
+          "rank": 30,
+          "children": []
+        }
+      ],
+      "changes": [
+        {
+          "type": "insert",
+          "value": {
+            "id": 3,
+            "rank": 30,
+            "children": []
+          }
+        }
+      ]
+    },
+    "capturedAt": 286,
+    "epoch": "2:source-failed-peer"
+  },
+  "laterCutIndependentCredit": false,
+  "laterDownstreamIndependentCredit": false,
+  "liveCheckerInterference": "delivery emitted before synchronous callback check throws; unhandled test assertion and later flush-throw may disturb continuation; later cuts/outcomes do not independently establish product behavior",
+  "expectedSourceWarningDistinct": true,
+  "nativeSupervisorOutcome": {
+    "reason": "observation",
+    "exitCode": null,
+    "signal": "SIGKILL",
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e/receipts.jsonl",
+    "primaryObservationError": "Error: completion law: callback has complete authored root content; expected [{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]}], got [{\"id\":1,\"rank\":10,\"children\":[101,102]},{\"id\":2,\"rank\":20,\"children\":[201,202]},{\"id\":3,\"rank\":30,\"children\":[]}]\n    at equal (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:175:11)\n    at check (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts:1721:5)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:280:9\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:400:7\n    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:171:9)\n    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:239:19)\n    at Timeout._onTimeout (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:437:14)\n    at listOnTimeout (node:internal/timers:635:17)\n    at processTimers (node:internal/timers:571:7)",
+    "bindingStatus": "bound"
+  },
+  "outerOutcome": {
+    "classification": "finite test command failed; inspect original assertion diagnostics",
+    "heap": false,
+    "identityMatched": true,
+    "remainingGroup": 0,
+    "cleanupErrors": 0,
+    "exitCode": 1,
+    "signal": null,
+    "cleanupDiagnostics": [],
+    "elapsedMonotonicMs": 3122.480416,
+    "maxSampledGroupRssBytes": 755318784,
+    "originalPgid": 4903,
+    "registeredReceivingGroups": [
+      {
+        "pid": 4909,
+        "pgid": 4909,
+        "parentPid": 4906,
+        "detached": true,
+        "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "--max-old-space-size=384",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "scripts/h02-progress/completion-receiving.config.ts",
+          "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+        ],
+        "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-4906-39922ece-ce07-47c7-9224-4d64cf74dd5e"
+      }
+    ],
+    "stdoutSha256": "8aa25124e87936e332117c286a9192f246d51910894d3785cd0066b52a03a2a5",
+    "stderrSha256": "87ad2d7aa6d5c954637f682c205d005f9dbb536ad7ed8935a76881f89e2438bf",
+    "limits": "Finite baseline assertions and reaches require review. Operational failures never supply product RED. RSS aggregates the original group and each synchronously registered receiving group without double-counting. Cleanup verifies these owned groups only. A supervisor interrupted between spawn and registration can leave an unknown group; no unregistered/escaped-group claim is made."
+  },
+  "savedProcessAbsence": {
+    "at": "2026-10-30T10:17:38.658595+00:00",
+    "psExitCode": 0,
+    "namedPids": [
+      4789,
+      4903,
+      4906,
+      4909
+    ],
+    "namedGroups": [
+      4903,
+      4909
+    ],
+    "remainingNamedGroupRows": [],
+    "zeroSignalProbes": [
+      {
+        "kind": "pid",
+        "value": 4789,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 4903,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 4906,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pid",
+        "value": 4909,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pgid",
+        "value": 4903,
+        "result": "ESRCH"
+      },
+      {
+        "kind": "pgid",
+        "value": 4909,
+        "result": "ESRCH"
+      }
+    ],
+    "limits": "Named original identities and owned groups only; no escaped/unregistered descendant census or PID/PGID reuse proof."
+  },
+  "actualToolCompletionChunk": "1cfb7b",
+  "actualHelperNoActiveOperation": "required and UNREACHED",
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted",
+  "priorKillEperm": "separate unresolved historical containment issue; current elevated SIGKILL outcome does not prove earlier cause or general repair",
+  "runtimeExecutions": 0,
+  "errors": [],
+  "allAuditChecksPass": true
+}

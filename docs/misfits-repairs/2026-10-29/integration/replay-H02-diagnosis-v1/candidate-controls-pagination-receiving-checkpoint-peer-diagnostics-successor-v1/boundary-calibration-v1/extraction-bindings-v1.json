@@ -1,0 +1,68 @@
+{
+  "sourceOnly": true,
+  "noTargetOrConfigOrModelOrProductionImports": true,
+  "extracts": [
+    {
+      "name": "createReceiptWriter",
+      "source": "scripts/h02-progress/receipt-transport.mjs",
+      "start": 904,
+      "end": 3873,
+      "sha256": "9085bf483d12aaa446b58239e21a1d80a5de2b5f0623b3db80338bab564711d2",
+      "adaptation": "only export keyword removed for isolated evaluation"
+    },
+    {
+      "name": "createReceiptDecoder",
+      "source": "scripts/h02-progress/receipt-transport.mjs",
+      "start": 3925,
+      "end": 5372,
+      "sha256": "215cd10b1c5413022f29e60d8919131b531996001349b4d0716c4aaa6db04403",
+      "adaptation": "only export keyword removed for isolated evaluation"
+    },
+    {
+      "name": "createReceiptReader",
+      "source": "scripts/h02-progress/receipt-transport.mjs",
+      "start": 5796,
+      "end": 7629,
+      "sha256": "ad073f967191de1d965c27b50bbe6db68b4ec3f676bd4ca778b7fe254d873009",
+      "adaptation": "only export keyword removed for isolated evaluation"
+    },
+    {
+      "name": "completion-baseline-epoch-start",
+      "source": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "start": 11357,
+      "end": 11692,
+      "sha256": "958a4e1a865bf2be9f1e882dc214c13c60b576fb9cf6179d74e7038d2f6d947b",
+      "adaptation": "exact branch body; harness supplies controlled free variables"
+    },
+    {
+      "name": "completion-baseline-epoch-end",
+      "source": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "start": 11755,
+      "end": 12661,
+      "sha256": "c9ed9cf8fc13948fbb4c652f8cc2524779764bf5192b0ce94fbce276dac745ff",
+      "adaptation": "exact branch body; harness supplies controlled free variables"
+    },
+    {
+      "name": "completion-baseline-cut",
+      "source": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "start": 15678,
+      "end": 17377,
+      "sha256": "0852bbf08a61f671fa75df1a30ff1417515b824a658cecdf77ac12886eaa2dea",
+      "adaptation": "exact branch body; harness supplies controlled free variables"
+    },
+    {
+      "name": "cut guard and final comparison dispatch",
+      "guardSha256": "aa688d1ab72140759513010037db42952a7a44cbad2dafa27692bb79c4089c44",
+      "comparisonSha256": "9988172a51d6894620d59d2ece0732ea4b6be005a89f45370c34c1caa6f89645",
+      "adaptation": "Harness binds observation=receipt separately instead of executing the TypeScript-only assertion. Failure-barrier product comparisons are omitted because controlled boundary=held-window. checkCompletionBaselineObservation is a call-count spy; no product judgment executes."
+    },
+    {
+      "name": "copied local checkpoint emission",
+      "source": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "start": 45312,
+      "end": 45445,
+      "sha256": "232da7fcc2659ad14c75371c72a05470838e81d4c885843f68c1b580c398f69e",
+      "adaptation": "exact statement with controlled emit and common free variables"
+    }
+  ]
+}

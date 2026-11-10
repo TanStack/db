@@ -1,0 +1,151 @@
+{
+  "kind": "Independent bounded additive setup successor static review; Python standard-library only",
+  "verdict": "Accept exact launcher output-path-only successor and three inert templates; no runtime/admission",
+  "packet": {
+    "manifestSha256": "f25da3e002c69934d8c8d16f0880e76ecace90514e2ba650df3f1152bef5a4a8",
+    "members": 9,
+    "bytes": 48446
+  },
+  "templateIndex": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/remaining-neighbor-setup-successor-templates-index-v1.json",
+    "sha256": "371b0744a69084669e9d72c36d534af01d8b0b3fa6058d73c10f68467ccb9d6c"
+  },
+  "threeExactLauncherAndTemplateChecks": [
+    {
+      "path": "empty scope-key publication",
+      "originalRecipeEntry": 2,
+      "launcherSha256": "770f1dc51af09e40044ab57b3c764c1759ef9bc90d1f085e83d03f09975444d1",
+      "literalOutputDirectoryReplacements": 2,
+      "reverseRestoresOriginalExactly": true,
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "templateSha256": "d5ab6faca69bfb048c6a07f444a6c0eafa58896474d679bb5fe5a9d3743c81ad",
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": false,
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "expectedReach": [
+        "empty-prior",
+        "held-provider-read",
+        "completed-enqueue",
+        "answer-executed",
+        "root-change",
+        "downstream-change",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "externalToolPolicy": {
+        "sandbox_permissions": "require_escalated",
+        "justification": "May I run this exact bounded local test launcher with read-only process identity and resource supervision, which the sandbox blocked?",
+        "cmd": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-empty-scope-v4.zsh",
+        "authority": "Root setup-successor preparation authorization; execution still requires independent static acceptance, exact root singleton admission, and automatic approval review.",
+        "onRejected": "Stop; preserve rejection and do not bypass, catch, skip or replace ps. No further control or retry."
+      },
+      "admittedRuntime": false,
+      "slot": null
+    },
+    {
+      "path": "literal true initial cut",
+      "originalRecipeEntry": 3,
+      "launcherSha256": "77256cb66200cf4a9b4cea1523a30e7020e5b3159d735931786f8400b562f918",
+      "literalOutputDirectoryReplacements": 2,
+      "reverseRestoresOriginalExactly": true,
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "templateSha256": "5fae71b049200004ff097b4078fcfcc8c585ea0b88beb64ce9296e6d82b0d266",
+      "history": {
+        "kind": "sync-initial",
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "expectedReach": [
+        "literal-true-establishing-receipt",
+        "subscriber-return-before-preload",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "externalToolPolicy": {
+        "sandbox_permissions": "require_escalated",
+        "justification": "May I run this exact bounded local test launcher with read-only process identity and resource supervision, which the sandbox blocked?",
+        "cmd": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-initial-v4.zsh",
+        "authority": "Root setup-successor preparation authorization; execution still requires independent static acceptance, exact root singleton admission, and automatic approval review.",
+        "onRejected": "Stop; preserve rejection and do not bypass, catch, skip or replace ps. No further control or retry."
+      },
+      "admittedRuntime": false,
+      "slot": null
+    },
+    {
+      "path": "ordinary synchronous mutation cut",
+      "originalRecipeEntry": 4,
+      "launcherSha256": "a92494e092f0cd88c63fa9a25a71b5b085ba0a944a9ac878391692b2ec1ae7bf",
+      "literalOutputDirectoryReplacements": 2,
+      "reverseRestoresOriginalExactly": true,
+      "freshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1",
+      "template": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1-root-admission-template-v1.json",
+      "templateSha256": "b1c285a6bed3007ac6034daa677146002c018d519b9d4f3e84287b4dd83f8cf3",
+      "history": {
+        "kind": "sync-mutation",
+        "keyShift": 0,
+        "rankScale": 10
+      },
+      "expectedReach": [
+        "ordinary-mutation-return-before-host-turn",
+        "final-publication",
+        "worker-cleaned"
+      ],
+      "externalToolPolicy": {
+        "sandbox_permissions": "require_escalated",
+        "justification": "May I run this exact bounded local test launcher with read-only process identity and resource supervision, which the sandbox blocked?",
+        "cmd": "exec /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-mutation-v4.zsh",
+        "authority": "Root setup-successor preparation authorization; execution still requires independent static acceptance, exact root singleton admission, and automatic approval review.",
+        "onRejected": "Stop; preserve rejection and do not bypass, catch, skip or replace ps. No further control or retry."
+      },
+      "admittedRuntime": false,
+      "slot": null
+    }
+  ],
+  "literalPatchReconstructedExactly": true,
+  "sourceCommandsConfigSelectorsEnvTimingHeapRssPsBindingUnchanged": true,
+  "sourcePreservationReceipt": {
+    "sha256": "81b7d201dafb701304de8ecd7698a567e275f26575478649a83836f39a49b557",
+    "declaredSources": 563,
+    "declaredNamedPackagePayloads": 2544,
+    "fourOriginalPacketManifestHashesMatch": true,
+    "liveSourceDependencyReauditPerformed": false
+  },
+  "failedSetupPreserved": {
+    "stableFinding": "H02-V4-EMPTY-SCOPE-SETUP01",
+    "manifestSha256": "db576de10b07f8a9aa0bee621357ee739e8e9759a845b8b852492d2c75f6d25a",
+    "members": 10,
+    "bytes": 430349,
+    "toolResultSha256": "db7efcae31da4142ea823a985bd522ca0598209a87ffc511b04a43095ef8b2f9",
+    "operationalFailureSha256": "1ab4e7acedbc1d586bd21ed8f6f928a5e250fc8d2f05e5eb641cd86f4b3271d9",
+    "toolExitCode": 127,
+    "vitestReceivingStarted": false,
+    "launcherProcessReceiptBytes": 0,
+    "originalLauncherPidPgid": "UNKNOWN; no original-id absence claim",
+    "outerVitestLogAndReceivingDirectory": "ABSENT",
+    "productReachOrCleanupCredit": false
+  },
+  "heldOldBatch": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/remaining-neighbor-controls-v4-root-batch-held-v1.json",
+    "sha256": "05b15b52f2634d07def76bba25361ca15a2dcb0faa1e4e788dac7522d312a6a6",
+    "runtimeAuthorized": false
+  },
+  "inheritedRecipeGateQualification": "Original finite-recipes progressVerdictGate text remains inherited unchanged. The new singleton controlVerdictGate gives no product-progress verdict from containment and excludes conflicting-cache premise credit on these controls; no boundedProgressVerdictGate appears in templates.",
+  "limits": [
+    "Only two literal output-directory occurrences per launcher change; no semantic/test source change",
+    "Template slot=null and independent-review fields=null are inert placeholders; root must create separate exact slot 2 admissions with review binding before runtime",
+    "require_escalated is proposed external tool admission only; no escalation or automatic approval review requested by this reviewer",
+    "Separate exact root singleton admission and automatic approval review required; stop on rejection or first surprise, no fallback/retry",
+    "Failed setup immutable; old remaining admissions held; original launcher process identity unknown",
+    "No native/runtime/test/build/project-verifier/process/source operations; only exclusive reports outside frozen packets",
+    "No receiving/product/candidate/metadata closure credit"
+  ]
+}

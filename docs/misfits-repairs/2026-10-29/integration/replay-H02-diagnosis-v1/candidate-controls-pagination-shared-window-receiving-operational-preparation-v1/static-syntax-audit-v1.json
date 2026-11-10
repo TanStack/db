@@ -1,0 +1,34 @@
+{
+  "scope": "static parser only; Node --check does not execute imports; all JSON parsed, both preserved Python helpers ast.parse only; no test/config import/discovery/probe",
+  "results": [
+    {
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--check",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+      "exit": 0,
+      "log": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/completion-parent-syntax-v1.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceSha256": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70",
+      "importsExecuted": false
+    },
+    {
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "--check",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+      "exit": 0,
+      "log": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/verify-bindings-syntax-v1.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceSha256": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+      "importsExecuted": false
+    }
+  ],
+  "source596MatchedAfter": true,
+  "nodeMatchedAfter": true,
+  "runtime": 0
+}

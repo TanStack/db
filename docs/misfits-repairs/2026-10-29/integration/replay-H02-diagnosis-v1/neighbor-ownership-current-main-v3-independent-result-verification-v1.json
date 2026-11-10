@@ -1,0 +1,59 @@
+{
+  "reviewer": "/root/review_h02_prepared",
+  "at": "2026-10-30T06:46:58.477597+00:00",
+  "verdict": "ACCEPT BOUNDED V3 OWNERSHIP RECEIVING RESULT",
+  "method": "Independent standard-library hash/JSON/text/literal-data parse. No eval, project runtime, process checks or repeated source audit.",
+  "packetSha256": "1caa4f74254e2423c4cf2a09afa44ba0f80d2aec1139bd6491bfe3ab31f2aa19",
+  "members": 21,
+  "bytes": 610650,
+  "qualificationSha256": "aaf6516c8c1cba9d32197700684cdf7b7ae0d929f114517db0ff2e9ce8e13fc6",
+  "actualNativePassed": 42,
+  "actualPayloads": 42,
+  "nativeSkipped": 220,
+  "allUniqueNamesHeadersSourcePathsHistoriesAndCountsMatched": true,
+  "finiteGrammarExact": true,
+  "freshNoRefetch": 6,
+  "staleRefetch": 36,
+  "reachCounts": 252,
+  "allReachCountsEqual": 1,
+  "entireStderrAccountedExpectedRejections": 12,
+  "assertionEvidence": "Every passed task has final-lease-released after the unchanged full held/published/settled/peerReleased/released/queryCalls equality and premise guards. Raw rows are checked there, not separately serialized in this result.",
+  "offsetUnitQualification": {
+    "rawOffset": "JavaScript UTF-16 code-unit index at marker; not byte offset",
+    "rawBytes": "UTF-8 bytes including marker and trailing newline",
+    "independentVerification": "Every payload parsed independently from raw bytes, then matched with converted UTF-16 offset, byte length and SHA256.",
+    "examples": [
+      {
+        "record": 6,
+        "rawOffsetUtf16": 46957,
+        "actualByteOffset": 47275
+      },
+      {
+        "record": 7,
+        "rawOffsetUtf16": 47908,
+        "actualByteOffset": 48226
+      }
+    ],
+    "limit": "Do not index a byte buffer directly with rawOffset. Frozen evidence preserved."
+  },
+  "identityBeforeAfterReports": {
+    "diskSourcesMatched": 562,
+    "payloadFilesMatched": 2544,
+    "nodeAndLocksAndLinksMatched": true
+  },
+  "identityScope": "Prior exact source acceptance plus current frozen before/after receipts; no ownership V8 body identity or repeated live source audit.",
+  "containment": {
+    "elapsedMonotonicMs": 2747.7982079999997,
+    "maxSampledGroupRssBytes": 442662912,
+    "wallLimitMs": 60000,
+    "sampledRssLimitBytes": 1073741824,
+    "parentChildWorkerHeapMiB": 384,
+    "originalPgid": 34421,
+    "finalGroupRows": 0,
+    "cleanupErrors": 0,
+    "rootIndependentAbsenceChecks": 4,
+    "rootAbsenceSha256": "45bb5f2cbe6198f102c0b03848868ad69d9b188e5ecc84d3204505eb68b28907",
+    "scope": "Original groups and sampled RSS only; no escaped-group/continuous-RSS proof."
+  },
+  "scope": "Finite existing real QueryClient reacquisition neighbor at named public row/query-call checkpoints. No new generated coverage, progress/nonempty-scope/candidate reach, universal bug-class closure or next admission. Prior V2 qualifications remain."
+}

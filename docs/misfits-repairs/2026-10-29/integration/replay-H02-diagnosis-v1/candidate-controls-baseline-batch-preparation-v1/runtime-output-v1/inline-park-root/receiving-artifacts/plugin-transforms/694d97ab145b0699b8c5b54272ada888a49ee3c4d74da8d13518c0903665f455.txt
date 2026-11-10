@@ -1,0 +1,343 @@
+export class BTree {
+  /**
+   * Initializes an empty B+ tree.
+   * @param compare Custom function to compare pairs of elements in the tree.
+   * @param maxNodeSize Branching factor (maximum items or children per node)
+   *   Must be in range 4..256. If undefined or <4 then default is used; if >256 then 256.
+   */
+  constructor(compare, maxNodeSize) {
+    this._root = new BNode();
+    this._size = 0;
+    this._maxNodeSize = maxNodeSize >= 4 ? Math.min(maxNodeSize, 256) : 32;
+    this._compare = compare;
+  }
+  /** Gets the number of key-value pairs in the tree. */
+  get size() {
+    return this._size;
+  }
+  /** Releases the tree so that its size is 0. */
+  clear() {
+    this._root = new BNode();
+    this._size = 0;
+  }
+  /**
+   * Finds a pair in the tree and returns the associated value.
+   * @param defaultValue a value to return if the key was not found.
+   * @returns the value, or defaultValue if the key was not found.
+   * @description Computational complexity: O(log size)
+   */
+  get(key, defaultValue) {
+    return this._root.get(key, defaultValue, this);
+  }
+  /** Returns true if the key exists in the B+ tree. */
+  has(key) {
+    const missing = {};
+    return this.get(key, missing) !== missing;
+  }
+  /**
+   * Adds or overwrites a key-value pair in the B+ tree. Overwriting also
+   * replaces the stored key.
+   * @returns true if a new key-value pair was added.
+   * @description Computational complexity: O(log size)
+   */
+  set(key, value) {
+    const result = this._root.set(key, value, this);
+    if (result === true || result === false) return result;
+    this._root = new BNodeInternal([this._root, result]);
+    return true;
+  }
+  /**
+   * Removes a single key-value pair from the B+ tree.
+   * @returns true if a pair was found and removed, false otherwise.
+   * @description Computational complexity: O(log size)
+   */
+  delete(key) {
+    const size = this._size;
+    let root = this._root;
+    root.forRange(key, key, true, true, this);
+    while (root.keys.length <= 1 && !root.isLeaf) {
+      this._root = root = root.keys.length === 0 ? new BNode() : root.children[0];
+    }
+    return this._size !== size;
+  }
+  /** Gets the lowest key in the tree. Complexity: O(log size) */
+  minKey() {
+    return this._root.minKey();
+  }
+  /** Gets the highest key in the tree. Complexity: O(1) */
+  maxKey() {
+    return this._root.maxKey();
+  }
+  /** Returns the next pair whose key is larger than the specified key (or undefined if there is none).
+   * If key === undefined, this function returns the lowest pair.
+   */
+  nextHigherPair(key) {
+    return key === void 0 ? this._root.minPair() : this._root.getPairOrNextHigher(key, this._compare);
+  }
+  /** Returns the next pair whose key is smaller than the specified key (or undefined if there is none).
+   *  If key === undefined, this function returns the highest pair.
+   */
+  nextLowerPair(key) {
+    return key === void 0 ? this._root.maxPair() : this._root.getPairOrNextLower(key, this._compare);
+  }
+  /**
+   * Scans the specified range of keys, in ascending order by key.
+   * Note: the callback `onFound` must not insert or remove items in the
+   * collection. Doing so may cause incorrect data to be sent to the
+   * callback afterward.
+   * @param low The first key scanned will be greater than or equal to `low`.
+   * @param high Scanning stops when a key larger than this is reached.
+   * @param includeHigh If the `high` key is present, `onFound` is called for
+   *        that final pair if and only if this parameter is true.
+   * @description Computational complexity: O(number of items scanned + log size)
+   */
+  forRange(low, high, includeHigh, onFound) {
+    this._root.forRange(low, high, includeHigh, false, this, onFound);
+  }
+}
+class BNode {
+  get isLeaf() {
+    return this.children === void 0;
+  }
+  constructor(keys = [], values = []) {
+    this.keys = keys;
+    this.values = values;
+  }
+  // /////////////////////////////////////////////////////////////////////////
+  // Shared methods /////////////////////////////////////////////////////////
+  maxKey() {
+    return this.keys[this.keys.length - 1];
+  }
+  // If key not found, returns i^failXor where i is the insertion index.
+  // Callers that don't care whether there was a match will set failXor=0.
+  indexOf(key, failXor, cmp) {
+    const keys = this.keys;
+    let lo = 0, hi = keys.length, mid = hi >> 1;
+    while (lo < hi) {
+      const c = cmp(keys[mid], key);
+      if (c < 0) lo = mid + 1;
+      else if (c > 0)
+        hi = mid;
+      else return mid;
+      mid = lo + hi >> 1;
+    }
+    return mid ^ failXor;
+  }
+  // ///////////////////////////////////////////////////////////////////////////
+  // Leaf Node: misc //////////////////////////////////////////////////////////
+  minKey() {
+    return this.keys[0];
+  }
+  /** Returns the pair at index `i`, or undefined when `i` is out of range. */
+  pairAt(i) {
+    return i >= 0 && i < this.keys.length ? [this.keys[i], this.values[i]] : void 0;
+  }
+  minPair() {
+    return this.pairAt(0);
+  }
+  maxPair() {
+    return this.pairAt(this.keys.length - 1);
+  }
+  get(key, defaultValue, tree) {
+    const i = this.indexOf(key, -1, tree._compare);
+    return i < 0 ? defaultValue : this.values[i];
+  }
+  // Strictly lower / higher neighbours of `key` within this leaf.
+  getPairOrNextLower(key, compare) {
+    const i = this.indexOf(key, -1, compare);
+    return this.pairAt(i < 0 ? ~i - 1 : i - 1);
+  }
+  getPairOrNextHigher(key, compare) {
+    const i = this.indexOf(key, -1, compare);
+    return this.pairAt(i < 0 ? ~i : i + 1);
+  }
+  // ///////////////////////////////////////////////////////////////////////////
+  // Leaf Node: set & node splitting //////////////////////////////////////////
+  set(key, value, tree) {
+    let i = this.indexOf(key, -1, tree._compare);
+    if (i >= 0) {
+      this.keys[i] = key;
+      this.values[i] = value;
+      return false;
+    }
+    i = ~i;
+    tree._size++;
+    let target = this;
+    let newRightSibling;
+    if (this.keys.length >= tree._maxNodeSize) {
+      newRightSibling = this.splitOffRightSide();
+      if (i > this.keys.length) {
+        i -= this.keys.length;
+        target = newRightSibling;
+      }
+    }
+    target.keys.splice(i, 0, key);
+    target.values.splice(i, 0, value);
+    return newRightSibling ?? true;
+  }
+  takeFromRight(rhs) {
+    this.values.push(rhs.values.shift());
+    this.keys.push(rhs.keys.shift());
+  }
+  splitOffRightSide() {
+    const half = this.keys.length >> 1;
+    return new BNode(this.keys.splice(half), this.values.splice(half));
+  }
+  // ///////////////////////////////////////////////////////////////////////////
+  // Leaf Node: scanning & deletions //////////////////////////////////////////
+  // Visits [low, high] (or [low, high)) with `onFound`, or deletes that range
+  // when `deleteMode` is set.
+  forRange(low, high, includeHigh, deleteMode, tree, onFound) {
+    const cmp = tree._compare;
+    let iLow, iHigh;
+    if (high === low) {
+      if (!includeHigh) return;
+      iHigh = (iLow = this.indexOf(low, -1, cmp)) + 1;
+      if (iLow < 0) return;
+    } else {
+      iLow = this.indexOf(low, 0, cmp);
+      iHigh = this.indexOf(high, -1, cmp);
+      if (iHigh < 0) iHigh = ~iHigh;
+      else if (includeHigh) iHigh++;
+    }
+    if (deleteMode) {
+      if (iHigh > iLow) {
+        this.keys.splice(iLow, iHigh - iLow);
+        this.values.splice(iLow, iHigh - iLow);
+        tree._size -= iHigh - iLow;
+      }
+    } else {
+      for (let i = iLow; i < iHigh; i++)
+        onFound(this.keys[i], this.values[i]);
+    }
+  }
+  /** Adds entire contents of right-hand sibling (rhs is left unchanged) */
+  mergeSibling(rhs, _) {
+    this.keys.push.apply(this.keys, rhs.keys);
+    this.values.push.apply(this.values, rhs.values);
+  }
+}
+class BNodeInternal extends BNode {
+  constructor(children, keys) {
+    super(keys ?? children.map((child) => child.maxKey()));
+    this.children = children;
+  }
+  minKey() {
+    return this.children[0].minKey();
+  }
+  minPair() {
+    return this.children[0].minPair();
+  }
+  maxPair() {
+    return this.children[this.children.length - 1].maxPair();
+  }
+  get(key, defaultValue, tree) {
+    const i = this.indexOf(key, 0, tree._compare), children = this.children;
+    return i < children.length ? children[i].get(key, defaultValue, tree) : defaultValue;
+  }
+  getPairOrNextLower(key, compare) {
+    const i = this.indexOf(key, 0, compare), children = this.children;
+    if (i >= children.length) return this.maxPair();
+    return children[i].getPairOrNextLower(key, compare) ?? (i > 0 ? children[i - 1].maxPair() : void 0);
+  }
+  getPairOrNextHigher(key, compare) {
+    const i = this.indexOf(key, 0, compare), children = this.children;
+    if (i >= children.length) return void 0;
+    return children[i].getPairOrNextHigher(key, compare) ?? children[i + 1]?.minPair();
+  }
+  // ///////////////////////////////////////////////////////////////////////////
+  // Internal Node: set & node splitting //////////////////////////////////////
+  set(key, value, tree) {
+    const c = this.children, max = tree._maxNodeSize, cmp = tree._compare;
+    let i = Math.min(this.indexOf(key, 0, cmp), c.length - 1);
+    const child = c[i];
+    if (child.keys.length >= max) {
+      let other;
+      if (i > 0 && (other = c[i - 1]).keys.length < max && cmp(child.keys[0], key) < 0) {
+        other.takeFromRight(child);
+        this.keys[i - 1] = other.maxKey();
+      }
+    }
+    const result = child.set(key, value, tree);
+    if (result === false) return false;
+    this.keys[i] = child.maxKey();
+    if (result === true) return true;
+    let target = this;
+    let newRightSibling;
+    if (this.keys.length >= max) {
+      newRightSibling = this.splitOffRightSide();
+      if (i + 1 >= this.keys.length) {
+        target = newRightSibling;
+        i -= this.keys.length;
+      }
+    }
+    target.children.splice(i + 1, 0, result);
+    target.keys.splice(i + 1, 0, result.maxKey());
+    return newRightSibling ?? true;
+  }
+  /**
+   * Split this node.
+   * Modifies this to remove the second half of the items, returning a separate node containing them.
+   */
+  splitOffRightSide() {
+    const half = this.children.length >> 1;
+    return new BNodeInternal(
+      this.children.splice(half),
+      this.keys.splice(half)
+    );
+  }
+  takeFromRight(rhs) {
+    this.keys.push(rhs.keys.shift());
+    this.children.push(rhs.children.shift());
+  }
+  // ///////////////////////////////////////////////////////////////////////////
+  // Internal Node: scanning & deletions //////////////////////////////////////
+  forRange(low, high, includeHigh, deleteMode, tree, onFound) {
+    const cmp = tree._compare;
+    const keys = this.keys, children = this.children;
+    let iLow = this.indexOf(low, 0, cmp), i = iLow;
+    const iHigh = Math.min(
+      high === low ? iLow : this.indexOf(high, 0, cmp),
+      keys.length - 1
+    );
+    for (; i <= iHigh; i++) {
+      children[i].forRange(low, high, includeHigh, deleteMode, tree, onFound);
+      if (deleteMode) keys[i] = children[i].maxKey();
+    }
+    if (deleteMode) {
+      const half = tree._maxNodeSize >> 1;
+      if (iLow > 0) iLow--;
+      for (i = iHigh; i >= iLow; i--) {
+        if (children[i].keys.length <= half) {
+          if (children[i].keys.length !== 0) {
+            this.tryMerge(i, tree._maxNodeSize);
+          } else {
+            keys.splice(i, 1);
+            children.splice(i, 1);
+          }
+        }
+      }
+    }
+  }
+  /** Merges child i with child i+1 if their combined size is not too large */
+  tryMerge(i, maxSize) {
+    const children = this.children;
+    if (i >= 0 && i + 1 < children.length && children[i].keys.length + children[i + 1].keys.length <= maxSize) {
+      children[i].mergeSibling(children[i + 1], maxSize);
+      children.splice(i + 1, 1);
+      this.keys.splice(i + 1, 1);
+      this.keys[i] = children[i].maxKey();
+    }
+  }
+  /**
+   * Move children from `rhs` into this.
+   * `rhs` must be part of this tree, and be removed from it after this call.
+   */
+  mergeSibling(rhs, maxNodeSize) {
+    const oldLength = this.keys.length;
+    this.keys.push.apply(this.keys, rhs.keys);
+    const rhsChildren = rhs.children;
+    this.children.push.apply(this.children, rhsChildren);
+    this.tryMerge(oldLength - 1, maxNodeSize);
+  }
+}

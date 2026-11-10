@@ -1,0 +1,28 @@
+{
+  "authority": "Installed @fast-check/vitest title construction plus authored fixed campaign seed; instrument identity only",
+  "installedPackage": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/package.json",
+    "sha256": "14cf8e42307a524be8e404db266accf2345e2783f26e906a2140504264d3a608",
+    "version": "0.4.1"
+  },
+  "installedTitleSource": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js",
+    "sha256": "d5316907da518e2069b98184962610045845f22683a36b1264ca3cfabf5cbc8d",
+    "line": 52,
+    "text": "\ttestFn(`${label} (with seed=${customParams.seed})`, async () => {"
+  },
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "authoredSource": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts",
+    "sha256": "bf6dc9beee9c3815fa5cf1e963a9d0de3df824472082605e3d687a271b70ac08"
+  },
+  "seed": 1665,
+  "baseLabelAndUnchangedCliSelector": "retains complete windows across joined failure histories for a fixed seed",
+  "exactExpectedReportTitle": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+  "onlyRecipeFieldChanged": "expectedOutput.title",
+  "wrapperChanges": 0,
+  "fuzzyMatching": false,
+  "exitNormalization": false,
+  "readyToLaunch": false,
+  "futureRunRequirement": "This title-only component retains the consumed historical output path. A future operational successor needs an explicit fresh-output/source binding, independent review and separate ROOT admission."
+}

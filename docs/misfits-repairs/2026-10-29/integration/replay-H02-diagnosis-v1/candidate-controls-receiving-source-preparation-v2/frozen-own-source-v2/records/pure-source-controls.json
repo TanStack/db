@@ -1,0 +1,305 @@
+{
+  "status": "pure instrument controls only; no receiving/product imports/histories/testCollection",
+  "sourceHashes": {
+    "driver": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+    "fixture": "aa28853ab3b9f64696d12bf63c675dcb30544dac8dee135551281e426265acc6",
+    "reference": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+    "declaration": "4dc22be210d46ce1d6590b911cf6bc077a78bfef1e54a98c637688b54830139c",
+    "original": "d0a1e76c56b86d49d8abd55e9d26bf53be392ac6fdf530af7a48d189eaf4c96c"
+  },
+  "exactExtractedBlocks": {
+    "driver": {
+      "line": 906,
+      "sha256": "6dcc91ff7676efdf2f94f50ac638ec9cfc13d26ef78191e321cc7c65ea916acc"
+    },
+    "original": {
+      "line": 637,
+      "sha256": "ad35e9e3dd9876f86832d2c4e1fea0e6b743a10a99e2da8b02a2b06e6caba094"
+    }
+  },
+  "domainControls": {
+    "total": 13,
+    "accepted": 3,
+    "rejected": 10,
+    "controls": [
+      {
+        "name": "children complete key",
+        "actual": true,
+        "expected": true
+      },
+      {
+        "name": "children different key",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children cap",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children offset",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children cursor",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "marked complete key",
+        "actual": true,
+        "expected": true
+      },
+      {
+        "name": "marked different key",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "marked cap",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "marked offset",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "marked cursor",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children row-id-only is incomplete",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children narrowed conjunction is incomplete",
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "children complete source",
+        "actual": true,
+        "expected": true
+      }
+    ]
+  },
+  "sequenceControls": [
+    {
+      "type": "source-answer",
+      "failure": false,
+      "current": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "source-answer",
+      "failure": true,
+      "current": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "source-failure",
+      "failure": false,
+      "current": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "source-failure",
+      "failure": true,
+      "current": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "apply-output",
+      "failure": false,
+      "current": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "apply-output",
+      "failure": true,
+      "current": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "settle-optimistic",
+      "failure": false,
+      "current": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "settle-optimistic",
+      "failure": true,
+      "current": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "original": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "originalRejected": true
+    },
+    {
+      "type": "cleanup",
+      "failure": false,
+      "current": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "original": {
+        "events": [
+          "physical",
+          "model",
+          "emit"
+        ]
+      },
+      "originalRejected": false
+    },
+    {
+      "type": "cleanup",
+      "failure": true,
+      "current": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "original": {
+        "events": [
+          "physical"
+        ],
+        "error": "Error: authored physical failure"
+      },
+      "originalRejected": false
+    },
+    {
+      "type": "request-window",
+      "failure": false,
+      "current": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      }
+    },
+    {
+      "type": "source-write",
+      "failure": false,
+      "current": {
+        "events": [
+          "model",
+          "emit",
+          "physical"
+        ]
+      }
+    }
+  ],
+  "limits": "Extracted actual semantic block runs against trace-only callbacks. This calibrates source sequencing, not a native Collection or product RED."
+}

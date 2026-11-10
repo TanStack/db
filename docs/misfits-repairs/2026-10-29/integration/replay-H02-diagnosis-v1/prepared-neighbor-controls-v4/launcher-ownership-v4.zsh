@@ -1,0 +1,6 @@
+#!/bin/zsh
+# Exact contained ownership command; acceptance plus root admission required.
+set -euo pipefail
+cd /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+/bin/ps -o pid=,pgid=,rss=,args= -p $$ > /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v4-parent-process.txt
+exec env -u NODE_OPTIONS -u NODE_PATH -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY -u TANSTACK_DB_ORACLE_CALIBRATION -u H02_PROGRESS_WORKER_HISTORY -u H02_PROGRESS_BINDING_DIR -u H02_PROGRESS_SELECTED_ROOT -u H02_PROGRESS_RECEIPTS -u H02_PROGRESS_SOURCE_FREEZE /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/ownership-parent.mjs /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/ownership-recipe-v4.json > /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v4-parent.log 2>&1

@@ -1,0 +1,11 @@
+{
+  "slot": 3,
+  "workers": 1,
+  "serial": true,
+  "name": "final own lint-changed-equivalent completion",
+  "command": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+  "sessionId": 76648,
+  "exitCode": 0,
+  "output": "",
+  "runtimeReceiving": 0
+}

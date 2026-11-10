@@ -1,0 +1,62 @@
+{
+  "status": "GREEN instrument and static validation only; no V7 receiving invocation",
+  "checks": {
+    "nodePure": 74,
+    "queryCorePremiseSeam": 2,
+    "sharedCheckerCalibration": 14,
+    "sameClientJsdomRootSetup": 2,
+    "total": 92
+  },
+  "nodePureBreakdown": {
+    "transport": 30,
+    "bindings": 23,
+    "startup": 6,
+    "monitor": 15
+  },
+  "staticGreen": [
+    "TypeScript at 384 MiB",
+    "all repository ESLint rules in file partitions at 1536 MiB",
+    "scripts/agent-lint-feedback.mjs at 1536 MiB",
+    "Prettier all 26 instrument files",
+    "zsh launcher syntax"
+  ],
+  "initialCompilerCorrections": [
+    "JSDoc types added to monitor module",
+    "two unknown string fields narrowed before includes"
+  ],
+  "originalCompilerLogsPreserved": [
+    "typescript-v7.log",
+    "typescript-repair-v7.log"
+  ],
+  "finalCompilerLog": "typescript-final-v7.log",
+  "protectedIdentity": {
+    "productionFiles": 511,
+    "receivingProductionFiles": 161,
+    "sharedFiles": 11,
+    "instrumentFiles": 26,
+    "materialPackages": 7,
+    "packagePayloadFilesRehashed": 2497,
+    "protectedInputsAllMatched": true,
+    "checkedFileEntries": 709,
+    "payloadFilesRehashedNow": 2497,
+    "selectedNodeAndLocksAndFourLinksMatched": true,
+    "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451"
+  },
+  "changesAgainstV6": {
+    "changedInstrumentFiles": 2,
+    "newSupportFiles": 2,
+    "production": 0,
+    "sharedModel": 0,
+    "receivingDriver": 0,
+    "historyGrammar": 0,
+    "budgets": 0,
+    "registries": 0
+  },
+  "classifications": "classification-controls-v7.json contains static recipe cases; these are not additional test runs",
+  "remoteFreshness": "inherited V6 remote metadata; no new network check",
+  "pending": [
+    "independent exact source/recipe acceptance",
+    "root admission before any V7 receiving invocation",
+    "separately admitted receiving neighbor gates before production edits"
+  ]
+}

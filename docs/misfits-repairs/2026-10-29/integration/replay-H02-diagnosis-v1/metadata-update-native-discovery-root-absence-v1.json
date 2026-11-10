@@ -1,0 +1,62 @@
+{
+  "probes": [
+    {
+      "identity": 62745,
+      "kind": "pid",
+      "participant": "outer",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 62745,
+      "kind": "pgid",
+      "participant": "outer",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 62756,
+      "kind": "pid",
+      "participant": "child",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 62756,
+      "kind": "pgid",
+      "participant": "child",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    }
+  ],
+  "psArgv": [
+    "/bin/ps",
+    "-A",
+    "-o",
+    "pid=,pgid=,rss=,stat="
+  ],
+  "psReturnCode": 0,
+  "psStderr": "",
+  "recordedBy": "/root/evaluate_metadata_external",
+  "scope": "Actual original recorded IDs only, after outer tool exit; no signal other than zero and no rediscovered target"
+}

@@ -1,0 +1,139 @@
+import copy
+import difflib
+import hashlib
+import json
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+r = Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items')
+w = Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1')
+h = r / 'docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1'
+s = h / 'candidate-controls-source-failed-peer-checkpoint-successor-v1'
+p = h / 'candidate-controls-pagination-failed-peer-source-preparation-v1'
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def write(name, value):
+    target = p / name
+    if target.exists():
+        raise RuntimeError(f'preserve existing {target}')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(value, indent=2) + '\n')
+
+prior = json.loads((s / 'source-freeze-v1.json').read_text())
+old = {**prior['productionFiles'], **prior['instrumentFiles'], **prior['sharedInstrumentFiles']}
+deltas = {file: {'before': digest, 'after': sha(w / file)} for file, digest in old.items() if sha(w / file) != digest}
+assert set(deltas) == {'packages/db/tests/oracle-config.ts'}, deltas
+assert len(prior['productionFiles']) == 511
+primary = 'packages/db/tests/query/pagination-oracle.property.test.ts'
+added = [primary, 'packages/db/tests/query/pagination-support.ts', 'packages/db/tests/trace-runner.ts', 'packages/db/tests/optimistic-history-oracle.ts', 'packages/db/vite.config.ts', 'packages/db/tsconfig.json', 'packages/db/tsconfig.test.json', 'packages/db/mangle-cache.json', 'packages/db/tests/test-setup.ts', 'packages/db/tests/indexed-db/setup.ts', 'scripts/commonjs-declarations.mjs']
+assert not set(added).intersection(old)
+current = {file: sha(w / file) for file in [*old, *added]}
+source_copies = {file: current[file] for file in [*prior['instrumentFiles'], *prior['sharedInstrumentFiles'], *added]}
+for file, digest in source_copies.items():
+    target = p / 'sources' / file
+    target.parent.mkdir(parents=True, exist_ok=True)
+    assert not target.exists()
+    shutil.copyfile(w / file, target)
+    assert sha(target) == digest
+for before, file in [('pagination-oracle.property.test.ts.txt', primary), ('oracle-config.ts.txt', 'packages/db/tests/oracle-config.ts')]:
+    text = ''.join(difflib.unified_diff((p / 'before' / before).read_text().splitlines(keepends=True), (w / file).read_text().splitlines(keepends=True), fromfile=f'before/{file}', tofile=f'after/{file}'))
+    target = p / (before.removesuffix('.ts.txt') + '-v1.patch')
+    assert not target.exists()
+    target.write_text(text)
+
+packages_checked = 0
+payload_checked = 0
+for package in prior['packages'].values():
+    root = Path(package['resolved'])
+    assert sha(root / 'package.json') == package['packageJsonSha256']
+    for file, digest in package['regularPayloadFilesMap'].items():
+        assert sha(root / file) == digest, (root, file)
+        payload_checked += 1
+    packages_checked += 1
+assert sha(prior['node']['executable']) == prior['node']['sha256']
+for link, fact in prior['dependencyReuseLinks'].items():
+    assert (w / link).is_symlink() == fact['isSymlink']
+    assert str((w / link).resolve()) == fact['resolved']
+assert sha(w / 'pnpm-lock.yaml') == prior['lockfiles']['repoPnpmLock']
+assert sha(w / 'node_modules/.pnpm/lock.yaml') == prior['lockfiles']['installedPnpmLock']
+
+prior_checks = {}
+for manifest, key in [(s / 'packet-sha256-v1.json', None), (s / 'inline-source-failed-peer-result-freeze-v1.json', 'files')]:
+    d = json.loads(manifest.read_text())
+    entries = d[key] if key else d
+    for file, digest in entries.items():
+        assert sha(manifest.parent / file) == digest, file
+    prior_checks[str(manifest)] = {'sha256': sha(manifest), 'entriesRehashed': len(entries)}
+
+for version in ['v1', 'v2']:
+    shutil.copyfile(Path(f'/private/tmp/h02-pagination-failed-peer-types-{version}.json'), p / f'typecheck-config-{version}.json')
+node = prior['node']['executable']
+vitest = str(Path(prior['packages']['vitest']['resolved']) / 'vitest.mjs')
+command = {
+    'executable': node,
+    'args': [vitest, 'run', '--config', 'vite.config.ts', 'tests/query/pagination-oracle.property.test.ts', '-t', 'retains complete windows across joined failure histories for a fixed seed', '--maxWorkers=1', '--no-file-parallelism'],
+    'workdir': str(w / 'packages/db'),
+    'environment': {'TANSTACK_DB_ORACLE_RUNS_MULTIPLIER': '1'},
+    'requiredUnsetEnvironment': ['TANSTACK_DB_ORACLE_SEED', 'TANSTACK_DB_ORACLE_PATH', 'TANSTACK_DB_ORACLE_PROPERTY', 'TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH'],
+    'campaign': 'new fixed-seed generated family only; seed 1665; existing transitionScenarioRuns=8 at multiplier 1; no prior campaign budget changed',
+    'assertionCheckpoint': 'original source rejection handled as exact lastSubsetError while original child peer remains pending; compare every nonthrowing captured callback and current read to independently computed prior window before releasing peer or awaiting setWindow',
+    'runtimeAdmission': 'NOT ADMITTED; freeze exact outer containment/launcher separately before any run',
+    'scope': 'proposal only; package config keeps its ordinary coverage/typecheck setup; no copied native completion launcher is suitable for this primary command',
+    'numericalDeadline': 'no product deadline; root must admit operational containment separately',
+    'nativeReceiving': 0,
+}
+write('proposed-primary-red-command-v1.json', command)
+
+freeze = {
+    'at': datetime.now(timezone.utc).isoformat(),
+    'status': 'source preparation only; no primary runtime or reach obtained',
+    'worktree': str(w),
+    'base': prior['base'],
+    'priorSourceFreeze': str(s / 'source-freeze-v1.json'),
+    'priorSourceFreezeSha256': sha(s / 'source-freeze-v1.json'),
+    'sourceBindings': current,
+    'sourceBindingCount': len(current),
+    'productionFiles': prior['productionFiles'],
+    'productionCount': len(prior['productionFiles']),
+    'existingInstrumentFiles': prior['instrumentFiles'],
+    'sharedInstrumentFiles': {file: current[file] for file in prior['sharedInstrumentFiles']},
+    'primaryAndSupportFilesAddedToBinding': {file: current[file] for file in added},
+    'oldBindingDeltas': deltas,
+    'primaryBeforeSha256': sha(p / 'before/pagination-oracle.property.test.ts.txt'),
+    'sourceCopies': source_copies,
+    'sourceCopyRoot': str(p / 'sources'),
+    'baselineDriverUnchangedSha256': sha(w / 'packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts'),
+    'node': prior['node'],
+    'packages': prior['packages'],
+    'lockfiles': prior['lockfiles'],
+    'dependencyReuseLinks': prior['dependencyReuseLinks'],
+    'verifiedDependencyPackages': packages_checked,
+    'verifiedDependencyPayloadFiles': payload_checked,
+    'priorPacketsRehashed': prior_checks,
+    'bindingProfile': 'source-only primary preparation; no native runtime profile implied',
+    'runtime': 0,
+    'reaches': 'UNREACHED; counts require admitted actual execution',
+    'candidateRaw20': 'UNREACHED',
+    'state14': 'proposed, not adopted',
+    'actualHelperNoActivePublicOperation': 'UNREACHED and remains required separately',
+    'metadata': 'independently owned; no credit transferred',
+}
+write('source-freeze-v1.json', freeze)
+write('actual-static-tool-completions-v1.json', {
+    'scope': 'direct installed static CLIs; no pnpm install; no test collection/product imports/fixture construction',
+    'prettierFinal': {'chunk':'e3c59a','exit':0,'log':'prettier-check-v1.log'},
+    'eslintCappedOriginal': {'initial':'1e8dae','session':87342,'final':'cca4f8','exit':134,'log':'eslint-v1.log','classification':'tool heap OOM; preserved; no product verdict'},
+    'eslintDefaultHeapV2': {'initial':'5dff30','session':14645,'final':'e989a6','exit':0,'log':'eslint-v2.log'},
+    'typecheckV1': {'initial':'112464','session':24514,'final':'1640a5','exit':2,'log':'typecheck-v1.log','classification':'temporary config did not resolve installed Node typings; also exposed new-test errors'},
+    'typecheckV2': {'initial':'dfade3','session':93396,'final':'7025b9','exit':2,'log':'typecheck-v2.log','classification':'Node typing resolved; one optional getWindow spread error remained'},
+    'typecheckFinal': {'initial':'c9cfac','session':66052,'final':'117c8f','exit':0,'log':'typecheck-v3.log','config':'typecheck-config-v2.json','defaultHeap':True},
+    'eslintFinal': {'initial':'8ee8d1','session':17971,'final':'ce7104','exit':0,'log':'eslint-v3.log','defaultHeap':True,'files':[primary,'packages/db/tests/oracle-config.ts','packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts']},
+    'sourceOracleFeedbackFinal': {'initial':'51f54e','session':64902,'final':'4a1e06','exit':0,'log':'source-oracle-feedback-v2.log','cwdDelegatedTo':str(w)},
+    'reportWorktreeRequiredLint': {'initial':'794be5','session':34172,'final':'82385f','exit':0,'log':'exact-pnpm-lint-changed-v1.log','exactShellCommand':"NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",'cwd':str(r)},
+    'serialSchedulingException':'Author polled source feedback at 5fe40a, received still running, then mistakenly launched report-WT lint. Both read-only static checks overlapped briefly; root was told immediately. Both completed exit 0; no other process launched until both completed.',
+    'productionEdits':0,'primaryRuntime':0,'nativeReceiving':0,'installation':0,
+})
+print(json.dumps({'sourceBindings':len(current),'productionFilesUnchanged':len(prior['productionFiles']),'copiedSourceFiles':len(source_copies),'sharedConfigChanged':deltas,'primarySha256':current[primary],'freezeSha256':sha(p / 'source-freeze-v1.json'),'commandSha256':sha(p / 'proposed-primary-red-command-v1.json'),'oldPacketEntriesRehashed':prior_checks,'dependencyPayloadFilesRehashed':payload_checked},indent=2))

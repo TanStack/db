@@ -1,0 +1,48 @@
+{
+  "format": "relative-path bytes SHA256; excludes this manifest only",
+  "status": "frozen exact V4 empty-scope launcher operational setup failure; no product verdict",
+  "members": 10,
+  "bytes": 430349,
+  "files": {
+    "handoff-v1.md": {
+      "bytes": 1130,
+      "sha256": "8c565cae09a524f9d98dfa4c677cbb5cea32f1f0e758d3d4324098898293fea1"
+    },
+    "launcher-empty-scope-v4.zsh": {
+      "bytes": 1725,
+      "sha256": "0a0ab6339691ef7c2066087bbd59c159f666e74c58f06befed4465de62f91f4e"
+    },
+    "launcher-process.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "operational-failure-v1.json": {
+      "bytes": 1819,
+      "sha256": "1ab4e7acedbc1d586bd21ed8f6f928a5e250fc8d2f05e5eb641cd86f4b3271d9"
+    },
+    "pre-launch-source-identity-v1.json": {
+      "bytes": 286,
+      "sha256": "4621d049855651bfbbed020f8ca041e9b9c138a6de276767485f292b19158dfe"
+    },
+    "root-admission-v1.json": {
+      "bytes": 8777,
+      "sha256": "91115cb67d5fe297126b5b23fd345bb418c90d2d6f1850322d662ba9c1612a71"
+    },
+    "root-batch-admission-v1.json": {
+      "bytes": 1773,
+      "sha256": "3f104a6fb0627b2db445a904f01e7e74252320c485e346ed90b7f8841814ada6"
+    },
+    "source-freeze-v4.json": {
+      "bytes": 413863,
+      "sha256": "acd050dcb5ad16e0aea2bee3d039528f2a2e6c40d0766fce880c04974de8f74d"
+    },
+    "source-identity-after-v1.json": {
+      "bytes": 226,
+      "sha256": "2752214ea4f366b468fb495bb32deac517ea076ecd49e8911b7fe8120421e877"
+    },
+    "tool-result-v1.json": {
+      "bytes": 750,
+      "sha256": "db7efcae31da4142ea823a985bd522ca0598209a87ffc511b04a43095ef8b2f9"
+    }
+  }
+}

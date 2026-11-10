@@ -1,0 +1,38 @@
+{
+  "audit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-qualified-copy-actual-v2.py",
+    "sha256": "827eed441980ebdb44e2dad556d1af175f6ed1c6db0bc1132f7602f34c514c65"
+  },
+  "candidateReruns": 0,
+  "command": "python3 -I -S -B audit-qualified-copy-actual-v2.py",
+  "compilerInvocations": 0,
+  "failedReviewerV1": {
+    "account": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-reviewer-schema-error-v1.json",
+      "sha256": "87b5243a77cf8381da3459bf3031f3e3957c2df7d440a5e3de22bc4f8b03f2c5"
+    },
+    "chunk_id": "853849",
+    "exit_code": 1
+  },
+  "final": {
+    "chunk_id": "55b0f0",
+    "exit_code": 0,
+    "original_token_count": 142,
+    "wall_time_seconds": 1.4125e-05
+  },
+  "initial": {
+    "chunk_id": "dfde7e",
+    "original_token_count": 0,
+    "output": "",
+    "session_id": 9990,
+    "wall_time_seconds": 1.003243833
+  },
+  "kind": "Reviewer-recorded independent static audit tool metadata; actual candidate API records remain separately byte-exact in evidence snapshot",
+  "nativeReceiving": 0,
+  "processProbes": 0,
+  "result": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-independent-facts-v2.json",
+    "sha256": "c50848b3a0ca69b3af84c870cc84ee7dd7f768d01042cfbf300b818f303fa554"
+  },
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1"
+}

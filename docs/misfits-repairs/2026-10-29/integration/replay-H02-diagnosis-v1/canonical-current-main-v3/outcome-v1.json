@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-30T04:19:07.050370+00:00",
+  "classification": "outer runner setup failure before receiving spawn",
+  "toolExecChunkId": "315a84",
+  "toolExecExitCode": 1,
+  "toolWallSeconds": 0.919441791,
+  "sandboxPermissions": "require_escalated",
+  "autoReviewRejected": false,
+  "outerProcess": {
+    "pid": 59927,
+    "pgid": 59927,
+    "identityReceipt": "launcher-process-v3.txt",
+    "identityRecordedBeforeExec": true,
+    "toolSession": "completed; no running exec session"
+  },
+  "vitest": {
+    "selected": 1,
+    "failed": 1,
+    "skipped": 3,
+    "totalRegistered": 4,
+    "selectedName": "replays the finite five-root queued-answer history",
+    "testDurationMs": 2,
+    "reportedTotalDurationMs": 512,
+    "log": "outer-vitest-v3.log"
+  },
+  "failure": {
+    "name": "TypeError",
+    "message": "The URL must be of scheme file",
+    "location": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:29",
+    "expression": "fileURLToPath(new URL(`../../../`, import.meta.url))",
+    "boundary": "before directory creation and detached receiving spawn"
+  },
+  "receiving": {
+    "historiesExecuted": 0,
+    "groupsCreated": 0,
+    "workerPid": null,
+    "workerPgid": null,
+    "rawWorkerLog": null,
+    "queuedPremiseReached": false,
+    "queuedAnswerReceipt": false,
+    "answerExecutedReceipt": false,
+    "sourceBindingVerifierExecuted": false,
+    "sourceBindingVerdict": "not run",
+    "reachesMeasured": false
+  },
+  "progressRed": false,
+  "semanticProductRed": false,
+  "productGreen": false,
+  "resourceTermination": false,
+  "rootIndependentGroupCheck": {
+    "requiredPgid": 59927,
+    "status": "pending root; no local process-list workaround performed"
+  },
+  "sourceEditsAfterAcceptance": 0,
+  "rerunsAfterSuccessor": 0,
+  "firstAttempt": {
+    "classification": "pre-Node /bin/ps sandbox denial",
+    "manifestSha256": "b4a99a5e0855c6672e29f9553a1c96e972be3faa43a088fcf729f12a20567b9b"
+  },
+  "disposition": "freeze and STOP; further source/runner repair or runtime requires new root admission"
+}

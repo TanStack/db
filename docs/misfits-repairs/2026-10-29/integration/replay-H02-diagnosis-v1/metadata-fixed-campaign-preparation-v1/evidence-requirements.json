@@ -1,0 +1,100 @@
+{
+  "artifactAttribution": {
+    "failure": "A failed property can generate shrinking attempts beyond8. Preserve every attributable directory and original failure/cleanup details, report counts honestly, and do not call this8-history GREEN. No retries admitted.",
+    "passiveBaseline": "Prelaunch candidate inventory only, no mtime/first-new selection.",
+    "selection": "Find all and only directories belonging to the actual recorded receiving parent PID and frozen source for this selected campaign. Each has its own UUID path, prepared.json historyPath/directory, raw history.json, worker-start.history, supervisor target identity, receipt writer identity and logPath agreement. Require exactly8 distinct successful per-history artifacts and one-to-one UUID/path identities; repeated generated facts are allowed and must not collapse into a history-keyed map. Stop on ambiguous or extra attributable paths."
+  },
+  "historyGrammar": {
+    "cacheIdentity": "scope",
+    "includes": true,
+    "keyShift": [
+      0,
+      20
+    ],
+    "kind": "query",
+    "limit": "No generated histories computed or sampled during source preparation.",
+    "metadataFollowupQuarter": [
+      1,
+      2,
+      3
+    ],
+    "metadataKeys": "default",
+    "nonemptyPrior": true,
+    "rankScale": [
+      1,
+      20
+    ],
+    "scheduler": "microtask",
+    "window": true
+  },
+  "identityAndCleanup": [
+    "Reuse unchanged20s/1GiB/384MiB/post-enqueue1000ms inner supervisor; no new guardian or timeout implementation",
+    "Record actual outer PID/PGID, receiving parent PID, each detached leader and each receipt-writer PID from original actual records. No guessed identity or regenerated process receipt.",
+    "Actual completion must be observed separately from child exit, and original recorded process IDs and groups must be checked absent through the admitted existing ps/signal-zero procedure. Qualify any missing initial getpgid proof as before. Do not infer cleanup from a quiet log.",
+    "Root owns the exact outer lifecycle/containment and completion capture. Existing300000ms test timeout is not a hard outer watchdog. Stop after one invocation on any result."
+  ],
+  "limits": [
+    "authored-key lane unvalidated",
+    "zero-quarter no-op unvalidated",
+    "subscription/conflicting-cache progress requires separate reviewed repair/freeze",
+    "unseeded campaign separately gated",
+    "no hostile production-mutant kill or product repair/bug-class closure",
+    "stable output metadata only; no changing-fetched-metadata, held-reload follow-up or new attribution law",
+    "no framework receiving, PR readiness, canonical import or publication"
+  ],
+  "parentSelection": {
+    "expectedSkippedTests": 19,
+    "filter": "^queued\\-answer\\ metadata\\ receiving\\ generated\\ 'scope'\\ 'default'\\ checks\\ the\\ fixed\\ generated\\ campaign$",
+    "reporter": "Unchanged verbose, silent=false, complete stdout and stderr redirected together to outer-vitest.log; assertions/logs use authored test title, no seed suffix accepted.",
+    "selectedPassedTests": 1,
+    "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+    "title": "queued-answer metadata receiving > generated 'scope' 'default' > checks the fixed generated campaign"
+  },
+  "rawPreservation": [
+    "actual outer exec invocation/session/chunks and actual completion exit separately from all eight receiving-child exits",
+    "entire outer-vitest.log and launcher-process/source-prelaunch records",
+    "every attributable full raw history/prepared/receipts/stdout/stderr/supervisor/source-binding/evaluated/V8/loader/verification artifact including failed and shrinking attempts",
+    "immutable inventory with byte lengths and hashes; current frozen source/tool/map recheck; no original overwritten or substituted"
+  ],
+  "reach": {
+    "campaign": "fc.assert fixed seed20261030, numRuns oracleRuns(8) with multiplier1; after successful fc.assert the authored reach.assertReached executes. No claim of unseeded parity or direct replay execution.",
+    "perHistory": "Each of eight successful raw histories must reach every one of the31 states and normal worker-cleaned. Existing console reach snapshots are cumulative over the single campaign; final count8 for every state and monotonic per-history increments1..8 must be backed by individual raw paths, not treated as eight independently reset counters.",
+    "perHistoryFinish": "Exact frozen run() calls checkQueuedAnswerProgress then metadata.finish() for every successful history; selected campaign pass and source call order supply existing invocation assumption. No dedicated runtime finish or assertion receipt or new parent-checker V8 provenance is invented.",
+    "states": [
+      "initial-root",
+      "initial-downstream",
+      "nonempty-prior",
+      "reload-started",
+      "positive-held-provider-read",
+      "held-root",
+      "held-downstream",
+      "completed-enqueue",
+      "answer-executed",
+      "callback-root",
+      "callback-downstream",
+      "selected-upstream-metadata",
+      "messages-root",
+      "messages-downstream",
+      "final-root",
+      "final-downstream",
+      "worker-cleaned",
+      "reload-baseline-compared",
+      "followup-started",
+      "source-applied",
+      "followup-acquisitions-settled",
+      "followup-retained-key-root",
+      "followup-messages-root",
+      "followup-final-root",
+      "followup-update-root",
+      "followup-previous-value-root",
+      "followup-retained-key-downstream",
+      "followup-messages-downstream",
+      "followup-final-downstream",
+      "followup-update-downstream",
+      "followup-previous-value-downstream"
+    ]
+  },
+  "scope": "One fixed-seed generated scope/default campaign only; seed20261030, exact budget8, multiplier1, serial histories.",
+  "sourceBinding": "Each history needs actual bindingStatus bound with stated startup/evaluated/V8/callback-path limits. Compiled/evaluated source alone is not execution. Nine named own-package maps do not prove full transitive host/native/dist equivalence.",
+  "successfulHistoryCount": 8
+}

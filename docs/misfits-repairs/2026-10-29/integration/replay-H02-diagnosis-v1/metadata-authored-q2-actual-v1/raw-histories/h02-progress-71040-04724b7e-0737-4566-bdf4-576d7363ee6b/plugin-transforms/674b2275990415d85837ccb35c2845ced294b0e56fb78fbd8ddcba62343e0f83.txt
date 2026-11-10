@@ -1,0 +1,28 @@
+export function hasVirtualProps(value) {
+  return typeof value === "object" && value !== null && ["$hasPendingWrites", "$origin", "$key", "$collectionId"].every(
+    (name) => name in value
+  );
+}
+export function enrichRowWithVirtualProps(row, key, collectionId, computePendingWrites, computeOrigin) {
+  const existingRow = row;
+  const hasPendingWrites = existingRow.$hasPendingWrites ?? computePendingWrites();
+  return {
+    ...row,
+    $hasPendingWrites: hasPendingWrites,
+    $origin: existingRow.$origin ?? computeOrigin(),
+    $key: existingRow.$key ?? key,
+    $collectionId: existingRow.$collectionId ?? collectionId
+  };
+}
+export const VIRTUAL_PROP_NAMES = [
+  "$hasPendingWrites",
+  "$origin",
+  "$key",
+  "$collectionId"
+];
+export function isVirtualPropName(name) {
+  return VIRTUAL_PROP_NAMES.includes(name);
+}
+export function hasVirtualPropPath(path) {
+  return path.some((segment) => isVirtualPropName(segment));
+}

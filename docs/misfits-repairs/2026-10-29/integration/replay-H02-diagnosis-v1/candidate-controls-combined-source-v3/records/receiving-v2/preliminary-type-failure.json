@@ -1,0 +1,9 @@
+{
+  "source": "tool transcript before final gated checks",
+  "exitCode": 2,
+  "findings": [
+    "baseline parent expected epoch possiblyundefined; fixed explicit required epoch guard",
+    "BasicExpression not publicly exported; fixed type-only IR import"
+  ],
+  "runtime": "static only"
+}

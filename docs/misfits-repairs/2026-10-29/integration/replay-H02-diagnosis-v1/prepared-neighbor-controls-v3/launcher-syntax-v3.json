@@ -1,0 +1,32 @@
+[
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-nonempty-conflict-v3.zsh",
+    "sha256": "aced329e1f9b84c6e655ed8a27663b8c96c2b0f4aad08b9ee4da87061843c384",
+    "exitCode": 0
+  },
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-nonempty-scope-v3.zsh",
+    "sha256": "08f3f65174cd5f2e996b57c19006772f179dcae25ee5ec9c51ad749167c34dc2",
+    "exitCode": 0
+  },
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-empty-scope-v3.zsh",
+    "sha256": "618384e265aa5940aa63e458f6b2ef35cf0ecd89c90b3d77d6023fd2a2c30216",
+    "exitCode": 0
+  },
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-sync-initial-v3.zsh",
+    "sha256": "1525c1f7331f6e9e97d38a3da12a64a109174d31ce078eb3c41b4bfd13233ab0",
+    "exitCode": 0
+  },
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-sync-mutation-v3.zsh",
+    "sha256": "98db08b720f4ce55f7d078b98a4cf888b49664d280ea10fb9baba100b8df7790",
+    "exitCode": 0
+  },
+  {
+    "launcher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/launcher-ownership-v3.zsh",
+    "sha256": "08d67bb7607356541c9d7a14481c522e7a4c8d5ca03e90d718e4e05257c7d4e5",
+    "exitCode": 0
+  }
+]

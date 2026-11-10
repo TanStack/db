@@ -1,0 +1,45 @@
+{
+  "schema": "h02-minimal-reentrant-compiler-source-packet-v2",
+  "status": "FROZEN inactive one-line correction and exact affected pins for ROOT delta review; no admission",
+  "fileCount": 6,
+  "files": {
+    "compiler-containment-contract-v1.json": {
+      "sha256": "6db3581c88484df8ccbff6b3374cfd23d191fd1be047247ada8c143cb0a22a1b",
+      "bytes": 8883
+    },
+    "contain-compiler-v1.py.txt": {
+      "sha256": "b6eb889598747265dd83b023d1e07f63beba4da3002df56947becca9bee772e4",
+      "bytes": 12342
+    },
+    "minimal-delta-evidence-v1.json": {
+      "sha256": "e15b46dbc43a4a74c1937ddd6f504cc16bd9c97d6d7309929f1a38089029c62b",
+      "bytes": 3792
+    },
+    "proposed-exact-compiler-only-tool-invocation-v1.json": {
+      "sha256": "030cb056b3a148501ef5e19a6fd9263856967085ba434250c4e7dba5b8d8da45",
+      "bytes": 4057
+    },
+    "report-v1.md": {
+      "sha256": "d2ee49bc4199d8a9423832b701f3ae5fc612f34c06bc207a326c30ddf2779314",
+      "bytes": 2022
+    },
+    "stop-lock-only-v1.diff.txt": {
+      "sha256": "16b9c06660d1c40c6989cdd31cefd11543abd9670a863a50812b702ad31d54bc",
+      "bytes": 360
+    }
+  },
+  "selfExcluded": true,
+  "parentManifestSha256": "77ecb1a906d4712663622962fcf3db3dee522484118c536a308ec6f046ff4ba0",
+  "finding": "H02-COMPILER-STOP-SIGNAL-REENTRANCY",
+  "wrapperSha256": "b6eb889598747265dd83b023d1e07f63beba4da3002df56947becca9bee772e4",
+  "contractSha256": "6db3581c88484df8ccbff6b3374cfd23d191fd1be047247ada8c143cb0a22a1b",
+  "toolProposalSha256": "030cb056b3a148501ef5e19a6fd9263856967085ba434250c4e7dba5b8d8da45",
+  "reportSha256": "d2ee49bc4199d8a9423832b701f3ae5fc612f34c06bc207a326c30ddf2779314",
+  "deltaEvidenceSha256": "e15b46dbc43a4a74c1937ddd6f504cc16bd9c97d6d7309929f1a38089029c62b",
+  "execution": 0,
+  "compilerInvocations": 0,
+  "processProbes": 0,
+  "materialization": 0,
+  "heavyCensus": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

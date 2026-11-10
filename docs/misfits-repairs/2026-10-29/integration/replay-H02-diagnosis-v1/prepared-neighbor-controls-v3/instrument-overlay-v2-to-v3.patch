@@ -1,0 +1,22 @@
+--- v2/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
++++ v3/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts
+@@ -5372,6 +5372,8 @@
+         reach.assertReached()
+       } finally {
+         console.info(`H02 ownership neighbor reach`, {
++          sourceModule: import.meta.url,
++          testName: expect.getState().currentTestName,
+           history,
+           counts: Object.fromEntries(reach.counts()),
+         })
+--- v2/scripts/h02-progress/ownership-neighbor.config.ts
++++ v3/scripts/h02-progress/ownership-neighbor.config.ts
+@@ -20,6 +20,8 @@
+     ],
+   },
+   test: {
++    reporters: ['verbose'],
++    silent: false,
+     include: [
+       'packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+     ],

@@ -1,0 +1,24 @@
+{
+  "classifiedBy": "/root",
+  "stage": "universe",
+  "boundedAccepted": false,
+  "verdict": "STOPPED: expected display-name instrumentation mismatch",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-result-freeze-v1.json",
+    "sha256": "6c2794c3b81b56cb2501013dc07e9cf9740f576bc6c06d8db7580a035ea01bb6"
+  },
+  "independentActualReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-native-discovery-actual-result-review-v1.md",
+    "sha256": "b4eeb0dc83f8c40e416bec5b0474ed12da83360e300ffa2c00ae5027b171377f"
+  },
+  "actualOuterExitCode": 1,
+  "nativeChildExitCode": 0,
+  "soleMismatch": "four no-op display names use quarter +0, expected quarter 0; order is ignored by exact set comparison",
+  "originalIdentitiesAbsent": true,
+  "inputsMatch": true,
+  "next": "four-string correction and fresh native universe in new namespace, preserving success requirements",
+  "productPassCredit": false,
+  "receivingReachCredit": false,
+  "newRuntimeAdmitted": false,
+  "canonicalImport": false
+}

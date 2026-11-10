@@ -1,0 +1,142 @@
+{
+  "status": "All three separately admitted successor controls normal complete; result classification pending independent and root review",
+  "batchAdmission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/remaining-neighbor-setup-successor-root-batch-admission-v2.json",
+  "batchAdmissionSha256": "e0b7cd93993c94945eacca81d4a88feed66ba7419e1f07074a953dbd387690af",
+  "serialSlot": 2,
+  "workerCount": 1,
+  "invocations": 3,
+  "retries": 0,
+  "toolSandboxPermissions": "require_escalated; each exact command passed automatic review and completed exit0",
+  "results": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1",
+      "manifestSha256": "4ad0c8551f954565af76d54022ef7cc7e9ed0360c88cd80cf1490ef6b2ab91d3",
+      "members": 1961,
+      "bytes": 31279956,
+      "rawReceiptCount": 213,
+      "finiteReachCounts": {
+        "empty-prior": 1,
+        "held-provider-read": 1,
+        "completed-enqueue": 1,
+        "answer-executed": 1,
+        "root-change": 1,
+        "downstream-change": 1,
+        "final-publication": 1,
+        "worker-cleaned": 1
+      },
+      "bindingCount": 648,
+      "operational": {
+        "outerExitCode": 0,
+        "childExitCode": 0,
+        "signal": null,
+        "reason": "exited",
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2601,
+        "maxSampledGroupRssBytes": 486834176,
+        "outerPid": 55971,
+        "outerPgid": 55971,
+        "childPid": 55979,
+        "childOriginalPgid": 55979,
+        "rootAbsenceReceiptSha256": null,
+        "executionSandboxPermissions": "require_escalated"
+      },
+      "sourceIdentityAfter": {
+        "sourceMapEntries": 563,
+        "namedPackagePayloadFiles": 2544,
+        "nodeLocksAndReuseLinksMatched": true
+      },
+      "packetErrors": []
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1",
+      "manifestSha256": "a8328b9be41b3c9922baf583551041aef62df34168822b8d9d492b978700b90b",
+      "members": 1960,
+      "bytes": 30965371,
+      "rawReceiptCount": 5,
+      "finiteReachCounts": {
+        "literal-true-establishing-receipt": 1,
+        "subscriber-return-before-preload": 1,
+        "final-publication": 1,
+        "worker-cleaned": 1
+      },
+      "bindingCount": 486,
+      "operational": {
+        "outerExitCode": 0,
+        "childExitCode": 0,
+        "signal": null,
+        "reason": "exited",
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2213,
+        "maxSampledGroupRssBytes": 469778432,
+        "outerPid": 59447,
+        "outerPgid": 59447,
+        "childPid": 59451,
+        "childOriginalPgid": 59451,
+        "rootAbsenceReceiptSha256": null,
+        "executionSandboxPermissions": "require_escalated"
+      },
+      "sourceIdentityAfter": {
+        "sourceMapEntries": 563,
+        "namedPackagePayloadFiles": 2544,
+        "nodeLocksAndReuseLinksMatched": true
+      },
+      "packetErrors": []
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1",
+      "manifestSha256": "6e9c65b15651d789a27947b8ce19a2c2cfd00e53831ccb06fd6db6f4e052992d",
+      "members": 1960,
+      "bytes": 30965148,
+      "rawReceiptCount": 5,
+      "finiteReachCounts": {
+        "ordinary-mutation-return-before-host-turn": 1,
+        "final-publication": 1,
+        "worker-cleaned": 1
+      },
+      "bindingCount": 486,
+      "operational": {
+        "outerExitCode": 0,
+        "childExitCode": 0,
+        "signal": null,
+        "reason": "exited",
+        "killAttempted": false,
+        "heap": false,
+        "observationError": null,
+        "cleanupErrors": [],
+        "remainingGroupRows": [],
+        "elapsedMs": 2207,
+        "maxSampledGroupRssBytes": 460177408,
+        "outerPid": 60343,
+        "outerPgid": 60343,
+        "childPid": 60348,
+        "childOriginalPgid": 60348,
+        "rootAbsenceReceiptSha256": null,
+        "executionSandboxPermissions": "require_escalated"
+      },
+      "sourceIdentityAfter": {
+        "sourceMapEntries": 563,
+        "namedPackagePayloadFiles": 2544,
+        "nodeLocksAndReuseLinksMatched": true
+      },
+      "packetErrors": []
+    }
+  ],
+  "originalSetupFailurePreserved": {
+    "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4",
+    "manifestSha256": "db576de10b07f8a9aa0bee621357ee739e8e9759a845b8b852492d2c75f6d25a"
+  },
+  "rootOriginalIdAbsence": "Requested separately for all original outer and child PID/PGIDs; no late receipt is added to an already frozen packet. Root can preserve absence evidence alongside immutable packets.",
+  "noFurtherRuntime": true,
+  "limits": "Three finite baseline controls, no generated closure, metadata temporal coherence or candidate20 reach. Original failed setup remains operational only. Sync mutation makes no literal-true establishing-receipt claim."
+}

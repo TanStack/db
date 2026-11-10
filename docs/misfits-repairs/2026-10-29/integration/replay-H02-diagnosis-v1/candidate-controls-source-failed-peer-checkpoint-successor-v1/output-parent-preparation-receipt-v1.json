@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-30T10:12:56.734246+00:00",
+  "status": "source-review launch-preparation gap corrected without native execution",
+  "reason": "unchanged completion-parent creates the output leaf exclusively without recursive parents",
+  "parent": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/runtime-output-v1",
+  "parentExists": true,
+  "parentEmpty": true,
+  "outputLeaf": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/runtime-output-v1/inline-source-failed-peer",
+  "outputLeafAbsent": true,
+  "immutablePacket": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/packet-sha256-v1.json",
+  "immutablePacketSha256": "60a45f03547a64b44341b72b2a9cebe2f9c2f662efc014b613d0e840978427fd",
+  "immutableEntriesRehashed": 88,
+  "sourceInputLauncherBytesUnchanged": true,
+  "nativeRuntime": 0,
+  "productImports": 0,
+  "fixtureConstructions": 0,
+  "testCollection": 0,
+  "runtimeAdmission": false
+}

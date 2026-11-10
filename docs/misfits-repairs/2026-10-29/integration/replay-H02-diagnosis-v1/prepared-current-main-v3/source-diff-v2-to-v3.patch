@@ -1,0 +1,42 @@
+--- v2/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
++++ v3/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+@@ -256,6 +256,18 @@
+     if (history.kind !== `query`) return
+     if (receipt.phase === `reload-start`) reloading = true
+     if (receipt.phase === `cleanup-start`) reloading = false
++    if (receipt.phase === `final-publication`) {
++      checkReplayPublication(
++        reloading,
++        true,
++        `query final checkpoint follows reload start`,
++      )
++      checkReplayPublication(
++        [...eventRows.values()].sort((left, right) => left.rank - right.rank),
++        receipt.rows,
++        `final checkpoint includes every event-derived public row`,
++      )
++    }
+     if (!reloading || receipt.phase !== `public-change`) return
+     const isFinal = isDeepStrictEqual(receipt.rows, final)
+     checkReplayPublication(
+--- v2/scripts/h02-progress/checker-calibration.test.ts
++++ v3/scripts/h02-progress/checker-calibration.test.ts
+@@ -80,6 +80,18 @@
+       `payload and callback read expose the same complete value`,
+     )
+   })
++  it(`rejects an omitted final callback even when final rows are correct`, () => {
++    const wrong = [...lawful.slice(0, 4), ...lawful.slice(6)]
++    expect(() => check(wrong)).toThrow(
++      `final checkpoint includes every event-derived public row`,
++    )
++  })
++  it(`rejects an absent reload boundary instead of bypassing event judgment`, () => {
++    const wrong = lawful.filter(({ phase }) => phase !== `reload-start`)
++    expect(() => check(wrong)).toThrow(
++      `query final checkpoint follows reload start`,
++    )
++  })
+   it(`rejects a return to prior after final first publishes`, () => {
+     const wrong = [
+       ...lawful.slice(0, 5),

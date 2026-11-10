@@ -1,0 +1,25 @@
+{
+  "status": "PASS source-only static read/hash/JSON/AST validation; launcher not imported or executed",
+  "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+  "bindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "activeSourceBindings": 595,
+  "sourceCopies": 84,
+  "namedPackageRoots": 255,
+  "namedPackageOwnPayloads": 11974,
+  "supplementalResolutionEdges": 405,
+  "absentOptionalOrPeers": 112,
+  "locksVerified": 2,
+  "reuseLinksVerified": 4,
+  "originalSupervisorSha256": "9566ec6fe9fdace272d8e204e3a8c86e407f8da50f4ffc11f7d5961bdd07cfb2",
+  "runtimeOutputAbsent": true,
+  "ASTSyntaxParsed": true,
+  "supervisorImported": false,
+  "launcherImported": false,
+  "nativeProcessesOrProbes": 0,
+  "testsOrDiscoveryOrConfigImports": 0,
+  "pureGaps": [
+    "No mocked execution of wrapper or report parser; no native containment calibration.",
+    "Actual PGID/signal/reap/report shape and selected test count remain unvalidated until admitted command.",
+    "Static own-payload identity is not runtime evaluated-source binding or host/native equivalence."
+  ]
+}

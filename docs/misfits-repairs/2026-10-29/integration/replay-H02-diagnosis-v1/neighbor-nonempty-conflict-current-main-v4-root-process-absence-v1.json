@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-30T07:10:19.252737+00:00",
+  "checkedBy": "/root",
+  "checks": [
+    {
+      "pid": 11686,
+      "process": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 11686,
+      "process": "pgid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 11702,
+      "process": "pid",
+      "result": "absent-ESRCH"
+    },
+    {
+      "pid": 11702,
+      "process": "pgid",
+      "result": "absent-ESRCH"
+    }
+  ],
+  "scope": "original identities after returned singleton command; no signal sent"
+}

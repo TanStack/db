@@ -1,0 +1,115 @@
+{
+  "schema": "h02-failure-receiving-result-v1",
+  "slot": 2,
+  "invocations": 1,
+  "disposition": "Instrumentation failure; no receiving product RED or GREEN",
+  "outerActual": {
+    "initialChunkId": "3be14d",
+    "sessionId": 90331,
+    "finalChunkId": "d1dc4d",
+    "exitCode": 1,
+    "receipt": "actual-tool-receipt-v1.json"
+  },
+  "parentCommand": {
+    "exitCode": 1,
+    "signal": null,
+    "title": "checks a selected baseline constituent through the shared judgment",
+    "tests": 1,
+    "failed": 1,
+    "outcome": "parent-raw/outcome.json"
+  },
+  "innerCommand": {
+    "exitCode": 1,
+    "signal": null,
+    "title": "records a source-bound completion receiving gate",
+    "tests": 1,
+    "failed": 1,
+    "outcome": "inner-raw/supervisor.json"
+  },
+  "parentInstrumentationFailure": {
+    "message": "public cut preceded its complete callback interval",
+    "rawSequence": 291,
+    "heldEpochEndSequence": 292,
+    "hypothesis": "Possible phase-spread collision in checkpoint emission; UNVERIFIED diagnosis, no repair performed"
+  },
+  "childInstrumentationFailure": {
+    "message": "completion instrument: original held peer binding changed before failure barrier",
+    "rawSequence": 323,
+    "specificGuardComponent": "UNESTABLISHED; broad guard reports no component-specific mismatch",
+    "failureBarrierAndDisposition": "UNREACHED; pending versus retired original peer not classified"
+  },
+  "binding": {
+    "status": "bound",
+    "bindings": 340,
+    "failures": [],
+    "verification": "inner-raw/binding-verification.json",
+    "limits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+  },
+  "rawReceipts": {
+    "count": 323,
+    "phaseCounts": {
+      "worker-start": 1,
+      "completion-baseline-epoch-start": 3,
+      "completion-boundary": 305,
+      "completion-baseline-delivery": 4,
+      "completion-baseline-epoch-end": 2,
+      "completion-baseline-view": 1,
+      "completion-baseline-action": 3,
+      "completion-baseline-cut": 2,
+      "worker-cleaned": 1,
+      "worker-error": 1
+    },
+    "originalPath": "inner-raw/receipts.jsonl",
+    "originalHeldPeerSequence": 289,
+    "sourceFailureSequence": 295,
+    "exactAppliedLoadRejectionSequence": 296,
+    "rootCallbackSequence": 302,
+    "downstreamCallbackSequence": 315,
+    "cleanupStartSequence": 317,
+    "peerLoadCleanupRejectionSequence": 319,
+    "cleanupCompleteSequence": 321,
+    "workerCleanedSequence": 322,
+    "workerErrorSequence": 323,
+    "sharedSemanticFailureReceiptCount": 0,
+    "failureAppliedBoundaryCount": 0,
+    "sourceFailedPeerPublicCutCount": 0,
+    "rawCallbacks": "Root and downstream each insert row3 with children[] after marked source rejection. Full values/read/changes are retained; inserted changes carry no previousValue field. This is raw evidence only; intended shared failure checkpoint and judgment were not reached."
+  },
+  "resourceAndLifecycle": {
+    "outerElapsedMonotonicMs": 3020.879292,
+    "outerMaxSampledGroupRssBytes": 707510272,
+    "outerBudgetWallMs": 60000,
+    "outerBudgetRssBytes": 1073741824,
+    "outerHeapDiagnostic": false,
+    "innerElapsedMs": 2290,
+    "innerMaxSampledGroupRssBytes": 453361664,
+    "innerBudgetWallMs": 20000,
+    "innerBudgetRssBytes": 1073741824,
+    "innerHeapDiagnostic": false,
+    "innerKillAttempted": false,
+    "outerCleanupErrors": 0,
+    "innerCleanupErrors": [],
+    "outerCleanupDiagnostics": [],
+    "ownedGroupsFinalRows": [],
+    "namedPidsAbsent": [
+      83258,
+      83269,
+      83272,
+      83275
+    ],
+    "limits": "Recorded sampled resource and owned-group evidence only; no claim about escaped groups or unrecorded outer signal attempts."
+  },
+  "postAudit": "post-run-source-and-tool-audit-v1.json",
+  "successRun": false,
+  "retry": false,
+  "sourceChanges": false,
+  "ordinaryCampaignRuntimeTypecheckCredit": false,
+  "productRed": false,
+  "productGreen": false,
+  "calibration": false,
+  "closure": false,
+  "candidateStates20": "UNREACHED",
+  "state14": "proposed, unadopted",
+  "actualHelperNoActivePublicOperation": "UNREACHED",
+  "limits": "First intended failure barrier unobserved. Real later settlement/retry, success witness, hostile calibration and wider closure remain open. Existing controlled primary bounded RED receives no additional credit from this failed receiving invocation."
+}

@@ -1,0 +1,89 @@
+{
+  "actualLiveOuterGetpgid": 99756,
+  "actualOuter": {
+    "exit": 0,
+    "finalChunk": "59a0d2",
+    "initialChunk": "6e3e50",
+    "session": 94881
+  },
+  "actualReceivingParentPpid": {
+    "pgid": 99756,
+    "pid": 99770,
+    "ppid": 99756
+  },
+  "all31CumulativeCounts": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "bugClassClosureCredit": false,
+  "canonicalImport": false,
+  "capturedOriginalPidsAbsent": 20,
+  "capturedOriginalTargetGroupsAbsent": 9,
+  "childExitCodes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "children": 8,
+  "chosenSeed": null,
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-result-freeze-v1.json",
+      "sha256": "954704f4509f4519152957251e141ed26f4c5eb0015a3d00a84c4cc6e7b9ed4e"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/report.md",
+      "sha256": "3742d75fb4c02826a39b31a038b79980dd5c503cada8a7897d00f681e6e0ccd0"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-manifest.json",
+      "sha256": "c3c1a5a73875be4f2b54c4084c1583b5dd3c50d1225404fec2f503c80f64b76d"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-audit-v2.py",
+      "sha256": "8e6ffbb1e1ef875a1c6b2f15eef195ec30edf10753c5e681df302d42249333aa"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-audit-v2.json",
+      "sha256": "f32bc20c7a8150aea7193ef6d08f6ea2cb8a69a42011de74638c0dc85c63f2e9"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-review-v1.md",
+      "sha256": "c3504c4548e8d3e4b4fc3b9350785ee0ae9396ee6f7b072ef07dc43767f56db4"
+    }
+  ],
+  "limitations": [
+    "Source-order/pass supports finish/assert under existing source-to-parent assumption; no dedicated finalizer/ordinal receipt or new parent checker V8 proof",
+    "Actual postlaunch outer/parent lifecycle evidence does not supply missing initial inner-group getpgid receipts",
+    "Stable metadata/direct eager source-sync lane only; no broader paths or PR readiness",
+    "Native coverage/typecheck false; prior standalone noEmit separate; no full transitive equivalence",
+    "All prior failures remain preserved; no product RED/GREEN repair inferred"
+  ],
+  "mutantCredit": false,
+  "nativePassedTests": 1,
+  "nativeSkippedTests": 19,
+  "newRuntimeAdmitted": false,
+  "ownPayloads": 2544,
+  "productProgressRepairCredit": false,
+  "productionMembers": 511,
+  "publishing": false,
+  "rawBytes": 251024553,
+  "rawFiles": 15587,
+  "reuseLinks": 4,
+  "slot4": "returned idle",
+  "sourceMembers": 589,
+  "status": "INDEPENDENTLY QUALIFIED EXACT UNSEEDED SCOPE/DEFAULT CAMPAIGN; ROOT CLASSIFICATION SEPARATE",
+  "successSeedEvidence": "Unavailable in unchanged success logging; no seed inferred and no replay result.",
+  "suppliedSeed": null
+}

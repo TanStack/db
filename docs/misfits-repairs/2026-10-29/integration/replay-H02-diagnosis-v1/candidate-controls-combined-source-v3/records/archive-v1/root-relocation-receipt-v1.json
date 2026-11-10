@@ -1,0 +1,20 @@
+{
+  "relocatedBy": "/root",
+  "originalRemovals": [
+    "materialization-source-v1/package.json",
+    "materialization-source-v1/packages/db/tests/oracle-config.js",
+    "materialization-source-v1/packages/db/tests/oracle-declaration.js",
+    "materialization-source-v1/packages/db/tests/oracle-reach.js",
+    "materialization-source-v1/packages/db/tests/oracle-replay-witness.js",
+    "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+    "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.js",
+    "materialization-source-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.js"
+  ],
+  "allOriginalsAbsent": true,
+  "archiveEntriesExact": 8,
+  "all45FreezeAnd46PacketEntriesResolveViaExplicitArchiveMap": true,
+  "historicalManifestBytesUnchanged": true,
+  "historicalDirectPathValidation": "superseded for exact8 keys; explicit archive map required",
+  "independentPreservationReviewSha256": "29e60b6bb033d252dac16c4db040963ba3bc59188173d28d1c8561006f533b88",
+  "noRuntimeOrRulesChanged": true
+}

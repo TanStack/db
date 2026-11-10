@@ -1,0 +1,104 @@
+{
+  "at": "2026-10-30T11:48:47.994423+00:00",
+  "mode": "Independent static D audit: reads, hashes, strict JSON and Python AST only.\nNo bound helper, supervisor, model or config is imported or executed.\n",
+  "packetManifestSha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403",
+  "sourceFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+  "members": 21,
+  "memberBytes": 599852,
+  "activeSources": 596,
+  "immutableCopies": 85,
+  "productionSources": 511,
+  "newSourceIdentities": 0,
+  "completionSubset": 18,
+  "receivingProductionSubset": 161,
+  "unchangedMaps": [
+    "sourceBindings",
+    "sourceCopies",
+    "productionFiles",
+    "instrumentFiles",
+    "sharedInstrumentFiles",
+    "packages",
+    "node",
+    "lockfiles",
+    "dependencyReuseLinks"
+  ],
+  "namedPackageRoots": 255,
+  "ownPayloadFiles": 11974,
+  "ownPayloadBytes": 174739946,
+  "declaredResolutionEdges": 405,
+  "absentOptionalOrPeer": 112,
+  "locks": 2,
+  "reuseLinks": 4,
+  "archives": [
+    {
+      "manifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-v1.json",
+      "members": 126,
+      "mappedEntries": 1
+    },
+    {
+      "manifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-with-snapshot-relocation-v2.json",
+      "members": 133,
+      "mappedEntries": 0
+    },
+    {
+      "manifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/packet-sha256-v1.json",
+      "members": 88,
+      "mappedEntries": 0
+    }
+  ],
+  "firstExactProposal": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+  },
+  "secondProposalSeparate": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+  },
+  "helperCorrectionDiff": "--- saved-v1\n+++ saved-v2\n@@ -43,7 +43,7 @@\n recovery=nb['toolchainRecovery'];bound(recovery['path'],recovery['sha256']);recoverydata=json.loads(Path(recovery['path']).read_text());recoveryproofs=[]\n for key in ['actualRepair','postAudit','closeout','formattingAccount']:\n  ref=recoverydata[key];bound(ref['path'],ref['sha256']);recoveryproofs.append(ref)\n-postaudit=json.loads(Path(recoverydata['postAudit']['path']).read_text());assert postaudit['allChecksPassed'] is True\n+postaudit=json.loads(Path(recoverydata['postAudit']['path']).read_text());assert postaudit['allChecksPassed'] is False;assert len(postaudit['errors'])==4;assert all(x['scope']=='A38Source3411' and x['detail']=='hash mismatch' for x in postaudit['errors']);assert recoverydata['disposition']=='shared generated-shim recovery accepted for unaffected exact-binding work';assert 'Exit1/allChecksPassedfalse remains' in recoverydata['failedAuditPreserved']\n for path,digest in postaudit['inputHashes'].items():bound(path,digest)\n validation=r/'docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/validation-account-v1.json';vd=json.loads(validation.read_text());assert vd['second']['exit']==0;lintlog=validation.parent/'exact-pnpm-lint-changed-v2.log';bound(lintlog,vd['second']['logSha256']);bound(vd['gitCaptureShim']['path'],vd['gitCaptureShim']['sha256'])\n primaryreview=h/'candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-review-v1.md';bound(primaryreview,'1a995f97683d8240b53260748a25bd16b92f6206c271a649dd72ddf185475923')\n@@ -67,5 +67,5 @@\n  assert recipe['args']==['--max-old-space-size=384',str(Path(oper['packages']['vitest']['resolved'])/'vitest.mjs'),'run','--config','scripts/h02-progress/completion-parent.config.ts','packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts','-t','checks a selected baseline constituent through the shared judgment']\n  assert not Path(recipe['outputDirectory']).exists();target=Path(stage['proposalRecipeTarget']);write(str(target.relative_to(d)),recipe)\n  record={'schedule':schedule,'recipe':str(target),'recipeSha256':sha(target),'sourceFreeze':str(freeze),'sourceFreezeSha256':sha(freeze),'programFile':str(copytarget),'programSha256':sha(copytarget),'programCopiedByteForByteFromQ':str(sourceprogram),'programCopiesEqual':copytarget.read_bytes()==sourceprogram.read_bytes(),'recipeFieldChangesOnly':sorted(changed),'command':stage['command'],'admission':stage['admission'],'prerequisites':stage['prerequisites'],'observationScope':stage['observationScope'],'budgetsUnchanged':True,'runtime':0};write('proposed-exact-'+schedule+'-command-v1.json',record);recipes.append(record)\n-write('source-and-tool-audit-v1.json',{'at':datetime.now(timezone.utc).isoformat(),'allChecksPassed':True,'sourcePreparationFreeze':bound(qfpath,qsha),'operationalFreeze':bound(freeze,sha(freeze)),'QsourceMapsUnchanged':596,'QcopiedSourcesUnchanged':85,'QproductionUnchanged':511,'completionMetadataSubset':18,'receivingProductionMetadataSubset':161,'newSourceIdentities':0,'originalReceivingFreeze':bound(sfpath,sha(sfpath)),'archives':archives,'materialPackages':packages,'materialPayloads':payloads,'supplemental':{'path':str(suppath),'sha256':sha(suppath),'packages':253,'payloadsRehashed':suppayloads,'scope':sup['limits']},'acceptedRecovery':recovery,'recoveryProofsRehashed':recoveryproofs,'recoveryInputHashesRehashed':len(postaudit['inputHashes']),'recoveryScope':'accepted historical recovery qualification and unchanged input-record hashes; no claim of a new full777wrapper audit','nodeLocksAndLinks':'bound expected identities matched','requiredExactReportWorktreeLint':{'account':str(validation),'sha256':sha(validation),'actual':vd['second']},'primaryReview':{'path':str(primaryreview),'sha256':sha(primaryreview)},'registrationBinding':{'path':str(d/'registration-and-config-bindings-v1.json'),'sha256':sha(d/'registration-and-config-bindings-v1.json')},'recipes':recipes,'executedImports':0,'testDiscovery':0,'nativeProbes':0,'runtime':0,'productionEdits':0})\n+write('source-and-tool-audit-v1.json',{'at':datetime.now(timezone.utc).isoformat(),'allChecksPassed':True,'sourcePreparationFreeze':bound(qfpath,qsha),'operationalFreeze':bound(freeze,sha(freeze)),'QsourceMapsUnchanged':596,'QcopiedSourcesUnchanged':85,'QproductionUnchanged':511,'completionMetadataSubset':18,'receivingProductionMetadataSubset':161,'newSourceIdentities':0,'originalReceivingFreeze':bound(sfpath,sha(sfpath)),'archives':archives,'materialPackages':packages,'materialPayloads':payloads,'supplemental':{'path':str(suppath),'sha256':sha(suppath),'packages':253,'payloadsRehashed':suppayloads,'scope':sup['limits']},'acceptedRecovery':recovery,'recoveryProofsRehashed':recoveryproofs,'recoveryInputHashesRehashed':len(postaudit['inputHashes']),'recoveryScope':'accepted historical recovery qualification and unchanged input-record hashes; no claim of a new full777wrapper audit','historicalPostAuditAllChecksPassed':postaudit['allChecksPassed'],'historicalPostAuditErrorsPreserved':postaudit['errors'],'rootRecoveryQualification':recoverydata['failedAuditPreserved'],'nodeLocksAndLinks':'bound expected identities matched','requiredExactReportWorktreeLint':{'account':str(validation),'sha256':sha(validation),'actual':vd['second']},'primaryReview':{'path':str(primaryreview),'sha256':sha(primaryreview)},'registrationBinding':{'path':str(d/'registration-and-config-bindings-v1.json'),'sha256':sha(d/'registration-and-config-bindings-v1.json')},'recipes':recipes,'executedImports':0,'testDiscovery':0,'nativeProbes':0,'runtime':0,'productionEdits':0})\n print(json.dumps({'operationalFreezeSha256':sha(freeze),'auditSha256':sha(d/'source-and-tool-audit-v1.json'),'registrationAndConfigSha256':sha(d/'registration-and-config-bindings-v1.json'),'recipes':[{'schedule':x['schedule'],'recipeSha256':x['recipeSha256'],'programSha256':x['programSha256']} for x in recipes],'boundSourceCount':596,'newSourceIdentities':0,'staticOnly':True},indent=2))\n",
+  "historicalPostAuditAllChecksPassed": false,
+  "historicalPostAuditErrors": [
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-support.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-oracle.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-oracle.test.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/query-db-collection/tests/retired-load-receiving-oracle.test.ts",
+      "detail": "hash mismatch"
+    }
+  ],
+  "recoveryInputHashes": 9,
+  "ledgerPrefixRows": 112,
+  "ledgerPrefixSha256": "29a297b3c178176431c30dd9076fbf3750ec610e864795e4735253c5f6e041ed",
+  "allAuditChecksPass": true,
+  "errors": [],
+  "blockingSourceFindings": [],
+  "productExecutions": 0,
+  "modelExecutions": 0,
+  "testExecutions": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0,
+  "runtimeAdmission": false,
+  "runtimeReachCredit": false,
+  "bugClassClosure": false,
+  "scopeLimit": "Named static own-file closure only. No undeclared dynamic import, evaluated-module, native lifecycle, OS shared-library or Python stdlib equivalence claim. Separate ROOT failure and success admissions remain required."
+}

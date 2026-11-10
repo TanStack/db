@@ -1,0 +1,54 @@
+{
+  "status": "PASS: exact correction source/static/pure verified",
+  "manifestSha256": "2166496ae2e6552a3b7a4dc2e6db8880b5780b367b1d76932c4939726ba0d088",
+  "members": 22,
+  "bytes": 59237,
+  "bindingSha256": "d2b486a500ee131ef0221a59241f01d35e8cd6010b38bd0fb3a14065046b6512",
+  "resumeSha256": "e61810be857648c136300d1d859bbd27fd48d6378ec3e6749422a1fa1912e101",
+  "recipesSha256": "f8400dadb2a98458b39de23a3eff744d8f035ab003229a1ec7460dc0562b3d6c",
+  "runRecipeSha256": "e656ef59307a6a7b5274b84901f919d575d904300887ea8eca0b6e48e8a34ccc",
+  "readOnlyVerifyInputs": {
+    "sourceFiles": 573,
+    "namedPackagePayloadFiles": 2544,
+    "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+    "recipesSha256": "8d72b7b9458f7a4c92634eac46fa3a8c6af09fc9e22031c253bc62e86b44c704",
+    "capturedUniverse": {
+      "status": "Existing captured bytes qualify under corrected DISPLAY schema only; no rerun",
+      "originalChildExitCode": 0,
+      "actualOriginalOuterExitCode": 1,
+      "originalStopPreserved": true,
+      "stopFreezeSha256": "1c47fe8e1526411ac238b86d91ba844aea5ec9237af39b64a55886a08e0872d8",
+      "capturedJsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+      "displayQualification": {
+        "jsonSha256": "d980e5c4be37058eaca1ebe32cfff6c818da2edbac5fe3daf1dc25d03e3cc863",
+        "names": [
+          "queued-answer metadata receiving > checks metadata 'scope' 'default'",
+          "queued-answer metadata receiving > checks metadata 'scope' 'authored'",
+          "queued-answer metadata receiving > checks metadata 'subscription' 'default'",
+          "queued-answer metadata receiving > checks metadata 'subscription' 'authored'"
+        ],
+        "count": 4,
+        "module": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-metadata-receiving-v1/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+        "stderrEmpty": true
+      },
+      "filterSelectionCredit": false
+    }
+  },
+  "remainingOrders": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "noUniverseRerun": true,
+  "futureOutputRootAbsent": true,
+  "nativeNameChecks": 40,
+  "pythonChecks": 17,
+  "bothPureJSONEqualAuthor": true,
+  "reviewerNativeCommands": 0,
+  "reviewerNativeProcessProbes": 0,
+  "receivingRuns": 0,
+  "failures": [],
+  "exactDependencyExcerpts": 7
+}

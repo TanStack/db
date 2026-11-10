@@ -1,0 +1,40 @@
+{
+  "additionalUnchangedSupportFiles": 15,
+  "changedMembers": 5,
+  "coordinatorDocumentationLintPending": true,
+  "eslint": {
+    "disabledRules": false,
+    "exitCode": 0,
+    "heapMiB": 1536,
+    "log": "eslint-final.log"
+  },
+  "namedOwnPackagePayloadsMatch": 2544,
+  "noGitOperation": true,
+  "noInstall": true,
+  "noMutants": true,
+  "noNativeCollection": true,
+  "noReceiving": true,
+  "parent573AllUnchanged": true,
+  "prettier": {
+    "exitCode": 0,
+    "logs": [
+      "format-final.log"
+    ]
+  },
+  "pure": {
+    "accepted": 32,
+    "exitCode": 0,
+    "heapMiB": 384,
+    "log": "pure-final.log",
+    "modeledReceiptHistories": 6720,
+    "rejected": 140,
+    "sourceNativeExecution": false
+  },
+  "sourceFiles": 588,
+  "successorProductionFilesUnchanged": 511,
+  "typecheck": {
+    "exitCode": 0,
+    "heapMiB": 1536,
+    "log": "typecheck-final.log"
+  }
+}

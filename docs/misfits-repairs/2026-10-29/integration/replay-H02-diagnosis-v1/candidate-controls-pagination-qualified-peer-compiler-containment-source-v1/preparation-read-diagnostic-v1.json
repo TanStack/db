@@ -1,0 +1,6 @@
+{
+  "actualChunkId": "6ef0b3",
+  "actualExitCode": 0,
+  "stderr": "rg: scripts/h02-progress: No such file or directory (os error 2)",
+  "scope": "First read-only search included a nonexistent coordinator scripts directory; the same search found U inactive source. Subsequent exact source reads used U .txt. No materialization, target/config import, compile or process probe."
+}

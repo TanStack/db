@@ -1,0 +1,925 @@
+import {
+  buildCursorCurrent,
+  canExpressCursorOrder
+} from "../../utils/cursor.js";
+import { normalizeError } from "../../utils/error.js";
+import { reportUncaught, runAllCallbacks } from "../../utils/callbacks.js";
+import { normalizeOrderByPaths } from "../compiler/expressions.js";
+const workState = (work) => work.kind === `full-source` ? work.status : work.kind;
+export class OrderedLoaderInvariantError extends Error {
+}
+function reportReleaseError(error) {
+  if (error instanceof OrderedLoaderInvariantError) throw error;
+  reportUncaught(error);
+}
+class OrderedPostSettlementError {
+  constructor(cause) {
+    this.cause = cause;
+  }
+}
+export class OrderedSourceLoader {
+  constructor(info, subscription, alias, onResult = () => {
+  }, canRetryRepair = () => false, getGraphInputRevision, hasPendingJoinedWork = () => false) {
+    this.info = info;
+    this.subscription = subscription;
+    this.alias = alias;
+    this.onResult = onResult;
+    this.canRetryRepair = canRetryRepair;
+    this.getGraphInputRevision = getGraphInputRevision;
+    this.hasPendingJoinedWork = hasPendingJoinedWork;
+    // Exact request settlement is not provider extent. This latch only records
+    // that some request once completed; reset may discard the boundary, and an
+    // empty page retains it. A failure never reads it before a full-source
+    // completion sets it again, so it never needs clearing.
+    this.hasSettledSourceRequest = false;
+    // Independent of ordinary finite success. A live delete or order-changing
+    // update owes a bounded repair: unlike a failed request it cannot have
+    // partially written unknown rows, so re-reading the exact ordered prefix is
+    // authoritative for the current window and preserves the provider query
+    // shape.
+    this.debt = `none`;
+    this.requesting = false;
+    // Retaining a demand does not prove it succeeded. Async failure retains it
+    // (`failed`) for replay; a synchronous startup failure retains nothing.
+    this.work = { kind: `idle` };
+    // Keep callbacks, not copied requests or rows. Successful full-source work
+    // subsumes these logical owners; unfinished transports remain observed.
+    // Each records its prefix count and, for a repair's own acquisitions, the
+    // epoch of the repair chain it belongs to.
+    this.settledFiniteAcquisitions = /* @__PURE__ */ new Map();
+    // A superseded failure owes only a full-source read, so that read's success
+    // retires it without an explicit retry.
+    this.failedAcquisitions = /* @__PURE__ */ new Map();
+    this.active = true;
+    this.orderedLoadGeneration = 0;
+    this.orderingInvalidationGeneration = 0;
+    // Counts authoritative reads started. A request issued before one is
+    // superseded: its failure raises the repair debt but blocks nothing.
+    this.authorityGeneration = 0;
+    this.needsOptimisticRefill = false;
+    this.retiringSupersededAcquisitions = false;
+    this.repairRetries = 0;
+    this.drainingNoInputContinuations = false;
+    this.info.isRequesting = () => this.requesting;
+    this.readsBoundedPrefix = info.sourceHoldsAllRows && info.index !== void 0 && info.orderBy.length === 1 && info.joinedFilterSourceId === void 0;
+  }
+  get needsOrderingRepair() {
+    return this.debt !== `none`;
+  }
+  // Every move of the work slot names the states it may leave. Any other
+  // move, or a work and debt pair the rules forbid, is an invariant violation.
+  moveWork(next, from, debt = this.debt) {
+    if (!from.includes(workState(this.work))) {
+      throw new OrderedLoaderInvariantError(
+        `Ordered loader work cannot move from ${workState(this.work)} to ${workState(next)}`
+      );
+    }
+    this.work = next;
+    this.debt = debt;
+    this.checkCoherence();
+  }
+  oweDebt(next) {
+    this.debt = next;
+    this.checkCoherence();
+  }
+  // Complete coverage owes nothing, a repair runs only to pay a debt, and a
+  // failed full-source read owes its replacement.
+  checkCoherence() {
+    const state = workState(this.work);
+    if (state === `complete` && this.debt !== `none` || state === `repair` && this.debt === `none` || state === `failed` && this.debt !== `full`) {
+      throw new OrderedLoaderInvariantError(
+        `Ordered loader work ${state} cannot owe ${this.debt} debt`
+      );
+    }
+  }
+  coversSource() {
+    return this.work.kind === `full-source` && this.work.status === `complete`;
+  }
+  // A repair whose epoch moved, or whose debt rose to a full-source read, is
+  // replaced before it issues another tie or refill.
+  repairNeedsReplacement() {
+    return this.work.kind === `repair` && (this.work.epoch !== this.orderingInvalidationGeneration || this.debt === `full`);
+  }
+  /** Derive invalidation from actual contributions, not a second cursor. */
+  onSourceChanges(changes, sentRows, hasOptimisticOverlay) {
+    let hasNewRows = false;
+    let hasOptimisticDeparture = false;
+    for (const change of changes) {
+      const previous = sentRows?.get(change.key);
+      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
+        continue;
+      }
+      if (change.type !== `insert` && previous !== void 0 && (change.type === `delete` || this.info.comparator(previous, change.value) !== 0)) {
+        if (hasOptimisticOverlay(change.key)) hasOptimisticDeparture = true;
+        else {
+          this.invalidateSourceOrdering();
+          return;
+        }
+      }
+      if (change.type !== `delete` && previous === void 0) hasNewRows = true;
+    }
+    if (hasOptimisticDeparture && !this.info.sourceHoldsAllRows) {
+      const locallyAvailable = this.subscription.readOrderedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: this.info.offset + this.info.limit
+      }).filter(({ key }) => !hasOptimisticOverlay(key)).length;
+      if (locallyAvailable < this.info.offset + this.info.limit) {
+        this.needsOptimisticRefill = true;
+        this.invalidateCursor();
+      }
+    }
+    if (hasNewRows) this.invalidateCursor();
+  }
+  start() {
+    const { index, limit, offset, requiresFullSource } = this.info;
+    if (index) this.subscription.setOrderByIndex(index);
+    if (limit === 0) return;
+    if (requiresFullSource) {
+      this.loadFullSource();
+      return;
+    }
+    if (!index) {
+      this.loadPrefix(offset + limit);
+      return;
+    }
+    this.loadPage(offset + limit);
+  }
+  loadMore(windowOperationGeneration, continuesOrderedPrefixRepair = false) {
+    if (this.requesting) {
+      this.graphCheckedDuringRequest = this.getGraphInputRevision?.();
+    }
+    if (!this.active || this.info.limit === 0 || this.requesting) return;
+    windowOperationGeneration ??= this.blockedLoadMore?.windowOperationGeneration;
+    continuesOrderedPrefixRepair ||= this.blockedLoadMore?.continuesOrderedPrefixRepair ?? false;
+    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+      if (windowOperationGeneration !== void 0 || continuesOrderedPrefixRepair) {
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair
+        };
+      }
+      return this.pending;
+    }
+    this.blockedLoadMore = void 0;
+    if (this.stagedContinuation) {
+      this.consumeStagedContinuation(windowOperationGeneration);
+      if (!this.active || this.pending) return this.pending;
+    }
+    const mayRetryFailure = this.failedRequest === void 0 || windowOperationGeneration !== void 0 && windowOperationGeneration !== this.failedRequest.windowOperationGeneration;
+    if (!mayRetryFailure) return this.pending;
+    if (this.work.kind === `full-source` && this.work.status === `failed`) {
+      this.moveWork({ kind: `idle` }, [`failed`]);
+    }
+    if ((this.failedRequest || this.failedAcquisitions.size > 0) && windowOperationGeneration !== void 0 && // The explicit retry releases them, not a repair-chain step that runs
+    // inside it: a throwing release would unwind the chain mid-step.
+    !continuesOrderedPrefixRepair) {
+      this.cancelRepairRetry();
+      this.repairRetries = 0;
+      if (this.failedRequest) {
+        this.failedRequest.windowOperationGeneration = windowOperationGeneration;
+      }
+      this.releaseOwned(this.failedAcquisitions, () => true);
+    }
+    if (this.work.kind !== `idle` && !(continuesOrderedPrefixRepair && this.work.kind === `repair`)) {
+      if (windowOperationGeneration !== void 0) {
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair
+        };
+      }
+      return this.pending;
+    }
+    if (this.needsOrderingRepair && !(continuesOrderedPrefixRepair && this.work.kind === `repair`) || this.info.requiresFullSource) {
+      if (this.debt === `bounded` && !this.info.requiresFullSource) {
+        this.loadOrderedPrefixRepair(windowOperationGeneration);
+      } else {
+        this.loadFullSource(windowOperationGeneration);
+      }
+      return this.pending;
+    }
+    if (!this.info.index) {
+      const shouldLoad = windowOperationGeneration !== void 0 || this.needsOptimisticRefill || (this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0 || this.lastPrefixCount !== void 0 && this.lastPrefixCount < this.info.offset + this.info.limit;
+      if (shouldLoad) {
+        this.needsOptimisticRefill = false;
+        this.loadPrefix(
+          this.info.offset + this.info.limit,
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair
+        );
+      } else if (continuesOrderedPrefixRepair) {
+        this.finishOrderedPrefixRepair(windowOperationGeneration);
+      }
+      return this.pending;
+    }
+    if (!this.info.dataNeeded || this.pending) {
+      if (this.pending && windowOperationGeneration !== void 0) {
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair
+        };
+      }
+      if (continuesOrderedPrefixRepair && !this.pending) {
+        this.finishOrderedPrefixRepair(windowOperationGeneration);
+      }
+      return this.pending;
+    }
+    let count = Math.max(
+      this.info.dataNeeded(this.settledSourceBoundary),
+      this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
+      this.needsOptimisticRefill ? 1 : 0
+    );
+    if (windowOperationGeneration !== void 0 && this.settledSourceBoundary !== void 0) {
+      const needed = this.info.offset + this.info.limit;
+      count = Math.max(count, needed - this.countAcquiredRows());
+    }
+    if (count > 0) {
+      this.needsOptimisticRefill = false;
+      this.loadPage(
+        count,
+        windowOperationGeneration,
+        continuesOrderedPrefixRepair
+      );
+    } else if (continuesOrderedPrefixRepair) {
+      this.finishOrderedPrefixRepair(windowOperationGeneration);
+    }
+    return this.pending;
+  }
+  loadFullSource(windowOperationGeneration) {
+    if (!this.active || this.work.kind !== `idle`) return;
+    this.pending = void 0;
+    this.moveWork({ kind: `full-source`, status: `held` }, [`idle`]);
+    this.requestAndObserve(
+      (tracking) => this.subscription.requestSnapshot(tracking),
+      `full-source`,
+      windowOperationGeneration
+    );
+  }
+  loadOrderedPrefixRepair(windowOperationGeneration) {
+    if (!this.active || this.work.kind !== `idle`) return;
+    this.pending = void 0;
+    this.moveWork(
+      { kind: `repair`, epoch: this.orderingInvalidationGeneration },
+      [`idle`]
+    );
+    this.ownPrefixCount = this.info.offset + this.info.limit;
+    this.requestAndObserve(
+      (tracking) => this.subscription.requestSnapshot({
+        ...tracking,
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: this.info.offset + this.info.limit,
+        boundedPrefix: this.readsBoundedPrefix
+      }),
+      `ordered-repair`,
+      windowOperationGeneration,
+      true,
+      this.info.offset + this.info.limit
+    );
+  }
+  loadPrefix(count, windowOperationGeneration, continuesOrderedPrefixRepair = false) {
+    if (!this.active || this.pending || this.stagedContinuation) return;
+    const last = this.lastPrefixCount ?? 0;
+    if (last >= count) {
+      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) === 0) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration);
+        }
+        return;
+      }
+      const rows = this.subscription.readOrderedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: last
+      }).length;
+      if (rows <= (this.grownPrefixRows ?? -1)) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration);
+        }
+        return;
+      }
+      this.grownPrefixRows = rows;
+      count = last * 2;
+    }
+    this.requestAndObserve(
+      (tracking) => this.subscription.requestSnapshot({
+        ...tracking,
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: count,
+        boundedPrefix: this.readsBoundedPrefix
+      }),
+      `ordered`,
+      windowOperationGeneration,
+      continuesOrderedPrefixRepair,
+      count
+    );
+    this.lastPrefixCount = count;
+    this.ownPrefixCount = count;
+  }
+  resetCursor() {
+    this.cancelRepairRetry();
+    this.repairRetries = 0;
+    this.orderedLoadGeneration++;
+    if (this.coversSource())
+      this.moveWork({ kind: `full-source`, status: `held` }, [`complete`]);
+    this.pending = void 0;
+    this.blockedLoadMore = void 0;
+    this.lastBoundary = void 0;
+    this.settledSourceBoundary = void 0;
+    this.stagedContinuation = void 0;
+    this.invalidateCursor();
+  }
+  settleFullSourceReplay() {
+    if (this.work.kind === `repair`) {
+      this.finishOrderedPrefixRepair();
+      return;
+    }
+    if (this.work.kind === `full-source` && this.work.status === `failed`) {
+      for (const [release, { kind }] of this.failedAcquisitions) {
+        if (kind === `full-source`) this.failedAcquisitions.delete(release);
+      }
+    }
+    if (this.work.kind !== `idle`) {
+      this.coverSource([`held`, `failed`, `complete`]);
+    }
+  }
+  // Full coverage pays every debt, ends the backoff retry, and retires both
+  // kinds of lease; a throwing release in one pass must not skip the other.
+  coverSource(from) {
+    this.cancelRepairRetry();
+    this.repairRetries = 0;
+    this.moveWork({ kind: `full-source`, status: `complete` }, from, `none`);
+    runAllCallbacks([
+      () => this.retireSettledFiniteAcquisitions(),
+      () => this.retireSupersededFailures()
+    ]);
+  }
+  retireSettledFiniteAcquisitions(prefix, keptChain) {
+    if (!this.coversSource() && !prefix && keptChain === void 0 || this.subscription.hasPendingTruncateReplacement)
+      return;
+    this.releaseOwned(
+      this.settledFiniteAcquisitions,
+      (release, { count, chain }) => keptChain !== void 0 ? chain !== keptChain : this.coversSource() || prefix !== void 0 && release !== prefix.release && count !== void 0 && count <= prefix.count
+    );
+  }
+  // A full-source read covers every row, so it supersedes the partial writes
+  // of each failed request that authoritative work had superseded.
+  retireSupersededFailures() {
+    if (this.subscription.hasPendingTruncateReplacement) return;
+    this.releaseOwned(
+      this.failedAcquisitions,
+      (_, { superseded }) => superseded
+    );
+  }
+  // Release each selected lease once. A release that resets the cursor, which
+  // dispose also does, stops the pass; the replay that follows owns the
+  // remaining leases. A release can run the graph synchronously, so
+  // refinement stays blocked until the pass unwinds.
+  releaseOwned(owner, selected) {
+    const orderedLoadGeneration = this.orderedLoadGeneration;
+    const requesting = this.requesting;
+    this.requesting = true;
+    try {
+      runAllCallbacks(
+        Array.from(owner, ([release, entry]) => () => {
+          if (orderedLoadGeneration !== this.orderedLoadGeneration || !selected(release, entry))
+            return;
+          if (owner.get(release) !== entry) {
+            throw new OrderedLoaderInvariantError(
+              `Ordered loader lease was released by another pass`
+            );
+          }
+          owner.delete(release);
+          try {
+            release();
+          } catch (error) {
+            reportReleaseError(error);
+          }
+        })
+      );
+    } finally {
+      this.requesting = requesting;
+    }
+  }
+  invalidateCursor() {
+    if ((this.stagedContinuation?.role ?? `finite`) === `finite`) {
+      this.stagedContinuation = void 0;
+    }
+    this.lastPage = void 0;
+    this.lastPrefixCount = void 0;
+    this.grownPrefixRows = void 0;
+  }
+  invalidateSourceOrdering() {
+    this.orderingInvalidationGeneration++;
+    this.invalidateCursor();
+    this.lastBoundary = void 0;
+    if (this.debt === `none` && !this.coversSource()) {
+      this.oweDebt(
+        this.hasSettledSourceRequest && this.work.kind === `idle` ? `bounded` : `full`
+      );
+    }
+    this.settledSourceBoundary = void 0;
+  }
+  /**
+   * The source's sync adapter reports that served pages may have shifted.
+   * Coverage that one full-source acquisition established has no page
+   * boundary to repair, and the adapter's refetch has already re-read it.
+   * A window inside this loader's own first page needs no repair either.
+   */
+  revalidateLoadedCoverage() {
+    if (!this.hasSettledSourceRequest) return;
+    const end = this.ownPrefixEnd();
+    if (end !== void 0 && ((this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit || Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary)))
+      return;
+    this.invalidateSourceOrdering();
+  }
+  // The refetched first page holds every row from the start of the order
+  // through its end, and any row it left out sorts after that end. So a
+  // window whose rows all sort at or before the end is right. A row after
+  // the page that ties with its end could sort before a window row; then
+  // the window is not proven. Returns the end when the window is inside
+  // the page.
+  ownPrefixEnd() {
+    const size = this.info.offset + this.info.limit;
+    if ((this.ownPrefixCount ?? 0) < size || !this.info.dataNeeded || this.subscription.hasHeldSyncTransaction) {
+      return void 0;
+    }
+    const rows = this.subscription.readOrderedSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: size + 1
+    });
+    if (rows.length <= size) return void 0;
+    const end = rows[size - 1].value;
+    return this.info.comparator(rows[size].value, end) > 0 && this.info.dataNeeded(end) === 0 ? end : void 0;
+  }
+  finishOrderedPrefixRepair(windowOperationGeneration) {
+    if (this.work.kind !== `repair`) return;
+    const epoch = this.work.epoch;
+    if (this.repairNeedsReplacement()) {
+      this.moveWork({ kind: `idle` }, [`repair`]);
+      if (this.debt === `full`) {
+        this.loadFullSource(windowOperationGeneration);
+      } else {
+        this.loadOrderedPrefixRepair(windowOperationGeneration);
+      }
+      return;
+    }
+    this.retiringSupersededAcquisitions = true;
+    try {
+      this.retireSettledFiniteAcquisitions(void 0, epoch);
+    } finally {
+      this.retiringSupersededAcquisitions = false;
+      const hasSupersededAcquisition = [
+        ...this.settledFiniteAcquisitions.values()
+      ].some(({ chain }) => chain !== epoch);
+      if (!this.active || !hasSupersededAcquisition) {
+        this.cancelRepairRetry();
+        this.repairRetries = 0;
+        this.moveWork({ kind: `idle` }, [`repair`], `none`);
+      }
+    }
+  }
+  abandonOrderedPrefixRepair() {
+    if (this.work.kind !== `repair`) return;
+    this.moveWork({ kind: `idle` }, [`repair`], `full`);
+  }
+  dispose() {
+    this.active = false;
+    this.resetCursor();
+    this.failedAcquisitions.clear();
+    this.settledFiniteAcquisitions.clear();
+  }
+  countAcquiredRows() {
+    return this.subscription.readOrderedSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: this.info.offset + this.info.limit
+    }).filter(
+      ({ value }) => this.info.comparator(value, this.settledSourceBoundary) <= 0
+    ).length;
+  }
+  loadPage(count, windowOperationGeneration, continuesOrderedPrefixRepair = false) {
+    if (!this.active || this.pending || this.stagedContinuation) return;
+    const startsFromSourcePrefix = this.settledSourceBoundary === void 0;
+    const biggest = this.settledSourceBoundary;
+    let minValues;
+    if (biggest !== void 0) {
+      const value = this.info.valueExtractorForRawRow(biggest);
+      if (!canExpressCursorOrder(this.info.orderBy, [value])) {
+        this.loadPrefix(
+          this.info.offset + this.info.limit,
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair
+        );
+        return;
+      }
+      minValues = [value];
+    }
+    const boundary = minValues?.[0];
+    if (this.lastPage?.count === count && Object.is(this.lastPage.boundary, boundary)) {
+      if (continuesOrderedPrefixRepair) {
+        this.finishOrderedPrefixRepair(windowOperationGeneration);
+      }
+      return;
+    }
+    this.lastPage = { count, boundary };
+    this.ownPrefixCount = startsFromSourcePrefix ? count : void 0;
+    this.requestAndObserve(
+      (tracking) => this.subscription.requestLimitedSnapshot({
+        ...tracking,
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: count,
+        minValues,
+        // Local rows seen before the first provider request prove neither
+        // a cursor nor a remote offset. Start the first acquisition at zero.
+        offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows()
+      }),
+      `ordered`,
+      windowOperationGeneration,
+      continuesOrderedPrefixRepair,
+      count
+    );
+  }
+  // A result is dead after a cursor reset. A non-authoritative result is stale
+  // after an ordering invalidation: it proves no current coverage.
+  standing(stamp) {
+    if (stamp.orderedLoadGeneration !== this.orderedLoadGeneration)
+      return `dead`;
+    const stale = stamp.role === `repair` ? this.supersedes(stamp) : stamp.role === `finite` && stamp.orderingInvalidationGeneration !== this.orderingInvalidationGeneration;
+    return stale ? `stale` : `current`;
+  }
+  // Authoritative work started after the request was issued.
+  supersedes(stamp) {
+    return stamp.authorityGeneration !== this.authorityGeneration;
+  }
+  runContinuation(continuation, windowOperationGeneration = continuation.windowOperationGeneration) {
+    if (!this.active || this.standing(continuation) !== `current`) return;
+    if (continuation.kind === `boundary`) {
+      this.loadBoundary(
+        windowOperationGeneration,
+        continuation.continuesOrderedPrefixRepair
+      );
+    } else {
+      if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+        this.stagedContinuation = continuation;
+        return;
+      }
+      this.loadMore(
+        windowOperationGeneration,
+        continuation.continuesOrderedPrefixRepair
+      );
+    }
+  }
+  consumeStagedContinuation(windowOperationGeneration) {
+    const continuation = this.stagedContinuation;
+    if (!continuation) return;
+    this.stagedContinuation = void 0;
+    this.runContinuation(continuation, windowOperationGeneration);
+  }
+  // A staged continuation waits for the graph to process the writes that
+  // staged it; the graph turn that does so resumes it. If no write arrived
+  // since `graphInputRevision`, or a graph turn already processed every
+  // write while the request ran and asked for more, no turn will resume it,
+  // so the loader continues now.
+  graphHasProcessedInput(graphInputRevision) {
+    const revision = this.getGraphInputRevision?.();
+    return revision === graphInputRevision || revision === this.graphCheckedDuringRequest;
+  }
+  drainNoInputContinuations(graphInputRevision) {
+    if (this.drainingNoInputContinuations) return;
+    this.drainingNoInputContinuations = true;
+    try {
+      while (this.stagedContinuation && !this.pending && this.graphHasProcessedInput(graphInputRevision)) {
+        this.consumeStagedContinuation();
+      }
+    } finally {
+      this.drainingNoInputContinuations = false;
+    }
+  }
+  loadBoundary(windowOperationGeneration, continuesOrderedPrefixRepair = false) {
+    const biggest = this.settledSourceBoundary;
+    if (biggest === void 0) {
+      return continuesOrderedPrefixRepair ? this.loadMore(windowOperationGeneration, true) : void 0;
+    }
+    const value = this.info.valueExtractorForRawRow(biggest);
+    const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias);
+    if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
+      if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair();
+      this.loadFullSource(windowOperationGeneration);
+      return this.pending;
+    }
+    if (Object.is(this.lastBoundary, value)) {
+      return this.loadMore(
+        windowOperationGeneration,
+        continuesOrderedPrefixRepair
+      );
+    }
+    const where = buildCursorCurrent(orderBy, [value]);
+    if (!where) {
+      if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair();
+      this.loadFullSource(windowOperationGeneration);
+      return this.pending;
+    }
+    this.lastBoundary = value;
+    return this.requestAndObserve(
+      (tracking) => this.subscription.requestSnapshot({ ...tracking, where }),
+      `boundary`,
+      windowOperationGeneration,
+      continuesOrderedPrefixRepair
+    );
+  }
+  requireFullSourceRepair() {
+    this.settledSourceBoundary = void 0;
+    if (!this.coversSource()) this.oweDebt(`full`);
+  }
+  cancelRepairRetry() {
+    clearTimeout(this.repairTimer);
+    this.repairTimer = void 0;
+  }
+  // Only the loader's own failure outside a window move schedules a retry.
+  // That failure blocks the ordinary passes that could fail again, and the
+  // timer clears itself before it retries, so no timer is pending here. An
+  // explicit move cancels the timer before it takes the failure over.
+  scheduleRepairRetry() {
+    if (!this.active || !this.canRetryRepair() || this.repairRetries >= 2)
+      return;
+    const orderedLoadGeneration = this.orderedLoadGeneration;
+    const failedRequest = this.failedRequest;
+    this.repairTimer = setTimeout(
+      () => {
+        this.repairTimer = void 0;
+        const retry = Promise.resolve().then(() => {
+          if (!this.active || !this.canRetryRepair() || orderedLoadGeneration !== this.orderedLoadGeneration || this.failedRequest !== failedRequest)
+            return;
+          this.moveWork({ kind: `idle` }, [`idle`, `failed`]);
+          this.releaseOwned(this.failedAcquisitions, () => true);
+          if (
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- release callbacks can dispose the loader
+            !this.active || orderedLoadGeneration !== this.orderedLoadGeneration || this.subscription.hasPendingTruncateReplacement
+          )
+            return;
+          this.failedRequest = void 0;
+          this.loadFullSource();
+        });
+        void retry.catch(() => {
+        });
+        this.onResult(retry, true, true);
+      },
+      250 * 2 ** this.repairRetries++
+    );
+  }
+  /** A failed request blocks ordinary refinement until a new operation. */
+  recordRequestFailure(windowOperationGeneration) {
+    this.failedRequest = { windowOperationGeneration };
+    this.stagedContinuation = void 0;
+    this.blockedLoadMore = void 0;
+    this.invalidateCursor();
+    this.lastBoundary = void 0;
+  }
+  /** Observe settlement only after all synchronous request work succeeds. */
+  requestAndObserve(request, kind, windowOperationGeneration, continuesOrderedPrefixRepair = false, requestedCount) {
+    const isFullSource = kind === `full-source`;
+    const isOrderedRepair = kind === `ordered-repair`;
+    const isAuthoritativeRequest = isFullSource || isOrderedRepair || continuesOrderedPrefixRepair;
+    let observed;
+    this.requesting = true;
+    this.graphCheckedDuringRequest = void 0;
+    let observing = false;
+    const graphInputRevision = this.getGraphInputRevision?.();
+    const issuedOrderingGeneration = this.orderingInvalidationGeneration;
+    try {
+      try {
+        request({
+          ...(isFullSource ? this.needsOrderingRepair : isAuthoritativeRequest) ? { refetch: true } : {},
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result2, options2, release2) => {
+            observed = { result: result2, options: options2, release: release2 };
+          }
+        });
+      } finally {
+        this.requesting = false;
+      }
+      if (isFullSource || isOrderedRepair) {
+        this.authorityGeneration++;
+      }
+      if (!observed) return;
+      observing = true;
+      const { result, options, release } = observed;
+      const retryRepair = isAuthoritativeRequest && this.hasSettledSourceRequest && this.needsOrderingRepair && windowOperationGeneration === void 0;
+      const chain = (isOrderedRepair || continuesOrderedPrefixRepair) && this.work.kind === `repair` ? this.work.epoch : void 0;
+      const stamp = {
+        orderedLoadGeneration: this.orderedLoadGeneration,
+        authorityGeneration: this.authorityGeneration,
+        orderingInvalidationGeneration: issuedOrderingGeneration,
+        role: isFullSource ? `full-source` : isAuthoritativeRequest ? `repair` : `finite`
+      };
+      const settlesAsync = result instanceof Promise;
+      const canSettleSynchronously = !settlesAsync && windowOperationGeneration === void 0 && // A full-source request without ordering-repair debt can finish in the
+      // current graph turn, including an initial fallback. A bounded prefix
+      // repair reads only installed rows and can also finish in that turn.
+      // Other repairs keep asynchronous settlement.
+      (!isAuthoritativeRequest || (isFullSource ? !this.needsOrderingRepair : this.readsBoundedPrefix)) && graphInputRevision !== void 0;
+      let synchronousCompletionFailure;
+      const continuation = (continuationKind) => ({
+        ...stamp,
+        kind: continuationKind,
+        windowOperationGeneration,
+        continuesOrderedPrefixRepair
+      });
+      const continueOrStage = (next, deferContinuation) => {
+        if (deferContinuation) {
+          this.stagedContinuation = next;
+        } else {
+          this.runContinuation(next);
+        }
+      };
+      const complete = (trackedRequest, deferContinuation = false) => {
+        if (trackedRequest && this.pending === trackedRequest) {
+          this.pending = void 0;
+        }
+        if (!this.active) return;
+        runAllCallbacks([
+          () => {
+            if (!isFullSource) {
+              const prefixCount = options.orderBy && !options.cursor ? options.limit : void 0;
+              this.settledFiniteAcquisitions.set(release, {
+                count: prefixCount,
+                chain
+              });
+              this.retireSettledFiniteAcquisitions();
+              if (!continuesOrderedPrefixRepair && this.standing(stamp) === `current` && prefixCount !== void 0) {
+                this.retireSettledFiniteAcquisitions({
+                  release,
+                  count: prefixCount
+                });
+              }
+              if (this.standing(stamp) === `stale` && this.work.kind === `idle` && !this.needsOrderingRepair && this.settledFiniteAcquisitions.delete(release)) {
+                this.retiringSupersededAcquisitions = true;
+                try {
+                  release();
+                } catch (error) {
+                  reportReleaseError(error);
+                } finally {
+                  this.retiringSupersededAcquisitions = false;
+                }
+              }
+            }
+          },
+          () => {
+            if (this.standing(stamp) !== `current`) return;
+            if (!isAuthoritativeRequest && (this.failedRequest || this.work.kind !== `idle`))
+              return;
+            this.failedRequest = void 0;
+            if (kind !== `boundary`) {
+              this.hasSettledSourceRequest = true;
+              if (options.orderBy && !options.cursor) {
+                this.lastPrefixCount = options.limit;
+              }
+              if (!isFullSource && options.orderBy) {
+                try {
+                  this.settledSourceBoundary = this.subscription.readOrderedSnapshot({
+                    ...options,
+                    // Provider limits include optimistic headroom. Those
+                    // extra local ranks do not prove a source boundary.
+                    limit: requestedCount ?? options.limit
+                  }).at(-1)?.value ?? this.settledSourceBoundary;
+                } catch (error) {
+                  if (canSettleSynchronously) {
+                    synchronousCompletionFailure = { error };
+                    throw error;
+                  }
+                  fail(error);
+                }
+              }
+            }
+            if ((isOrderedRepair || continuesOrderedPrefixRepair) && (this.work.kind !== `repair` || this.repairNeedsReplacement())) {
+              this.finishOrderedPrefixRepair(windowOperationGeneration);
+              return;
+            }
+            if (isFullSource) this.coverSource([`held`, `complete`]);
+            if (isOrderedRepair || kind === `ordered`) {
+              continueOrStage(continuation(`boundary`), deferContinuation);
+              return;
+            }
+            continueOrStage(continuation(`more`), deferContinuation);
+          }
+        ]);
+      };
+      const fail = (error, trackedRequest) => {
+        this.settledFiniteAcquisitions.delete(release);
+        if (trackedRequest && this.pending === trackedRequest) {
+          this.pending = void 0;
+        }
+        if (isFullSource && this.coversSource()) return;
+        this.requireFullSourceRepair();
+        if (this.standing(stamp) === `dead`) return;
+        const ownsAuthority = isAuthoritativeRequest && this.standing(stamp) === `current` && (isFullSource || this.work.kind === `repair`);
+        if (ownsAuthority || (this.stagedContinuation?.role ?? `finite`) === `finite`) {
+          this.stagedContinuation = void 0;
+        }
+        if (isAuthoritativeRequest ? !ownsAuthority : this.supersedes(stamp)) {
+          this.failedAcquisitions.set(release, {
+            kind,
+            superseded: true
+          });
+          if (this.coversSource()) {
+            this.retireSupersededFailures();
+          }
+          this.invalidateCursor();
+          this.lastBoundary = void 0;
+          if (this.failedRequest === void 0 && this.work.kind === `idle`) {
+            try {
+              this.loadFullSource(windowOperationGeneration);
+            } catch (startError) {
+              if (startError instanceof OrderedLoaderInvariantError) {
+                throw startError;
+              }
+            }
+          }
+          throw error;
+        }
+        if (isFullSource) {
+          this.moveWork({ kind: `full-source`, status: `failed` }, [`held`]);
+        } else if (isAuthoritativeRequest) {
+          this.moveWork({ kind: `idle` }, [`repair`]);
+        }
+        this.recordRequestFailure(windowOperationGeneration);
+        this.failedAcquisitions.set(release, {
+          kind,
+          superseded: false
+        });
+        if (retryRepair) this.scheduleRepairRetry();
+        throw error;
+      };
+      if (canSettleSynchronously) {
+        try {
+          runAllCallbacks([
+            () => complete(void 0, true),
+            () => {
+              if (!synchronousCompletionFailure) {
+                this.onResult(true, false, false);
+              }
+            },
+            () => {
+              if (!synchronousCompletionFailure && this.graphHasProcessedInput(graphInputRevision)) {
+                this.drainNoInputContinuations(graphInputRevision);
+              }
+            }
+          ]);
+        } catch (error) {
+          if (synchronousCompletionFailure) {
+            throw synchronousCompletionFailure.error;
+          }
+          throw new OrderedPostSettlementError(error);
+        }
+        return this.pending;
+      }
+      const transport = settlesAsync ? result : Promise.resolve();
+      const tracked = transport.then(
+        () => complete(tracked),
+        (error) => fail(error, tracked)
+      );
+      this.pending = tracked;
+      void tracked.catch(() => {
+      });
+      this.onResult(
+        tracked,
+        isAuthoritativeRequest && this.needsOrderingRepair,
+        settlesAsync,
+        options
+      );
+      return tracked;
+    } catch (error) {
+      if (error instanceof OrderedPostSettlementError) throw error.cause;
+      if (error instanceof OrderedLoaderInvariantError) throw error;
+      this.requesting = true;
+      try {
+        const failure = normalizeError(error);
+        if (observing) {
+          this.orderedLoadGeneration++;
+          this.pending = void 0;
+        }
+        this.requireFullSourceRepair();
+        this.recordRequestFailure(windowOperationGeneration);
+        if (isAuthoritativeRequest) {
+          this.moveWork({ kind: `idle` }, [`held`, `repair`]);
+        }
+        try {
+          observed?.release({ error: failure });
+        } catch (releaseError) {
+          reportReleaseError(releaseError);
+        }
+        if (isAuthoritativeRequest && this.hasSettledSourceRequest) {
+          if (windowOperationGeneration === void 0) {
+            this.scheduleRepairRetry();
+          }
+          if (!observing) {
+            const rejected = Promise.reject(failure);
+            void rejected.catch(() => {
+            });
+            this.onResult(rejected, true, true);
+          }
+        }
+        throw failure;
+      } finally {
+        this.requesting = false;
+      }
+    }
+  }
+}

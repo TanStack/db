@@ -1,0 +1,65 @@
+{
+  "scope": "staged source supplied on stdin with its canonical proposed filename; no overlay applied and no test executed",
+  "outcomes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "--stdin",
+        "--stdin-filename",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts"
+      ],
+      "exitCode": 1,
+      "signal": null,
+      "log": "eslint-overlay-1-v1.log"
+    },
+    {
+      "path": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "--stdin",
+        "--stdin-filename",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts"
+      ],
+      "exitCode": 1,
+      "signal": null,
+      "log": "eslint-overlay-2-v1.log"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "--stdin",
+        "--stdin-filename",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts"
+      ],
+      "exitCode": 1,
+      "signal": null,
+      "log": "eslint-overlay-3-v1.log"
+    },
+    {
+      "path": "scripts/h02-progress/ownership-neighbor.config.ts",
+      "args": [
+        "--max-old-space-size=1536",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+        "--config",
+        "scripts/h02-progress/eslint.config.mjs",
+        "--stdin",
+        "--stdin-filename",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/ownership-neighbor.config.ts"
+      ],
+      "exitCode": 1,
+      "signal": null,
+      "log": "eslint-overlay-4-v1.log"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "status": "PROPOSED ONLY; requires independent source review, fresh copy verification and separate exact compile admission",
+  "command": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+      "--project",
+      "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+      "--noEmit",
+      "--incremental",
+      "false",
+      "--pretty",
+      "false",
+      "--listFiles"
+    ],
+    "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code"
+  },
+  "node": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "version": "v24.19.0",
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "compilerEntry": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+    "sha256": "2cffde0b8c6760dfb0b5b0382bbb7e00ba6a8b2d981b9205b256a700a481d983",
+    "version": "5.9.3",
+    "fullPackagePayloadIdentity": "157973716ed7eea8fef4816c93432cb12febb4c31b02360394d7767304bdb4e5"
+  },
+  "config": {
+    "inactivePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/typecheck.tsconfig.json.txt",
+    "runtimePath": "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+    "sha256": "b9a6658265fc6864b059b9be47d4e52c0ea7203d641ccce0bd26a51d3a7763bb"
+  },
+  "entryFiles": [
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "sha256": "4a4ef825b3b255e5c2c777d086d767727d740e361a2925ead9c6bd6a6b04db5c"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sha256": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/source-binding.setup.ts",
+      "sha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-parent.config.ts",
+      "sha256": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/completion-receiving.config.ts",
+      "sha256": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219"
+    },
+    {
+      "path": "/private/tmp/h02-qualified-peer-receiving-v1/code/scripts/h02-progress/vitest.config.ts",
+      "sha256": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6"
+    }
+  ],
+  "scope": "Minimum compiler-only noEmit gate: changed driver, exact parent/receiving entries, binding setup and their standalone config chain; TypeScript follows all transitive source/declaration imports. --listFiles retains actual resolved compile closure. Does not execute imports, setup, config or tests.",
+  "sameInheritedStrictSettings": "Extends the copied packages/db/tsconfig.json and copied root config, as prior scoped Q compile gate. No strictness/skip flags are relaxed. Seven entry files do not mean only seven files are checked.",
+  "heap": "Node default as prior scoped Q static pass; no new heap override or receiving/primary resource credit",
+  "containment": "Exact static invocation, wall/resource observation and any stop action must be independently fixed in the compile admission. No static supervisor is run or newly asserted by this proposal. Receiving60s/20s budgets belong only to receiving.",
+  "requiredReceipt": "Actual tool initial/session/final return and complete separate stdout/stderr; preserve compiler diagnostics and resolved --listFiles output without normalization; source/tool/locks/reuse links before/after match.",
+  "passGate": "One admitted invocation returns0 with no diagnostics; exact config and complete transitive input identities retained. NoEmit/incrementalfalse leaves proposed source/lock bytes unchanged. Failure stays compile/setup/resource evidence and grants no native run.",
+  "stop": "No auto-install, retry, exclude, skip, typed assertion change or source fix; freeze and root-classify any failure first.",
+  "receivingAuthorityAfterPass": false,
+  "ordinaryCampaignRuntimeTypecheckCredit": false,
+  "executed": false
+}

@@ -1,0 +1,69 @@
+{
+  "slot": 3,
+  "workers": 1,
+  "serial": true,
+  "checks": [
+    {
+      "name": "format",
+      "cmd": "/Users/kyle.mathews/.n/bin/node node_modules/prettier/bin/prettier.cjs --write packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "e3fdc0",
+      "wall_time_seconds": 0.131690958,
+      "exit_code": 0,
+      "original_token_count": 104,
+      "output": "packages/query-db-collection/tests/queued-answer-completion-oracle.ts 70ms\npackages/query-db-collection/tests/queued-answer-completion-history-oracle.ts 22ms (unchanged)\npackages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts 8ms\npackages/query-db-collection/tests/queued-answer-progress-oracle.ts 10ms (unchanged)\nscripts/h02-progress/completion-checker-controls.ts 10ms (unchanged)\n"
+    },
+    {
+      "name": "type",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --noEmit --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "5b001c",
+      "wall_time_seconds": 0.375060417,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "lint",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/eslint/bin/eslint.js --config scripts/h02-progress/eslint.config.mjs packages/query-db-collection/tests/queued-answer-completion-oracle.ts packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts packages/query-db-collection/tests/queued-answer-progress-oracle.ts scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "ab7dc9",
+      "wall_time_seconds": 2.4268475,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "pure-emit",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --outDir /private/tmp/h02-completion-pure-v1 --rootDir /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1 --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node scripts/h02-progress/completion-checker-controls.ts",
+      "chunk_id": "f8ad7d",
+      "wall_time_seconds": 0.268638709,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "pure-checker",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=384 --input-type=module - <<'JS'\nimport { writeFileSync } from 'node:fs'\nimport { runCompletionCheckerControls } from '/private/tmp/h02-completion-pure-v1/scripts/h02-progress/completion-checker-controls.js'\nconst controls = runCompletionCheckerControls()\nconst record = {kind:'pure-comparison-calibration', controls, accepted:controls.filter(x=>x.outcome==='accepted').length, rejected:controls.filter(x=>x.outcome==='rejected').length, receiving:0, generatedProgramsExecuted:0, runtimeMutants:0}\nwriteFileSync('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-preparation-v1/pure-checker-calibration.json', JSON.stringify(record,null,2)+'\\n')\nprocess.stdout.write(JSON.stringify({accepted:record.accepted,rejected:record.rejected,total:controls.length,receiving:0,generatedProgramsExecuted:0,runtimeMutants:0})+'\\n')\nJS",
+      "chunk_id": "8d11b5",
+      "wall_time_seconds": 0.000008042,
+      "exit_code": 0,
+      "original_token_count": 26,
+      "output": "{\"accepted\":14,\"rejected\":23,\"total\":37,\"receiving\":0,\"generatedProgramsExecuted\":0,\"runtimeMutants\":0}\n"
+    },
+    {
+      "name": "lint-changed-equivalent",
+      "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs",
+      "chunk_id": "3445b4",
+      "wall_time_seconds": 10.002324042,
+      "session_id": 27074,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "name": "lint-changed-completion",
+      "chunk_id": "e24803",
+      "wall_time_seconds": 0.000019959,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    }
+  ]
+}

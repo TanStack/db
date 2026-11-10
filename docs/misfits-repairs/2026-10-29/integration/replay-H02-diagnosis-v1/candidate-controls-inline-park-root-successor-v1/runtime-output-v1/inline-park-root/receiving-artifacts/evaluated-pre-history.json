@@ -1,0 +1,2367 @@
+{
+  "cut": "pre-history",
+  "selectedRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "inventory": [
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/source-binding.setup.ts",
+      "url": "/scripts/h02-progress/source-binding.setup.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/source-binding.setup.ts",
+      "evaluated": true,
+      "imports": [
+        "crypto",
+        "fs",
+        "inspector",
+        "path",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/startup-inspector.mjs"
+      ],
+      "sourceSha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13",
+      "codeSha256": "601f621e717b58f78c8f17f1cd2ce7f1d7261f8540f92e5bbe58a75eb58d68e7"
+    },
+    {
+      "id": "crypto",
+      "url": "/@id/__vite-browser-external:node:crypto",
+      "file": "crypto",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:crypto"
+    },
+    {
+      "id": "fs",
+      "url": "/@id/__vite-browser-external:node:fs",
+      "file": "fs",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:fs"
+    },
+    {
+      "id": "inspector",
+      "url": "/@id/__vite-browser-external:node:inspector",
+      "file": "inspector",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:inspector"
+    },
+    {
+      "id": "path",
+      "url": "/@id/__vite-browser-external:node:path",
+      "file": "path",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:path"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/startup-inspector.mjs",
+      "url": "/scripts/h02-progress/startup-inspector.mjs",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/startup-inspector.mjs",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e3e6748f8c2fb673779e7c1143b2c4afe10d2688bc7ffa226b7bbc01754ad905",
+      "codeSha256": "984a699dba2a05d98486b5c7704076ccd9fd3ffafa467b4fb8642d690e5d94d7"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "evaluated": true,
+      "imports": [
+        "fs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-driver.ts"
+      ],
+      "sourceSha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "codeSha256": "ebf9088be1afae4b93aee3bdedc65ff9cb7e971c778e2ab97a24c628329bd868"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs",
+      "url": "/scripts/h02-progress/receipt-transport.mjs",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs",
+      "evaluated": true,
+      "imports": [
+        "fs",
+        "path",
+        "util"
+      ],
+      "sourceSha256": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da",
+      "codeSha256": "2a9261ce37221b142ebce90077d9ade71d096d55938f7f1038ecff01f4e07eb0"
+    },
+    {
+      "id": "util",
+      "url": "/@id/__vite-browser-external:node:util",
+      "file": "util",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "node:util"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts"
+      ],
+      "sourceSha256": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+      "codeSha256": "f715e69b3aea53eaab2f091e61312a1cc0dd4c539330967d4c425b0912f0ba68"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "evaluated": true,
+      "imports": [
+        "util",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+      ],
+      "sourceSha256": "c255f15acd92444a6fff8291ac10945f9d40162856adec24070682a066ad1f06",
+      "codeSha256": "cac2a32abd5e528a2daa5d8f02313f1823e6059fd4bde3161976cf589ef86f62"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "evaluated": true,
+      "imports": [
+        "util",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/bucket-facade-adapter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/candidate-controls.ts"
+      ],
+      "sourceSha256": "82c6dd8e724fc5cc0ab54d855e9e6fd3335d8f912b00161966018d38793027b8",
+      "codeSha256": "46b4e75a50c91550c371f4cca65e72638f923ee8238aeec27cf24b1305010002"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+      "url": "/packages/db/src/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/types.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/optimistic-action.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-adapter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-only.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-storage.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db-wrapper.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-persistence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-receipt.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/paced-mutations.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/basic-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/btree-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/reverse-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/index-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/expression-helpers.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/effect.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts"
+      ],
+      "sourceSha256": "897961cdc23a8587ac7d882dfc10e2e0184afd452ee2e60efb89a2a425321277",
+      "codeSha256": "c80cf716964e47972ff38e13fe456a04d1fe4135a84a47713af19d0005c1f3a4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+      "url": "/packages/db/src/query/ir.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts"
+      ],
+      "sourceSha256": "f457b852e61c6dbb5fd654a7fd1f6b50ed2d9e9773444e2ba5b0e702b8dcc118",
+      "codeSha256": "b720b39e67f827cef7126441f4507c069c5c8ae70ace4f399111eece99ab5a19"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+      "url": "/packages/db/src/error-message.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9ab4a64436c3db3a61f3a84b5ccff11359ccdf5676c81b81dc3be9db9c1dff13",
+      "codeSha256": "5bb41dcbf3a042ec2dd6fe7bbc622d1ada7328868ab99672bbb0be71a8ea2e91"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "url": "/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "909d40e4425647ae58850decd6891fa7f6aa4690cd76e82c3ced13b70dc93b10",
+      "codeSha256": "3cb0bb8c937890bc69b947aad4b12900ad7e98a209bcb677ddd1847b91dcfe53"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+      "url": "/packages/db/src/collection/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/validate-config.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/change-events.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/state.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/changes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/indexes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/mutations.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/events.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts"
+      ],
+      "sourceSha256": "9802283653165dc317b34cfb97cba5fbf4ee574e628afe9645babb4ac09bac3c",
+      "codeSha256": "c65e318f5018bb3f33caa423cd64b198c3e447f39ac220cde64bab16db12cc72"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+      "url": "/packages/db-ivm/src/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/types.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts"
+      ],
+      "sourceSha256": "d8a1237d1cdf958354e458754ab3e340c04250dcdcb2f7cd67f7ee072e280647",
+      "codeSha256": "77a6eb8f0fe5ec14101a7725e60b83b2c228a28b2818e208fccba3a5e642fe5e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+      "url": "/packages/db-ivm/src/d2.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts"
+      ],
+      "sourceSha256": "1afc8bf4a587ea281905333ba2a96a475b7799a08d67fcd10b7531ba1de8adb7",
+      "codeSha256": "38a91192cdfdd6ed16f1f6a675a7f5478038a4d9e432483574fd1bf04f27a534"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+      "url": "/packages/db-ivm/src/graph.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "a46ce4fc6e9c9399fec7c77281cb056b216dba28d41a22e41ed5eb0c8f26fac0",
+      "codeSha256": "58b7c9bb8d556cfa7fcc2018bcf9608138eb1fd561e5c734b7f665c1d12d1432"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+      "url": "/packages/db-ivm/src/multiset.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/index.ts"
+      ],
+      "sourceSha256": "105aae2dd54580e114be1059cef4a2453716a98604c590e1d0f26d3189eedec9",
+      "codeSha256": "5910ae51ce88bac633f90e37fc69eb2aad62f5817f513a3b21900a18fc364c6d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts",
+      "url": "/packages/db-ivm/src/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/temporal.ts"
+      ],
+      "sourceSha256": "96a35cfb8197533027c85e0986d8e4d85f32dfe53913864198782d0d01463490",
+      "codeSha256": "79b0f371c9d91527d3859fd5dddae3146de73d5c88fba615cd2c301d961e2606"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/temporal.ts",
+      "url": "/packages/db-ivm/src/hashing/temporal.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/temporal.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e94abec5b31971ca1af6bc5e47de70c4f997c9b36cc665025ea9889be69b564a",
+      "codeSha256": "b4507e355ee531b6b76723e97f3c3c44c08f9d27115db5fc2638cd8538c727ef"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/index.ts",
+      "url": "/packages/db-ivm/src/hashing/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts"
+      ],
+      "sourceSha256": "7c69736a3bed223bbafa1c387ffd352f544051ce786420bd9d0d82451c9bff43",
+      "codeSha256": "0680c2a331aa482998b1dbd5c7c67e9e1138e106f8e67284f758b7baad5e768c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts",
+      "url": "/packages/db-ivm/src/hashing/hash.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/murmur.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/temporal.ts"
+      ],
+      "sourceSha256": "951a44ec2ce0524e9ba28306e25abbff0efdcd02ca6b8f959b45963032fb2d24",
+      "codeSha256": "b2d1600be5c1a7867c17ea2b9aaefbcda4a941696a0a135cf691cbcdb6733b1d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/murmur.ts",
+      "url": "/packages/db-ivm/src/hashing/murmur.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/murmur.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "55b50358e37521654f70c206219a4c0bd276e5bde995c2272c934200f655e1ac",
+      "codeSha256": "f13770f14f6989a2224173795fdec9f97920cc47d905c946e0ac88d27e77c5f5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/index.ts",
+      "url": "/packages/db-ivm/src/operators/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/pipe.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/map.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/tap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/filter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/concat.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/output.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/consolidate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/join.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/reduce.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/distinct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/orderBy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupBy.ts"
+      ],
+      "sourceSha256": "8c6608f72bf98ae827a2f8cfcc21e886049649ac28a0745011fe854913677b1c",
+      "codeSha256": "3bfadf9a945abe416ac27de9f372e9c9a75c356892d974c3f6eed37185eb366a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/pipe.ts",
+      "url": "/packages/db-ivm/src/operators/pipe.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/pipe.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "17e3ed788cfd5c3945211284c37399a9168e1e85609e6f939262444ad780856e",
+      "codeSha256": "80400addf87bb1df6c5e35d7b480f6192759eb6303cb9e6a6f03288acf63f7a4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/map.ts",
+      "url": "/packages/db-ivm/src/operators/map.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/map.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "31ed85ed7246ab42719723d5ad03faceb3b1e9345d112a9342856914d0742edd",
+      "codeSha256": "0b810dfc1a7e85cbf4b774cdc36705a9fc41f5f1465964807032f5d9d0c7a450"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/tap.ts",
+      "url": "/packages/db-ivm/src/operators/tap.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/tap.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "7966b8e60871d3e28dd3d5f54f4375faf2e50de12c0d3bf0b44f6350cae4f9c6",
+      "codeSha256": "9fa321b2fdcb39499d78cc7dada4a5a37fb6d87721ff63ad63e9a4d9fec9a11d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/filter.ts",
+      "url": "/packages/db-ivm/src/operators/filter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/filter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "d53af7776a7aa5619f891a4c00a8b0af2102aeb67e65bb04e2451d28d9fec714",
+      "codeSha256": "67d78e089ca6724c6b602c5e26fd216cecb7043515d801705df851d3992dd14b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/concat.ts",
+      "url": "/packages/db-ivm/src/operators/concat.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/concat.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "157fc2807de482a3fecb56f51e5f1b2be49d613b6665cb3889abf7d01a8cd8ba",
+      "codeSha256": "b9b4ecaa284939342c5c1e64c0824b59573b2b52d80f4177b6a1ac45aa896d3e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/output.ts",
+      "url": "/packages/db-ivm/src/operators/output.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/output.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts"
+      ],
+      "sourceSha256": "0968eb6580a7d3ad2b2a36846c8ad175c97e588da6d1dfdadc2caaebe63bc703",
+      "codeSha256": "871248da02453555e57d7353049f6c33412d2082aec9bde7434ee3c034e674b3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/consolidate.ts",
+      "url": "/packages/db-ivm/src/operators/consolidate.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/consolidate.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "b38b7580ee182473fb02bfd8bf8c9021cb1aa0fb1a59ea75594c128fad06b279",
+      "codeSha256": "3ef5222c721e126061f3a8ad5b7d97b83dcadb9cbbd85eabb49baa59beaf29c8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/join.ts",
+      "url": "/packages/db-ivm/src/operators/join.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/join.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/indexes.ts"
+      ],
+      "sourceSha256": "8f5f78fa973a94e8bd7a7b15991548a60cf25fafabd10722bd221818b4707b81",
+      "codeSha256": "1d32e40fe5260619c108572f531b24279d0b1cf8c1f30e8533da5a49ee986d40"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/indexes.ts",
+      "url": "/packages/db-ivm/src/indexes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/indexes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/index.ts"
+      ],
+      "sourceSha256": "972d634e3e5faf9693ca93562e6b54a30ac1b5a00a5f95509534d5c74313105d",
+      "codeSha256": "06e2e02c807e157a8f3e7e9ae6e1cb2faf95aaed3416f3053552b35dc8f3b4ee"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/reduce.ts",
+      "url": "/packages/db-ivm/src/operators/reduce.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/reduce.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/indexes.ts"
+      ],
+      "sourceSha256": "ec7e794c587ebace6431ba03847d980cf6bc01ef805bcb1310483a3c06a64629",
+      "codeSha256": "9401471722000e41bd3ee161cbe8b042f496b9a26ad61c3f0b9bfca0a642074e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/distinct.ts",
+      "url": "/packages/db-ivm/src/operators/distinct.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/distinct.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts"
+      ],
+      "sourceSha256": "35b026e81627fab615ec664d631e02091dd307c91d32c1dd54546e453ba767c0",
+      "codeSha256": "adabe2e8f213adc5cb62068ecf530dae4b74a4b050d5db7799983805e43b6c48"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "url": "/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKState.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "37a708f0d29f916c839230875d87d84479cec1cc3e668de351849c091da14be7",
+      "codeSha256": "8fa1cf130f176668ba1f04b45bfa16cd9631548ce37d2184128025aafd12eec0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKState.ts",
+      "url": "/packages/db-ivm/src/operators/topKState.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKState.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "166549d5b44d73e10d0ee284fc324dd87b3bcf46f2ec3212d02c08bc07392977",
+      "codeSha256": "b1a8cb61b30359a93e20c763237880492d70ea5e3e7429e44f2a0cd350c55128"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKArray.ts",
+      "url": "/packages/db-ivm/src/operators/topKArray.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKArray.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts"
+      ],
+      "sourceSha256": "a4889e6bf625027a048d2fdd74be5b96ac085a36abc4cc7e5d291ef2583ec916",
+      "codeSha256": "59dd4785568fb173f448117ddfbf94ce3e2899f533fe54b9c2c267c5c397ffa1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "url": "/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/graph.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/d2.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/multiset.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKState.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKArray.ts"
+      ],
+      "sourceSha256": "878f6fc16a06b2d384a3567137b653f580b4d3811e84050e68d978751339140c",
+      "codeSha256": "6a5486482507b5860e9da543af7d3f1ee99d61dee7d81494241dfd88fc5ee42f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/orderBy.ts",
+      "url": "/packages/db-ivm/src/operators/orderBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/orderBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/topKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/consolidate.ts"
+      ],
+      "sourceSha256": "1c2261f2622fb256d9223f7392b2195a9eee48ee77218c11b2930d35f2800757",
+      "codeSha256": "de201debc0705a73635010111d05d627f6bfc8cfa73b8c270d1d8a93b2d07125"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "url": "/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedOrderBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/consolidate.ts"
+      ],
+      "sourceSha256": "7072e0aaa26e1244a92a6410eb5cd4d75cf199d702599d87ed546b811f7f34cf",
+      "codeSha256": "3b88369a82230a8ebf254755ddf6ff4f134d2c47d36d8ad9af68737b63432a40"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupBy.ts",
+      "url": "/packages/db-ivm/src/operators/groupBy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/groupBy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/hashing/hash.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/map.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/operators/reduce.ts"
+      ],
+      "sourceSha256": "14629481a3f6014a259248b4fa610087ee69cba954cb80dbf4c700f3c2b5c166",
+      "codeSha256": "8a33dd736650711069258bf62022e907a697001b0ecb69ce027aa902b921f469"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/types.ts",
+      "url": "/packages/db-ivm/src/types.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/types.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "6e76bf3f2af58e171123b8cb6a647b8a6c9908d7377e27b01aa4bfc5c0ac022d",
+      "codeSha256": "2c5eff7f570d1b0535388bc11ee7f7aa2e75c3c0dcb4abe5178c3c1aac1621e9"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+      "url": "/packages/db/src/utils/uuid.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "0365c5c02b46eabac53562dac87b342656e2774b36385a094c16b3a9db3a5ca1",
+      "codeSha256": "e8aafba01acf107a9406b7fa5878c83b1c63bf46638da5397590b9872d415684"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+      "url": "/packages/db/src/collection-options.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options-brand.ts"
+      ],
+      "sourceSha256": "0b0f9713312f9554f62c020dda3bae8291303dbeadb85adfee76515a28442feb",
+      "codeSha256": "d6b9aac6d0a5d3cd7be25c16fbed7bfb8819a7f52e54c6b82ba935e05cf34590"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options-brand.ts",
+      "url": "/packages/db/src/collection-options-brand.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options-brand.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "93df3fc8d90531ca926c6e9ca48653dbda9259cfaaade9c23cbbf35131b2e1ed",
+      "codeSha256": "1720cd05ad21bb5c732e3682a5784f3e45df9b6d672146b1d67eddb02a2ed541"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+      "url": "/packages/db/src/errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "48d1e786bc84793ca16a2f5d4dcc80a914a03aa1a4753c08a99d7847c6a8120d",
+      "codeSha256": "bc1ea16999fd0533a0fe0de0f7bd9800db266097d20271857eb9f6595e94c4f0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+      "url": "/packages/db/src/query/live/collection-registry.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts"
+      ],
+      "sourceSha256": "c24da0f80292e4fa22370711cdf66e52ec44989f8fda50430025aa5b25510e65",
+      "codeSha256": "867829f2a123095dfd32446da13221c98df019ace2e45969bebf2a164626cee8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+      "url": "/packages/db/src/query/live/internal.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "3aa788cfb3647e2758ff9befe18e4503bc68797fd97d55dc5c3905db9a7145fc",
+      "codeSha256": "58a3095987f859e53a477242249b3969c4c3509ac535fe9a27edda2496e16a7b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/validate-config.ts",
+      "url": "/packages/db/src/collection/validate-config.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/validate-config.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/config-errors.ts"
+      ],
+      "sourceSha256": "10bc3f83c357cf8b835694c73df9adf413c6190f924256786f17e123a688489a",
+      "codeSha256": "aee643f00e502f36809e8382508070181d81780d87c84f8abbd697c7c28cad66"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/config-errors.ts",
+      "url": "/packages/db/src/collection/config-errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/config-errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "ffe046ad75542c863e1781c192191479cdcb68e7dcfaf92c9ce180ee48522cc0",
+      "codeSha256": "6ce272787d3a02bdeddb6f80c3ca6bae78e7b434580abf93bcb3c2a9688b6212"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/change-events.ts",
+      "url": "/packages/db/src/collection/change-events.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/change-events.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-conjunct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "754f897ba843d004eaf5bfe3f047fc53aa24eb49a16ae1eae4073e32ec17ba49",
+      "codeSha256": "5bb4a36f017023dd6e40b8bed1462592b60a67ec3d8da108a4094dbe700a451f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+      "url": "/packages/db/src/query/compiler/evaluators.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "499cb252c6e2c166cf626bf88c6c08ced102020558bdccab46a6d12acd52ec92",
+      "codeSha256": "cf25039de693206969886c5f04f2895958599a8236f1cf5e393e3d471aed8a32"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+      "url": "/packages/db/src/utils/comparison.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "78c8163a2b6819ffd59f5aedc4b40d0490042c7dc3ca0799e84a2f0f9fb170de",
+      "codeSha256": "72d6c23e61d857bf3c7fb2194b06a91eaecdeb1d5ff5a31a4a7c330e72760862"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+      "url": "/packages/db/src/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "de7d370b0ddfed65865d3cc48d7607f02630dc9f820ad0d68ac80763987cf272",
+      "codeSha256": "e17499b2fad18bed84cca772c43020040ddd7c2a8a79317f9efc28ea956f96ad"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts",
+      "url": "/packages/db/src/query/runtime-reference-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "c1c695e80771ab545e58254381333bd24469813d69f448106df2dc5a5de1db48",
+      "codeSha256": "424c3e6c1a988404fcb0733886ffdefaa818177778403c51994fb47cdb5d16a7"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+      "url": "/packages/db/src/query/equality-value-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts"
+      ],
+      "sourceSha256": "a7b65759c20ebec4d83c47ec744bbd382da9a86ffa4c9e59028827127081d016",
+      "codeSha256": "20467b4315f955e5f6a0944d40aed1aeff9b96d6f71d79e30aa504c97814f10f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts",
+      "url": "/packages/db/src/query/compiler/route-metadata.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts"
+      ],
+      "sourceSha256": "53283291ce25656339492bff678b8742a7fdc7b60c49d3b7f7015569e5c06788",
+      "codeSha256": "889074803012ab69ba2881297aeada9fec69423c78a357c52b44bf2dad1e1d11"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+      "url": "/packages/db/src/utils/type-guards.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b7a63accd5abd4dd5c93bb451650fc962a2fdcc3981e70f0b7b373ebeb5f07db",
+      "codeSha256": "4c04f935d249521cfca2f9dc8754809248dac3ed591e99b7c9163bdc87c65bb8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+      "url": "/packages/db/src/utils/index-optimization.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/reverse-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts"
+      ],
+      "sourceSha256": "034310477e43f29bfe3493a56ee3b3524378ae3f941f4a452e6a15b9aec24425",
+      "codeSha256": "55b2e426c16552488c00be463dfa392a32e7b428e5d5c41460d049295200f38e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/reverse-index.ts",
+      "url": "/packages/db/src/indexes/reverse-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/reverse-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "ebf2d22eb0eec10acb4df154488862243ec20be117bc069fe307fc991853dd0b",
+      "codeSha256": "d3dfc53027beecd605b2ce9add0beb85a88c53b8e007464aa870f12022dffb67"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+      "url": "/packages/db/src/virtual-props.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "28acdeda1137e0aad5f02af309939ee23bad61ae05cd1130b8d5d39925897a9a",
+      "codeSha256": "4ce74b5d23988b2e02f7742483059b69106fec33777851c89ce6d000093601dd"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+      "url": "/packages/db/src/indexes/auto-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/index-registry.ts"
+      ],
+      "sourceSha256": "d226516a7514c40e83010ab211020adba17965af96bd6d3b96e88989c6f31b51",
+      "codeSha256": "02247dc9d54b2e7c9c2ba82f8bde6ba0ddce6158a3eed0492efdb519191f6251"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+      "url": "/packages/db/src/query/builder/functions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/grouping.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/wrapper-identity.ts"
+      ],
+      "sourceSha256": "25eebaaa6ab6abfc0dfc035f96fbb5119e4127c15db063a6e1164d06f3effba2",
+      "codeSha256": "a8de77c3767c38fbefb0bba939675c4317929e7ebbc6cfb71f2563a65356471d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/grouping.ts",
+      "url": "/packages/db/src/query/compiler/grouping.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/grouping.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/group-by.ts"
+      ],
+      "sourceSha256": "60bf53ca65138c45894858d222187e3ba94c831c0a3223bd3234d60ac832405f",
+      "codeSha256": "84dcbca71df33ee44367eb7ebf2fae84d3a3187444699429dce81792daf7e3ce"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/group-by.ts",
+      "url": "/packages/db/src/query/compiler/group-by.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/group-by.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "b8db87c995a44f229488dc7dc15a95041224184bb400b914f56d7368ee5f4722",
+      "codeSha256": "21c19138cbfa40330419102baa2f78376045cb08e53524120a87e9279f6f7dc2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+      "url": "/packages/db/src/query/builder/ref-proxy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/wrapper-identity.ts"
+      ],
+      "sourceSha256": "898e671e5656ebfb0a7dc0683de6b83e4ff1bc339616435caa1d60def4e6b767",
+      "codeSha256": "8499f8474a44eff22891ec88c180f3bee028e5cc61f406bf7514fcd8423f8c21"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/wrapper-identity.ts",
+      "url": "/packages/db/src/query/builder/wrapper-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/wrapper-identity.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "3053d30505c57f0eb16cc573e196291e617aff7479151508bbaa397fa3757f57",
+      "codeSha256": "210ab0788ba7a369e8bc6c9661e80c353020ee7570740e6e474e93234a339367"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/index-registry.ts",
+      "url": "/packages/db/src/indexes/index-registry.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/index-registry.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "d44e34c9e5d90db56dee7f91e402f2547d91647ae100cc4752bc13bcd49e2719",
+      "codeSha256": "c0d6c3d5183ab7855edf3a17547f08beafc835202827fe70ded8f6d4408f19ba"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-conjunct.ts",
+      "url": "/packages/db/src/query/equality-conjunct.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-conjunct.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts"
+      ],
+      "sourceSha256": "02041d880376b46814ab072747a9b0493e24cd4bd72df8389726780e535cc584",
+      "codeSha256": "50b1ce533c962b7fd7ae8b3768c62ca61e385631ce7711438945501d9dd7537b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/order-by.ts",
+      "url": "/packages/db/src/query/compiler/order-by.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/order-by.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/index-optimization.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts"
+      ],
+      "sourceSha256": "45c15469bb52e11b74a5f6e95b31c659f15e34d33e4bd2fb45bc5caf017d190c",
+      "codeSha256": "3ba61da8b8cea0ad71981caa237f0339fc6103daa43ea6b156fff0a4672099b5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts",
+      "url": "/packages/db/src/query/compiler/expressions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "70925f2d29f57aec189d0e7f485d0531534e3482f0696a5e9a1141d8cf36c42d",
+      "codeSha256": "846924df382a50f2136d0429da97d238a862c5d13b6fef0daf2f310a4aeeb330"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/state.ts",
+      "url": "/packages/db/src/collection/state.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/state.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/SortedMap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "codeSha256": "d90c63b7d06c8a93d62eb0b81c4ddca5901859c6aedcc267948fa05c4b02ea9a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/SortedMap.ts",
+      "url": "/packages/db/src/SortedMap.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/SortedMap.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "5ffa75ae2c41e2c657931728186fe9bd9c9b60f8da81cbf327c7c41417e2debc",
+      "codeSha256": "62293030ca7ce48ffedb1755c704eb255fbc3855b83afc635927c0dc5aa80b58"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/changes.ts",
+      "url": "/packages/db/src/collection/changes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/changes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/subscription.ts"
+      ],
+      "sourceSha256": "3a8878ab58df162f8108c5cdd6470562af7e6ed65a7b3e720f6b329bc0378628",
+      "codeSha256": "00e0f0d4d88edc685133f3cb8d69dc05d238ccbe42e0c6f33cbd290b2d6748cf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+      "url": "/packages/db/src/scheduler.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "b21cbbdc088b3c1dc4840b7db857ee7f262e6958dc8bc300398ad8e93da4f01a",
+      "codeSha256": "b8779407c0761ff76f64847a17263da49ffc1e2aad94c80aeae0d7d343321c88"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+      "url": "/packages/db/src/utils/callbacks.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "da4d6fc8d94bf93d07442eefbebd1ec0c183ef559fa7eebceb51b3652816708a",
+      "codeSha256": "df583c7da65c545ab1025d2d3fd6f2b0b9fd3597bd5c90fe3457e8aacf607d80"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/subscription.ts",
+      "url": "/packages/db/src/collection/subscription.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/subscription.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/event-emitter.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/cursor.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/change-events.ts"
+      ],
+      "sourceSha256": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "codeSha256": "315d1bbf9a1da68e1cbd40ecab592f007d07d12fb218d6849bd81531e230cb64"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/event-emitter.ts",
+      "url": "/packages/db/src/event-emitter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/event-emitter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "1d8775f3c2dbc9c833f03d2b9bb0d55d1606419e43d661064cc95cd91eb187e8",
+      "codeSha256": "8da079aad1f50e4e1a5346267c52325f1908c47b32fc1f21177c641549da274b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/cursor.ts",
+      "url": "/packages/db/src/utils/cursor.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/cursor.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "b728649d395a8e4e61cd6a63479be92ce2d4d4a08dc73beb549b92dafec5181f",
+      "codeSha256": "fd0ef90ace07888be8fd1b1abd771571e61a11b3b2f2da8c4f989c7829a7b5db"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+      "url": "/packages/db/src/utils/error.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "133924e3809af4a69826c08774455f12f10aba675cbc92a4298525868bba4ece",
+      "codeSha256": "1eb2af1aff904035b553ed9e9a5696e547d4a002d4f8171c0d80073d1a4554e4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+      "url": "/packages/db/src/deferred.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9c99553d7ab92ac89d377cb3382a9dfbdf592635c87b86eac8aa1f18efc4da68",
+      "codeSha256": "7390aa54d52a0ceb401011f1eb6f9d495c3ddb7f3b9e6bbff59400ed7747fab6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+      "url": "/packages/db/src/live-query-primitives.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "44b28251bc2c234c5c47df25d5219a0e6ffc766d63ab9f9087dfd450d35dfd63",
+      "codeSha256": "8bbdbe92e2d308f2b290119b7b09ab39bcd098e225ebe9c478fb93b9a3063fa2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts",
+      "url": "/packages/db/src/collection/lifecycle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/browser-polyfills.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/cleanup-queue.ts"
+      ],
+      "sourceSha256": "0aee449fa231215d8d3d086e1e37e761f332c75a6cae50fabd3101ed057a84b7",
+      "codeSha256": "32f21c5100798d370aa0d8af824f10b31b963b8148ff4493ffe2f47b74193764"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/browser-polyfills.ts",
+      "url": "/packages/db/src/utils/browser-polyfills.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/browser-polyfills.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b3212d22af7254eb8c286d89393eb043324abd0b5a7ddbc8eaaa505e292b437b",
+      "codeSha256": "dd825d1c60344deab59e928bf62c97e0bbe89c3c25029d0154a6b533839370e3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/cleanup-queue.ts",
+      "url": "/packages/db/src/collection/cleanup-queue.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/cleanup-queue.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "869a5fdff4680354a9b3c68d3e5228ffe701507968dd1a5ae2123ed856fe517e",
+      "codeSha256": "a72cb6f3466b635503e89bf0a2ec3658ff7283f4826cf1cf61a2a4a23597973a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/sync.ts",
+      "url": "/packages/db/src/collection/sync.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/sync.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-receipt.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/state.ts"
+      ],
+      "sourceSha256": "12120489cabc124acd52a4ed690fce1ddd903602c8cda373b910f9fa744b4697",
+      "codeSha256": "ee3261102a859324c5d47d4d7d56611106060f4de1420cc158e7c290b841dbb5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-receipt.ts",
+      "url": "/packages/db/src/sync-receipt.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-receipt.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "5ab4074603d96c23decd4fae499ed55f3a6ee5077e379f370d9b76fd90565399",
+      "codeSha256": "546d0bf1c2eef7a7c97c944a53e6a743dad09b3e472062d483d22b71a1bdf59a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/indexes.ts",
+      "url": "/packages/db/src/collection/indexes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/indexes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "f6a800dbe0f6e326884bf6d0b4912c126a82ef87413eb7490241fb1f56ca8f6f",
+      "codeSha256": "90e71145c2f3f05bf94c012175e13030ac3d5c41173c8d684b4d0bf52e041732"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts",
+      "url": "/packages/db/src/indexes/base-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "63e35c6bf011ad361882509a521407acf29b9404ce4e810a8f4d54b50c0e6685",
+      "codeSha256": "0899670312165674d8e47537cc91215b14875216ec4cbc78f57f7bbe4b2c432b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/mutations.ts",
+      "url": "/packages/db/src/collection/mutations.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/mutations.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "a9fb56d836eab56789154735841a7d2908d940d438196c5dc2d7a85f16132848",
+      "codeSha256": "969acb2a57d10801d9651a9ad061cc21804db915fc75a8187c6b2b6a89e098df"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/proxy.ts",
+      "url": "/packages/db/src/proxy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/proxy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "97fd4841cd8532a8bd2f08197d0d755cf348a50e5df0b2f4705079895f2a42c1",
+      "codeSha256": "513b5bb5fa2cc76b273655ab7d6ae2e06eeb61da3c92f550a2dea5e6e72368ba"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+      "url": "/packages/db/src/transactions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/duplicate-instance-check.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transaction-commit-work.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "772998f86099b370835e8617ca79c85e3df214a71875649cf9ff425574205589",
+      "codeSha256": "d7ae1debfa1d7e92830d45e5b08e3ca2728a1b0804d8398ca2fbb90da9524f7c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/duplicate-instance-check.ts",
+      "url": "/packages/db/src/duplicate-instance-check.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/duplicate-instance-check.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "7ea3110958ff28f9befe760c60fc6fcd695bfba76aba76d654220358e6e8f8f5",
+      "codeSha256": "28e8df4d4178a9edbf81225b179814f113f72347bb5be1fa91b6ba1c8c2f8ec2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transaction-commit-work.ts",
+      "url": "/packages/db/src/transaction-commit-work.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transaction-commit-work.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "b3c341c01f7a8b1207683fb3388b66b1173481f43ea59160e1922778e64872fe",
+      "codeSha256": "e0082be2473c9bc5e6fadb6fc9e7792ef56b3dec9aae9c326b83dacecc9c76a5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/events.ts",
+      "url": "/packages/db/src/collection/events.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/events.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/event-emitter.ts"
+      ],
+      "sourceSha256": "afe1913937b6e8859a0b9061436eb6563695247300f71582bf656f5710bab45c",
+      "codeSha256": "496da509d6e61dbc254cec923fe8620c0a7adf62fe39462a64ff7ebbfb931241"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts",
+      "url": "/packages/db/src/collection/health-tree.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts"
+      ],
+      "sourceSha256": "3c9c72ffa3045d1719883bd609df87d98d336140fe6076e485f7535b9debdc59",
+      "codeSha256": "cbffd8bb0a334fe3e142e0d6c8d854318baa86aa4e5d3ca7cb38d744773dbece"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts",
+      "url": "/packages/db/src/client.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer-client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/state.ts"
+      ],
+      "sourceSha256": "0c07442588bf7cf2847b2a63b5ead361f803631d566c93ff09f5882c82ccb250",
+      "codeSha256": "f3fe7b2c5ee9892e2672e6b3276c89b4d4631ec2033c8457b9567fcd08de29d4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+      "url": "/packages/db/src/query/live-query-collection.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-config-builder.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts"
+      ],
+      "sourceSha256": "d9fa71c30a1dbb69d58e2e11c2ba4acbeaa727f8d1ee70ce3d225be08ce7224f",
+      "codeSha256": "010b0297cc0da2bfbfdd67482013c6e87eea49cad3fbcfde83f2ed50b2729286"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-config-builder.ts",
+      "url": "/packages/db/src/query/live/collection-config-builder.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-config-builder.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/public-key-reduction.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-subscriber.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/graph-scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/utils.ts"
+      ],
+      "sourceSha256": "0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d",
+      "codeSha256": "070386158a3ba170085ce6060152050d84386f73cb87f1f872374470389ab9ac"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/index.ts",
+      "url": "/packages/db/src/query/compiler/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/get-or-create.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/optimizer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/joins.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/find-aggregate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/lazy-targets.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/parent-routes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/query-equivalence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/select.ts"
+      ],
+      "sourceSha256": "56559f340bd684b1389130fc772505fe27c7d5a34c2a55cf047e831a35f624c3",
+      "codeSha256": "f61a534c337e1cd692bcf48ac3594465884a565f04012bc145b0669558edcf59"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/get-or-create.ts",
+      "url": "/packages/db/src/utils/get-or-create.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/get-or-create.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "eb56ba9e1a6eddecc8241062cb9a4ea0afca7437fbb50f0404de1276a611ee82",
+      "codeSha256": "a06bb04b4f15c079e52c4c4eaac3fefa408f8643f9b736ea704cef8d047dcbfa"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/optimizer.ts",
+      "url": "/packages/db/src/query/optimizer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/optimizer.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/find-aggregate.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "4f359a9488bc178dcfcb5bbe56c04ab5589575c1224afffdd5b082d0cd1e8059",
+      "codeSha256": "332ad8fafe89b5ea6b0c449f46007d9c92b6ac58f852e9f158add9a3226fb25d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/find-aggregate.ts",
+      "url": "/packages/db/src/query/compiler/find-aggregate.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/find-aggregate.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "8714ef7f93008a2cec4b6afd3369b93bc691b6f1ca9ec977a3e9530ff285a43c",
+      "codeSha256": "bc9f0e7957cd0ee873074c5666adc77516152543b48591cb2f7e2332bfcc3640"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+      "url": "/packages/db/src/query/builder/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/join-conditions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/query-ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/clone-query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts"
+      ],
+      "sourceSha256": "8a5c3397e84601025e0589fa5e5303d5054773cb45d083bfb56ac2ff28646f26",
+      "codeSha256": "bf4ead38563c2b5ec31855fcad963e2832cd7eee6929a03ff7e1918228950ca3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/join-conditions.ts",
+      "url": "/packages/db/src/query/join-conditions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/join-conditions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "c2659d14f7a15203343de19b66cb83195c7ab5c26f953b52bbf6f40bbe012802",
+      "codeSha256": "9cc6225f65ea00d92d0d23cab7d48a47519b5466743ce3d777baa3a7d0069b73"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/query-ir.ts",
+      "url": "/packages/db/src/query/builder/query-ir.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/query-ir.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "6aa35045e8a83c63a68e3af2de951879aaa2b91c132606db6d0bfd32247af108",
+      "codeSha256": "7d1e4b12a811a41bfac17a5a8756d958eea629d90af7c26f1cc5390caef819d6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/clone-query.ts",
+      "url": "/packages/db/src/query/builder/clone-query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/clone-query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts"
+      ],
+      "sourceSha256": "d149bec44c8a26da59519dc9bb2e7ca4013cc04028ac46830bafe4cca439c752",
+      "codeSha256": "06db7dd99874973b66f4cacd946ca2d73311e3414391b390a28fdaaa185e8f22"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/source-record.ts",
+      "url": "/packages/db/src/utils/source-record.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/source-record.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "48023571bd2e850170b78a34a3a9d14940d97742f510f96cad4baaf4a75694e3",
+      "codeSha256": "8ec1abf1da8eb7796fdb70e0e2bddec6f4d2ee699d82bdbddce95627872927ed"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/joins.ts",
+      "url": "/packages/db/src/query/compiler/joins.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/joins.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/auto-index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/join-conditions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/lazy-targets.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/parent-routes.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/query-equivalence.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts"
+      ],
+      "sourceSha256": "8f0aacfc3e09bbc2672cc21af75ac8b27e1f957a47ee8e36ce3b451137beff08",
+      "codeSha256": "bbfefbcaefb6207d631ce5fe2a02dd8612ec0062eccf863dbbc8e3016c040c2b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/lazy-targets.ts",
+      "url": "/packages/db/src/query/compiler/lazy-targets.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/lazy-targets.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "6949ebfac1f0d76b64dc9a3c1cfee87490702a21de235c320fdd7aaa02b77587",
+      "codeSha256": "6a251a1c6956ae4a001970ae2dd12ac6677d91effedc1f8ed018648e8dc5412c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/parent-routes.ts",
+      "url": "/packages/db/src/query/compiler/parent-routes.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/parent-routes.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "d59e9d64534c53bb58349f07c121158adc9b37cac7a0b5150493e6368442c18b",
+      "codeSha256": "472655ba01bf7e4a250d139816b0765b6d48495da3a929c0a1f0f688404667b1"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/query-equivalence.ts",
+      "url": "/packages/db/src/query/compiler/query-equivalence.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/query-equivalence.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts"
+      ],
+      "sourceSha256": "7171fa0f1aa960297ba1269193ed3527967d78ebf1c19ef03544604280aa4480",
+      "codeSha256": "2d5f410436f69e819da6f87f28ffbe46a7ab8ff6784357a41ddc97def076f451"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts",
+      "url": "/packages/db/src/query/ir-stable-identity.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/query-ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts"
+      ],
+      "sourceSha256": "7d41ca1a6f044d087a6addca6fd4a891828c72d3bf2db079adb95979eedd9f66",
+      "codeSha256": "fd9c522545220f4033a249169954c446d75ca044aa1dc6a16a3a8120e468d9cc"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/select.ts",
+      "url": "/packages/db/src/query/compiler/select.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/select.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts"
+      ],
+      "sourceSha256": "a4b60959e37ea674bfac8f3cc4076c35facb9378891f72603c309e92c2882760",
+      "codeSha256": "f1b0b979714d0090aa77314118129fcd9c7b48a0bd31537dcf7ad8badafbe50b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/public-key-reduction.ts",
+      "url": "/packages/db/src/query/live/public-key-reduction.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/public-key-reduction.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "6bba0de854b7ddd1417696409c28c92d94f65366ca4e3f26ceb6a46111ea7b83",
+      "codeSha256": "b0a13f8b7088159f4783bf6735e4039e0cfd7bccf6089726b928d2e3aa9ab765"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-subscriber.ts",
+      "url": "/packages/db/src/query/live/collection-subscriber.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-subscriber.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/ordered-source-loader.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts"
+      ],
+      "sourceSha256": "18ef3bbf99a747182f431bd1d03b985418a6320e595418f3fff57fa3db3acab2",
+      "codeSha256": "e8318e95bf60e23a64cb90a3eb06a0dea3b8ebda8307f7f61f1b7fe11aeba031"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/ordered-source-loader.ts",
+      "url": "/packages/db/src/query/live/ordered-source-loader.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/ordered-source-loader.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/cursor.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts"
+      ],
+      "sourceSha256": "188382f75335916bb37ca53c72b469bc345b588082ca310a8390f4dbdaa2a450",
+      "codeSha256": "56220ce088e834c7058ce70eee662bdb89f5b411ab813ffcdb46965b44c1524c"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/utils.ts",
+      "url": "/packages/db/src/query/live/utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/ref-proxy-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "00d2a0462ea2a997f50d104f641e9837cdf1341fc763116a0df773f6888f1646",
+      "codeSha256": "daad8b4f4d3a04136ef26ad16834983c1b986432652e6667cb8bbb8d25948fb2"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts",
+      "url": "/packages/db/src/query/live/subset-demand-controller.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-value-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts"
+      ],
+      "sourceSha256": "fc0ee1159e167a52fd2490fe4f5ba42d9253eafb002528b686caa96d32302dd2",
+      "codeSha256": "4477937ba6fab1dbded378bab526e50c522a38866146291493a5a1b3b0f14fe0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/graph-scheduler.ts",
+      "url": "/packages/db/src/query/live/graph-scheduler.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/graph-scheduler.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts"
+      ],
+      "sourceSha256": "bdd37b3814814a2bf32fa55422a2fb039107d04cbf4fbd79df67056c5bc4654b",
+      "codeSha256": "cf16d34bb0ed08fb80c80048e83cdbc5340ac544a3e467732ca7cac4362e91e8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer.ts",
+      "url": "/packages/db/src/live-query-observer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts"
+      ],
+      "sourceSha256": "96c4c5fad774ea2ab60e58f98f7886c25d3f1843eb10dfc339dc58983c17d5f4",
+      "codeSha256": "14df462ab9adaf3ff5088ed7dd9673e24ad3c4c58ee5aca958bea03daa08e69f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer-client.ts",
+      "url": "/packages/db/src/live-query-observer-client.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer-client.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-source.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts"
+      ],
+      "sourceSha256": "dab8ffeca97ac0eb2a4f8663250d7d218f9ab782d6c4a438b654f3adbed90773",
+      "codeSha256": "ee8b298c9cea5fc993ed85e4dde0c6fe1fe81e7bbd284cfb9fdb3ad7f5a3ad33"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+      "url": "/packages/db/src/live-query-options.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/internal.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/runtime-reference-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "524541f5f2ea6852720f37cd78ddb31d62b8f83d8ea83293baf8a7f2e3048a41",
+      "codeSha256": "96fa2bf7ccadcdc10b49f6e330490b44e39e0f84bf860202e32a96ef4a2a4bb8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-source.ts",
+      "url": "/packages/db/src/query/pooled-source.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-source.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "777947447dc196cc34ad0b2be83c13ba4736997215816c228ff2a8abd172e53a",
+      "codeSha256": "cb8863216fb5aa68a95b387ecb1ceebcf584bec548c5263303015b7ffa49e945"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/types.ts",
+      "url": "/packages/db/src/types.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/types.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "codeSha256": "c70e03d782d2fa816b0809f9e49601244794f4037e83b69439da76b085cb5e70"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/index.ts",
+      "url": "/packages/db/src/query/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-live-query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/group-keys.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/grouping.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/includes-runtime.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/include-functions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/query-once.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/subset-dedupe.ts"
+      ],
+      "sourceSha256": "6e3e166f6570842b7e8da850040960815adc8d15684be5f35bb875854a2d37f2",
+      "codeSha256": "5f0adc5d498b1a559a3178cde02ba9537aef8beac5da4d3a255d3353aa1ecb90"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-live-query.ts",
+      "url": "/packages/db/src/query/pooled-live-query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-live-query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/SortedMap.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/cleanup-queue.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/lifecycle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/virtual-props.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/equality-conjunct.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/evaluators.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/order-by.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/pooled-source.ts"
+      ],
+      "sourceSha256": "490a7efb3318cf7c089d71af1e6f64ab444416a8662831dc34505dfd050e132b",
+      "codeSha256": "667e0083fed96cf78f167744140ff4fc9cd38a6c42b815e13877a870a86311f8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/group-keys.ts",
+      "url": "/packages/db/src/query/builder/group-keys.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/group-keys.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/grouping.ts"
+      ],
+      "sourceSha256": "333fc756bff61aea0e249e5ad75ddc0a5343410f1c02270b25ad673a48ea9403",
+      "codeSha256": "0044c20a421af2be93a1e166db83e2524edd24d4be3194e8efa9be3fd8ac149a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/includes-runtime.ts",
+      "url": "/packages/db/src/query/live/includes-runtime.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/includes-runtime.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/materialized-pipeline.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/bucket-facade-adapter.ts"
+      ],
+      "sourceSha256": "5be2395cff94fdb99a5712e021109eba16e79b74334fda5a68ffba76242c3c10",
+      "codeSha256": "b7fd5c8ab4af710db422745dde31561b56ebd8219183c5f43d96623f326fbaaf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/materialized-pipeline.ts",
+      "url": "/packages/db/src/query/live/materialized-pipeline.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/materialized-pipeline.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/public-key-reduction.ts"
+      ],
+      "sourceSha256": "f5cf651fea9537e12ad71eb8aff44991e43513aa769016c95e5d38b304f1ea2a",
+      "codeSha256": "d9c22d6055cced748190f901426f2639ad7062ac6d3fb5e489abe56992b1bb0f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "url": "/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/bucket-facade-adapter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/get-or-create.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/route-metadata.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/materialized-pipeline.ts"
+      ],
+      "sourceSha256": "7aae32f2a4d5aad783fe84bfde78073bac0c526ea7a9615b3ce285360e43b6bc",
+      "codeSha256": "37b5ffd26b32c45bcb7ea99cc0e90ba8d48a8388a36ca14d508eda71371bef79"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/include-functions.ts",
+      "url": "/packages/db/src/query/builder/include-functions.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/include-functions.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/includes-runtime.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/functions.ts"
+      ],
+      "sourceSha256": "78612562bb571f37f95416eea52e1991a154ccfe13f42e50d4ffb921d4604786",
+      "codeSha256": "7027e236e4608a960c6248145a5b9805650fdae5ca18b82ed08cb1412ec901c7"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/query-once.ts",
+      "url": "/packages/db/src/query/query-once.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/query-once.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts"
+      ],
+      "sourceSha256": "1399a24809ce83173f0d952ab35620bc4430874cb96ab14229495fad3ef57478",
+      "codeSha256": "26231926a1a044d978cdcca5914abbbcab3602e2d5a7d1caaf66cccde6be1c28"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/subset-dedupe.ts",
+      "url": "/packages/db/src/query/subset-dedupe.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/subset-dedupe.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/ir-stable-identity.ts"
+      ],
+      "sourceSha256": "c535bb2a38db491d1c11024c88c71dc1664a59bae3c19f1f5bec35d37d5b99de",
+      "codeSha256": "0800c2b61fd9d3aad482ba3496551db518e1f85ccbd4fd33e83deef434def14a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/optimistic-action.ts",
+      "url": "/packages/db/src/optimistic-action.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/optimistic-action.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/type-guards.ts"
+      ],
+      "sourceSha256": "3b3d98ec0561927c301c6979256bbcd98faf0ee41b2b6690abe1c189eeaf4fec",
+      "codeSha256": "285d46adbfacf1df426ec48c7bd8390e96fea3512410bcf215837dd366555737"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-adapter.ts",
+      "url": "/packages/db/src/live-query-adapter.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-adapter.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-binding.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-controller.ts"
+      ],
+      "sourceSha256": "d9cdb5d94192061ca0b1d61d288998b34ae34294226f5219213cb639a0bfc2d7",
+      "codeSha256": "6eeea51ca6654fc9ee54efb7b60b43d59be67f734b29616083c46cdb16d2ffdd"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-binding.ts",
+      "url": "/packages/db/src/live-query-window-binding.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-binding.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live-query-collection.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-controller.ts"
+      ],
+      "sourceSha256": "c291596aeeac20349b6aefa1526d4a2641f96e89eaae279af9704bac2cbe70c1",
+      "codeSha256": "61b49cd0009dde420dbee441cf14d08c9d5f77f6c97d90b6c82ff8f2562c3cd5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-controller.ts",
+      "url": "/packages/db/src/live-query-window-controller.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-window-controller.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-observer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/builder/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "81fd80e363b9bfbd0c70837812089d0640d1d083c53d97be55661e3d134346e1",
+      "codeSha256": "155ae1c7f1efc54faf9b41942a672587586b9da3d28ed744e272784368087ddf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-only.ts",
+      "url": "/packages/db/src/local-only.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-only.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts"
+      ],
+      "sourceSha256": "fea6e26a682a80031d32f045e0141064646a55f16a8e57957c8f25e6389e054e",
+      "codeSha256": "dd483fb35989a9b4bc6804bac48ad81922ec7caa1578d0794ab629a208846d89"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-storage.ts",
+      "url": "/packages/db/src/local-storage.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/local-storage.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection-options.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transaction-commit-work.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "5d1e1e3de35ad066981e4972204e903f8de1a5c98a35c2f207eace37fb30199e",
+      "codeSha256": "1790242b95895109126b433ba233e5049a87614c02c163344ae4fc406713bb45"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db.ts",
+      "url": "/packages/db/src/indexed-db.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/uuid.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/client.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db-wrapper.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "354a3e02c711e1db3ce1fb651d190aa45a58e238a42c5d9f9d6ee394d55ad95f",
+      "codeSha256": "4f52f9824af13d377507b26394042a6e8b2b57c74f26539fe158da4bc8cb4433"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db-wrapper.ts",
+      "url": "/packages/db/src/indexed-db-wrapper.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexed-db-wrapper.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "216fcac76c01b1af8363cda8a93678f53cd2cd58c9df918cd3d56d2a1f25fd11",
+      "codeSha256": "f64f46cef20c88564f0e60c71f6fc974026c4e285ee5c05f91554cdb3d15dcb5"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-persistence.ts",
+      "url": "/packages/db/src/sync-persistence.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/sync-persistence.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts"
+      ],
+      "sourceSha256": "7052e177e444acbe47b57dc5d5bf7f57aae339c7ef6b7308765ea56f81bd4251",
+      "codeSha256": "19b167336cf565771eebd8dc9a384d1a56df99132ee7f8d71ff0cb6ed7860513"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/paced-mutations.ts",
+      "url": "/packages/db/src/paced-mutations.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/paced-mutations.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/transactions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "064eccfb1101c6860d9b93d22c18d1538f2595728f215a24be3abf2cb8e205bc",
+      "codeSha256": "5fb5f20f84cac2daf1e8631d1d98e58aefb510033bde9e2620bfccae94201da0"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/index.ts",
+      "url": "/packages/db/src/strategies/index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/debounceStrategy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/queueStrategy.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/throttleStrategy.ts"
+      ],
+      "sourceSha256": "89409b3e87ef0c9366d5fc045289330d204cc58b33b8a08fb27cf0e67332a9e4",
+      "codeSha256": "280f992de389e1e9b0d49f4e856aace6170458bcabfb0e00de9eceb6b62bb356"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/debounceStrategy.ts",
+      "url": "/packages/db/src/strategies/debounceStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/debounceStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/serial-pacer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "8ab894803575f1cfab85939adbf67637342bf2e230e34d0db9bb642f205cdce5",
+      "codeSha256": "a20333fe4bf57f63a1f27e21a79e12b5d3e88a1e73c90bd72f0aad5c62c5e013"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/serial-pacer.ts",
+      "url": "/packages/db/src/strategies/serial-pacer.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/serial-pacer.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "63f4aa8f7aacd4bbe5cc3d56173fdb9231fedea68bb721bb2d420cf2303ec679",
+      "codeSha256": "ee6303ebf00bc4b796c0f52fbe48aa5cfff352ac6dc3261644f4b89a73999449"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/commit-completion.ts",
+      "url": "/packages/db/src/strategies/commit-completion.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/commit-completion.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "96dc5b54ee70de38e2458800bafab3ebc2880afec7eb48e197831f55a331065e",
+      "codeSha256": "6cb81acf5344df2eabe650cd80889a7160fcb8435a4d3171b946b12fe17ee674"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/queueStrategy.ts",
+      "url": "/packages/db/src/strategies/queueStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/queueStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "a7a0df7331b92af04b2ee3391620eeee5a37ca0a9a9d1d146066f0c14c6cb6e0",
+      "codeSha256": "916e2dcbffc560e7041beec92b4869093a2f387ff46772110bc40778c66e4593"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite/dist/lite-queuer.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/throttleStrategy.ts",
+      "url": "/packages/db/src/strategies/throttleStrategy.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/throttleStrategy.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/serial-pacer.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/strategies/commit-completion.ts"
+      ],
+      "sourceSha256": "028b5a000cc5a49a0176a42f0bb0c5cbb0a71849e543b523b080942947f40cb7",
+      "codeSha256": "b0a17738561e4b737abfaf5146000006792d8f4b4a3bf9baebdad41fc07b7a3d"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/basic-index.ts",
+      "url": "/packages/db/src/indexes/basic-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/basic-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/array-utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts"
+      ],
+      "sourceSha256": "9a128909d6df2c6d5b9ef07295a55f9f587170721cb7c6a652dd9c43eb674633",
+      "codeSha256": "c4515b25dd06f0d35faff6a03e24b8915841c77ef94313e21ca2199c270499e6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/array-utils.ts",
+      "url": "/packages/db/src/utils/array-utils.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/array-utils.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts"
+      ],
+      "sourceSha256": "a151c6b1779cf975e85e53a7b2328865889738df1f0d0fc3b8a8e466d15911f2",
+      "codeSha256": "d34b89e51800839125d0451df5413c5bfc6acfb77813a9914d16ecdadc1cc8bf"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/btree-index.ts",
+      "url": "/packages/db/src/indexes/btree-index.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/btree-index.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/array-utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/btree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/comparison.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/indexes/base-index.ts"
+      ],
+      "sourceSha256": "b006f65cf1c2ab14004e7311f4ac4b89958e919fb8439cd9ca25090789e37186",
+      "codeSha256": "910cbd748126107237ad9099a708e623de0ea5f3e5ab83856956a3442998c77e"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/btree.ts",
+      "url": "/packages/db/src/utils/btree.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/btree.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "e2172d757bfdaf3e528fe94864876fac9de24a66302ed1930d108daa1f525b1e",
+      "codeSha256": "5d5663eac0f1f200cf629ff6cf769de906ecb0113178eebc8367a31c46acaf40"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/expression-helpers.ts",
+      "url": "/packages/db/src/query/expression-helpers.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/expression-helpers.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts"
+      ],
+      "sourceSha256": "15d6635f8b28dafee0ca0afe2e8598545f09995a5b992798916d789167383019",
+      "codeSha256": "14cd77d38247fdc9dd8263637b0a6d079839cd799804d4bd08ca542c8801432a"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/effect.ts",
+      "url": "/packages/db/src/query/effect.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/effect.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db-ivm/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/source-record.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/deferred.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/callbacks.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils/error.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/utils.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/error-message.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/collection/health-tree.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/live-query-primitives.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/compiler/expressions.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/collection-registry.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/graph-scheduler.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/subset-demand-controller.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/ordered-source-loader.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/query/live/utils.ts"
+      ],
+      "sourceSha256": "38726e384d3e9c136aef5682649422187531f32f107360cc5b9c2fbc54ca22f4",
+      "codeSha256": "a33ed488942c1b4525bbfae2e8b9007898e2063a10ba07039a0be05eb5ad6de8"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/candidate-controls.ts",
+      "url": "/scripts/h02-progress/candidate-controls.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/candidate-controls.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/index.js",
+        "fs",
+        "path",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-reach.ts"
+      ],
+      "sourceSha256": "d1b3f65b082cf18112df6531d0372b25b2e64d98052a1b8fd899f0beb64c3cb7",
+      "codeSha256": "a37b3ce4b5afe17f449cae7c13f3743ae3b7141e9540ca7bb7cd6fd01bef2cac"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-reach.ts",
+      "url": "/packages/db/tests/oracle-reach.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-reach.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-config.ts"
+      ],
+      "sourceSha256": "f32b74e0adfaf8d869edaa8aeb2d1d8ac0a413ddd61b91ff706bde1767959283",
+      "codeSha256": "911e28f0e8130e51a18a961a9061e9a24ae1a60d8baae597d44f2a711e5d3571"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-config.ts",
+      "url": "/packages/db/tests/oracle-config.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-config.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-replay-witness.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts"
+      ],
+      "sourceSha256": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908",
+      "codeSha256": "f9af10b3b6fa56e8129d8bb0ac6faa01e97e5680ef169f4cb65220ee848d09c3"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-replay-witness.ts",
+      "url": "/packages/db/tests/oracle-replay-witness.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-replay-witness.ts",
+      "evaluated": true,
+      "imports": [
+        "fs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js"
+      ],
+      "sourceSha256": "c8f80722bd46b2a1439aa4c7f145b18c7c724a281a776169fdd715a27d8aae70",
+      "codeSha256": "3cc9e7cbede684b54784988e4c70f2f9eacd23e29cd87c5b021a12a4c9ee52db"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts",
+      "url": "/packages/db/tests/oracle-declaration.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "4dc22be210d46ce1d6590b911cf6bc077a78bfef1e54a98c637688b54830139c",
+      "codeSha256": "e7c3e61dbe12ae4c6d8faf6f312b19396a75a82cd32593352f1710b42d6c5a15"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/reference-expression-oracle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/query.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-attachments.ts"
+      ],
+      "sourceSha256": "aa28853ab3b9f64696d12bf63c675dcb30544dac8dee135551281e426265acc6",
+      "codeSha256": "5a203a356b662d031a3445217a45b6d97d36be195152aa86316f772bea98c43b"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "url": "/@fs/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+      "evaluated": true,
+      "imports": [],
+      "externalize": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/reference-expression-oracle.ts",
+      "url": "/packages/db/tests/reference-expression-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/reference-expression-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts"
+      ],
+      "sourceSha256": "c44eaa178548dc26b3767a6902225dddbaa6934008f1a35c4d1e752db7ef3f29",
+      "codeSha256": "e6595cd1e3a38b00088c257da293cb7cc04d2633a1a5979ffdcdc95eddd30892"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/query.ts",
+      "url": "/packages/query-db-collection/src/query.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/query.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/index.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/errors.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/manual-sync.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/cleanup.ts"
+      ],
+      "sourceSha256": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "codeSha256": "cebce5394cd0a00e7cc4fcd65521c3265a4c7fcec8abde303581cb9983e4b0a6"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/errors.ts",
+      "url": "/packages/query-db-collection/src/errors.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/errors.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts"
+      ],
+      "sourceSha256": "328909ca6887c49d8451200b388fb28bf0fc6d62cbdf2377835e8f8d4566f910",
+      "codeSha256": "87adef501c99eefed3a9790337b8ef5ee81838194d19569d18f68b553eb990b4"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/manual-sync.ts",
+      "url": "/packages/query-db-collection/src/manual-sync.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/manual-sync.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/src/index.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/errors.ts"
+      ],
+      "sourceSha256": "46561af0d5a176a76f73425f329d1bdee5d94e6a731d2eacfe99041e853683dd",
+      "codeSha256": "33fa4792535e473bd60ef875ed5182bf3f3c5489bf0443701d660af88ba51d65"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/cleanup.ts",
+      "url": "/packages/query-db-collection/src/cleanup.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/src/cleanup.ts",
+      "evaluated": true,
+      "imports": [],
+      "sourceSha256": "9a64ecdd6411043129594c88f39378e63fa4bfa52b1e72ea23d0b912c9208df2",
+      "codeSha256": "f42f465558e1bf920c96d156c34bd2301bbd4330ca2ee47f1d7b804e44659cba"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+      ],
+      "sourceSha256": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+      "codeSha256": "f81e2c93cac11f57433cb2173dcd7a5d9f1eb0af37d383a4092b7ffd695c4c2f"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/fast-check.js",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-reach.ts",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts"
+      ],
+      "sourceSha256": "5e1902e7ea02b8f11521c8ef5cc5b63c426fe3b92b50174e5c755be9b3c892fc",
+      "codeSha256": "be9105705fbdea599e8cf6530a9e92dcd053f46d8f5b0e6346d57447fde879be"
+    },
+    {
+      "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "url": "/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "file": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+      "evaluated": true,
+      "imports": [
+        "util",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/oracle-declaration.ts"
+      ],
+      "sourceSha256": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec",
+      "codeSha256": "b173ecf08132575558f7f1483a9cfad3ab92596e5611ce8ed1d718738bf92387"
+    }
+  ]
+}

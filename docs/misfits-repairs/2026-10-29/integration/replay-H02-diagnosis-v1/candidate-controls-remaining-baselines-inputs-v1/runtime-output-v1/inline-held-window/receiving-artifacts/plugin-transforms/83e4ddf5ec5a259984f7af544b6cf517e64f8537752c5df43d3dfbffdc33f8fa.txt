@@ -1,0 +1,398 @@
+import { output, serializeValue } from "@tanstack/db-ivm";
+import { isPlainObject } from "../../utils/type-guards.js";
+import { getOrCreate } from "../../utils/get-or-create.js";
+import { createCollection } from "../../collection/index.js";
+import {
+  INCLUDES_ROUTING,
+  transformPublicContainers
+} from "../compiler/route-metadata.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+import { BUCKET_FACADE_REF } from "./materialized-pipeline.js";
+const PRIVATE_RESULT_KEYS = /* @__PURE__ */ new Set([INCLUDES_ROUTING]);
+const NO_FACADE_CHANGES = {
+  prepare: () => {
+  },
+  publish: () => {
+  },
+  rollback: () => {
+  }
+};
+export class BucketFacadeAdapter {
+  constructor(parentId, compilations, onMessages) {
+    this.parentId = parentId;
+    this.compilations = compilations;
+    this.pending = /* @__PURE__ */ new Map();
+    this.pendingActivity = /* @__PURE__ */ new Map();
+    this.activeBuckets = /* @__PURE__ */ new Map();
+    this.entries = /* @__PURE__ */ new Map();
+    this.retiredEntries = /* @__PURE__ */ new Map();
+    this.resolvedValues = /* @__PURE__ */ new WeakMap();
+    this.cleanedUp = false;
+    for (const compilation of compilations) {
+      compilation.rows.pipe(
+        output((data) => {
+          const messages = data.getInner();
+          onMessages(messages.length);
+          for (const [[bucketKey, row], multiplicity] of messages) {
+            this.accumulate(compilation.edgeId, bucketKey, row, multiplicity);
+          }
+        })
+      );
+      compilation.activeBuckets.pipe(
+        output((data) => {
+          const messages = data.getInner();
+          onMessages(messages.length);
+          for (const [[bucketKey], multiplicity] of messages) {
+            this.accumulateActivity(compilation.edgeId, bucketKey, multiplicity);
+          }
+        })
+      );
+    }
+  }
+  hasPendingChanges() {
+    return this.pending.size > 0 || this.pendingActivity.size > 0;
+  }
+  flush() {
+    if (!this.hasPendingChanges()) return NO_FACADE_CHANGES;
+    const snapshot = this.snapshot();
+    const publications = [];
+    const newBaselines = [];
+    try {
+      for (const compilation of this.compilations) {
+        const activity = this.pendingActivity.get(compilation.edgeId);
+        const active = this.getActiveBuckets(compilation.edgeId);
+        for (const [bucketKey, multiplicity] of activity ?? []) {
+          if (multiplicity > 0 && !active.has(bucketKey)) {
+            active.add(bucketKey);
+            newBaselines.push(this.getEntry(compilation.edgeId, bucketKey));
+          }
+        }
+        const buckets = this.pending.get(compilation.edgeId);
+        for (const [bucketKey, changes] of buckets ?? []) {
+          const existing = this.entries.get(compilation.edgeId)?.get(bucketKey);
+          if (!active.has(bucketKey) && !existing) continue;
+          const entry = this.getEntry(compilation.edgeId, bucketKey);
+          const sync = entry.sync;
+          if (!sync || changes.size === 0) continue;
+          for (const change of changes.values()) {
+            this.prepareChange(entry, change);
+          }
+          this.beginWrite(
+            entry,
+            sync,
+            snapshot,
+            publications,
+            [...changes.values()].map(
+              ({ value: [publicKey] }) => publicKey
+            )
+          );
+          for (const change of changes.values()) {
+            this.applyChange(entry, sync, change, compilation.hasOrderBy);
+          }
+          sync.commit();
+        }
+        for (const [bucketKey, multiplicity] of activity ?? []) {
+          if (multiplicity >= 0) continue;
+          active.delete(bucketKey);
+          this.retireEntry(compilation.edgeId, bucketKey);
+        }
+      }
+    } catch (error) {
+      this.abort(snapshot, publications);
+      throw error;
+    }
+    const pending = this.pending;
+    const pendingActivity = this.pendingActivity;
+    this.pending = /* @__PURE__ */ new Map();
+    this.pendingActivity = /* @__PURE__ */ new Map();
+    let closed = false;
+    let prepared = false;
+    const prepare = () => {
+      if (closed || prepared) return;
+      prepared = true;
+      for (const entry of newBaselines) entry.sync?.markReady();
+    };
+    return {
+      prepare,
+      publish: () => {
+        if (closed) return;
+        prepare();
+        closed = true;
+        let publicationError;
+        for (const publication of publications) {
+          try {
+            publication.publish();
+          } catch (error) {
+            publicationError ??= { error };
+          }
+        }
+        this.retiredEntries.clear();
+        if (publicationError) throw publicationError.error;
+      },
+      rollback: () => {
+        if (closed || this.cleanedUp) return;
+        closed = true;
+        this.abort(snapshot, publications);
+        if (this.hasPendingChanges()) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Bucket facade received graph output between a flush and its rollback` : codedMessage(235)
+          );
+        }
+        this.pending = pending;
+        this.pendingActivity = pendingActivity;
+      }
+    };
+  }
+  resolve(value) {
+    return this.resolveValue(value);
+  }
+  cleanup() {
+    this.cleanedUp = true;
+    for (const byBucket of this.entries.values()) {
+      for (const entry of byBucket.values()) {
+        void entry.dispose();
+      }
+    }
+    this.entries.clear();
+    this.cleanupRetiredEntries();
+    this.pending.clear();
+    this.pendingActivity.clear();
+    this.activeBuckets.clear();
+  }
+  accumulate(edgeId, bucketKey, row, multiplicity) {
+    const buckets = getOrCreate(this.pending, edgeId, () => /* @__PURE__ */ new Map());
+    const rows = getOrCreate(buckets, bucketKey, () => /* @__PURE__ */ new Map());
+    const [publicKey] = row;
+    const key = serializeValue(publicKey);
+    const change = rows.get(key) ?? {
+      deletes: 0,
+      inserts: 0,
+      value: row
+    };
+    if (multiplicity < 0) {
+      change.deletes += -multiplicity;
+    } else if (multiplicity > 0) {
+      change.inserts += multiplicity;
+      change.value = row;
+    }
+    rows.set(key, change);
+  }
+  copyRows(entry) {
+    return [...entry.collection._state.acceptedSyncedEntries()].map(
+      ([key, value]) => ({ key, value, order: entry.order.get(value) })
+    );
+  }
+  snapshot() {
+    return {
+      activeBuckets: new Map(
+        [...this.activeBuckets].map(([edgeId, buckets]) => [
+          edgeId,
+          new Set(buckets)
+        ])
+      ),
+      entries: new Map(
+        [...this.entries].map(([edgeId, byBucket]) => [
+          edgeId,
+          new Map(byBucket)
+        ])
+      ),
+      rows: /* @__PURE__ */ new Map(),
+      written: /* @__PURE__ */ new Map()
+    };
+  }
+  /** Restore the facades, then discard their events even if restore throws. */
+  abort(snapshot, publications) {
+    try {
+      this.restore(snapshot);
+    } finally {
+      this.retiredEntries.clear();
+      for (const publication of publications) publication.discard();
+    }
+  }
+  restore(snapshot) {
+    const previousEntries = new Set(
+      [...snapshot.entries.values()].flatMap((byBucket) => [
+        ...byBucket.values()
+      ])
+    );
+    const currentEntries = new Set(
+      [...this.entries.values()].flatMap((byBucket) => [...byBucket.values()])
+    );
+    for (const [entry, rows] of snapshot.rows) {
+      if (!previousEntries.has(entry)) continue;
+      const sync = entry.sync;
+      if (!sync) continue;
+      const before = new Map(rows.map((row) => [row.key, row]));
+      if (!entry.collection._state.hasOpenSyncTransaction()) sync.begin();
+      for (const key of snapshot.written.get(entry)) {
+        const row = before.get(key);
+        if (!row) {
+          if (entry.collection._state.getAcceptedSyncedRow(key) !== void 0)
+            sync.write({ type: `delete`, key });
+          continue;
+        }
+        if (row.order !== void 0) entry.order.set(row.value, row.order);
+        sync.write({
+          type: entry.collection._state.getAcceptedSyncedRow(key) === void 0 ? `insert` : `update`,
+          value: row.value
+        });
+      }
+      sync.commit();
+    }
+    this.entries.clear();
+    for (const [edgeId, byBucket] of snapshot.entries) {
+      this.entries.set(edgeId, new Map(byBucket));
+    }
+    this.activeBuckets.clear();
+    for (const [edgeId, buckets] of snapshot.activeBuckets) {
+      this.activeBuckets.set(edgeId, new Set(buckets));
+    }
+    this.resolvedValues = /* @__PURE__ */ new WeakMap();
+    for (const entry of currentEntries) {
+      if (!previousEntries.has(entry)) void entry.dispose();
+    }
+  }
+  accumulateActivity(edgeId, bucketKey, multiplicity) {
+    const activity = getOrCreate(this.pendingActivity, edgeId, () => /* @__PURE__ */ new Map());
+    activity.set(bucketKey, (activity.get(bucketKey) ?? 0) + multiplicity);
+  }
+  getActiveBuckets(edgeId) {
+    return getOrCreate(this.activeBuckets, edgeId, () => /* @__PURE__ */ new Set());
+  }
+  /**
+   * Begin a facade write. Copy the facade's rows and defer its events before
+   * its first write in the flush, so a rollback reads only the facades the
+   * flush wrote.
+   */
+  beginWrite(entry, sync, snapshot, publications, keys) {
+    if (!snapshot.rows.has(entry)) {
+      snapshot.rows.set(entry, this.copyRows(entry));
+      snapshot.written.set(entry, /* @__PURE__ */ new Set());
+      publications.push(entry.collection._deferPublication());
+    }
+    for (const key of keys) snapshot.written.get(entry).add(key);
+    sync.begin();
+  }
+  retireEntry(edgeId, bucketKey) {
+    const byBucket = this.entries.get(edgeId);
+    const entry = byBucket?.get(bucketKey);
+    if (!entry) return;
+    if (!entry.collection._state.acceptedSyncedEntries().next().done) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Bucket facade retired with rows the graph did not retract` : codedMessage(240)
+      );
+    }
+    byBucket.delete(bucketKey);
+    if (byBucket.size === 0) this.entries.delete(edgeId);
+    const retired = getOrCreate(this.retiredEntries, edgeId, () => /* @__PURE__ */ new Map());
+    retired.set(bucketKey, entry);
+  }
+  getEntry(edgeId, bucketKey) {
+    const byBucket = getOrCreate(this.entries, edgeId, () => /* @__PURE__ */ new Map());
+    const existing = byBucket.get(bucketKey);
+    if (existing) return existing;
+    const order = /* @__PURE__ */ new WeakMap();
+    let sync;
+    const collection = createCollection({
+      id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
+      getKey: (row) => {
+        const key = row?.$key;
+        if (typeof key !== `string` && typeof key !== `number`) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Bucket facade row has no public key` : codedMessage(146)
+          );
+        }
+        return key;
+      },
+      compare: (left, right) => {
+        const leftOrder = order.get(left);
+        const rightOrder = order.get(right);
+        if (leftOrder === rightOrder) return 0;
+        if (leftOrder === void 0) return 1;
+        if (rightOrder === void 0) return -1;
+        return leftOrder < rightOrder ? -1 : 1;
+      },
+      sync: {
+        rowUpdateMode: `full`,
+        sync: (methods) => {
+          sync = methods;
+          return () => {
+            sync = void 0;
+          };
+        }
+      },
+      startSync: true,
+      gcTime: 0
+    });
+    const dispose = () => collection._lifecycle.cleanup();
+    collection.cleanup = () => Promise.reject(
+      new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `A live query's child collection cannot be cleaned up directly. Clean up the live query instead.` : codedMessage(241)
+      )
+    );
+    const entry = {
+      collection,
+      dispose,
+      get sync() {
+        return sync;
+      },
+      order
+    };
+    byBucket.set(bucketKey, entry);
+    return entry;
+  }
+  applyChange(entry, sync, change, hasOrderBy) {
+    const [publicKey, value, nextOrder] = change.value;
+    const key = publicKey;
+    if (change.deletes > change.inserts) {
+      sync.write({ type: `delete`, key });
+      return;
+    }
+    const accepted = entry.collection._state.getAcceptedSyncedRow(key);
+    const present = accepted !== void 0;
+    if (change.inserts === change.deletes && !present) return;
+    const orderChanged = present && entry.order.get(accepted) !== nextOrder;
+    const row = { ...this.resolve(value), $key: key };
+    if (nextOrder !== void 0) entry.order.set(row, nextOrder);
+    sync.write({ type: present ? `update` : `insert`, value: row });
+    if (hasOrderBy && orderChanged) sync.collection._markLayoutChange();
+  }
+  /** Resolve and validate every public key before opening a sync transaction. */
+  prepareChange(entry, change) {
+    const [publicKey, value] = change.value;
+    this.resolve(value);
+    entry.collection.getKeyFromItem({ $key: publicKey });
+  }
+  resolveValue(value) {
+    if (value === null || typeof value !== `object`) return value;
+    const cached = this.resolvedValues.get(value);
+    if (cached !== void 0) return cached;
+    if (isBucketFacadeRef(value)) {
+      const { edgeId, bucketKey } = value[BUCKET_FACADE_REF];
+      const facade = this.entries.get(edgeId)?.get(bucketKey)?.collection ?? this.retiredEntries.get(edgeId)?.get(bucketKey)?.collection ?? this.getEntry(edgeId, bucketKey).collection;
+      this.resolvedValues.set(value, facade);
+      return facade;
+    }
+    if (Array.isArray(value) || isPlainObject(value)) {
+      const result = transformPublicContainers(
+        value,
+        (leaf) => isBucketFacadeRef(leaf) ? this.resolveValue(leaf) : leaf,
+        PRIVATE_RESULT_KEYS
+      );
+      this.resolvedValues.set(value, result);
+      return result;
+    }
+    return value;
+  }
+  cleanupRetiredEntries() {
+    for (const byBucket of this.retiredEntries.values()) {
+      for (const entry of byBucket.values()) {
+        void entry.dispose();
+      }
+    }
+    this.retiredEntries.clear();
+  }
+}
+function isBucketFacadeRef(value) {
+  return value !== null && typeof value === `object` && BUCKET_FACADE_REF in value;
+}

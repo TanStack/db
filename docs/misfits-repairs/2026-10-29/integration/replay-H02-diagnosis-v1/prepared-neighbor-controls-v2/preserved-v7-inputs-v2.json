@@ -1,0 +1,26 @@
+{
+  "productionFiles": 511,
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "oldSharedInputs": 11,
+  "unchangedSharedJudgment": true,
+  "archivedPackets": {
+    "prepared-current-main-v7": {
+      "members": 62,
+      "bytes": 707085,
+      "manifestSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+      "allMembersRehashed": true
+    },
+    "canonical-current-main-v7": {
+      "members": 1951,
+      "bytes": 43192185,
+      "manifestSha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+      "allMembersRehashed": true
+    }
+  },
+  "ownerModelAndGrammarByteIdentical": {
+    "modelReacquisition": "0ce8bca5de51872277fe55aa0882b0847a879d46215262cd508e25f0f0185d4d",
+    "reacquisitionHistories": "a5057147b67add7132825d7dae83ecb0fa70acff13ba4677f71fa53dbc7c8111"
+  },
+  "modelAndGrammarBodiesUnchanged": true,
+  "generatedRunBudgetsUnchanged": true
+}

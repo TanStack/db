@@ -1,0 +1,7 @@
+const pooledSources = /* @__PURE__ */ new WeakMap();
+export function registerPooledSource(view, source) {
+  pooledSources.set(view, source);
+}
+export function getPooledLiveQuerySource(value) {
+  return typeof value === `object` && value !== null ? pooledSources.get(value) : void 0;
+}

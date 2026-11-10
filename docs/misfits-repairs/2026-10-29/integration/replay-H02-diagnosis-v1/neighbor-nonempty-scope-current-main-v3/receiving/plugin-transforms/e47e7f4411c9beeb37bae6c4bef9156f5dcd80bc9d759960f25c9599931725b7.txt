@@ -1,0 +1,774 @@
+import { registerOpaqueHash } from "@tanstack/db-ivm";
+import { safeRandomUUID } from "../utils/uuid";
+import { collectionOptionsClaim } from "../collection-options.js";
+import {
+  CollectionConfigurationError,
+  CollectionHasSubscribersError,
+  CollectionRequiresConfigError,
+  CollectionRequiresSyncConfigError
+} from "../errors";
+import { codedMessage, devBuild } from "../error-message";
+import { getBuilderFromConfig } from "../query/live/collection-registry.js";
+import { validateCollectionConfig } from "./validate-config";
+import { currentStateAsChanges } from "./change-events";
+import { CollectionStateManager } from "./state";
+import { CollectionChangesManager } from "./changes";
+import { CollectionLifecycleManager } from "./lifecycle.js";
+import { CollectionSyncManager } from "./sync";
+import { CollectionIndexesManager } from "./indexes";
+import { CollectionMutationsManager } from "./mutations";
+import { CollectionEventsManager } from "./events.js";
+import { buildHealthTree } from "./health-tree.js";
+export { findProblems } from "./health-tree.js";
+const collectionSyncConfigFactory = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionSyncConfig.factory`
+);
+const collectionSyncConfigCleanup = /* @__PURE__ */ Symbol.for(
+  `@tanstack/db.collectionSyncConfig.cleanup`
+);
+export function withCollectionSyncConfigFactory(sync, factory) {
+  Object.defineProperty(sync, collectionSyncConfigFactory, {
+    value: factory,
+    // Preserve the hook when callers wrap a sync config with object spread.
+    enumerable: true
+  });
+  return sync;
+}
+export function withCollectionSyncConfigCleanup(sync, cleanup) {
+  Object.defineProperty(sync, collectionSyncConfigCleanup, {
+    value: cleanup,
+    enumerable: false
+  });
+  return sync;
+}
+function materializeCollectionSyncConfig(sync, utilities, startSyncIfIdle) {
+  const factory = sync[collectionSyncConfigFactory];
+  if (!factory) return { sync, utilities };
+  const ownedUtilities = Object.create(
+    Object.getPrototypeOf(utilities),
+    Object.getOwnPropertyDescriptors(utilities)
+  );
+  return {
+    sync: factory(sync, ownedUtilities, startSyncIfIdle),
+    utilities: ownedUtilities
+  };
+}
+function cleanupCollectionSyncConfig(sync) {
+  const cleanup = sync[collectionSyncConfigCleanup];
+  cleanup?.();
+}
+export function createCollection(options) {
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
+    validateCollectionConfig(options);
+  }
+  const claimOptions = options[collectionOptionsClaim];
+  return constructWithClaim(options, claimOptions?.());
+}
+function constructWithClaim(options, releaseClaim) {
+  try {
+    return new CollectionImpl(options);
+  } catch (error) {
+    releaseClaim?.();
+    throw error;
+  }
+}
+export class CollectionImpl {
+  /**
+   * Creates a new Collection instance
+   *
+   * @param config - Configuration object for the collection
+   * @throws Error if sync config is missing
+   */
+  constructor(config) {
+    // Utilities namespace
+    // This is populated by createCollection
+    this.utils = {};
+    /**
+     * When set, collection consumers should defer processing incoming data
+     * refreshes until this promise resolves. This prevents stale data from
+     * overwriting optimistic state while pending writes are being applied.
+     */
+    this.deferDataRefresh = null;
+    /**
+     * Inserts one or more items into the collection
+     * @param items - Single item or array of items to insert
+     * @param config - Optional configuration including metadata
+     * @returns A Transaction object representing the insert operation(s)
+     * @throws {SchemaValidationError} If the data fails schema validation
+     * @example
+     * // Insert a single todo (requires onInsert handler)
+     * const tx = collection.insert({ id: "1", text: "Buy milk", completed: false })
+     * await tx.when('settled')
+     *
+     * @example
+     * // Insert multiple todos at once
+     * const tx = collection.insert([
+     *   { id: "1", text: "Buy milk", completed: false },
+     *   { id: "2", text: "Walk dog", completed: true }
+     * ])
+     * await tx.when('settled')
+     *
+     * @example
+     * // Insert with metadata
+     * const tx = collection.insert({ id: "1", text: "Buy groceries" },
+     *   { metadata: { source: "mobile-app" } }
+     * )
+     * await tx.when('settled')
+     *
+     * @example
+     * // Handle errors
+     * try {
+     *   const tx = collection.insert({ id: "1", text: "New item" })
+     *   await tx.when('settled')
+     *   console.log('Insert successful')
+     * } catch (error) {
+     *   console.log('Insert failed:', error)
+     * }
+     */
+    this.insert = (data, config) => {
+      return this._mutations.insert(data, config);
+    };
+    /**
+     * Deletes one or more items from the collection
+     * @param keys - Single key or array of keys to delete
+     * @param config - Optional configuration including metadata
+     * @returns A Transaction object representing the delete operation(s)
+     * @example
+     * // Delete a single item
+     * const tx = collection.delete("todo-1")
+     * await tx.when('settled')
+     *
+     * @example
+     * // Delete multiple items
+     * const tx = collection.delete(["todo-1", "todo-2"])
+     * await tx.when('settled')
+     *
+     * @example
+     * // Delete with metadata
+     * const tx = collection.delete("todo-1", { metadata: { reason: "completed" } })
+     * await tx.when('settled')
+     *
+     * @example
+     * // Handle errors
+     * try {
+     *   const tx = collection.delete("item-1")
+     *   await tx.when('settled')
+     *   console.log('Delete successful')
+     * } catch (error) {
+     *   console.log('Delete failed:', error)
+     * }
+     */
+    this.delete = (keys, config) => {
+      return this._mutations.delete(keys, config);
+    };
+    if (!config) {
+      throw new CollectionRequiresConfigError();
+    }
+    if (!config.sync) {
+      throw new CollectionRequiresSyncConfigError();
+    }
+    if (config.id) {
+      this.id = config.id;
+    } else {
+      this.id = safeRandomUUID();
+    }
+    const { sync: collectionSync, utilities: collectionUtils } = materializeCollectionSyncConfig(
+      config.sync,
+      config.utils ?? {},
+      () => {
+        if (this._lifecycle.status === `idle`) this._sync.startSync();
+      }
+    );
+    this.config = {
+      ...config,
+      sync: collectionSync,
+      autoIndex: config.autoIndex ?? `off`,
+      utils: collectionUtils
+    };
+    this.utils = collectionUtils;
+    if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
+      throw new CollectionConfigurationError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `autoIndex: 'eager' requires defaultIndexType to be set. Import an index type and set it:
+  import { BasicIndex } from '@tanstack/db'
+  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })` : codedMessage(206)
+      );
+    }
+    registerOpaqueHash(this);
+    this._changes = new CollectionChangesManager();
+    this._events = new CollectionEventsManager();
+    this._indexes = new CollectionIndexesManager();
+    this._lifecycle = new CollectionLifecycleManager(
+      this.config,
+      this.id,
+      () => cleanupCollectionSyncConfig(this.config.sync)
+    );
+    this._mutations = new CollectionMutationsManager(this.config, this.id);
+    this._state = new CollectionStateManager(this.config);
+    this._sync = new CollectionSyncManager(this.config, this.id);
+    this.comparisonOpts = buildCompareOptionsFromConfig(config);
+    this._changes.setDeps({
+      collection: this,
+      // Required for passing to CollectionSubscription
+      lifecycle: this._lifecycle,
+      sync: this._sync,
+      events: this._events,
+      state: this._state
+      // Required for enriching changes with virtual properties
+    });
+    this._events.setDeps({
+      collection: this
+      // Required for adding to emitted events
+    });
+    this._indexes.setDeps({
+      state: this._state,
+      lifecycle: this._lifecycle,
+      defaultIndexType: config.defaultIndexType,
+      events: this._events
+    });
+    this._lifecycle.setDeps({
+      changes: this._changes,
+      events: this._events,
+      indexes: this._indexes,
+      state: this._state,
+      sync: this._sync
+    });
+    this._mutations.setDeps({
+      collection: this,
+      // Required for passing to config.onInsert/onUpdate/onDelete and annotating mutations
+      lifecycle: this._lifecycle,
+      state: this._state
+    });
+    this._state.setDeps({
+      collection: this,
+      // Required for filtering events to only include this collection
+      lifecycle: this._lifecycle,
+      changes: this._changes,
+      indexes: this._indexes,
+      events: this._events
+    });
+    this._sync.setDeps({
+      collection: this,
+      // Required for passing to config.sync callback
+      state: this._state,
+      lifecycle: this._lifecycle,
+      events: this._events
+    });
+    if (config.startSync === true) {
+      this._sync.startSync();
+    }
+  }
+  /**
+   * Gets the current status of the collection
+   */
+  get status() {
+    return this._lifecycle.status;
+  }
+  /**
+   * The health tree for this Collection and every Collection it depends on.
+   * A base Collection's tree is one node. It always has the same shape for a
+   * given query, so apps can parse it. After the first ready, sync problems
+   * appear here and the rows stay.
+   */
+  get health() {
+    return buildHealthTree(this);
+  }
+  /** @internal A Collection this one depends on changed its health tree. */
+  _emitHealthChange() {
+    this._events.emitHealthChange();
+  }
+  /**
+   * Get the number of subscribers that ask for this collection's data. A live
+   * query that has no subscriber or preload of its own does not count.
+   */
+  get subscriberCount() {
+    return this._changes.acquiringSubscribersCount;
+  }
+  /**
+   * Monotonic revision of the collection's visible state; advances once per
+   * committed batch of changes and cleanup, even while nothing is subscribed.
+   * Internal — used by the live-query observer's snapshot cache.
+   */
+  get _stateRevision() {
+    return this._changes.stateRevision;
+  }
+  /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  get _layoutRevision() {
+    return this._changes.layoutRevision;
+  }
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  _subscribeLayoutChanges(listener) {
+    return this._changes.subscribeLayoutChanges(listener);
+  }
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  _markLayoutChange() {
+    this._sync.markLayoutChange();
+  }
+  /** Defer subscriber events until a coherent multi-Collection commit ends. */
+  _deferPublication() {
+    return this._changes.deferPublication();
+  }
+  /**
+   * Register a callback to be executed when the collection first becomes ready
+   * Useful for preloading collections
+   * Every callback queued before the transition runs. Because ready state is
+   * established first, callbacks registered during or after delivery run
+   * immediately. If one throws, the collection remains ready. Direct sync
+   * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
+   * @param callback Function to call when the collection first becomes ready
+   * @example
+   * collection.onFirstReady(() => {
+   *   console.log('Collection is ready for the first time')
+   *   // Safe to access collection.state now
+   * })
+   */
+  onFirstReady(callback) {
+    return this._lifecycle.onFirstReady(callback);
+  }
+  /**
+   * Check if the collection is ready for use
+   * Returns true if the collection has been marked as ready by its sync implementation
+   * @returns true if the collection is ready, false otherwise
+   * @example
+   * if (collection.isReady()) {
+   *   console.log('Collection is ready, data is available')
+   *   // Safe to access collection.state
+   * } else {
+   *   console.log('Collection is still loading')
+   * }
+   */
+  isReady() {
+    return this._lifecycle.status === `ready`;
+  }
+  /**
+   * Check if the collection is currently loading more data
+   * @returns true if the collection has pending load more operations, false otherwise
+   */
+  get isLoadingSubset() {
+    return this._sync.isLoadingSubset;
+  }
+  /**
+   * Start sync immediately - internal method for compiled queries
+   * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
+   */
+  startSyncImmediate() {
+    this._sync.startSync();
+  }
+  /** @internal Subscribe to the synchronous cleanup-start boundary. */
+  _onCleanupStart(callback) {
+    return this._lifecycle.onCleanupStart(callback);
+  }
+  /** @internal */
+  _setTransactionScope(transactionScope) {
+    this._mutations.setTransactionScope(transactionScope);
+  }
+  /** @internal */
+  _hasHydratedKey(key) {
+    return this._state.hydratedKeys.has(key);
+  }
+  /** @internal */
+  _deferSyncStart() {
+    return this._sync.deferStart();
+  }
+  /** @internal */
+  _resumeSyncStart() {
+    this._sync.resumeStart();
+  }
+  /**
+   * Preload the collection data by starting sync if not already started
+   * Multiple concurrent calls will share the same promise
+   */
+  preload() {
+    return this.afterPreloadMark(() => this._sync.preload());
+  }
+  // Records a request for data, then continues. A source whose start throws
+  // on resumption rejects the returned promise instead of throwing.
+  afterPreloadMark(next) {
+    try {
+      this._markPreload();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return next();
+  }
+  /**
+   * @internal Record a preload without starting one, for a caller whose data
+   * request another promise answers, such as a DbClient stream for the same
+   * query. The request still counts: deferred acquisition may now resume.
+   */
+  _markPreload() {
+    this._changes.markSubscriberOrPreload();
+  }
+  /** @internal Whether this Collection had a subscriber or a preload in this sync run. */
+  _hasSubscriberOrPreload() {
+    return this._changes.hasSubscriberOrPreload();
+  }
+  /** @internal Listen for the first subscriber or preload in this sync run. */
+  _onFirstSubscriberOrPreload(listener) {
+    return this._changes.onFirstSubscriberOrPreload(listener);
+  }
+  /**
+   * The exposed authoritative base rows, before optimistic writes are applied.
+   * Queued sync writes are excluded. Reading does not start sync.
+   * Do not mutate the backing map or its rows: that bypasses publication.
+   */
+  get base() {
+    return this._state.syncedData;
+  }
+  /**
+   * Get the current value for a key (virtual derived state)
+   */
+  get(key) {
+    return this._state.getWithVirtualProps(key);
+  }
+  /**
+   * Check if a key exists in the collection (virtual derived state)
+   */
+  has(key) {
+    return this._state.has(key);
+  }
+  /** Maximum number of source rows whose visible projection a local write can hide. */
+  _optimisticOverlaySize() {
+    return this._state.optimisticDeletes.size + this._state.optimisticUpserts.size;
+  }
+  /** Whether a local write obscures this key's authoritative source row. */
+  _hasOptimisticOverlay(key) {
+    return this._state.optimisticDeletes.has(key) || this._state.optimisticUpserts.has(key);
+  }
+  /** Whether an accepted sync transaction is not yet visible. */
+  _hasHeldSyncTransaction() {
+    return this._state.hasHeldSyncTransaction();
+  }
+  /**
+   * Get the current size of the collection (cached)
+   */
+  get size() {
+    return this._state.size;
+  }
+  /**
+   * Get all keys (virtual derived state)
+   */
+  *keys() {
+    yield* this._state.keys();
+  }
+  /**
+   * Get all values (virtual derived state)
+   */
+  *values() {
+    for (const key of this._state.keys()) {
+      const value = this.get(key);
+      if (value !== void 0) {
+        yield value;
+      }
+    }
+  }
+  /**
+   * Get all entries (virtual derived state)
+   */
+  *entries() {
+    for (const key of this._state.keys()) {
+      const value = this.get(key);
+      if (value !== void 0) {
+        yield [key, value];
+      }
+    }
+  }
+  /**
+   * Get all entries (virtual derived state)
+   */
+  *[Symbol.iterator]() {
+    yield* this.entries();
+  }
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  forEach(callbackfn) {
+    let index = 0;
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++);
+    }
+  }
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  map(callbackfn) {
+    const result = [];
+    let index = 0;
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++));
+    }
+    return result;
+  }
+  getKeyFromItem(item) {
+    return this.config.getKey(item);
+  }
+  /**
+   * Creates an index on a collection for faster queries.
+   * Indexes significantly improve query performance by allowing constant time lookups
+   * and logarithmic time range queries instead of full scans.
+   *
+   * @param indexCallback - Function that extracts the indexed value from each item
+   * @param config - Configuration including index type and type-specific options
+   * @returns The created index
+   *
+   * @example
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db'
+   *
+   * // Create an index with explicit type
+   * const ageIndex = collection.createIndex((row) => row.age, {
+   *   indexType: BasicIndex
+   * })
+   *
+   * // Create an index with collection's default type
+   * const nameIndex = collection.createIndex((row) => row.name)
+   * ```
+   */
+  createIndex(indexCallback, config = {}) {
+    return this._indexes.createIndex(indexCallback, config);
+  }
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   *
+   * Best-effort semantics: removing an index guarantees it is detached from
+   * collection query planning. Existing index proxy references should be treated
+   * as invalid after removal.
+   */
+  removeIndex(indexOrId) {
+    return this._indexes.removeIndex(indexOrId);
+  }
+  /**
+   * Returns a snapshot of current index metadata sorted by indexId.
+   * Persistence wrappers can use this to bootstrap index state if indexes were
+   * created before event listeners were attached.
+   */
+  getIndexMetadata() {
+    return this._indexes.getIndexMetadataSnapshot();
+  }
+  /**
+   * Get resolved indexes for query optimization
+   */
+  get indexes() {
+    return this._indexes.indexes;
+  }
+  /**
+   * Validates the data against the schema
+   */
+  validateData(data, type, key) {
+    return this._mutations.validateData(data, type, key);
+  }
+  get compareOptions() {
+    return { ...this.comparisonOpts };
+  }
+  update(keys, configOrCallback, maybeCallback) {
+    return this._mutations.update(keys, configOrCallback, maybeCallback);
+  }
+  /**
+   * Gets the current state of the collection as a Map
+   * @returns Map containing all items in the collection, with keys as identifiers
+   * @example
+   * const itemsMap = collection.state
+   * console.log(`Collection has ${itemsMap.size} items`)
+   *
+   * for (const [key, item] of itemsMap) {
+   *   console.log(`${key}: ${item.title}`)
+   * }
+   *
+   * // Check if specific item exists
+   * if (itemsMap.has("todo-1")) {
+   *   console.log("Todo 1 exists:", itemsMap.get("todo-1"))
+   * }
+   */
+  get state() {
+    const result = /* @__PURE__ */ new Map();
+    for (const [key, value] of this.entries()) {
+      result.set(key, value);
+    }
+    return result;
+  }
+  /**
+   * Gets the current state of the collection as a Map once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
+   *
+   * @returns Promise that resolves to a Map containing all items in the collection
+   */
+  stateWhenReady() {
+    return this.preload().then(() => this.state);
+  }
+  /**
+   * Gets the current state of the collection as an Array
+   *
+   * @returns An Array containing all items in the collection
+   */
+  get toArray() {
+    return Array.from(this.values());
+  }
+  /**
+   * Gets the current state of the collection as an Array once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
+   *
+   * @returns Promise that resolves to an Array containing all items in the collection
+   */
+  toArrayWhenReady() {
+    return this.preload().then(() => this.toArray);
+  }
+  /**
+   * Returns the current state of the collection as an array of changes
+   * @param options - Options including optional where filter
+   * @returns An array of changes
+   * @example
+   * // Get all items as changes
+   * const allChanges = collection.currentStateAsChanges()
+   *
+   * // Get only items matching a condition
+   * const activeChanges = collection.currentStateAsChanges({
+   *   where: (row) => row.status === 'active'
+   * })
+   *
+   * // Get only items using a pre-compiled expression
+   * const activeChanges = collection.currentStateAsChanges({
+   *   whereExpression: eq(row.status, 'active')
+   * })
+   */
+  currentStateAsChanges(options = {}) {
+    return currentStateAsChanges(
+      this,
+      options,
+      (prefilter) => this._state.entriesPassing(prefilter)
+    );
+  }
+  subscribeChanges(callback, options = {}) {
+    return this._changes.subscribeChanges(
+      (changes) => callback(changes),
+      options
+    );
+  }
+  /**
+   * Subscribe to a collection event
+   */
+  on(event, callback) {
+    return this._events.on(event, callback);
+  }
+  /**
+   * Subscribe to a collection event once
+   */
+  once(event, callback) {
+    return this._events.once(event, callback);
+  }
+  /**
+   * Unsubscribe from a collection event
+   */
+  off(event, callback) {
+    this._events.off(event, callback);
+  }
+  /**
+   * Wait for a collection event
+   */
+  waitFor(event, timeout) {
+    return this._events.waitFor(event, timeout);
+  }
+  /**
+   * Start a new sync run while everything visible stays: the rows, the
+   * status, and the current error, with `reloading` on this Collection's
+   * health node. The new run's writes apply on the kept rows; its snapshot
+   * (`begin({ snapshot: true })`) or truncate replaces them at once. The
+   * reload completes when that replacement applies, or at the new run's
+   * `markReady()`, and the node drops the old run's problems; a `status` of
+   * `error` becomes `ready` at `markReady()`. If the new run fails first, the
+   * rows and status stay and the node shows the new error. On a live query, it reloads each of its sources that has an
+   * `error`, and then the query itself if its own node has an `error`: a
+   * failed first load or a failed request for more data.
+   *
+   * Returns the promise of a reload in flight when called again. Rejects on a
+   * `crashed` Collection: a crash is not recovered in place. Clean the
+   * Collection up with its dependents to start it fresh.
+   */
+  reload() {
+    const builder = getBuilderFromConfig(this.config);
+    return builder ? builder.reload(this) : this._sync.reload();
+  }
+  /**
+   * Live queries, Effects, and direct subscriptions that read this
+   * Collection. `cleanup()` refuses while a live query or Effect reads it.
+   */
+  get subscribers() {
+    const dependents = /* @__PURE__ */ new Set();
+    for (const subscription of this._changes.changeSubscriptions) {
+      dependents.add(
+        subscription.owner ?? {
+          kind: `subscription`,
+          active: true,
+          end: () => {
+            subscription.unsubscribe();
+            return Promise.resolve();
+          }
+        }
+      );
+    }
+    return [...dependents];
+  }
+  /**
+   * Clean up the collection by stopping sync and clearing data
+   * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync run. If adapter
+   * cleanup rejects, this promise rejects after the Collection reaches its
+   * final cleaned-up state.
+   *
+   * Rejects with `CollectionHasSubscribersError` while an active live query
+   * (one that still has a subscriber) or an Effect reads this Collection,
+   * because its readers would lose their data. A live query nothing reads
+   * any more ends with this Collection's cleanup start. With
+   * `{ dependents: true }`, it first cleans up each live query (and its own
+   * dependents) and disposes each Effect. A direct subscription survives
+   * cleanup and asks for data again when a new sync run starts.
+   */
+  cleanup(options) {
+    const dependents = this.subscribers.filter(
+      (dependent) => dependent.kind !== `subscription`
+    );
+    if (!options?.dependents) {
+      const active = dependents.filter((dependent) => dependent.active);
+      if (active.length > 0) {
+        return Promise.reject(
+          new CollectionHasSubscribersError(this.id, active.length)
+        );
+      }
+      return this._lifecycle.cleanup();
+    }
+    const ended = dependents.map(async (dependent) => dependent.end());
+    return Promise.allSettled([this._lifecycle.cleanup(), ...ended]).then(
+      (results) => {
+        for (const result of results) {
+          if (result.status === `rejected`) throw result.reason;
+        }
+      }
+    );
+  }
+}
+function buildCompareOptionsFromConfig(config) {
+  const options = config.defaultStringCollation;
+  if (!options) {
+    return { stringSort: `locale` };
+  }
+  if (options.stringSort === `lexical`) {
+    return { stringSort: `lexical` };
+  }
+  if (options.stringSort === `custom`) {
+    return { stringSort: `custom`, compare: options.compare };
+  }
+  return {
+    stringSort: `locale`,
+    ...`locale` in options && options.locale !== void 0 && { locale: options.locale },
+    ...`localeOptions` in options && options.localeOptions !== void 0 && {
+      localeOptions: options.localeOptions
+    }
+  };
+}

@@ -1,0 +1,22 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'
+H02 inert native selection {
+  name: 'ordinary synchronous mutation cut',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'"
+}
+
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication'
+ ↓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut' 1ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  00:31:51
+   Duration  134ms (transform 11ms, setup 0ms, import 17ms, tests 1ms, environment 0ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/selected-4.report.json

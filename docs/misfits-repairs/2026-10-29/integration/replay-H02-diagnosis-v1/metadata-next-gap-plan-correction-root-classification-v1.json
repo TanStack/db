@@ -1,0 +1,18 @@
+{
+  "kind": "Root acceptance of F01 source-plan correction",
+  "review": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-authored-q2-and-F01-independent-review-v1.md",
+    "sha256": "1873346d04543d631086c875433c8987fc9850b0d0575ffaeae4035d7b94ed3c"
+  },
+  "correction": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/correction-freeze.json",
+    "sha256": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4"
+  },
+  "disposition": "F01 corrected at source-plan level only",
+  "fullCurrentFour": "Expected first divergence is ordinary preceding-public-value assertion; no metadata-comparator invocation credit",
+  "omissionFour": "Shared metadata delta checkpoint remains predicted; actual mutant evidence required",
+  "firstDivergencePreserved": true,
+  "actualMutantCredit": false,
+  "classClosure": false,
+  "canonicalImport": false
+}

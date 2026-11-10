@@ -1,0 +1,46 @@
+--- prior/launch.py
++++ successor/launch.py
+@@ -1,7 +1,8 @@
+ """One exact primary-pagination command; importing defines functions only.
+ 
+-Reuse the frozen native-list run_one supervisor unchanged. Only its output
+-qualifier and cleared environment are configured for this exact Vitest run.
++Reuse the threshold-only 2-GiB successor of the frozen native-list run_one
++supervisor. Process control is unchanged; its output qualifier and cleared
++environment are configured for this exact Vitest run.
+ Child nonzero remains outer nonzero and requires independent assertion review.
+ """
+ import hashlib
+@@ -59,12 +60,12 @@
+     for name, expected in binding['files'].items():
+         require(Path(name).name == name and digest(HERE / name) == expected,
+                 f'preparation source changed: {name}')
+-    for key in ['supervisor', 'proposedCommand', 'sourceFreeze', 'ps']:
++    for key in ['supervisor', 'proposedCommand', 'sourceFreeze', 'ps', 'toolchainRecovery']:
+         item = binding[key]
+         require(digest(item['path']) == item['sha256'], f'{key} changed')
+     source = read_json(binding['sourceFreeze']['path'])
+     worktree = Path(source['worktree'])
+-    require(len(source['sourceBindings']) == 595, 'source binding count changed')
++    require(len(source['sourceBindings']) == 596, 'source binding count changed')
+     for name, expected in source['sourceBindings'].items():
+         require(digest(worktree / name) == expected, f'active source changed: {name}')
+     for name, expected in source['sourceCopies'].items():
+@@ -114,7 +115,7 @@
+     require(recipe['presentationArgs'] == ['--reporter=default', '--reporter=json',
+             '--outputFile.json=' + recipe['expectedOutput']['path']], 'reporter adaptation changed')
+     require(recipe['outerWallContainmentMs'] == 30000 and
+-            recipe['groupRssContainmentBytes'] == 1073741824, 'containment changed')
++            recipe['groupRssContainmentBytes'] == 2147483648, 'containment changed')
+     require(recipe['environment'] == dict(proposal['environment'], CI='1', NO_COLOR='1'),
+             'environment adaptation changed')
+     require(recipe['maxWorkers'] == 1 and not recipe['fileParallelism'], 'concurrency changed')
+@@ -122,7 +123,7 @@
+     for key in ['stdoutPath', 'stderrPath']:
+         require(Path(recipe[key]).parent == out, 'log escaped exact output')
+     require(Path(recipe['expectedOutput']['path']).parent == out, 'report escaped exact output')
+-    return binding, recipe, {'sourceFiles': 595, 'copiedSources': len(source['sourceCopies']),
++    return binding, recipe, {'sourceFiles': 596, 'copiedSources': len(source['sourceCopies']),
+                             'namedPackageRoots': len(seen), 'namedPackagePayloads': payloads,
+                             'sourceFreezeSha256': binding['sourceFreeze']['sha256'],
+                             'nodeSha256': source['node']['sha256']}

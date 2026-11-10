@@ -1,0 +1,1153 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"insert","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"update","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":false,"operation":"delete","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"insert","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"update","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"none","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"refetch","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"legacy-disable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"write","outcome":"fulfilled","returned":"legacy-enable"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"none","outcome":"reject-before-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"none","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"refetch","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > mutation outcome and confirmation > refreshes only when the handler requests it: {"adapter":"query","peer":true,"operation":"delete","confirmation":"write","outcome":"reject-after-write","returned":"void"}
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > rejects post-handler wrong observation: early-receipt
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > rejects post-handler wrong observation: partial-rows
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > rejects post-handler wrong observation: stale-waiter
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'insert' rejection:false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'insert' rejection:true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'update' rejection:false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'update' rejection:true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'delete' rejection:false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > refetch application after handler exit > waits for later application after handler 'delete' rejection:true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps an accepted empty-diff result pending until application
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > retains separate outcomes for a retired caller and its successor
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a fetch-boundary-only wrong-result control
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects illegal explicit-refetch model histories
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a suppressed fetch failure pending for its accepted application
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > excludes unrelated background applications from a refetch call
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves the result slot of a Query removed during refetch startup
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects fail-fast while an independent application remains pending
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a handler call that resolves before its Query fetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves every direct handler identity legacy replay coordinate
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects handler identity wrong-result controls
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > resolves a refetch with no tracked Query results
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > applies a successful on-demand refetch without Query listeners
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > skips a snapshotted Query removed while an earlier refetch starts
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a suppressed fetch failure at the fetch boundary while a mutation persists
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > waits for every Query result and preserves tracked-key order
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not adopt a background application from the same Query
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects before an independent accepted application settles
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'changed' accepted result at fetch and applies it after mutation
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'empty-diff' accepted result at fetch and applies it after mutation
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an eager refetch at fetch while another collection refetches
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch at fetch with 'mutation-first' overlap (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch at fetch with 'refresh-first-during-fetch' overlap (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch at fetch with 'mutation-first' overlap (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch at fetch with 'refresh-first-during-fetch' overlap (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch when mutation starts during persisted application preparation (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an external refetch when mutation starts during persisted application preparation (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a call-entry-only boundary mutant for refresh-first overlap
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves every mutation refresh legacy replay coordinate
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'manual-transaction' refetch at the fetch boundary (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'manual-transaction' refetch at the fetch boundary (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'optimistic-action' refetch at the fetch boundary (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a 'optimistic-action' refetch at the fetch boundary (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a captured handler Collection refetch at the fetch boundary (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a captured handler Collection refetch at the fetch boundary (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not schedule Collection work for a foreign Query
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not defer reverted fetch record retirement to a successor fetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'insert' handler identity through 'parameter' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'insert' handler identity through 'parameter' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'insert' handler identity through 'mutation-alias' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'insert' handler identity through 'mutation-alias' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'update' handler identity through 'parameter' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'update' handler identity through 'parameter' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'update' handler identity through 'mutation-alias' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'update' handler identity through 'mutation-alias' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'delete' handler identity through 'parameter' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'delete' handler identity through 'parameter' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'delete' handler identity through 'mutation-alias' refetch (legacy replay: 'refetch')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > preserves 'delete' handler identity through 'mutation-alias' refetch (legacy replay: 'clearError')
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an application failure with throwOnError=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles an application failure with throwOnError=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > records a handler-phase application failure after fetch settlement
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects silent fulfillment in the public result-settlement checker
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > fulfills a public refetch after applying a valid empty result
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a same-result reentrant $receiptOutcome receipt attached to its refetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a same-result reentrant $receiptOutcome receipt attached to its refetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a public refetch whose successful Query result has an invalid 'non-array' shape, throwOnError=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a public refetch whose successful Query result has an invalid 'non-array' shape, throwOnError=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a public refetch whose successful Query result has an invalid 'null array member' shape, throwOnError=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a public refetch whose successful Query result has an invalid 'null array member' shape, throwOnError=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a deferred public refetch pending until its replacement applies
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > cancels a deferred public refetch when cleanup retires it
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not reuse an invalid result rejection for a later valid refetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not reuse an eager initial rejection when a refetch applies a valid result
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects an invalid retained revalidation before its persisted baseline loads
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps refetches pending when an older barrier refresh reaches a newer barrier
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > settles a fresh applied refetch independently of an older deferred result
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 1) 23ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1) 15ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 1) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 1) 17ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 1) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 1) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 2) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2) 17ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2) 17ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 2) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 2) 17ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 0,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 2) 17ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 2) 16ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 1) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1) 19ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 1) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 1) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 1) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 1) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 2) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2) 19ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 1,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2) 19ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 2) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 2) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 2) 20ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 2) 20ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 1) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1) 22ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 1) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 1) 24ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 1)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 1)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 1
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+  history: {
+    staleTime: Infinity,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'fresh-cache-without-refetch': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'while-held',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'rejects',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 1) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 1) 23ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 2) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2) 24ms
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'while-held',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'same-rows',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'while-held',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+stdout | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 2)
+H02 ownership neighbor reach {
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
+  testName: "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 2)",
+  history: {
+    staleTime: 0,
+    refetch: 'empty',
+    settles: 'after-publication',
+    peers: 2,
+    rows: 2
+  },
+  counts: {
+    'older-release-held': 1,
+    'cached-reacquisition-held': 1,
+    'older-release-published': 1,
+    'refetch-outcome-settled': 1,
+    'all-peers-released': 1,
+    'final-lease-released': 1
+  }
+}
+
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 2) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 2) 24ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 2) 23ms
+ ✓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 2) 23ms
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'while-held', peer false, reacquired false)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'while-held', peer false, reacquired true)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'while-held', peer true, reacquired false)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'while-held', peer true, reacquired true)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'after-publication', peer false, reacquired false)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'after-publication', peer false, reacquired true)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'after-publication', peer true, reacquired false)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > publishes only active owners when a lease claims a released row (claims 'after-publication', peer true, reacquired true)
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps server rows a direct write did not touch when an older fetch settles: initial-load
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps server rows a direct write did not touch when an older fetch settles: handler-refetch-other-key
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps server rows a direct write did not touch when an older fetch settles: handler-refetch-same-key
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps server rows a direct write did not touch when an older fetch settles: user-refetch
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'update' with 1 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete' with 1 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert' with 1 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-upsert' with 1 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert-refetch' with 1 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'update' with 1 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete' with 1 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert' with 1 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-upsert' with 1 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert-refetch' with 1 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'update' with 2 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete' with 2 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert' with 2 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-upsert' with 2 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert-refetch' with 2 owners and metadata=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'update' with 2 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete' with 2 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert' with 2 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-upsert' with 2 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > tracks a direct row lifetime through 'delete-insert-refetch' with 2 owners and metadata=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'none'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'none'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'none'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'none'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'same-key'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'same-key'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'same-key'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'same-key'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'other-key'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'other-key'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'other-key'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'write-first'/'other-key'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'none'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'none'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'none'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'none'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'same-key'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'same-key'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'same-key'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'same-key'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'other-key'/cache=false/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'other-key'/cache=false/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'other-key'/cache=true/refetch=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders shared fetches, writes, and cache edits before acquisition: 'fetch-first'/'other-key'/cache=true/refetch=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=false/newer-first=false/write='none'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=false/newer-first=true/write='none'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=true/newer-first=false/write='none'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=true/newer-first=true/write='none'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=true/newer-first=true/write='none'/equal=true
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=true/newer-first=true/write='between'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > orders overlapping subset values and owners: existing=true/newer-first=true/write='after'/equal=false
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > does not rescan a stable empty persisted baseline on retained reacquisition
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > scans a cold durable owner that appeared after an empty sync run
+ ↓ packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > rejects a superseded accepted result while publishing its successor
+
+ Test Files  1 passed (1)
+      Tests  42 passed | 220 skipped (262)
+   Start at  00:41:58
+   Duration  2.09s (transform 705ms, setup 0ms, import 871ms, tests 841ms, environment 294ms)
+

@@ -1,0 +1,50 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'
+H02 inert native selection {
+  name: 'nonempty conflicting replay',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay'"
+}
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'
+H02 inert native selection {
+  name: 'nonempty scope-key publication',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication'"
+}
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication'
+H02 inert native selection {
+  name: 'empty scope-key publication',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication'"
+}
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'
+H02 inert native selection {
+  name: 'literal true initial cut',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut'"
+}
+
+stdout | native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'
+H02 inert native selection {
+  name: 'ordinary synchronous mutation cut',
+  sourceModule: 'file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/native-titles.test.ts',
+  testName: "queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut'"
+}
+
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty conflicting replay' 1ms
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'nonempty scope-key publication' 0ms
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'empty scope-key publication' 0ms
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'literal true initial cut' 0ms
+ ✓ native-titles.test.ts > queued-answer receiving neighbors > checks receiving neighbor 'ordinary synchronous mutation cut' 0ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  00:33:51
+   Duration  104ms (transform 12ms, setup 0ms, import 18ms, tests 1ms, environment 0ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/native-calibration/bound-v1/all-inert.report.json

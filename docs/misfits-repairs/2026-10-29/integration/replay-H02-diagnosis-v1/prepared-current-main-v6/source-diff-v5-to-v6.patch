@@ -1,0 +1,1499 @@
+--- v5/packages/query-db-collection/tests/queued-answer-progress-driver.ts
++++ v6/packages/query-db-collection/tests/queued-answer-progress-driver.ts
+@@ -9,6 +9,7 @@
+ } from '@tanstack/db'
+ import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle.js'
+ import { emitProgressReceipt as emit } from '../../../scripts/h02-progress/receipt-transport.mjs'
++import { findQueuedAnswerPremise } from '../../../scripts/h02-progress/witness-premise.js'
+ import { queryCollectionOptions } from '../src/query.js'
+ import { progressFacts } from './queued-answer-progress-oracle.js'
+ import type { LoadSubsetOptions } from '@tanstack/db'
+@@ -17,12 +18,15 @@
+   ProgressHistory,
+   ProgressRow,
+ } from './queued-answer-progress-oracle.js'
++import type {
++  AnswerFact,
++  PendingFact,
++  QueryFact,
++} from '../../../scripts/h02-progress/witness-premise.js'
+ 
+ type Marker = { id: number; rowId: number }
+-type PendingAnswer = {
+-  atom: string
+-  keys: Array<number>
+-  pending: boolean
++type PendingAnswer = PendingFact & {
++  signal: AbortSignal | undefined
+   release: () => void
+ }
+ 
+@@ -154,16 +158,20 @@
+     string,
+     { key: QueryKey; keys: Array<number>; subscriptionAtom?: number }
+   >()
+-  const answers = new Map<
+-    string,
+-    { version: number; backendVersion: number; rows: Array<number> }
+-  >()
+-  const cacheVersions = new Map<
+-    string,
+-    { version: number; backendVersion: number; rows: Array<number> }
+-  >()
++  const answers = new Map<string, AnswerFact>()
++  const cacheVersions = new Map<string, AnswerFact>()
+   const attempts = new WeakMap<LoadSubsetOptions, Array<number>>()
+   const pending: Array<PendingAnswer> = []
++  const physicalQueries = new WeakMap<object, number>()
++  let physicalQuerySequence = 0
++  const physicalQueryToken = (query: object) => {
++    let token = physicalQueries.get(query)
++    if (token === undefined) {
++      token = ++physicalQuerySequence
++      physicalQueries.set(query, token)
++    }
++    return token
++  }
+   let actualBaseKey: QueryKey | undefined
+   const activeAttempts: Array<number> = []
+   let acquisitionSequence = 0
+@@ -173,6 +181,8 @@
+   let answerQueued = false
+   const hasQueuedAnswer = () => answerQueued
+   let stackCaptured = false
++  let feedbackStackCaptured = false
++  const heldAcquisitionScopes = new Set<string>()
+   let initialStackCaptured = false
+   const requestedKeys = (options: LoadSubsetOptions) =>
+     roots
+@@ -225,6 +235,12 @@
+     )
+       ? value.map((row: { id: number }) => row.id)
+       : undefined
++  const answerPayload = (answer: AnswerFact | undefined) =>
++    answer && {
++      version: answer.version,
++      backendVersion: answer.backendVersion,
++      rows: [...answer.rows],
++    }
+   const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+     validateActualKey(event.query.queryKey, `cache-${event.type}`)
+     if (event.type === `updated` && event.action.type === `success`) {
+@@ -233,16 +249,23 @@
+       const actualRows = rowIds(event.query.state.data)
+       if (
+         answer &&
++        answer.identity === event.query &&
++        event.query.state.dataUpdateCount > answer.startCount &&
+         JSON.stringify(answer.rows) === JSON.stringify(actualRows)
+       ) {
+-        cacheVersions.set(atom, { ...answer, rows: [...answer.rows] })
++        cacheVersions.set(atom, {
++          ...answer,
++          rows: [...answer.rows],
++          installedCount: event.query.state.dataUpdateCount,
++        })
+       }
+       emit(`cache-success`, {
+         atom,
+         key: event.query.queryKey,
+         dataUpdateCount: event.query.state.dataUpdateCount,
+-        answer: cacheVersions.get(atom),
++        answer: answerPayload(cacheVersions.get(atom)),
+         actualRows,
++        physicalQuery: physicalQueryToken(event.query),
+       })
+     }
+   })
+@@ -262,6 +285,90 @@
+       ...details,
+       scheduler: history.scheduler,
+       enqueueReturned: true,
++    })
++  }
++  const tryQueueResolvingAnswer = (cut: string) => {
++    if (answerQueued) return
++    const queries: Array<QueryFact> = queryClient
++      .getQueryCache()
++      .getAll()
++      .flatMap((query) => {
++        const atom = hashKey(query.queryKey)
++        const scope = queryScopes.get(atom)
++        if (!scope) return []
++        return [
++          {
++            identity: query,
++            atom,
++            key: query.queryKey,
++            keys: [...scope.keys],
++            owner: scope.subscriptionAtom,
++            status: query.state.status,
++            fetchStatus: query.state.fetchStatus,
++            dataUpdateCount: query.state.dataUpdateCount,
++            rows: rowIds(query.state.data),
++          },
++        ]
++      })
++    const facts = findQueuedAnswerPremise(
++      pivot,
++      pending.map((request) => ({
++        ...request,
++        aborted: request.signal?.aborted === true,
++      })),
++      queries,
++      [...answers.values()],
++      [...cacheVersions.values()],
++    )
++    if (!facts) return
++    captureBindings(`conflicting-cache-premise`)
++    emit(`source-stack`, {
++      cut: `queued-answer-premise`,
++      stack: new Error(`H02 current Query answer path`).stack,
++    })
++    emit(`conflicting-cache-premise`, {
++      cut,
++      pivot,
++      pendingAtom: facts.request.atom,
++      pendingKey: facts.request.key,
++      cached: answerPayload(facts.cached),
++      emptySibling: {
++        atom: facts.answer.atom,
++        key: facts.answer.key,
++        answer: answerPayload(facts.answer),
++      },
++      observed: {
++        pending: facts.request.pending,
++        aborted: facts.request.aborted,
++        pendingScope: facts.request.keys,
++        pendingOwner: facts.request.owner,
++        pendingStartCount: facts.request.startCount,
++        pendingActualCount: facts.current.dataUpdateCount,
++        pendingStatus: facts.current.status,
++        pendingFetchStatus: facts.current.fetchStatus,
++        siblingScope: facts.sibling.keys,
++        siblingOwner: facts.sibling.owner,
++        siblingStartCount: facts.answer.startCount,
++        siblingActualCount: facts.sibling.dataUpdateCount,
++        siblingStatus: facts.sibling.status,
++        siblingRows: facts.sibling.rows,
++        physicalQueriesCurrent: true,
++        pendingPhysicalQuery: physicalQueryToken(facts.request.identity),
++        currentPhysicalQuery: physicalQueryToken(facts.current.identity),
++        siblingPhysicalQuery: physicalQueryToken(facts.sibling.identity),
++        siblingAnswerPhysicalQuery: physicalQueryToken(facts.answer.identity),
++      },
++    })
++    emit(`retained-publication`, {
++      rows: readLive(),
++      reason: `resolving answer still pending`,
++    })
++    queueAnswer({
++      kind: `resolving-conflict`,
++      atom: facts.request.atom,
++      key: facts.request.key,
++      cachedVersion: facts.cached.version,
++      emptyVersion: facts.answer.version,
+     })
+   }
+   const markers = createCollection(
+@@ -309,12 +416,20 @@
+         const scope = queryScopes.get(atom)
+         if (!scope || JSON.stringify(scope.keys) !== JSON.stringify(keys))
+           throw new Error(`actual key/request scope mismatch`)
++        const physicalQuery = queryClient
++          .getQueryCache()
++          .find({ queryKey: context.queryKey, exact: true })
++        if (!physicalQuery)
++          throw new Error(`current physical Query missing at request start`)
++        const startCount = physicalQuery.state.dataUpdateCount
+         emit(`provider-request`, {
+           atom,
+           key: context.queryKey,
+           options: optionsReceipt(options),
+           backendVersion,
+-          cached: cacheVersions.get(atom),
++          cached: answerPayload(cacheVersions.get(atom)),
++          physicalQuery: physicalQueryToken(physicalQuery),
++          startCount,
+         })
+         // This finite receiving profile serves complete predicate results.
+         // Refuse an unexpected ordered/window request instead of ignoring its
+@@ -331,17 +446,35 @@
+             .filter((id) => marked.has(id))
+             .map((id) => ({ id, rowId: id }))
+           const answer = {
++            identity: physicalQuery,
++            atom,
++            key: [...context.queryKey],
++            keys: [...keys],
++            owner: scope.subscriptionAtom,
++            startCount,
+             version: ++answerVersion,
+             backendVersion,
+             rows: result.map(({ id }) => id),
+           }
+           answers.set(atom, answer)
+-          emit(`provider-answer`, { atom, key: context.queryKey, answer })
++          emit(`provider-answer`, {
++            atom,
++            key: context.queryKey,
++            answer: answerPayload(answer),
++            physicalQuery: physicalQueryToken(physicalQuery),
++            startCount,
++          })
+           return result
+         }
+         if (!holding) return Promise.resolve(complete())
+         return new Promise<Array<Marker>>((resolve) => {
+           const request: PendingAnswer = {
++            identity: physicalQuery,
++            key: [...context.queryKey],
++            owner: scope.subscriptionAtom,
++            startCount,
++            signal: options.signal,
++            aborted: options.signal?.aborted === true,
+             atom,
+             keys,
+             pending: true,
+@@ -352,57 +485,16 @@
+             },
+           }
+           pending.push(request)
+-          const cached = cacheVersions.get(atom)
+-          const emptySibling = [...cacheVersions].find(
+-            ([other, version]) =>
+-              other !== atom &&
+-              version.backendVersion === 1 &&
+-              version.rows.length === 0 &&
+-              JSON.stringify(queryScopes.get(other)?.keys) ===
+-                JSON.stringify([pivot]),
+-          )
+-          if (
+-            !answerQueued &&
+-            keys.length === 1 &&
+-            keys[0] === pivot &&
+-            cached?.rows.includes(pivot) &&
+-            cached.backendVersion === 0 &&
+-            emptySibling
+-          ) {
+-            captureBindings(`conflicting-cache-premise`)
+-            emit(`source-stack`, {
+-              cut: `queued-answer-premise`,
+-              stack: new Error(`H02 current Query answer path`).stack,
+-            })
+-            emit(`conflicting-cache-premise`, {
+-              pivot,
+-              pendingAtom: atom,
+-              pendingKey: context.queryKey,
+-              cached,
+-              emptySibling: {
+-                atom: emptySibling[0],
+-                key: queryScopes.get(emptySibling[0])?.key,
+-                answer: emptySibling[1],
+-              },
+-            })
+-            emit(`retained-publication`, {
+-              rows: readLive(),
+-              reason: `resolving answer still pending`,
+-            })
+-            queueAnswer({
+-              kind: `resolving-conflict`,
+-              atom,
+-              key: context.queryKey,
+-              cachedVersion: cached.version,
+-              emptyVersion: emptySibling[1].version,
+-            })
+-          }
++          tryQueueResolvingAnswer(`held-queryFn-registration`)
+         })
+       },
+     }),
+   )
+   const actualLoad = markers._sync.loadSubset.bind(markers._sync)
+   markers._sync.loadSubset = (options) => {
++    // A prior provider request may still be pending when a later cache result
++    // installs. Check that same physical current request before reacquisition.
++    tryQueueResolvingAnswer(`existing-pending-before-acquisition`)
+     const attempt = ++acquisitionSequence
+     const sameOptions = attempts.get(options) ?? []
+     sameOptions.push(attempt)
+@@ -413,6 +505,22 @@
+       options: optionsReceipt(options),
+       pivotPresent: markers.has(pivot),
+     })
++    if (holding && !feedbackStackCaptured) {
++      const scope = {
++        owner: subscriptionAtom(options),
++        keys: requestedKeys(options),
++      }
++      const identity = JSON.stringify(scope)
++      if (heldAcquisitionScopes.has(identity)) {
++        feedbackStackCaptured = true
++        emit(`source-stack`, {
++          cut: `first-repeated-held-acquisition`,
++          attempt,
++          ...scope,
++          stack: new Error(`H02 repeated held acquisition path`).stack,
++        })
++      } else heldAcquisitionScopes.add(identity)
++    }
+     if (!initialStackCaptured) {
+       initialStackCaptured = true
+       emit(`source-stack`, {
+--- v5/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
++++ v6/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts
+@@ -18,6 +18,10 @@
+     const { driveQueuedAnswerHistory } = await import(
+       `./queued-answer-progress-driver.js`
+     )
++    const seal: unknown = Reflect.get(globalThis, `__h02SealBindings`)
++    if (typeof seal !== `function`)
++      throw new Error(`startup binding seal is missing`)
++    await seal()
+     await driveQueuedAnswerHistory(history)
+   } catch (error) {
+     failed = true
+--- v5/scripts/h02-progress/bindings-calibration.test.mjs
++++ v6/scripts/h02-progress/bindings-calibration.test.mjs
+@@ -36,6 +36,8 @@
+   `packages/db/tests/reference-expression-oracle.ts`,
+   `scripts/h02-progress/source-binding.setup.ts`,
+   `scripts/h02-progress/receipt-transport.mjs`,
++  `scripts/h02-progress/startup-inspector.mjs`,
++  `scripts/h02-progress/witness-premise.ts`,
+   `packages/db/tests/optional-calibration-helper.ts`,
+ ]
+ function fixture() {
+@@ -114,6 +116,26 @@
+     resolve(run, `evaluated-driver-start.json`),
+     JSON.stringify({ selectedRoot: root, inventory }),
+   )
++  const before = JSON.stringify({ selectedRoot: root, inventory })
++  writeFileSync(resolve(run, `evaluated-pre-history.json`), before)
++  writeFileSync(
++    resolve(run, `binding-seal.json`),
++    JSON.stringify({
++      selectedRoot: root,
++      sealed: true,
++      skipAllPausesAcknowledged: true,
++      debuggerDisableAcknowledged: true,
++      inspectorDisconnectedBeforeHistory: true,
++      inventorySha256: hash(before),
++      bindings: inventory.map((module) => ({
++        file: module.file,
++        codeSha256: module.codeSha256,
++        scripts: scripts
++          .filter((script) => script.url === module.file)
++          .map(({ scriptId, sourceSha256 }) => ({ scriptId, sourceSha256 })),
++      })),
++    }),
++  )
+   if (extraInventory)
+     writeFileSync(
+       resolve(run, `evaluated-after-all.json`),
+@@ -121,8 +143,19 @@
+     )
+   writeFileSync(
+     resolve(run, `v8-binding.jsonl`),
+-    scripts.map((entry) => JSON.stringify(entry)).join(`\n`),
++    [
++      { phase: `inspector-ack`, method: `Debugger.setSkipAllPauses` },
++      ...scripts,
++      ...[`Debugger.enable`, `Debugger.disable`].map((method) => ({
++        phase: `inspector-ack`,
++        method,
++      })),
++      { phase: `inspector-disconnected-before-history` },
++    ]
++      .map((entry) => JSON.stringify(entry))
++      .join(`\n`),
+   )
++  input.mutatePrepared?.(run)
+   const child = spawnSync(
+     process.execPath,
+     [`--max-old-space-size=384`, verifier, run, freezePath],
+@@ -322,3 +355,72 @@
+   },
+   `required evaluated receiving instrument missing: scripts/h02-progress/receipt-transport.mjs`,
+ )
++calibration(
++  `requires the startup source seal`,
++  (input) => {
++    input.mutatePrepared = (run) => rmSync(resolve(run, `binding-seal.json`))
++  },
++  `startup source seal missing`,
++)
++calibration(
++  `rejects a false inspector disconnection claim`,
++  (input) => {
++    input.mutatePrepared = (run) => {
++      const path = resolve(run, `binding-seal.json`)
++      const seal = JSON.parse(readFileSync(path, `utf8`))
++      seal.inspectorDisconnectedBeforeHistory = false
++      writeFileSync(path, JSON.stringify(seal))
++    }
++  },
++  `startup source seal or inspector acknowledgements invalid`,
++)
++calibration(
++  `requires the skip-all-pauses acknowledgement`,
++  (input) => {
++    input.mutatePrepared = (run) => {
++      const path = resolve(run, `v8-binding.jsonl`)
++      writeFileSync(
++        path,
++        readFileSync(path, `utf8`)
++          .split(`\n`)
++          .filter((line) => !line.includes(`Debugger.setSkipAllPauses`))
++          .join(`\n`),
++      )
++    }
++  },
++  `startup source seal or inspector acknowledgements invalid`,
++)
++calibration(
++  `requires exact pre-history registry bytes`,
++  (input) => {
++    input.mutatePrepared = (run) =>
++      writeFileSync(
++        resolve(run, `evaluated-pre-history.json`),
++        JSON.stringify({ selectedRoot: input.root, inventory: [] }),
++      )
++  },
++  `startup source seal or inspector acknowledgements invalid`,
++)
++calibration(
++  `rejects a module absent from the sealed source binding`,
++  (input) => {
++    input.mutatePrepared = (run) => {
++      const path = resolve(run, `binding-seal.json`)
++      const seal = JSON.parse(readFileSync(path, `utf8`))
++      seal.bindings = seal.bindings.filter(
++        ({ file }) => !file.endsWith(`/witness-premise.ts`),
++      )
++      writeFileSync(path, JSON.stringify(seal))
++    }
++  },
++  `receiving module lacks sealed startup binding: scripts/h02-progress/witness-premise.ts`,
++)
++calibration(
++  `rejects an otherwise bound module first observed after startup sealing`,
++  ({ inventory }) => {
++    const later = structuredClone(inventory)
++    inventory.pop()
++    return later
++  },
++  `receiving module lacks sealed startup binding: packages/db/tests/optional-calibration-helper.ts`,
++)
+--- v5/scripts/h02-progress/source-binding.setup.ts
++++ v6/scripts/h02-progress/source-binding.setup.ts
+@@ -3,20 +3,19 @@
+ import { Session } from 'node:inspector'
+ import { resolve } from 'node:path'
+ import { afterAll } from 'vitest'
++import { prepareStartupInspector } from './startup-inspector.mjs'
+ import type { EvaluatedModules } from 'vite/module-runner'
+ 
+ /**
+- * V8 reports each compiled/loaded script and supplies its exact runtime source.
+- * The inventory includes compiled scripts that may not execute. Precise
+- * coverage, where reached, and positive driver stacks provide execution
+- * evidence separately. A watchdog-aborted worker gets no final coverage credit.
+- * Source capture is observational but can affect setup timing; no scheduling
+- * mechanism or production source byte is changed.
++ * V8 supplies loaded source during startup only. The driver import finishes,
++ * original/loader/V8 bindings are sealed, and the debugger disconnects before
++ * the product history. Passive registry captures and real callback stacks give
++ * separate evaluated/path evidence. Compiled code alone is not execution.
+  */
+ const directory = process.env.H02_PROGRESS_BINDING_DIR
+ if (directory) {
+   mkdirSync(resolve(directory, `v8-sources`), { recursive: true })
+-  const record = (value: unknown) =>
++  const record = (value: Record<string, unknown>) =>
+     appendFileSync(
+       resolve(directory, `v8-binding.jsonl`),
+       JSON.stringify(value) + `\n`,
+@@ -30,6 +29,7 @@
+   if (!freezePath) throw new Error(`selected source freeze is required`)
+   const freeze: {
+     worktree: string
++    productionFiles: Record<string, string>
+     instrumentFiles: Record<string, string>
+     sharedInstrumentFiles: Record<string, string>
+   } = JSON.parse(readFileSync(freezePath, `utf8`))
+@@ -39,10 +39,20 @@
+     ...freeze.instrumentFiles,
+     ...freeze.sharedInstrumentFiles,
+   }
++  const expectedFiles = { ...freeze.productionFiles, ...approvedInstruments }
++  const digest = (bytes: string | Buffer) =>
++    createHash(`sha256`).update(bytes).digest(`hex`)
++  const runtimeSources: Array<{
++    url: string
++    scriptId: string
++    sourceSha256: string
++  }> = []
++  const pendingSources = new Set<Promise<void>>()
++  const sourceErrors: Array<string> = []
++  const sealedModules = new Set<string>()
++  let sealed = false
++
+   const capture = (cut: string) => {
+-    // The runtime version and this private registry shape are frozen inputs.
+-    // This reads actual loader metadata; it does not wrap fetch promises or
+-    // add a second module evaluator. evaluated=false is retained explicitly.
+     const state: unknown = Reflect.get(globalThis, `__vitest_worker__`)
+     if (
+       typeof state !== `object` ||
+@@ -61,24 +71,31 @@
+       const relative = sourceFile.startsWith(selectedRoot + `/`)
+         ? sourceFile.slice(selectedRoot.length + 1)
+         : undefined
+-      const approvedInstrument =
++      const approved =
+         relative !== undefined && approvedInstruments[relative] !== undefined
+       let sourceSha256: string | undefined
+-      if (production || approvedInstrument) {
+-        if (!sourceFile.startsWith(selectedRoot + `/`))
+-          throw new Error(`outside selected production root: ${sourceFile}`)
+-        sourceSha256 = createHash(`sha256`)
+-          .update(readFileSync(sourceFile))
+-          .digest(`hex`)
++      if (production || approved) {
++        if (relative === undefined || expectedFiles[relative] === undefined)
++          throw new Error(
++            `outside or unapproved receiving source: ${sourceFile}`,
++          )
++        sourceSha256 = digest(readFileSync(sourceFile))
++        if (sourceSha256 !== expectedFiles[relative])
++          throw new Error(`changed frozen receiving source: ${relative}`)
+       }
+-      const codeSha256 =
+-        code === undefined
+-          ? undefined
+-          : createHash(`sha256`).update(code).digest(`hex`)
++      const codeSha256 = code === undefined ? undefined : digest(code)
+       if (code !== undefined && codeSha256 !== undefined)
+         writeFileSync(
+           resolve(directory, `evaluated-sources`, `${codeSha256}.txt`),
+           code,
++        )
++      if (
++        sealed &&
++        (production || approved) &&
++        !sealedModules.has(`${sourceFile}:${codeSha256}`)
++      )
++        throw new Error(
++          `later receiving module lacks sealed V8 binding: ${sourceFile}`,
+         )
+       return {
+         id: module.id,
+@@ -101,51 +118,132 @@
+       cut,
+       modules: inventory.length,
+     })
++    return inventory
+   }
+   Object.defineProperty(globalThis, `__h02CaptureBindings`, {
+     value: capture,
+     configurable: true,
+   })
++
+   session.on(`Debugger.scriptParsed`, ({ params }) => {
+-    session.post(
+-      `Debugger.getScriptSource`,
+-      { scriptId: params.scriptId },
+-      (error, result) => {
+-        if (error) {
+-          record({
+-            phase: `v8-source-error`,
+-            scriptId: params.scriptId,
+-            url: params.url,
+-            message: String(error),
++    const pending = new Promise<void>((done) => {
++      session.post(
++        `Debugger.getScriptSource`,
++        { scriptId: params.scriptId },
++        (error, result) => {
++          if (error) {
++            sourceErrors.push(String(error))
++            record({
++              phase: `v8-source-error`,
++              scriptId: params.scriptId,
++              url: params.url,
++              message: String(error),
++            })
++          } else {
++            const source = result.scriptSource
++            const sourceSha256 = digest(source)
++            writeFileSync(
++              resolve(directory, `v8-sources`, `${sourceSha256}.txt`),
++              source,
++            )
++            runtimeSources.push({
++              url: params.url,
++              scriptId: params.scriptId,
++              sourceSha256,
++            })
++            record({ phase: `v8-compiled-script`, ...params, sourceSha256 })
++          }
++          done()
++        },
++      )
++    })
++    pendingSources.add(pending)
++    void pending.then(() => pendingSources.delete(pending))
++  })
++  const startup = await prepareStartupInspector(session, record)
++  Object.defineProperty(globalThis, `__h02SealBindings`, {
++    configurable: true,
++    value: async () => {
++      let bindings: Array<{
++        file: string
++        codeSha256: string
++        scripts: Array<{ scriptId: string; sourceSha256: string }>
++      }> = []
++      await startup.seal(async () => {
++        while (pendingSources.size) await Promise.all([...pendingSources])
++        if (sourceErrors.length)
++          throw new Error(
++            `startup V8 source errors: ${sourceErrors.join(` | `)}`,
++          )
++        const inventory = capture(`pre-history`)
++        bindings = inventory
++          .filter(({ sourceSha256 }) => sourceSha256 !== undefined)
++          .map((module) => {
++            const file = resolve(module.file.replace(/\?.*$/, ``))
++            if (!module.codeSha256)
++              throw new Error(
++                `startup receiving module lacks loader code: ${file}`,
++              )
++            const code = readFileSync(
++              resolve(
++                directory,
++                `evaluated-sources`,
++                `${module.codeSha256}.txt`,
++              ),
++              `utf8`,
++            )
++            const scripts = runtimeSources
++              .filter((script) => {
++                if (!(
++                  script.url === file ||
++                  script.url === `file://${file}` ||
++                  script.url === module.url
++                ))
++                  return false
++                const source = readFileSync(
++                  resolve(
++                    directory,
++                    `v8-sources`,
++                    `${script.sourceSha256}.txt`,
++                  ),
++                  `utf8`,
++                )
++                if (digest(source) !== script.sourceSha256)
++                  throw new Error(
++                    `changed startup V8 source: ${script.scriptId}`,
++                  )
++                return source.includes(code)
++              })
++              .map(({ scriptId, sourceSha256 }) => ({ scriptId, sourceSha256 }))
++            if (!scripts.length)
++              throw new Error(
++                `startup receiving module lacks exact V8 binding: ${file}`,
++              )
++            sealedModules.add(`${file}:${module.codeSha256}`)
++            return { file, codeSha256: module.codeSha256, scripts }
+           })
+-          return
+-        }
+-        const source = result.scriptSource
+-        const sourceSha256 = createHash(`sha256`).update(source).digest(`hex`)
+-        writeFileSync(
+-          resolve(directory, `v8-sources`, `${sourceSha256}.txt`),
+-          source,
+-        )
+-        record({ phase: `v8-compiled-script`, ...params, sourceSha256 })
+-      },
+-    )
+-  })
+-  session.post(`Debugger.enable`, (error) =>
+-    record({
+-      phase: `debugger-enabled`,
+-      error: error ? String(error) : undefined,
+-    }),
+-  )
+-  session.post(`Profiler.enable`)
+-  session.post(
+-    `Profiler.startPreciseCoverage`,
+-    { callCount: true, detailed: true },
+-    (error) =>
+-      record({
+-        phase: `coverage-started`,
+-        error: error ? String(error) : undefined,
+-      }),
+-  )
++      })
++      sealed = true
++      writeFileSync(
++        resolve(directory, `binding-seal.json`),
++        JSON.stringify(
++          {
++            selectedRoot,
++            sealed: true,
++            skipAllPausesAcknowledged: true,
++            debuggerDisableAcknowledged: true,
++            inspectorDisconnectedBeforeHistory: true,
++            inventorySha256: digest(
++              readFileSync(resolve(directory, `evaluated-pre-history.json`)),
++            ),
++            bindings,
++          },
++          null,
++          2,
++        ),
++      )
++    },
++  })
+   record({
+     phase: `binding-started`,
+     node: process.version,
+@@ -154,14 +252,10 @@
+     cwd: process.cwd(),
+   })
+   afterAll(() => {
+-    capture(`after-all`)
+-    session.post(`Profiler.takePreciseCoverage`, (error, result) => {
+-      record({
+-        phase: `final-coverage`,
+-        error: error ? String(error) : undefined,
+-        result,
+-      })
+-      session.disconnect()
+-    })
++    try {
++      capture(`after-all`)
++    } finally {
++      if (!sealed) session.disconnect()
++    }
+   })
+ }
+--- v5/scripts/h02-progress/verify-bindings.mjs
++++ v6/scripts/h02-progress/verify-bindings.mjs
+@@ -101,6 +101,51 @@
+   failures.push(`actual evaluated-module startup inventory missing`)
+ const v8 = jsonLines(`v8-binding.jsonl`)
+ const scripts = v8.filter((entry) => entry.phase === `v8-compiled-script`)
++let seal
++try {
++  seal = JSON.parse(
++    readFileSync(resolve(directory, `binding-seal.json`), `utf8`),
++  )
++  const methods = v8.filter((entry) => entry.phase === `inspector-ack`)
++  const skipIndex = v8.findIndex(
++    (entry) =>
++      entry.phase === `inspector-ack` &&
++      entry.method === `Debugger.setSkipAllPauses`,
++  )
++  const disableIndex = v8.findIndex(
++    (entry) =>
++      entry.phase === `inspector-ack` && entry.method === `Debugger.disable`,
++  )
++  const disconnectIndex = v8.findIndex(
++    (entry) => entry.phase === `inspector-disconnected-before-history`,
++  )
++  if (
++    seal.selectedRoot !== root ||
++    seal.sealed !== true ||
++    seal.skipAllPausesAcknowledged !== true ||
++    seal.debuggerDisableAcknowledged !== true ||
++    seal.inspectorDisconnectedBeforeHistory !== true ||
++    seal.inventorySha256 !==
++      hash(readFileSync(resolve(directory, `evaluated-pre-history.json`))) ||
++    JSON.stringify(methods.map(({ method }) => method)) !==
++      JSON.stringify([
++        `Debugger.setSkipAllPauses`,
++        `Debugger.enable`,
++        `Debugger.disable`,
++      ]) ||
++    methods.some(({ error }) => error !== undefined) ||
++    v8.some(({ phase }) => phase === `v8-source-error`) ||
++    disconnectIndex <= disableIndex ||
++    v8.some(
++      (entry, index) =>
++        entry.phase === `v8-compiled-script` &&
++        (index <= skipIndex || index >= disableIndex),
++    )
++  )
++    failures.push(`startup source seal or inspector acknowledgements invalid`)
++} catch (error) {
++  failures.push(`startup source seal missing or unreadable: ${String(error)}`)
++}
+ const bindings = []
+ for (const name of inventories) {
+   const { inventory, selectedRoot } = JSON.parse(
+@@ -164,6 +209,26 @@
+     })
+     if (matches.length === 0)
+       failures.push(`no exact transformed-to-V8 binding: ${relative}`)
++    const sealed =
++      Array.isArray(seal?.bindings) &&
++      seal.bindings.find(
++        (entry) =>
++          entry.file === file && entry.codeSha256 === module.codeSha256,
++      )
++    if (
++      !sealed ||
++      !Array.isArray(sealed.scripts) ||
++      !matches.some((match) =>
++        sealed.scripts.some(
++          (script) =>
++            script.scriptId === match.scriptId &&
++            script.sourceSha256 === match.sourceSha256,
++        ),
++      )
++    )
++      failures.push(
++        `receiving module lacks sealed startup binding: ${relative}`,
++      )
+     bindings.push({
+       inventory: name,
+       relative,
+@@ -197,6 +262,8 @@
+   `packages/db/tests/reference-expression-oracle.ts`,
+   `scripts/h02-progress/source-binding.setup.ts`,
+   `scripts/h02-progress/receipt-transport.mjs`,
++  `scripts/h02-progress/startup-inspector.mjs`,
++  `scripts/h02-progress/witness-premise.ts`,
+ ]) {
+   if (
+     !bindings.some(
+@@ -230,7 +297,7 @@
+   emptyCallbacks: emptyCalls.length,
+   bindings,
+   failures,
+-  limits: `V8 compiled inventory can include unused scripts; evaluated registry and positive stacks supply separate receiving-path execution evidence. Child oracle-module evaluation does not prove parent checker invocation. Final coverage is credited only if reached.`,
++  limits: `Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation.`,
+ }
+ writeFileSync(
+   resolve(directory, `binding-verification.json`),
+--- v5/scripts/h02-progress/vitest.config.ts
++++ v6/scripts/h02-progress/vitest.config.ts
+@@ -14,7 +14,8 @@
+ /**
+  * Record resolution and plugin-transform inputs as supplemental provenance.
+  * These hooks do not prove loading. The setup instrument snapshots the actual
+- * Vitest evaluated-module registry and V8 runtime scripts at named driver cuts.
++ * Vitest evaluated-module registry at named cuts and seals actual V8 loaded
++ * source during startup, before disconnecting the inspector for the history.
+  * All hooks run only when root later admits runtime; importing this config
+  * for static typechecking does not execute a test or load production.
+  */
+--- v5/scripts/h02-progress/witness-premise.ts
++++ v6/scripts/h02-progress/witness-premise.ts
+@@ -0,0 +1,107 @@
++import { isDeepStrictEqual } from 'node:util'
++
++// These are observed Query Core facts, not a model of DB ownership. Physical
++// Query identity distinguishes a removed cache entry from a replacement with
++// the same key. Counts distinguish a returned provider answer from installation.
++export type QueryFact = {
++  identity: object
++  atom: string
++  key: ReadonlyArray<unknown>
++  keys: Array<number>
++  owner: number | undefined
++  status: string
++  fetchStatus: string
++  dataUpdateCount: number
++  rows: Array<number> | undefined
++}
++export type AnswerFact = Pick<
++  QueryFact,
++  `identity` | `atom` | `key` | `keys` | `owner`
++> & {
++  startCount: number
++  installedCount?: number
++  version: number
++  backendVersion: number
++  rows: Array<number>
++}
++export type PendingFact = Pick<
++  QueryFact,
++  `identity` | `atom` | `key` | `keys` | `owner`
++> & {
++  startCount: number
++  pending: boolean
++  aborted: boolean
++}
++
++const sameScope = (
++  left: Pick<QueryFact, `identity` | `atom` | `key` | `keys` | `owner`>,
++  right: Pick<QueryFact, `identity` | `atom` | `key` | `keys` | `owner`>,
++) =>
++  left.identity === right.identity &&
++  left.atom === right.atom &&
++  left.owner === right.owner &&
++  isDeepStrictEqual(left.key, right.key) &&
++  isDeepStrictEqual(left.keys, right.keys)
++
++/**
++ * Query Core installs success state before synchronous observer notification.
++ * Its later QueryCache success event can remain blocked inside those observers.
++ * Read the installed state itself; a provider return alone cannot satisfy this
++ * detector. Both sides must retain their actual key, scope and physical Query.
++ */
++export function findQueuedAnswerPremise(
++  pivot: number,
++  pending: Array<PendingFact>,
++  queries: Array<QueryFact>,
++  completed: Array<AnswerFact>,
++  installed: Array<AnswerFact>,
++) {
++  for (const request of pending) {
++    if (
++      !request.pending ||
++      request.aborted ||
++      request.owner === undefined ||
++      !isDeepStrictEqual(request.keys, [pivot])
++    )
++      continue
++    const current = queries.find((query) => sameScope(query, request))
++    if (
++      !current ||
++      current.status !== `success` ||
++      current.fetchStatus !== `fetching` ||
++      current.dataUpdateCount !== request.startCount
++    )
++      continue
++    const cached = installed.find(
++      (answer) =>
++        sameScope(answer, request) &&
++        answer.backendVersion === 0 &&
++        answer.installedCount === current.dataUpdateCount &&
++        answer.installedCount > answer.startCount &&
++        answer.rows.includes(pivot) &&
++        isDeepStrictEqual(answer.rows, current.rows),
++    )
++    if (!cached) continue
++    for (const answer of completed) {
++      if (
++        answer.atom === request.atom ||
++        answer.backendVersion !== 1 ||
++        answer.owner === undefined ||
++        answer.owner === request.owner ||
++        !isDeepStrictEqual(answer.keys, [pivot]) ||
++        answer.rows.length !== 0
++      )
++        continue
++      const sibling = queries.find((query) => sameScope(query, answer))
++      if (
++        !sibling ||
++        sibling.status !== `success` ||
++        sibling.dataUpdateCount <= answer.startCount ||
++        !isDeepStrictEqual(sibling.rows, answer.rows)
++      )
++        continue
++      return { request, current, cached, sibling, answer }
++    }
++  }
++  return undefined
++}
+--- v5/scripts/h02-progress/witness-calibration.config.ts
++++ v6/scripts/h02-progress/witness-calibration.config.ts
+@@ -0,0 +1,18 @@
++import { defineConfig } from 'vitest/config'
++
++// Actual Query Core ordering plus pure source-fact controls. No DB production,
++// receiving setup, generated history, or progress/value comparison executes.
++export default defineConfig({
++  test: {
++    include: [
++      `packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts`,
++    ],
++    environment: `node`,
++    pool: `forks`,
++    maxWorkers: 1,
++    fileParallelism: false,
++    execArgv: [`--max-old-space-size=384`],
++    coverage: { enabled: false },
++    typecheck: { enabled: false },
++  },
++})
+--- v5/scripts/h02-progress/startup-inspector.mjs
++++ v6/scripts/h02-progress/startup-inspector.mjs
+@@ -0,0 +1,38 @@
++/**
++ * The debugger records loaded source only before the receiving history. All
++ * protocol acknowledgements are required. No active inspector remains while
++ * DB runs; later registry captures must bind to this sealed source inventory.
++ *
++ * @param {{post: (method: string, parameters: object, callback: (error: Error | null) => void) => void, disconnect: () => void}} session
++ * @param {(value: Record<string, unknown>) => void} record
++ */
++export async function prepareStartupInspector(session, record) {
++  /** @param {string} method @param {object} [parameters] */
++  const command = (method, parameters = {}) =>
++    new Promise((resolve, reject) => {
++      session.post(method, parameters, (error) => {
++        record({
++          phase: `inspector-ack`,
++          method,
++          error: error ? String(error) : undefined,
++        })
++        if (error) reject(error)
++        else resolve(undefined)
++      })
++    })
++  // Set the policy before enabling the domain, including startup script events.
++  await command(`Debugger.setSkipAllPauses`, { skip: true })
++  await command(`Debugger.enable`)
++  let sealed = false
++  return {
++    /** @param {() => Promise<void>} captureAndCheck */
++    async seal(captureAndCheck) {
++      if (sealed) throw new Error(`startup binding is already sealed`)
++      await captureAndCheck()
++      await command(`Debugger.disable`)
++      session.disconnect()
++      sealed = true
++      record({ phase: `inspector-disconnected-before-history` })
++    },
++  }
++}
+--- v5/scripts/h02-progress/startup-inspector.test.mjs
++++ v6/scripts/h02-progress/startup-inspector.test.mjs
+@@ -0,0 +1,108 @@
++import { strict as assert } from 'node:assert'
++import { Session } from 'node:inspector'
++import { test } from 'node:test'
++import { prepareStartupInspector } from './startup-inspector.mjs'
++
++test(`acknowledges passive policy and disconnects before a history could start`, async () => {
++  const calls = []
++  const records = []
++  const session = {
++    post(method, parameters, callback) {
++      calls.push([method, parameters])
++      callback(null)
++    },
++    disconnect() {
++      calls.push([`disconnect`])
++    },
++  }
++  const startup = await prepareStartupInspector(session, (record) =>
++    records.push(record),
++  )
++  await startup.seal(async () => {
++    calls.push([`capture-and-bind`])
++  })
++  assert.deepEqual(calls, [
++    [`Debugger.setSkipAllPauses`, { skip: true }],
++    [`Debugger.enable`, {}],
++    [`capture-and-bind`],
++    [`Debugger.disable`, {}],
++    [`disconnect`],
++  ])
++  assert.equal(records.at(-1).phase, `inspector-disconnected-before-history`)
++  await assert.rejects(() => startup.seal(async () => {}), /already sealed/)
++})
++
++for (const failed of [
++  `Debugger.setSkipAllPauses`,
++  `Debugger.enable`,
++  `Debugger.disable`,
++])
++  test(`fails closed when ${failed} is not acknowledged`, async () => {
++    const original = new Error(`authored ${failed} error`)
++    let disconnected = false
++    const session = {
++      post(method, parameters, callback) {
++        callback(method === failed ? original : null)
++      },
++      disconnect() {
++        disconnected = true
++      },
++    }
++    await assert.rejects(
++      async () => {
++        const startup = await prepareStartupInspector(session, () => {})
++        await startup.seal(async () => {})
++      },
++      (error) => error === original,
++    )
++    assert.equal(disconnected, false)
++  })
++
++test(`does not seal when source binding fails`, async () => {
++  const calls = []
++  const session = {
++    post(method, parameters, callback) {
++      calls.push(method)
++      callback(null)
++    },
++    disconnect() {
++      assert.fail(`failed source binding cannot seal`)
++    },
++  }
++  const startup = await prepareStartupInspector(session, () => {})
++  const original = new Error(`authored missing source binding`)
++  await assert.rejects(
++    () =>
++      startup.seal(async () => {
++        throw original
++      }),
++    (error) => error === original,
++  )
++  assert.deepEqual(calls, [`Debugger.setSkipAllPauses`, `Debugger.enable`])
++})
++
++test(`installed Node acknowledges startup policy, disable and disconnect`, async () => {
++  // This real-host handshake loads no DB, QueryClient, history, or driver.
++  const session = new Session()
++  const records = []
++  session.connect()
++  try {
++    const startup = await prepareStartupInspector(session, (record) =>
++      records.push(record),
++    )
++    await startup.seal(async () => {})
++    assert.deepEqual(
++      records
++        .filter(({ phase }) => phase === `inspector-ack`)
++        .map(({ method, error }) => [method, error]),
++      [
++        [`Debugger.setSkipAllPauses`, undefined],
++        [`Debugger.enable`, undefined],
++        [`Debugger.disable`, undefined],
++      ],
++    )
++    assert.equal(records.at(-1).phase, `inspector-disconnected-before-history`)
++  } finally {
++    session.disconnect()
++  }
++})
+--- v5/packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts
++++ v6/packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts
+@@ -0,0 +1,320 @@
++import { QueryClient, QueryObserver, hashKey } from '@tanstack/query-core'
++import { expect, it } from 'vitest'
++import { findQueuedAnswerPremise } from '../../../scripts/h02-progress/witness-premise.js'
++import type {
++  AnswerFact,
++  PendingFact,
++  QueryFact,
++} from '../../../scripts/h02-progress/witness-premise.js'
++
++// Ordinary instrument calibrations. Expected facts come from authored receipts
++// or actual Query Core state, never from DB production or its product oracle.
++function fixture() {
++  const old = {}
++  const fresh = {}
++  const pending: PendingFact = {
++    identity: old,
++    atom: `old`,
++    key: [`base`, 2, [3]],
++    keys: [3],
++    owner: 2,
++    startCount: 1,
++    pending: true,
++    aborted: false,
++  }
++  const current: QueryFact = {
++    ...pending,
++    status: `success`,
++    fetchStatus: `fetching`,
++    dataUpdateCount: 1,
++    rows: [3],
++  }
++  const sibling: QueryFact = {
++    identity: fresh,
++    atom: `fresh`,
++    key: [`base`, 1, [3]],
++    keys: [3],
++    owner: 1,
++    status: `success`,
++    fetchStatus: `idle`,
++    dataUpdateCount: 1,
++    rows: [],
++  }
++  const cached: AnswerFact = {
++    ...pending,
++    startCount: 0,
++    version: 1,
++    backendVersion: 0,
++    rows: [3],
++    installedCount: 1,
++  }
++  const answer: AnswerFact = {
++    ...sibling,
++    version: 2,
++    backendVersion: 1,
++    rows: [],
++    startCount: 0,
++  }
++  return { pending, current, sibling, cached, answer }
++}
++
++it(`requires real pending, physical current query, exact scope and installed answer facts`, () => {
++  const good = fixture()
++  const find = (f: ReturnType<typeof fixture>) =>
++    findQueuedAnswerPremise(
++      3,
++      [f.pending],
++      [f.current, f.sibling],
++      [f.answer],
++      [f.cached],
++    )
++  expect(find(good)?.request).toBe(good.pending)
++  const controls: Array<(f: ReturnType<typeof fixture>) => void> = [
++    (f) => {
++      f.pending.pending = false
++    },
++    (f) => {
++      f.pending.aborted = true
++    },
++    (f) => {
++      f.pending.identity = {}
++    },
++    (f) => {
++      f.current.identity = {}
++    },
++    (f) => {
++      f.answer.identity = {}
++    },
++    (f) => {
++      f.cached.identity = {}
++    },
++    (f) => {
++      f.pending.key = [`wrong`]
++    },
++    (f) => {
++      f.answer.key = [`wrong`]
++    },
++    (f) => {
++      f.pending.owner = undefined
++    },
++    (f) => {
++      f.sibling.owner = 2
++    },
++    (f) => {
++      f.current.keys = [4]
++    },
++    (f) => {
++      f.sibling.keys = [4]
++    },
++    (f) => {
++      f.current.status = `pending`
++    },
++    (f) => {
++      f.current.fetchStatus = `idle`
++    },
++    (f) => {
++      f.current.dataUpdateCount = 2
++    },
++    (f) => {
++      f.cached.installedCount = 0
++    },
++    (f) => {
++      f.cached.startCount = 1
++    },
++    (f) => {
++      f.cached.backendVersion = 1
++    },
++    (f) => {
++      f.cached.rows = []
++    },
++    (f) => {
++      f.sibling.status = `pending`
++    },
++    (f) => {
++      f.sibling.dataUpdateCount = 0
++    },
++    (f) => {
++      f.answer.startCount = 1
++    },
++    (f) => {
++      f.answer.backendVersion = 0
++    },
++    (f) => {
++      f.answer.rows = [3]
++    },
++    (f) => {
++      f.sibling.rows = [3]
++    },
++  ]
++  for (const control of controls) {
++    const f = fixture()
++    control(f)
++    expect(find(f)).toBeUndefined()
++  }
++  expect(
++    findQueuedAnswerPremise(
++      3,
++      [],
++      [good.current, good.sibling],
++      [good.answer],
++      [good.cached],
++    ),
++  ).toBeUndefined()
++  expect(
++    findQueuedAnswerPremise(
++      3,
++      [good.pending],
++      [good.current, good.sibling],
++      [],
++      [good.cached],
++    ),
++  ).toBeUndefined()
++  expect(
++    findQueuedAnswerPremise(
++      3,
++      [good.pending],
++      [good.current, good.sibling],
++      [good.answer],
++      [],
++    ),
++  ).toBeUndefined()
++  expect(
++    findQueuedAnswerPremise(
++      3,
++      [good.pending],
++      [good.current],
++      [good.answer],
++      [good.cached],
++    ),
++  ).toBeUndefined()
++})
++
++it(`sees actual installed success inside an observer before the cache success reporter`, async () => {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
++  })
++  const oldKey = [`base`, 2, [3]]
++  const freshKey = [`base`, 1, [3]]
++  await client.fetchQuery({ queryKey: oldKey, queryFn: () => [{ id: 3 }] })
++  const old = client.getQueryCache().find({ queryKey: oldKey, exact: true })!
++  const cached: AnswerFact = {
++    identity: old,
++    atom: hashKey(oldKey),
++    key: oldKey,
++    keys: [3],
++    owner: 2,
++    startCount: 0,
++    installedCount: old.state.dataUpdateCount,
++    version: 1,
++    backendVersion: 0,
++    rows: [3],
++  }
++  let releaseOld: (() => void) | undefined
++  const held = client.fetchQuery({
++    queryKey: oldKey,
++    queryFn: () =>
++      new Promise<Array<{ id: number }>>((resolve) => {
++        releaseOld = () => resolve([])
++      }),
++  })
++  const pending: PendingFact = {
++    ...cached,
++    startCount: old.state.dataUpdateCount,
++    pending: true,
++    aborted: false,
++  }
++  let reported = false
++  let observed = false
++  let completed: AnswerFact | undefined
++  const delayedMirror: Array<AnswerFact> = [cached]
++  const unsubscribeCache = client.getQueryCache().subscribe((event) => {
++    if (
++      event.type === `updated` &&
++      event.action.type === `success` &&
++      event.query.queryHash === hashKey(freshKey)
++    ) {
++      reported = true
++      delayedMirror.push({
++        ...completed!,
++        installedCount: event.query.state.dataUpdateCount,
++      })
++    }
++  })
++  const observer = new QueryObserver(client, {
++    queryKey: freshKey,
++    enabled: false,
++  })
++  const unsubscribe = observer.subscribe((result) => {
++    if (result.status !== `success`) return
++    const fresh = client
++      .getQueryCache()
++      .find({ queryKey: freshKey, exact: true })!
++    const current: QueryFact = {
++      ...pending,
++      status: old.state.status,
++      fetchStatus: old.state.fetchStatus,
++      dataUpdateCount: old.state.dataUpdateCount,
++      rows: (old.state.data as Array<{ id: number }>).map(({ id }) => id),
++    }
++    const sibling: QueryFact = {
++      ...completed!,
++      status: fresh.state.status,
++      fetchStatus: fresh.state.fetchStatus,
++      dataUpdateCount: fresh.state.dataUpdateCount,
++      rows: (fresh.state.data as Array<{ id: number }>).map(({ id }) => id),
++    }
++    expect(reported).toBe(false)
++    // The old delayed mirror has no empty success yet: preserve its false-negative.
++    expect(
++      delayedMirror.find(
++        (answer) => answer.backendVersion === 1 && answer.rows.length === 0,
++      ),
++    ).toBeUndefined()
++    expect(
++      findQueuedAnswerPremise(
++        3,
++        [pending],
++        [current, sibling],
++        [completed!],
++        [cached],
++      )?.answer,
++    ).toBe(completed)
++    observed = true
++  })
++  try {
++    await client.fetchQuery({
++      queryKey: freshKey,
++      queryFn: () => {
++        const fresh = client
++          .getQueryCache()
++          .find({ queryKey: freshKey, exact: true })!
++        completed = {
++          identity: fresh,
++          atom: hashKey(freshKey),
++          key: freshKey,
++          keys: [3],
++          owner: 1,
++          startCount: fresh.state.dataUpdateCount,
++          version: 2,
++          backendVersion: 1,
++          rows: [],
++        }
++        return []
++      },
++    })
++    expect(observed).toBe(true)
++    expect(reported).toBe(true)
++    expect(
++      delayedMirror.some(
++        (answer) => answer.backendVersion === 1 && answer.rows.length === 0,
++      ),
++    ).toBe(true)
++  } finally {
++    pending.pending = false
++    releaseOld?.()
++    await held
++    unsubscribe()
++    unsubscribeCache()
++    client.clear()
++  }
++})

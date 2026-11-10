@@ -1,0 +1,784 @@
+import { D2, output } from "@tanstack/db-ivm";
+import { createSourceRecord } from "../utils/source-record.js";
+import { createDeferred } from "../deferred.js";
+import { runAllCallbacks } from "../utils/callbacks.js";
+import { normalizeError } from "../utils/error.js";
+import { deepEquals } from "../utils.js";
+import { codedMessage, devBuild } from "../error-message.js";
+import { buildHealthTree, healthNode } from "../collection/health-tree.js";
+import { isFailedStatus } from "../live-query-primitives.js";
+import { compileQuery } from "./compiler/index.js";
+import { normalizeExpressionPaths } from "./compiler/expressions.js";
+import { getCollectionBuilder } from "./live/collection-registry.js";
+import { scheduleQueryGraphRun } from "./live/graph-scheduler.js";
+import {
+  SubsetDemandController,
+  hasPendingJoinedWork as hasPendingJoinedSourceWork
+} from "./live/subset-demand-controller.js";
+import { OrderedSourceLoader } from "./live/ordered-source-loader.js";
+import {
+  buildQueryFromConfig,
+  computeSubscriptionOrderByHints,
+  extractCollectionFromSource,
+  extractCollectionSources,
+  extractCollectionsFromQuery,
+  reconcileChangesForD2,
+  sendChangesToInput,
+  sourcePermitsInitialReadiness,
+  splitUpdates
+} from "./live/utils.js";
+let effectCounter = 0;
+function stoppedSourceError(collectionId, status) {
+  return new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' entered ${status} state` : codedMessage(135, { collectionId, status })
+  );
+}
+export function createEffect(config) {
+  const id = config.id ?? `live-query-effect-${++effectCounter}`;
+  const abortController = new AbortController();
+  const ctx = {
+    effectId: id,
+    signal: abortController.signal
+  };
+  const inFlightHandlers = /* @__PURE__ */ new Set();
+  let disposed = false;
+  const onBatchProcessed = (events) => {
+    if (disposed) return;
+    if (events.length === 0) return;
+    if (config.onBatch) {
+      try {
+        const result = config.onBatch(events, ctx);
+        if (result instanceof Promise) {
+          const tracked = result.catch((error) => {
+            reportError(error, events[0], config.onError);
+          });
+          trackPromise(tracked, inFlightHandlers);
+        }
+      } catch (error) {
+        reportError(error, events[0], config.onError);
+      }
+    }
+    for (const event of events) {
+      if (abortController.signal.aborted) break;
+      const handler = getHandlerForEvent(event, config);
+      if (!handler) continue;
+      try {
+        const result = handler(event, ctx);
+        if (result instanceof Promise) {
+          const tracked = result.catch((error) => {
+            reportError(error, event, config.onError);
+          });
+          trackPromise(tracked, inFlightHandlers);
+        }
+      } catch (error) {
+        reportError(error, event, config.onError);
+      }
+    }
+  };
+  let disposalPromise;
+  const dispose = () => {
+    if (disposalPromise) return disposalPromise;
+    const completion = createDeferred();
+    const attempt = completion.promise;
+    disposalPromise = attempt;
+    disposed = true;
+    abortController.abort();
+    void (async () => {
+      let cleanupFailed = false;
+      let cleanupError;
+      try {
+        runner.dispose();
+      } catch (error) {
+        cleanupFailed = true;
+        cleanupError = error;
+      }
+      if (inFlightHandlers.size > 0) {
+        await Promise.allSettled([...inFlightHandlers]);
+      }
+      if (cleanupFailed) throw cleanupError;
+    })().then(completion.resolve, completion.reject);
+    void attempt.then(
+      () => {
+      },
+      () => {
+        if (disposalPromise === attempt) disposalPromise = void 0;
+      }
+    );
+    return attempt;
+  };
+  const effect = {
+    dispose,
+    get disposed() {
+      return disposed;
+    }
+  };
+  const runner = new EffectPipelineRunner({
+    effect,
+    query: config.query,
+    skipInitial: config.skipInitial ?? false,
+    onBatchProcessed,
+    onHealthChange: config.onHealthChange,
+    onSourceError: (error) => {
+      if (disposed) return;
+      if (config.onSourceError) {
+        try {
+          config.onSourceError(error);
+        } catch (callbackError) {
+          console.error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `[Effect '${id}'] onSourceError callback threw:` : codedMessage(220, { id }),
+            callbackError
+          );
+        }
+      } else {
+        console.error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `[Effect '${id}'] ${error.message}. Disposing effect.` : codedMessage(221, { id, message: error.message })
+        );
+      }
+      void dispose().catch((cleanupError) => {
+        console.error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `[Effect '${id}'] failed to dispose after a source error:` : codedMessage(222, { id }),
+          cleanupError
+        );
+      });
+    }
+  });
+  try {
+    runner.start();
+  } catch (error) {
+    try {
+      runner.dispose();
+    } catch (cleanupError) {
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[Effect '${id}'] failed to dispose after a startup error:` : codedMessage(223, { id }),
+        cleanupError
+      );
+    }
+    throw error;
+  }
+  return effect;
+}
+function followHeldAcquisition(acquisition, replacementAfterFailure, handlers) {
+  void acquisition.then(
+    () => handlers.settled(true),
+    () => {
+      const replacement = replacementAfterFailure();
+      if (replacement) handlers.replaced(replacement);
+      else handlers.settled(false);
+    }
+  );
+}
+class EffectPipelineRunner {
+  constructor(config) {
+    // Mutable objects passed to compileQuery by reference.
+    // The join compiler captures these references and reads them later when
+    // the graph runs, so they must be populated before the first graph run.
+    this.subscriptions = createSourceRecord();
+    this.lazySourcesCallbacks = createSourceRecord();
+    this.lazySources = /* @__PURE__ */ new Set();
+    this.demand = new SubsetDemandController();
+    // OrderBy optimization info populated by the compiler when limit is present
+    this.optimizableOrderByCollections = createSourceRecord();
+    // Ordered subscription state for cursor-based loading
+    this.orderedLoaders = /* @__PURE__ */ new Map();
+    // An asynchronous authoritative repair may update the private D2 state in
+    // several prefix/tie/refill steps. Keep their net Effect delta private until
+    // the final participant settles, matching live-query Collection publication.
+    this.pendingOrderedPublications = /* @__PURE__ */ new Set();
+    this.pendingInitialLoads = /* @__PURE__ */ new Set();
+    this.orderedPublicationFailed = false;
+    // Subscription management
+    this.unsubscribeCallbacks = /* @__PURE__ */ new Set();
+    // Exact row last contributed to D2 per lexical source key.
+    this.sentToD2RowsBySource = /* @__PURE__ */ new Map();
+    // Output accumulator
+    this.pendingChanges = /* @__PURE__ */ new Map();
+    // Callback-visible result. Held repair deltas are classified against this
+    // last coherent membership rather than their net multiplicity alone.
+    this.publishedRows = /* @__PURE__ */ new Map();
+    this.initialLoadComplete = false;
+    // The Effect's initial gate: latched when every
+    // initial load has settled, with or without skipInitial. After it,
+    // a sync problem does not dispose the Effect.
+    this.reachedReady = false;
+    // Scheduler integration
+    this.subscribedToAllCollections = false;
+    this.builderDependencies = /* @__PURE__ */ new Set();
+    // Reentrance guard
+    this.isGraphRunning = false;
+    this.disposed = false;
+    this.skipInitial = config.skipInitial;
+    this.onBatchProcessed = config.onBatchProcessed;
+    this.onSourceError = config.onSourceError;
+    this.onHealthChange = config.onHealthChange;
+    this.dependent = {
+      kind: `effect`,
+      active: true,
+      end: () => config.effect.dispose()
+    };
+    this.query = buildQueryFromConfig({ query: config.query });
+    this.queryCompareOptions = extractCollectionFromSource(
+      this.query
+    ).compareOptions;
+    this.collections = extractCollectionsFromQuery(this.query);
+    this.collectionSources = extractCollectionSources(this.query);
+    this.compilePipeline();
+  }
+  /** Compile the D2 graph and query pipeline */
+  compilePipeline() {
+    this.graph = new D2();
+    const inputs = createSourceRecord();
+    for (const source of this.collectionSources) {
+      inputs[source.sourceId] = this.graph.newInput();
+    }
+    this.inputs = inputs;
+    const compilation = compileQuery(
+      this.query,
+      this.inputs,
+      this.collections,
+      // These mutable objects are captured by reference. The join compiler
+      // reads them later when the graph runs, so they must be populated
+      // (in start()) before the first graph run.
+      this.subscriptions,
+      this.lazySourcesCallbacks,
+      this.lazySources,
+      this.optimizableOrderByCollections,
+      () => {
+      }
+      // setWindowFn (no-op — effects don't paginate)
+    );
+    this.sourceWhereClauses = compilation.sourceWhereClauses;
+    compilation.pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner();
+        messages.reduce(accumulateEffectChanges, this.pendingChanges);
+      })
+    );
+    this.graph.finalize();
+  }
+  isDisposed() {
+    return this.disposed;
+  }
+  /** Subscribe to source collections and start processing */
+  start() {
+    if (this.collectionSources.length === 0) {
+      return;
+    }
+    if (!this.skipInitial) {
+      this.initialLoadComplete = true;
+    }
+    const pendingBuffers = /* @__PURE__ */ new Map();
+    for (const source of this.collectionSources) {
+      if (this.isDisposed()) {
+        return;
+      }
+      const { sourceId, alias, collection } = source;
+      const collectionId = collection.id;
+      const handleSourceCleanup = () => {
+        if (this.disposed) return;
+        this.onSourceError(
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' was cleaned up while effect depends on it` : codedMessage(134, { collectionId })
+          )
+        );
+      };
+      const cleanupStartUnsubscribe = collection._onCleanupStart(handleSourceCleanup);
+      if (this.isDisposed()) {
+        cleanupStartUnsubscribe();
+        return;
+      }
+      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe);
+      this.sentToD2RowsBySource.set(sourceId, /* @__PURE__ */ new Map());
+      const dependencyBuilder = getCollectionBuilder(collection);
+      if (dependencyBuilder) {
+        this.builderDependencies.add(dependencyBuilder);
+      }
+      const whereClause = this.sourceWhereClauses?.get(sourceId);
+      const whereExpression = whereClause ? normalizeExpressionPaths(whereClause, alias) : void 0;
+      const buffer = [];
+      pendingBuffers.set(sourceId, buffer);
+      const isLazy = this.lazySources.has(sourceId);
+      const orderByInfo = this.optimizableOrderByCollections[sourceId];
+      const changeCallback = (changes) => {
+        const bufferedChanges = pendingBuffers.get(sourceId);
+        if (bufferedChanges) bufferedChanges.push(changes);
+        else this.handleSourceChanges(sourceId, changes);
+      };
+      if (isFailedStatus(collection.status)) {
+        this.onSourceError(stoppedSourceError(collectionId, collection.status));
+        return;
+      }
+      const subscription = collection.subscribeChanges(changeCallback, {
+        ...this.buildSubscriptionOptions(
+          alias,
+          isLazy,
+          orderByInfo,
+          whereExpression
+        ),
+        owner: this.dependent,
+        onLoadSubsetError: ({ error }) => this.onSourceError(normalizeError(error)),
+        // subscribeChanges can report a result before it returns the
+        // subscription, so read it from the record when a load fails.
+        onLoadSubsetResult: (result) => {
+          this.trackInitialLoad(
+            result,
+            () => this.subscriptions[sourceId]?.pendingTruncateReplacement
+          );
+        }
+      });
+      this.subscriptions[sourceId] = subscription;
+      const unsubscribe = () => {
+        delete this.subscriptions[sourceId];
+        subscription.unsubscribe();
+      };
+      if (this.isDisposed()) {
+        unsubscribe();
+        return;
+      }
+      this.unsubscribeCallbacks.add(unsubscribe);
+      if (Object.values(this.optimizableOrderByCollections).some(
+        (info) => info.joinedFilterSourceId === sourceId
+      )) {
+        this.unsubscribeCallbacks.add(
+          subscription.on(`status:ready`, () => {
+            if (!this.disposed) this.scheduleGraphRun();
+          })
+        );
+      }
+      const lazyCallbacks = this.lazySourcesCallbacks[sourceId];
+      if (lazyCallbacks) {
+        lazyCallbacks.setDemand = (plan, keys) => this.setDemand(subscription, plan, keys);
+        for (const plan of lazyCallbacks.plans ?? []) {
+          if (plan.initialKeys.size > 0) {
+            lazyCallbacks.setDemand(plan, plan.initialKeys);
+          }
+        }
+      }
+      if (orderByInfo) {
+        const loader = new OrderedSourceLoader(
+          orderByInfo,
+          subscription,
+          alias,
+          (result, holdPublication) => {
+            this.trackInitialLoad(
+              result,
+              () => subscription.pendingTruncateReplacement
+            );
+            const holdsInitialPublication = this.skipInitial && !this.initialLoadComplete;
+            if (holdPublication || holdsInitialPublication) {
+              this.trackOrderedPublication(
+                Promise.resolve(result),
+                () => subscription.pendingTruncateReplacement
+              );
+            }
+          },
+          () => false,
+          void 0,
+          () => orderByInfo.joinedFilterSourceId !== void 0 && this.hasPendingJoinedWork(orderByInfo.joinedFilterSourceId)
+        );
+        this.orderedLoaders.set(sourceId, loader);
+        loader.start();
+        this.unsubscribeCallbacks.add(
+          collection.on(`loadedSubsets:invalidated`, () => {
+            if (this.disposed) return;
+            loader.revalidateLoadedCoverage();
+            this.scheduleGraphRun();
+          })
+        );
+      }
+      const handleSourceStatus = (status) => {
+        if (this.disposed) return;
+        if (status === `crashed` || status === `error` && !this.reachedReady) {
+          this.onSourceError(stoppedSourceError(collectionId, status));
+          return;
+        }
+        if (status === `cleaned-up`) {
+          handleSourceCleanup();
+          return;
+        }
+        if (this.skipInitial && !this.initialLoadComplete && this.canCompleteInitialLoad()) {
+          this.initialLoadComplete = true;
+        }
+        this.latchReady();
+      };
+      const statusUnsubscribe = collection.on(
+        `status:change`,
+        ({ status }) => handleSourceStatus(status)
+      );
+      this.unsubscribeCallbacks.add(statusUnsubscribe);
+      this.unsubscribeCallbacks.add(
+        collection.on(`health:change`, () => this.reportHealth())
+      );
+    }
+    this.subscribedToAllCollections = true;
+    for (const [sourceId, buffer] of pendingBuffers) {
+      pendingBuffers.delete(sourceId);
+      for (const changes of buffer) {
+        this.handleSourceChanges(sourceId, changes, false);
+      }
+    }
+    this.runGraph();
+    this.latchReady();
+    if (this.skipInitial && !this.initialLoadComplete && this.canCompleteInitialLoad()) {
+      this.initialLoadComplete = true;
+    }
+  }
+  /** Handle incoming changes from a source collection */
+  handleSourceChanges(sourceId, changes, scheduleGraph = true) {
+    if (this.optimizableOrderByCollections[sourceId]) {
+      const source = this.collectionSources.find(
+        (candidate) => candidate.sourceId === sourceId
+      );
+      this.orderedLoaders.get(sourceId)?.onSourceChanges(
+        changes,
+        this.sentToD2RowsBySource.get(sourceId),
+        (key) => source.collection._hasOptimisticOverlay(key)
+      );
+      changes = [...splitUpdates(changes)];
+    }
+    this.sendChangesToD2(sourceId, changes);
+    if (scheduleGraph) this.scheduleGraphRun();
+  }
+  setDemand(subscription, plan, keys) {
+    const update = this.demand.setDemand(subscription, plan, keys);
+    if (update.ready instanceof Promise) {
+      this.trackInitialLoad(
+        update.ready,
+        () => subscription.pendingTruncateReplacement
+      );
+      void update.ready.then(
+        () => {
+          if (!this.disposed) this.scheduleGraphRun();
+        },
+        () => {
+        }
+      );
+    }
+  }
+  /**
+   * Schedule a graph run via the transaction-scoped scheduler.
+   *
+   * When called within a transaction, the run is deferred until the
+   * transaction flushes, coalescing multiple changes into a single graph
+   * execution. Without a transaction, the graph runs immediately.
+   *
+   * Dependencies are discovered from source collections that are themselves
+   * live query collections, ensuring parent queries run before effects.
+   */
+  scheduleGraphRun() {
+    scheduleQueryGraphRun(this, this.builderDependencies, () => {
+      if (!this.disposed && this.subscribedToAllCollections) this.runGraph();
+    });
+  }
+  /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
+  trackInitialLoad(result, replacementAfterFailure) {
+    if (!(result instanceof Promise) || this.reachedReady || this.disposed)
+      return;
+    this.pendingInitialLoads.add(result);
+    const release = () => {
+      if (this.pendingInitialLoads.delete(result) && !this.disposed)
+        this.scheduleGraphRun();
+    };
+    followHeldAcquisition(result, replacementAfterFailure, {
+      settled: (succeeded) => succeeded ? release() : void Promise.resolve().then(release),
+      replaced: (replacement) => {
+        this.trackInitialLoad(replacement, replacementAfterFailure);
+        release();
+      }
+    });
+  }
+  /** Hold Effect callback publication across one authoritative repair chain. */
+  trackOrderedPublication(promise, replacementAfterFailure) {
+    if (this.disposed) return;
+    if (this.pendingOrderedPublications.size === 0) {
+      this.orderedPublicationFailed = false;
+    }
+    this.pendingOrderedPublications.add(promise);
+    const finish = (succeeded) => {
+      if (!this.pendingOrderedPublications.delete(promise)) return;
+      if (!succeeded) this.orderedPublicationFailed = true;
+      if (succeeded && !this.orderedPublicationFailed && this.pendingOrderedPublications.size === 0 && !this.disposed) {
+        this.scheduleGraphRun();
+      }
+    };
+    followHeldAcquisition(promise, replacementAfterFailure, {
+      settled: finish,
+      replaced: (replacement) => {
+        if (this.pendingOrderedPublications.delete(promise) && !this.disposed)
+          this.trackOrderedPublication(replacement, replacementAfterFailure);
+      }
+    });
+  }
+  /**
+   * Send changes to the D2 input for the given lexical source.
+   * Returns the number of multiset entries sent.
+   */
+  sendChangesToD2(sourceId, changes) {
+    if (this.disposed || !this.inputs || !this.graph) return 0;
+    const input = this.inputs[sourceId];
+    if (!input) return 0;
+    const sentRows = this.sentToD2RowsBySource.get(sourceId);
+    const reconciled = reconcileChangesForD2(changes, sentRows);
+    return sendChangesToInput(input, reconciled);
+  }
+  /**
+   * Run the D2 graph until quiescence, then emit accumulated events once.
+   *
+   * All output across the entire while-loop is accumulated into a single
+   * batch so that users see one `onBatchProcessed` invocation per scheduler
+   * run, even when ordered loading causes multiple graph steps.
+   */
+  runGraph() {
+    if (this.isGraphRunning || this.disposed || !this.graph) return;
+    this.isGraphRunning = true;
+    try {
+      if (!this.graph.pendingWork()) this.loadMoreIfNeeded();
+      while (!this.isDisposed() && this.graph.pendingWork()) {
+        this.graph.run();
+        if (this.disposed) break;
+        this.loadMoreIfNeeded();
+      }
+      this.flushPendingChanges();
+      this.latchReady();
+      if (this.skipInitial && !this.initialLoadComplete && this.canCompleteInitialLoad()) {
+        this.initialLoadComplete = true;
+      }
+    } finally {
+      this.isGraphRunning = false;
+    }
+  }
+  /** Classify accumulated changes into DeltaEvents and invoke the callback */
+  flushPendingChanges() {
+    if (this.pendingChanges.size === 0) return;
+    if (this.orderedPublicationFailed || this.pendingOrderedPublications.size > 0) {
+      return;
+    }
+    if (this.hasPendingJoinedFilterWork()) {
+      return;
+    }
+    const shouldPublish = !this.skipInitial || this.initialLoadComplete;
+    const tracksPublishedRows = this.orderedLoaders.size > 0;
+    const events = [];
+    for (const [key, changes] of this.pendingChanges) {
+      const event = classifyDelta(
+        key,
+        changes,
+        tracksPublishedRows ? this.publishedRows : void 0
+      );
+      if (event) {
+        if (tracksPublishedRows) {
+          if (event.type === `exit`) this.publishedRows.delete(key);
+          else this.publishedRows.set(key, event.value);
+        }
+        if (shouldPublish) events.push(event);
+      }
+    }
+    this.pendingChanges = /* @__PURE__ */ new Map();
+    if (events.length > 0) {
+      this.onBatchProcessed(events);
+    }
+  }
+  /** Check the source-readiness part of initial readiness for every source. */
+  sourcesPermitInitialReadiness() {
+    return this.collectionSources.every(
+      ({ collection }) => sourcePermitsInitialReadiness(collection)
+    );
+  }
+  /** Latch the Effect's initial gate and report whether it has been reached. */
+  latchReady() {
+    if (!this.reachedReady && this.canCompleteInitialLoad()) {
+      this.reachedReady = true;
+      const tree = this.healthTree();
+      if (tree.hasErrors) this.reportHealth();
+      else this.reportedTree = tree;
+    }
+    return this.reachedReady;
+  }
+  /** The health tree for this effect's sources, in query order. */
+  healthTree() {
+    return healthNode(this, void 0, {
+      alias: `root`,
+      collectionId: `effect`,
+      kind: `live-query`,
+      status: this.reachedReady ? `ready` : `loading`,
+      failureReason: null,
+      error: null,
+      reloading: false,
+      sources: this.collectionSources.map(
+        ({ sourceId, alias, collection }) => buildHealthTree(collection, { alias, id: sourceId }, this)
+      )
+    });
+  }
+  reportHealth() {
+    if (this.disposed || !this.reachedReady || !this.onHealthChange) return;
+    const tree = this.healthTree();
+    if (tree === this.reportedTree) return;
+    this.reportedTree = tree;
+    this.onHealthChange(tree);
+  }
+  canCompleteInitialLoad() {
+    return !this.orderedPublicationFailed && this.pendingOrderedPublications.size === 0 && this.pendingInitialLoads.size === 0 && !this.hasPendingJoinedFilterWork() && this.sourcesPermitInitialReadiness();
+  }
+  hasPendingJoinedFilterWork() {
+    return Object.values(this.optimizableOrderByCollections).some(
+      (info) => info.joinedFilterSourceId !== void 0 && this.hasPendingJoinedWork(info.joinedFilterSourceId)
+    );
+  }
+  /**
+   * Build subscription options for an alias based on whether it uses ordered
+   * loading, is lazy, or should pass orderBy/limit hints.
+   */
+  buildSubscriptionOptions(alias, isLazy, orderByInfo, whereExpression) {
+    if (this.query.limit === 0) {
+      return { includeInitialState: false, whereExpression };
+    }
+    if (orderByInfo) {
+      return { includeInitialState: false, whereExpression };
+    }
+    const includeInitialState = !isLazy;
+    const hints = computeSubscriptionOrderByHints(
+      this.query,
+      alias,
+      this.queryCompareOptions
+    );
+    return {
+      includeInitialState,
+      whereExpression,
+      ...hints.orderBy ? { orderBy: hints.orderBy } : {},
+      ...hints.limit !== void 0 ? { limit: hints.limit } : {}
+    };
+  }
+  /**
+   * After each graph run step, check if any ordered query's topK operator
+   * needs more data. If so, load more rows via requestLimitedSnapshot.
+   */
+  loadMoreIfNeeded() {
+    for (const loader of this.orderedLoaders.values()) {
+      try {
+        loader.loadMore();
+      } catch (error) {
+        if (!this.disposed && !Object.values(this.subscriptions).some(
+          (subscription) => Object.is(subscription.lastError, error)
+        ))
+          throw error;
+      }
+    }
+  }
+  hasPendingJoinedWork(joinedSourceId) {
+    return hasPendingJoinedSourceWork(
+      joinedSourceId,
+      this.lazySourcesCallbacks,
+      this.subscriptions,
+      (planId) => this.demand.hasPendingDemand(planId)
+    );
+  }
+  /** Tear down subscriptions and clear state */
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.subscribedToAllCollections = false;
+    try {
+      runAllCallbacks(this.unsubscribeCallbacks);
+    } finally {
+      this.unsubscribeCallbacks.clear();
+      this.clearPipelineState();
+    }
+  }
+  clearPipelineState() {
+    this.sentToD2RowsBySource.clear();
+    this.pendingChanges.clear();
+    this.publishedRows.clear();
+    this.pendingOrderedPublications.clear();
+    this.pendingInitialLoads.clear();
+    this.orderedPublicationFailed = false;
+    this.lazySources.clear();
+    this.demand.clear();
+    this.builderDependencies.clear();
+    for (const loader of this.orderedLoaders.values()) loader.dispose();
+    this.orderedLoaders.clear();
+    for (const key of Object.keys(this.lazySourcesCallbacks)) {
+      delete this.lazySourcesCallbacks[key];
+    }
+    for (const key of Object.keys(this.optimizableOrderByCollections)) {
+      delete this.optimizableOrderByCollections[key];
+    }
+    this.graph = void 0;
+    this.inputs = void 0;
+    this.sourceWhereClauses = void 0;
+  }
+}
+function getHandlerForEvent(event, config) {
+  switch (event.type) {
+    case `enter`:
+      return config.onEnter;
+    case `exit`:
+      return config.onExit;
+    case `update`:
+      return config.onUpdate;
+  }
+}
+function accumulateEffectChanges(acc, [[key, tupleData], multiplicity]) {
+  const [value] = tupleData;
+  const changes = acc.get(key) || {
+    deletes: 0,
+    inserts: 0
+  };
+  if (multiplicity < 0) {
+    changes.deletes += Math.abs(multiplicity);
+    changes.deleteValue ??= value;
+  } else if (multiplicity > 0) {
+    changes.inserts += multiplicity;
+    changes.insertValue = value;
+  }
+  acc.set(key, changes);
+  return acc;
+}
+function classifyDelta(key, changes, publishedRows) {
+  const { inserts, deletes, insertValue, deleteValue } = changes;
+  const wasPresent = publishedRows ? publishedRows.has(key) : deletes > 0;
+  const previousValue = publishedRows?.get(key) ?? deleteValue;
+  const isPresent = publishedRows ? Number(wasPresent) + inserts - deletes > 0 : inserts > 0;
+  if (!wasPresent && isPresent) {
+    return { type: `enter`, key, value: insertValue };
+  }
+  if (wasPresent && !isPresent) {
+    return { type: `exit`, key, value: previousValue ?? deleteValue };
+  }
+  if (wasPresent && isPresent && insertValue !== void 0 && (!publishedRows || !deepEquals(previousValue, insertValue))) {
+    return {
+      type: `update`,
+      key,
+      value: insertValue,
+      previousValue
+    };
+  }
+  return void 0;
+}
+function trackPromise(promise, inFlightHandlers) {
+  inFlightHandlers.add(promise);
+  const finish = () => {
+    inFlightHandlers.delete(promise);
+  };
+  void promise.then(finish, finish);
+}
+function reportError(error, event, onError) {
+  const normalised = normalizeError(error);
+  if (onError) {
+    try {
+      onError(normalised, event);
+    } catch (onErrorError) {
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[Effect] Error in onError handler:` : codedMessage(224),
+        onErrorError
+      );
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `[Effect] Original error:` : codedMessage(225),
+        normalised
+      );
+    }
+  } else {
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `[Effect] Unhandled error in handler:` : codedMessage(226),
+      normalised
+    );
+  }
+}

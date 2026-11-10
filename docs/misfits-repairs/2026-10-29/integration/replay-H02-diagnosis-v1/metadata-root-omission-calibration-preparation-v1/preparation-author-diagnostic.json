@@ -1,0 +1,12 @@
+{
+  "cause": "Pin list contained two executable path strings alongside pathlib Paths",
+  "correction": "Convert every pin entry to Path before metadata checks. Reuse unchanged existing expanded source after byte equality check.",
+  "exitCode": 1,
+  "firstError": "AttributeError: 'str' object has no attribute 'is_file'",
+  "kind": "Passive preparation author error; no product result",
+  "productImportsRuntimeCompilerProbesMaterialization": false,
+  "toolChunk": "e4573d",
+  "writesBeforeFailure": [
+    "Only final expanded inert .ts.txt source; no binding/invocation/freeze or executable workspace existed"
+  ]
+}

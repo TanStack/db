@@ -1,0 +1,104 @@
+[
+  {
+    "path": "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "status": "unchanged",
+    "beforeSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "afterSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+    "status": "unchanged",
+    "beforeSha256": "5ab01ce82607ecff372577ef1ccba7ca46848a0b7adfb0eabd57466257059d21",
+    "afterSha256": "5ab01ce82607ecff372577ef1ccba7ca46848a0b7adfb0eabd57466257059d21"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts",
+    "status": "unchanged",
+    "beforeSha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337",
+    "afterSha256": "e37a74feee5ee43f6c52efe3f6c745d9059c0d8f2f4e3eeb69c0dea90fc19337"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+    "status": "unchanged",
+    "beforeSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed",
+    "afterSha256": "025fc8dce5a10c0912787dce60c6f049c27c474acd9ca40f324d40350d97a3ed"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+    "status": "modified",
+    "beforeSha256": "35477e105ca1a71bf5fdcc4de6550e31214abfbff8e8f68c9f2f4e68de3990db",
+    "afterSha256": "6e4e7c067695016d3cffc16771eeb7f903dc4ce875019e0d369b2d24bdd18bac"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+    "status": "unchanged",
+    "beforeSha256": "ec15efd9ca0b827a531db4cf560cd06040215d4c7e9bd556721283432ee50208",
+    "afterSha256": "ec15efd9ca0b827a531db4cf560cd06040215d4c7e9bd556721283432ee50208"
+  },
+  {
+    "path": "packages/query-db-collection/tests/queued-answer-root-setup-probe.ts",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "7fc098f239803bbd02a17190e812c14c44b62784b6db7c9d85b535ba965a3a71"
+  },
+  {
+    "path": "scripts/h02-progress/bindings-calibration.test.mjs",
+    "status": "unchanged",
+    "beforeSha256": "ce36cb923806e7289646c24b9e1276c3f4b7d4031cd34a67e689415953c7214a",
+    "afterSha256": "ce36cb923806e7289646c24b9e1276c3f4b7d4031cd34a67e689415953c7214a"
+  },
+  {
+    "path": "scripts/h02-progress/calibration.config.ts",
+    "status": "unchanged",
+    "beforeSha256": "2c6f5c42a9b4c67211604ac3f6f92188597d4c7c0a71e976ba010c83aa01328d",
+    "afterSha256": "2c6f5c42a9b4c67211604ac3f6f92188597d4c7c0a71e976ba010c83aa01328d"
+  },
+  {
+    "path": "scripts/h02-progress/checker-calibration.test.ts",
+    "status": "unchanged",
+    "beforeSha256": "d0d167b3edbb77be0c6987ea01807c016fa06ff5e718909536471f803a5c3a84",
+    "afterSha256": "d0d167b3edbb77be0c6987ea01807c016fa06ff5e718909536471f803a5c3a84"
+  },
+  {
+    "path": "scripts/h02-progress/eslint.config.mjs",
+    "status": "unchanged",
+    "beforeSha256": "71e94882843c94560d64eb0a58cd7dc469f4a97f999ff31c2624c67ad87d06b2",
+    "afterSha256": "71e94882843c94560d64eb0a58cd7dc469f4a97f999ff31c2624c67ad87d06b2"
+  },
+  {
+    "path": "scripts/h02-progress/root-setup-calibration.config.ts",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "abc424c53103e46bc83bcb9519033f0fae84070a4fb388c61b3c385cf487c58a"
+  },
+  {
+    "path": "scripts/h02-progress/root-setup-calibration.test.ts",
+    "status": "added",
+    "beforeSha256": null,
+    "afterSha256": "aad1a39bac493e5a25bf777c2eb63ce67e88d6fb8dd42d4af35d3f66f4644dfe"
+  },
+  {
+    "path": "scripts/h02-progress/source-binding.setup.ts",
+    "status": "unchanged",
+    "beforeSha256": "1cad4346f920be998da96a006f93dfb192e99f7b1da7dc0b233a1a883fe0d52c",
+    "afterSha256": "1cad4346f920be998da96a006f93dfb192e99f7b1da7dc0b233a1a883fe0d52c"
+  },
+  {
+    "path": "scripts/h02-progress/tsconfig.json",
+    "status": "unchanged",
+    "beforeSha256": "ba1fe0c807d4bbfb91185d25fc338bab2511c695d472682f885373df5165bf08",
+    "afterSha256": "ba1fe0c807d4bbfb91185d25fc338bab2511c695d472682f885373df5165bf08"
+  },
+  {
+    "path": "scripts/h02-progress/verify-bindings.mjs",
+    "status": "unchanged",
+    "beforeSha256": "1f08564ce3f321d1d57b9eda6bf009ac045114e57c26bf051ed783c4e4aaae73",
+    "afterSha256": "1f08564ce3f321d1d57b9eda6bf009ac045114e57c26bf051ed783c4e4aaae73"
+  },
+  {
+    "path": "scripts/h02-progress/vitest.config.ts",
+    "status": "unchanged",
+    "beforeSha256": "d3428cb09831e5ff455f7b43eaa9698de55c776f70643204bb85d7d1778af034",
+    "afterSha256": "d3428cb09831e5ff455f7b43eaa9698de55c776f70643204bb85d7d1778af034"
+  }
+]

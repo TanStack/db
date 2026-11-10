@@ -1,0 +1,32 @@
+{
+  "kind": "independent read-only hash verification",
+  "sourceFreezeSha256": "888ff265816fe90252d1d4ad674ac98ac57c294c18498fb0b88277a687cd5a8a",
+  "packetManifestSha256": "1332c3f797f8a2f34e7bca47c929f1bbfae7f398a7f7021c39e469675a2cf941",
+  "checks": {
+    "packetMembers": 586,
+    "activeSnapshots": 573,
+    "storedSnapshots": 573,
+    "instrumentFiles": 44,
+    "sharedInstrumentFiles": 18,
+    "productionFiles": 511,
+    "receivingProductionFiles": 161,
+    "originalParentInputs": 563,
+    "package:eslint": 426,
+    "package:fast-check": 946,
+    "package:jsdom": 533,
+    "package:query-core": 307,
+    "package:typescript": 132,
+    "package:vite": 39,
+    "package:vitest": 114,
+    "package:vitest-runner": 13,
+    "package:vitest-utils": 34
+  },
+  "packageOwnPayloadFiles": 2544,
+  "reuseLinks": 4,
+  "lockfiles": 2,
+  "nodeExecutableMatched": true,
+  "changedSourcePairs": 12,
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "failures": [],
+  "pass": true
+}

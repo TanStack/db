@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-30T08:07:13.011373+00:00",
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "productionIdentityRecalculated": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "identityFormat": "SHA256 of sorted compact JSON path-to-sha256 map",
+  "checks": {
+    "productionFiles": {
+      "count": 511,
+      "changed": {}
+    },
+    "sharedInstrumentFiles": {
+      "count": 18,
+      "changed": {}
+    },
+    "instrumentFiles": {
+      "count": 34,
+      "changed": {
+        "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+          "before": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+          "after": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e"
+        }
+      }
+    }
+  },
+  "runtimeReceiving": 0,
+  "productionEdited": false
+}

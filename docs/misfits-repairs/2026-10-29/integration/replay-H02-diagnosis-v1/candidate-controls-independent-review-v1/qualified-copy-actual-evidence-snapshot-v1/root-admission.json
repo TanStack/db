@@ -1,0 +1,28 @@
+{
+  "kind": "Root one-shot copy-only admission",
+  "admittedMaterialization": true,
+  "maxInvocations": 1,
+  "pins": {
+    "packet-manifest-v1.json": "9abbc7da757afc7ce98b60f1b07a3ed70f851875efff27e729efdd1b0b2bb298",
+    "materialize-qualified-peer-v1.py.txt": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09",
+    "copy-only-contract-v1.json": "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+    "proposed-exact-copy-only-tool-invocation-v1.json": "2df5c78a10bbcb0b82b3cec7bf139bbd85603a775cbd8021fa91f4eac2e68b4f"
+  },
+  "review": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/copy-materializer-source-independent-review-v1.md",
+    "sha256": "4c7fa8c0fc6079f63fb9eeae6f5fad0cb8ada6a50536388da5d94f44b62ec313"
+  },
+  "exactToolArguments": {
+    "cmd": "exec /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -I -S -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+    "shell": "/bin/sh",
+    "login": false,
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+    "sandbox_permissions": "use_default",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 10000
+  },
+  "scope": "Only declared603regular/4links/227dirs and exclusive receipt tree; no compiler or native authority",
+  "after": "Preserve actual tool completion/raw streams/receipt; independent copied/protected input verification before compiler decision. No retry or cleanup.",
+  "productRedGreenCredit": false,
+  "canonicalImport": false
+}

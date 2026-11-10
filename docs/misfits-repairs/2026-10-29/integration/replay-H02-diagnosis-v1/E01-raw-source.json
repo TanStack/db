@@ -1,0 +1,27 @@
+{
+  "name": "E01-raw-source",
+  "argv": [
+    "node",
+    "--max-old-space-size=384",
+    "/private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/vitest/vitest.mjs",
+    "run",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--pool=forks",
+    "--fileParallelism=false",
+    "--config",
+    "h02.vite.config.ts",
+    "tests/h02-raw.test.ts"
+  ],
+  "cwd": "/private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection",
+  "NODE_OPTIONS": "--max-old-space-size=384",
+  "testSha256": "56e2f2854d978826ad89747f209d4e00db50879f8e065e21ab6d5607359919c8",
+  "sourceIdentity": "archived baseline 3937a73a source aliases; reconstructed receiving path, original build bytes unavailable",
+  "exitCode": 1,
+  "termination": null,
+  "elapsedSeconds": 7.369,
+  "maximumGroupRssBytes": 1024933888,
+  "rssSamples": 44,
+  "pgid": 89575
+}

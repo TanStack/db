@@ -1,0 +1,35 @@
+{
+  "status": "SEALED SOURCE-ONLY; separate root review/admission required",
+  "members": {
+    "binding.json": {
+      "sha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+      "bytes": 2064
+    },
+    "launch.py": {
+      "sha256": "8cae808cd8b045c45e78c10ca492ce0f8f712a6ea2d64a61ada28ee0aae7d4b0",
+      "bytes": 11661
+    },
+    "preparation-tool-record-v1.json": {
+      "sha256": "b0b1e94dc3adcf13b3f2af18ee5de64b77bab49f3b26a24beca095edb625eab1",
+      "bytes": 622
+    },
+    "report-v1.md": {
+      "sha256": "dc5be52aeeeb87b2c2b545ee2b8fec4c54e79e60d876b26a77ebfe7699480de4",
+      "bytes": 5771
+    },
+    "run-recipe.json": {
+      "sha256": "6a290c3a8e4a03382e026c39b09b71196bcc39aa9d7a2003253709ea3b2d8dc3",
+      "bytes": 4234
+    },
+    "source-validation-v1.json": {
+      "sha256": "79361daba28b97fe033750e796cebe7246bb2d71f288c58c837b530a1b729af4",
+      "bytes": 1135
+    },
+    "supplemental-tool-inputs.json": {
+      "sha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+      "bytes": 1531103
+    }
+  },
+  "nativeInvocations": 0,
+  "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec"
+}

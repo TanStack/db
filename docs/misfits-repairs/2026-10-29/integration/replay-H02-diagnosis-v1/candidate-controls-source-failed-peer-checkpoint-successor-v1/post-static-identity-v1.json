@@ -1,0 +1,12 @@
+{
+  "sourceEntries": 584,
+  "productionUnchanged": 511,
+  "dependencyPayloads": 2544,
+  "packages": 9,
+  "node": true,
+  "locks": 2,
+  "dependencyLinks": 4,
+  "allMatch": true,
+  "scope": "after offline source-only calibration and exact report-WT lint",
+  "runtimeAdmission": false
+}

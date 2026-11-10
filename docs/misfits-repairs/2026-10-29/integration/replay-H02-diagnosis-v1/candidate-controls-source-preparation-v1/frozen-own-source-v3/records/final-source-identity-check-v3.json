@@ -1,0 +1,27 @@
+{
+  "productionFilesVerified": 511,
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "productionUnchanged": true,
+  "sharedFilesVerified": 18,
+  "sharedUnchanged": true,
+  "ownSources": {
+    "packages/query-db-collection/tests/queued-answer-completion-oracle.ts": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec",
+    "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts": "5e1902e7ea02b8f11521c8ef5cc5b63c426fe3b92b50174e5c755be9b3c892fc",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e",
+    "scripts/h02-progress/completion-checker-controls.ts": "e65fa3ed827b1c1eb3db2da64dc9328a09b9eb83db89a428c5f6f523317522de"
+  },
+  "unchangedFromOwnV2": [
+    "packages/query-db-collection/tests/queued-answer-completion-history-oracle.ts",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts"
+  ],
+  "runtime": {
+    "receiving": 0,
+    "generatedHistories": 0,
+    "campaigns": 0,
+    "productMutants": 0,
+    "testCollection": 0
+  },
+  "originalProgressFamilyAndBudgets": "primary progress and candidate history source bytes identical to own v2",
+  "baselineFamily": "constructor profile/gate cardinality unchanged: inline8 + facade10; no history execution"
+}

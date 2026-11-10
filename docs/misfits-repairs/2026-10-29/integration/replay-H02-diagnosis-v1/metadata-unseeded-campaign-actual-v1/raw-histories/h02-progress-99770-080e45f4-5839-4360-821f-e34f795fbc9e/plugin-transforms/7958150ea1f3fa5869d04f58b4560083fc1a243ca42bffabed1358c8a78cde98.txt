@@ -1,0 +1,4 @@
+import { grouping } from "../compiler/grouping.js";
+export function groupKeys(callback) {
+  return { callback, grouping };
+}

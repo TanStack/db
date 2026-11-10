@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-30T10:54:26.798350+00:00",
+  "status": "PASS",
+  "identity": {
+    "sourceFiles": 595,
+    "copiedSources": 84,
+    "namedPackageRoots": 255,
+    "namedPackagePayloads": 11974,
+    "sourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+    "nodeSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "wrapperBeforeAfterAndSeparatePostReturnEqual": true,
+  "esbuildControlNamesPresent": [],
+  "bindingSha256": "73f288a87255d58095b431942fb94aa4d65b6d75508acd55d2f89a7e6ed44db7",
+  "runtimeConfigOrTestReimported": false,
+  "supervisorReimported": false,
+  "newNativeInvocation": false,
+  "same595Sources84Copies255PackageRoots11974Payloads405Edges112AbsentOptionalOrPeersVerified": true
+}

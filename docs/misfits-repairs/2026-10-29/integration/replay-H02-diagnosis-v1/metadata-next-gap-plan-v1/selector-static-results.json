@@ -1,0 +1,43 @@
+{
+  "kind": "Pure JavaScript string/RegExp comparison against preserved discovery bytes; no native discovery or test execution.",
+  "discoveryPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-v2/names.json",
+  "discoverySha256": "bf1afb58132bd904e881b053c3129d8be403529cfe35056cb8960ae96c2a2999",
+  "sourceRegistrationSha256": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+  "results": [
+    {
+      "id": "followup-scope-authored-q2",
+      "selectedPreservedNameCount": 1,
+      "selected": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+      "rejectsAppendedSuffix": true,
+      "zeroSelectorContainsEscapedPlus": null
+    },
+    {
+      "id": "followup-scope-default-q0",
+      "selectedPreservedNameCount": 1,
+      "selected": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0",
+      "rejectsAppendedSuffix": true,
+      "zeroSelectorContainsEscapedPlus": true
+    },
+    {
+      "id": "followup-scope-authored-q0",
+      "selectedPreservedNameCount": 1,
+      "selected": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0",
+      "rejectsAppendedSuffix": true,
+      "zeroSelectorContainsEscapedPlus": true
+    },
+    {
+      "id": "generated-scope-authored-fixed",
+      "selectedPreservedNameCount": 1,
+      "selected": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign",
+      "rejectsAppendedSuffix": true,
+      "zeroSelectorContainsEscapedPlus": null
+    },
+    {
+      "id": "generated-scope-authored-random",
+      "selectedPreservedNameCount": 1,
+      "selected": "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay",
+      "rejectsAppendedSuffix": true,
+      "zeroSelectorContainsEscapedPlus": null
+    }
+  ]
+}

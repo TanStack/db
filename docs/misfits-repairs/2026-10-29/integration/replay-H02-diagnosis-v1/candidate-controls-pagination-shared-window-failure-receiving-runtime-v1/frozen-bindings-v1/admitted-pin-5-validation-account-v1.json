@@ -1,0 +1,13 @@
+{
+  "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "initial": "d04e0b",
+  "session": 70292,
+  "final": "99c04e",
+  "exit": 0,
+  "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+  "gitCaptureShimSha256": "ab33ad1d62fb4e5b329dae5048b75e3fe231983de4404787904c2db133f2c8d5",
+  "scope": "Exact required lint; unchanged64MiB Git buffer-only shim; no truncated output, narrowing, exclusions or rule changes.",
+  "canonicalImport": false,
+  "publishing": false
+}

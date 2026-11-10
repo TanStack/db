@@ -1,0 +1,19 @@
+{
+  "heldBy": "/root",
+  "at": "2026-10-30T07:19:02.565030+00:00",
+  "status": "all unconsumed original batch admissions HELD after first setup surprise",
+  "originalBatchAdmissionSha256": "3f104a6fb0627b2db445a904f01e7e74252320c485e346ed90b7f8841814ada6",
+  "setupFailureManifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4/packet-sha256-v1.json",
+  "setupFailureManifestSha256": "db576de10b07f8a9aa0bee621357ee739e8e9759a845b8b852492d2c75f6d25a",
+  "finding": "H02-V4-EMPTY-SCOPE-SETUP01",
+  "classification": "sandbox denied initial ps before Vitest exec; no receiving child/source binding/history/reach; original launcher identity unrecorded",
+  "runtimeAuthorized": false,
+  "nextWork": "Only additive exact output-path successor launcher preparation/static review; any later attempt needs new root admission and process-inspection sandbox escalation.",
+  "forbidden": [
+    "overwrite original output",
+    "infer product failure",
+    "skip process inspection",
+    "retry existing consumed admission",
+    "run unconsumed original admissions"
+  ]
+}

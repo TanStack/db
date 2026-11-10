@@ -1,0 +1,30 @@
+{
+  "schedule": "success",
+  "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json",
+  "recipeSha256": "abc901dc7bc376988a463d44d42f9c3d851370abe3fdfdfa9b17140bdeeeafd0",
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+  "sourceFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+  "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/programs/inline-window-success.json",
+  "programSha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+  "programCopiedByteForByteFromQ": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-success.json",
+  "programCopiesEqual": true,
+  "recipeFieldChangesOnly": [
+    "outputDirectory",
+    "programFile",
+    "sourceFreeze",
+    "sourceFreezeSha256"
+  ],
+  "command": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+  },
+  "admission": "SEPARATE ROOT ADMISSION REQUIRED; no automatic next stage",
+  "prerequisites": "failure runtime frozen/reviewed, source identity unchanged, plus separate exact success admission",
+  "observationScope": "same frozen recorder/comparison real successful held-marker/child neighbor with complete child contents; calibration belongs only to this exact source epoch",
+  "budgetsUnchanged": true,
+  "runtime": 0
+}

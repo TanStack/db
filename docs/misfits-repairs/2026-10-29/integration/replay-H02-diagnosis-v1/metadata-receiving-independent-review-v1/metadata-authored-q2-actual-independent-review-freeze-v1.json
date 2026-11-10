@@ -1,0 +1,17 @@
+{
+  "kind": "Independent authored-q2 actual review freeze; original absence unobserved",
+  "members": {
+    "metadata-authored-q2-actual-independent-ledger-v1.json": "aa4147f112da057fdfa0f8d5df5b13b0ee8b4a79cdcfb9b495659b5638fc29eb",
+    "metadata-authored-q2-actual-independent-audit-v1.py": "507046dfec535034577fb3c94f4694f79440ee7dc01eaa57598d39f796747aba",
+    "metadata-authored-q2-actual-independent-audit-v1.json": "df3aeabb9beb24a5d2e004bbb25c9283120370e276da92eae94e0aa915e0c090",
+    "metadata-authored-q2-independent-original-absence-proposal-v1.json": "2c2c0bc8c962abf842a6875c2242fe71580115421050781e293a6a47281cf472",
+    "metadata-authored-q2-actual-independent-review-v1.md": "430f019d5c1c841b4f42a377a97488d1f975779a6d889238aa64b48461c30489",
+    "metadata-authored-q2-actual-independent-dispositions-v1.json": "c8fc0ebb5c780166d6dc9aa8d8a084906a9c764ab127ef8befca1fa94c8cce09"
+  },
+  "subjectCaptureManifestSha256": "9522fa338cd148a0353553bf0964202d527c56f76a4c7e2c0ddd9265966fe4e4",
+  "originalAbsenceProposalSha256": "c5ab1883f6047a022bca5903048ff45a345b2e81bd54d3c8b0e216686f42bcb9",
+  "processProbesExecuted": false,
+  "runtimeAdmission": false,
+  "rootOwnsLint": true,
+  "slot4Returned": "idle"
+}

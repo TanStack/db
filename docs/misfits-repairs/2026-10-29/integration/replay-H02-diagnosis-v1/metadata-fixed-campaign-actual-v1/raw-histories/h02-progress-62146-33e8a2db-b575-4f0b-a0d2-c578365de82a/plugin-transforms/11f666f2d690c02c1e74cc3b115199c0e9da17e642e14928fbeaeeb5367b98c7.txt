@@ -1,0 +1,89 @@
+import { map, reduce, serializeValue } from "@tanstack/db-ivm";
+import { deepEquals } from "../../utils.js";
+import { getParentContextIdentity } from "../equality-value-identity.js";
+import { INCLUDES_ROUTING } from "../compiler/route-metadata.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+export function exposeRouting(pipeline) {
+  return pipeline.pipe(
+    map(([key, rawTuple]) => {
+      const tuple = rawTuple;
+      return [
+        key,
+        [
+          tuple[0],
+          tuple[1],
+          tuple[2],
+          tuple[3],
+          tuple[0][INCLUDES_ROUTING],
+          tuple[4]
+        ]
+      ];
+    })
+  );
+}
+export function canonicalizeByPublicKey(pipeline, getKey, scope, valueIdentity) {
+  return pipeline.pipe(
+    map(([internalKey, rawTuple]) => {
+      const tuple = rawTuple;
+      const publicKey = getKey ? getKey(tuple[0]) : tuple[5] ?? internalKey;
+      const relationKey = scope === `root` ? serializeValue([`root`, publicKey]) : serializeValue([
+        routeKey(tuple[2], tuple[3], valueIdentity),
+        publicKey
+      ]);
+      return [relationKey, { publicKey, tuple }];
+    }),
+    reduce((values) => {
+      const totalMultiplicity = values.reduce(
+        (total, [, multiplicity]) => total + multiplicity,
+        0
+      );
+      if (totalMultiplicity === 0) return [];
+      if (totalMultiplicity < 0) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Canonical query row has negative multiplicity` : codedMessage(154)
+        );
+      }
+      const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0];
+      if (!visible) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Canonical query row has no positive contributor` : codedMessage(155)
+        );
+      }
+      for (const [candidate, multiplicity] of values) {
+        if (multiplicity <= 0) continue;
+        assertCongruentContributors(visible, candidate);
+      }
+      return [[visible, 1]];
+    }),
+    map(([relationKey, { publicKey, tuple }]) => [
+      scope === `root` ? publicKey : relationKey,
+      tuple
+    ])
+  );
+}
+function assertCongruentContributors(left, right) {
+  const [leftValue, leftOrder, leftCorrelation, leftContext, leftRouting] = left.tuple;
+  const [rightValue, rightOrder, rightCorrelation, rightContext, rightRouting] = right.tuple;
+  if (leftOrder !== rightOrder || !deepEquals(leftValue, rightValue) || !deepEquals(leftCorrelation, rightCorrelation) || !deepEquals(leftContext, rightContext) || !deepEquals(leftRouting, rightRouting)) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Query contributors for public key ${serializeValue(left.publicKey)} are not congruent` : codedMessage(156, { publicKey: left.publicKey })
+    );
+  }
+}
+export function routeKey(correlationKey, parentContext, valueIdentity) {
+  return serializeValue([
+    valueIdentity.equality(correlationKey ?? null),
+    getParentContextIdentity(parentContext ?? null)
+  ]);
+}
+export function reducePublicKeys(compilation, getKey) {
+  return {
+    pipeline: canonicalizeByPublicKey(
+      exposeRouting(compilation.pipeline),
+      getKey,
+      `root`,
+      compilation.valueIdentity
+    ),
+    facades: void 0
+  };
+}

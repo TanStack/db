@@ -1,0 +1,11 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db/tests/query/pagination-oracle.property.test.ts
+  2587:43  warning  'children' is already declared in the upper scope on line 2442 column 9  no-shadow
+  2627:39  warning  'children' is already declared in the upper scope on line 2442 column 9  no-shadow
+  2740:39  warning  'children' is already declared in the upper scope on line 2442 column 9  no-shadow
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts
+  190:19  warning  'receipt' is already declared in the upper scope on line 139 column 6  no-shadow
+
+✖ 4 problems (0 errors, 4 warnings)
+

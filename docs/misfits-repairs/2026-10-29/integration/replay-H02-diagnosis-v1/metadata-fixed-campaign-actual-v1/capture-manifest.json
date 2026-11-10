@@ -1,0 +1,70 @@
+{
+  "actualInvocations": 1,
+  "actualOuterExitCode": 0,
+  "evidenceFiles": {
+    "actual-final-exec-return.json": {
+      "bytes": 279,
+      "sha256": "f7afa01975b48ec933df770b5fde68a771e8f06ca2f24419262b6484b15e44ab"
+    },
+    "actual-initial-exec-return.json": {
+      "bytes": 914,
+      "sha256": "963cb30d3094cc163321355543e4661a94e08420f1202f9606420cbbcb542570"
+    },
+    "actual-original-identity-absence.json": {
+      "bytes": 10311,
+      "sha256": "1bd6e66f1ba7520fd20fea76101c596a22d0e34342bac6e6faf829bfe219e99f"
+    },
+    "actual-outer-lifecycle-observation.json": {
+      "bytes": 814,
+      "sha256": "fef9ad0984eea10c6b098dc4202dd1a46276031e632039e933bf0f712b4859d9"
+    },
+    "capture-audit.py": {
+      "bytes": 13353,
+      "sha256": "ee5f8737bcbd8156ceb1374622947f77ed900be130bf187fdc17e5c8da62a0cd"
+    },
+    "observation-summary.json": {
+      "bytes": 34047,
+      "sha256": "02e58629ff1b88fd5991f5969f215b2a4fb8e2b95d8633e99942574e214e8982"
+    },
+    "original-process-identities.json": {
+      "bytes": 5447,
+      "sha256": "0898aa5ed49e592fdea19f658603a4333439b6c960ac6757ee71182fd66d780a"
+    },
+    "prelaunch-pins.json": {
+      "bytes": 1626,
+      "sha256": "1274d0f3e6246e4b0eab8af59ce3c2e9aabdf35ab50ff1578fe2ba1245a8838c"
+    },
+    "python-postcheck.json": {
+      "bytes": 236,
+      "sha256": "6588dc8ccf2d9154e8b90017b4d8ec7e2d93fbc828a4acc954556aeba8b118b0"
+    },
+    "raw-manifest.json": {
+      "bytes": 7407525,
+      "sha256": "fa1043072d6a0241fee022a455b7c41a27d4867fdda9c021e5dbdd17c9eefb86"
+    },
+    "report.md": {
+      "bytes": 6488,
+      "sha256": "b17458e4cccfebc978bd53685281f5e85b2e7807016939cbf0c6fbe49d9af10f"
+    },
+    "source-tool-postcheck.json": {
+      "bytes": 489,
+      "sha256": "365b13b43f494cf8a276102cdbbc5193b6bc18c4cd0421a34cfbc05bacd01da7"
+    }
+  },
+  "limits": "Existing source-to-parent invocation and process-group identity limitations retained; no next runtime admitted.",
+  "rawBytes": 251021924,
+  "rawFiles": 15587,
+  "rawManifestSha256": "fa1043072d6a0241fee022a455b7c41a27d4867fdda9c021e5dbdd17c9eefb86",
+  "receivingChildExitCodes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "receivingChildren": 8,
+  "status": "FROZEN ACTUAL RESULT; pending independent actual-result review and root classification"
+}

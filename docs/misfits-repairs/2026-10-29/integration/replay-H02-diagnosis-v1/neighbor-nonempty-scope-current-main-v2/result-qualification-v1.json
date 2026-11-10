@@ -1,0 +1,26 @@
+{
+  "classification": "unreached native test selector; no receiving invocation or product verdict",
+  "launcherInvocations": 1,
+  "outerExitCode": 0,
+  "outerPid": 92750,
+  "outerPgid": 92750,
+  "nativeSummary": {
+    "filesSkipped": 1,
+    "testsSkipped": 5,
+    "testMilliseconds": 0
+  },
+  "selectedTests": 0,
+  "receivingHistories": 0,
+  "childPid": null,
+  "childPgid": null,
+  "perPathRequiredReachCounts": "unmeasured; no body ran",
+  "sourceIdentityAfter": {
+    "production": 511,
+    "instrument": 34,
+    "shared": 17,
+    "matched": 562
+  },
+  "rootAbsenceReceiptSha256": "30000bfe00f15bc00b7eb6a56bbbc21ae23a1e7caf6e41f41aa221f1fdf7eb75",
+  "diagnosis": "Source title $name interpolates through native objDisplay; plain frozen selector did not select the native string-valued table title. Derivation/selection calibration required for successor; no guessed runtime retry.",
+  "limits": "No baseline GREEN/RED, DB path, binding, receipt, provider hold, queued answer, publication or cleanup reach established."
+}

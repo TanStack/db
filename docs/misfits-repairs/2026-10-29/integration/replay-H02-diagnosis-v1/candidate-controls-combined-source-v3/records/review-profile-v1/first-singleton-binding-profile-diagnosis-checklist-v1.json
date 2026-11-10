@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-30T09:24:15.131586+00:00",
+  "diagnosisSha256": "e21847d14e43c9edfc1cc067aef575817cbcfae7cdf2252079cf4838a38f54a1",
+  "factsSha256": "ccda8b46fffd761159b413eb631cb1fa7791953c1a0a4101746ecb7b39e0e139",
+  "resultFreezeStillMatches": true,
+  "combinedV2StillMatches": true,
+  "inputV1StillMatches": true,
+  "ledger": {
+    "previousRows": 83,
+    "addedRows": 3,
+    "rows": 86,
+    "previousSha256": "990c024ef0beea4a91e3ec5651742ff706734ecbcec9224c069939a39fe0edf0",
+    "sha256": "edc0adf2efb4f08c9a0edbf6e8508fd52ff072c9ba19fa9875935ecaa253c385",
+    "appendOnlyPrefixVerified": true
+  },
+  "runtime": {
+    "nativeRetries": 0,
+    "verifierInvocations": 0,
+    "modelHistories": 0,
+    "testCollection": 0,
+    "processProbes": 0
+  },
+  "successorAcceptance": false,
+  "runtimeAdmission": false
+}

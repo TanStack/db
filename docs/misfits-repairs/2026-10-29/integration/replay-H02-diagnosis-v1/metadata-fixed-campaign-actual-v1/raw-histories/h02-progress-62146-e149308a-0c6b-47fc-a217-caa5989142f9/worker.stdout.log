@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  05:42:46
+   Duration  1.73s (transform 600ms, setup 382ms, import 9ms, tests 1.08s, environment 189ms)
+

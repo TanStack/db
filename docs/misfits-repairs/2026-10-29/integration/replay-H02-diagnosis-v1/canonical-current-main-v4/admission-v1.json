@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-30T04:29:04.528100+00:00",
+  "rootAdmission": "exactly one canonical current-main history after exact v4 static acceptance; approved process-access escalation; freeze STOP regardless of outcome",
+  "acceptance": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v4-independent-static-acceptance-v1.md",
+  "acceptanceSha256": "a70639dfdc26da1cfaedfc4edc55158efde705d9135248180385ce8621208932",
+  "acceptedBytes": {
+    "source-freeze-v4.json": "55fa4125913996e46b45e205129ea2a9df0151dd11d7fac4ecdaf4ec9017872c",
+    "recipes-v4.json": "db772733040837e73abe3a925881cad0a6349a7148ddcdd03d02111292b1cb20",
+    "launcher-v4.zsh": "883a06b0b2f2031e341e2a5615b8f96c9b68c4a73d7c1c76852f41eed3d6b603",
+    "packet-sha256-v4.json": "13b89c06513fcbd3612fa1a0946348707a5054173addbc7c4b633e2e4da13798"
+  },
+  "sandboxPermissions": "require_escalated",
+  "maximumReceivingHistories": 1,
+  "noRerun": true,
+  "priorV3ReceivingHistories": 0
+}

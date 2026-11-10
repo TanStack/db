@@ -1,0 +1,7 @@
+{
+  "chunk_id": "a64e48",
+  "wall_time_seconds": 1.003650791,
+  "session_id": 78242,
+  "original_token_count": 237,
+  "output": "{\"event\": \"compiler-preflight\", \"command\": {\"executable\": \"/Users/kyle.mathews/.n/bin/node\", \"args\": [\"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js\", \"--project\", \"/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json\", \"--noEmit\", \"--incremental\", \"false\", \"--pretty\", \"false\", \"--listFiles\"], \"cwd\": \"/private/tmp/h02-qualified-peer-receiving-v1/code\"}, \"wrapperPid\": 30151, \"limits\": {\"compilerWallMs\": 45000, \"groupRssBytes\": 2147483648, \"samplingMs\": 100, \"psInvocationTimeoutMs\": 1000, \"cleanupMs\": 2000}}\n{\"event\": \"owned-resource\", \"elapsedMs\": 58.20141700678505, \"rows\": [{\"pid\": 30153, \"pgid\": 30153, \"rssBytes\": 32768, \"raw\": \"30153 30153     32\"}]}\n{\"event\": \"owned-resource\", \"elapsedMs\": 214.9588330066763, \"rows\": [{\"pid\": 30153, \"pgid\": 30153, \"rssBytes\": 93274112, \"raw\": \"30153 30153  91088\"}]}\n"
+}

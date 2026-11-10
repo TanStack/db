@@ -1,0 +1,18 @@
+import { compareKeys } from "@tanstack/db-ivm";
+export function compareKeysReversed(a, b) {
+  return compareKeys(b, a);
+}
+export function findInsertPositionInArray(sortedArray, value, compareFn) {
+  let left = 0;
+  let right = sortedArray.length;
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    const comparison = compareFn(sortedArray[mid], value);
+    if (comparison < 0) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+  return left;
+}

@@ -1,0 +1,181 @@
+{
+  "at": "2026-10-30T11:19:31.394270+00:00",
+  "mode": "Static read/hash/source/JSON transformations only; no TypeScript/JS/model import, product/test/native run, or process probe.",
+  "knownQ": {
+    "source-freeze-v1.json": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+    "packet-sha256-v1.json": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+    "report-v1.md": "c8ab425db65bbdef057a1456fb5d39bcea3991190b5469435d0d778cd2c869a0"
+  },
+  "reviewedBase": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "packetEntries": 126,
+  "sourceBindings": 596,
+  "sourceCopies": 85,
+  "unchangedProduction": 511,
+  "exactOldBindingDeltas": {
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts": {
+      "before": "82c6dd8e724fc5cc0ab54d855e9e6fd3335d8f912b00161966018d38793027b8",
+      "after": "4bc16d539153129b5ad960f84199ca07f6f2d0baeb157088d97c77e5ec624f6c"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts": {
+      "before": "9237bde4da2d85ba933d3eee1ad11929c747196c7d3d5580a3b2cd2bad08cc3c",
+      "after": "39356f41a857f09e26afb746e596023b7bfb42de92dfbc5576504ac7e0dd2a8e"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts": {
+      "before": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+      "after": "78753e1e7bc7b2f94a3fe957e11a0abb329a7375aa9a32278b076cb1c4c63062"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts": {
+      "before": "be0be0fe5eadc55a97b769b5495b3435160db971bacaf50e5f0ee4fdfe62deb4",
+      "after": "8d58024e6bf6ef864ed0cb4338221e4b84a534b908d8ba05b309859bffa4c235"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts": {
+      "before": "aa28853ab3b9f64696d12bf63c675dcb30544dac8dee135551281e426265acc6",
+      "after": "fca27cdb8e8253518a0677a6186a655d59b17bef842c188ddd090ec8afa8cde2"
+    },
+    "packages/query-db-collection/tests/queued-answer-completion-oracle.ts": {
+      "before": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec",
+      "after": "c95d63bf25ae1361452d9c788a25e6bc7d0a94f825601707531c8e7e2ac6f76a"
+    },
+    "docs/contributing/oracle-coverage.md": {
+      "before": "b03542925faa47ac399b6eef31a593621c87bce9f1dcb524ca24692666efe71a",
+      "after": "00572f9ec98ec93864c4a2afa62159baa5abfc7e197de6ee48761258962ecb18"
+    },
+    "packages/db/tests/query/pagination-oracle.property.test.ts": {
+      "before": "6f26a439c6bcf949364e6c32c238a72b98d1d29d929c355622e32232c56e4f32",
+      "after": "bf6dc9beee9c3815fa5cf1e963a9d0de3df824472082605e3d687a271b70ac08"
+    }
+  },
+  "newBindings": {
+    "packages/db/tests/query/pagination-window-publication-oracle.ts": "cc7a3ac8bb2b1250f5b13ee8435c5b1bd3565e3d988bec139386c258b683d233"
+  },
+  "exactPatchChecks": [
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-oracle.ts",
+    "docs/contributing/oracle-coverage.md",
+    "packages/db/tests/query/pagination-oracle.property.test.ts"
+  ],
+  "priorPreservedEntries": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-source-preparation-v1/packet-sha256-v1.json": 105,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/packet-sha256-v1.json": 88,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/inline-source-failed-peer-result-freeze-v1.json": 1975
+  },
+  "dependencyPackages": 9,
+  "dependencyPayloads": 2544,
+  "PrettierPayloads": 56,
+  "node": 1,
+  "locks": 2,
+  "links": 4,
+  "offlinePrograms": [
+    {
+      "schedule": "failure-first",
+      "sourceProgramSha256": "c5eef9f5c5bdce78790002f0a753684c6dfb3e42fb4b68f0b0b7d5fcbd07e9e7",
+      "programSha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "steps": 7,
+      "epochs": 3,
+      "semanticConstructorEquality": "PASS by exact static source/JSON transformation; no import or model run"
+    },
+    {
+      "schedule": "success",
+      "sourceProgramSha256": "a4f1a52748536423af49b5f9c346128c64c95ea88f8fa9bbdaff384224aeca14",
+      "programSha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "steps": 7,
+      "epochs": 3,
+      "semanticConstructorEquality": "PASS by exact static source/JSON transformation; no import or model run"
+    }
+  ],
+  "staticRecords": {
+    "scope": "direct installed serial static tools only; no tests/runtime/install; required exact report-WT pnpm lint gate pending root",
+    "prettierFinal": {
+      "actual": "1eb218",
+      "exit": 0,
+      "files": 8,
+      "log": "prettier-check-v1.log"
+    },
+    "eslintFinal": {
+      "initial": "45429e",
+      "session": 75184,
+      "final": "a68b1a",
+      "exit": 0,
+      "files": 8,
+      "defaultHeap": true,
+      "log": "eslint-v2.log"
+    },
+    "typecheckFinal": {
+      "initial": "763ce9",
+      "session": 40160,
+      "final": "0e427a",
+      "exit": 0,
+      "files": 8,
+      "defaultHeap": true,
+      "log": "typecheck-v2.log",
+      "config": "typecheck-config-v2.json"
+    },
+    "sourceOracleFeedback": {
+      "initial": "8ee055",
+      "session": 11198,
+      "final": "c7dc6f",
+      "exit": 0,
+      "log": "source-oracle-feedback-v1.log"
+    },
+    "supplementalReportWorktreeDirectFeedback": {
+      "initial": "b1280c",
+      "session": 13737,
+      "final": "f87c80",
+      "exit": 1,
+      "log": "report-worktree-direct-feedback-v1.log",
+      "classification": "git ls-files --others --exclude-standard ENOBUFS before lint at existing8MiB buffer; no scope narrowing or retry"
+    },
+    "requiredExactReportWorktreePnpmLint": "PENDING ROOT; supplemental direct invocation does not substitute",
+    "sourceFreezeAssembly": {
+      "initial": "81af79",
+      "exit": 1,
+      "classification": "inventory assertion before freeze; coverage already bound in595",
+      "corrected": "069e2a",
+      "correctedExit": 0,
+      "finalBindingCount": 596
+    },
+    "runtime": 0,
+    "productionEdits": 0,
+    "nativeReceiving": 0,
+    "installation": 0
+  },
+  "reportOnlyFinding": {
+    "id": "H02-Q-REPORT-BODY-OVERCLAIM",
+    "status": "confirmed-open",
+    "claim": "prior cf550f stopped before the body",
+    "correction": "Body execution UNESTABLISHED; no selected report/reach/comparison retained. RSS cutoff supplies no product credit.",
+    "scope": "additive report erratum; bound source freeze/proposals need no change for this wording correction"
+  },
+  "priorAuditCorrection": {
+    "staticReturn": "87cc6f exit1",
+    "priorFactsSha256": "a702f768ecf884b34d7e56b42989d8f6ab75c9f23b1a2f566fb8e4964fa579a4",
+    "reason": "The v1 raw-recording lexical guard matched the word checkpoint in a comment. Narrow it to semantic-check call tokens; no bound source changed."
+  },
+  "sourceFindings": [],
+  "executionLimits": {
+    "sourceOnly": true,
+    "runtimeAdmitted": false,
+    "reportWorktreeExactLint": "pending ROOT",
+    "fullChildReceiving": "failure and success both required before production; both UNREACHED",
+    "firstFailureOperation": "pending or exact rejection only at recipe-bound first barrier; later settlement/retry open",
+    "peerDisposition": "no per-disposition reach minimum; actual pending/retired premise must be measured; legal retirement never becomes a product failure by itself",
+    "successCallbackWindow": "full child rows/event replicas checked; success callback window tuple not a new promised checkpoint; final settled window still checked",
+    "law16": "ordinary status/lazy-failure owner unchanged; source acceptance supplies no new law16 runtime credit",
+    "priorSingleton": "earlier first emitted root callback only; follow-on contaminated observations get no additional credit",
+    "candidateRaw20": "all UNREACHED",
+    "actualHelperNoActiveOperation": "required and UNREACHED",
+    "state14": "proposed/unadopted"
+  },
+  "allAuditChecksPass": true,
+  "errors": [],
+  "productExecutions": 0,
+  "modelExecutions": 0,
+  "testExecutions": 0,
+  "nativeRunInvocations": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0
+}

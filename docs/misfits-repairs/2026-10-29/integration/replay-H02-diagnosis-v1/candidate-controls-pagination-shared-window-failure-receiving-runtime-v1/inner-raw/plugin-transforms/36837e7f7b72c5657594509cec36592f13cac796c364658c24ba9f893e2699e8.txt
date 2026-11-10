@@ -1,0 +1,254 @@
+import {
+  groupedOrderByWithFractionalIndex,
+  orderByWithFractionalIndex
+} from "@tanstack/db-ivm";
+import { defaultComparator, makeComparator } from "../../utils/comparison.js";
+import {
+  PropRef,
+  collectCollectionSources,
+  followRef,
+  getWhereExpression,
+  isResidualWhere
+} from "../ir.js";
+import { ensureIndexForField } from "../../indexes/auto-index.js";
+import {
+  findIndexForField,
+  supportsOrderedIndexStructure,
+  supportsOrderedRange
+} from "../../utils/index-optimization.js";
+import { hasVirtualPropPath } from "../../virtual-props.js";
+import { devBuild } from "../../error-message.js";
+import { compileExpression } from "./evaluators.js";
+import { getSourceAliasesFromExpression } from "./expressions.js";
+function warnOrderIndexFallback(collection, path, options, index) {
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
+    const field = path.join(`.`);
+    const prefix = `[TanStack DB]${collection.id ? ` [${collection.id}]` : ``} orderBy with limit`;
+    if (options.stringSort === `custom`) {
+      console.warn(
+        `${prefix} uses a custom string comparator on "${field}". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.`
+      );
+      return;
+    }
+    if (hasVirtualPropPath(path)) {
+      console.warn(
+        `${prefix} orders virtual field "${field}"; Collection indexes cannot cover virtual fields, so creating one will not enable ordered lazy loading.`
+      );
+      return;
+    }
+    if (index) return;
+    const fieldIndexes = [...collection.indexes.values()].filter(
+      (candidate) => candidate.matchesField(path)
+    );
+    let detail;
+    if (fieldIndexes.length === 0) {
+      detail = `requires an index on "${field}" for efficient lazy loading. Consider collection.createIndex((row) => row.${field}) or autoIndex: 'eager' with a defaultIndexType.`;
+    } else if (fieldIndexes.every(
+      (candidate) => !candidate.matchesCompareOptions(options)
+    )) {
+      detail = `found an index on "${field}", but none uses the query's compareOptions (nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}"${options.stringSort === `locale` ? `, including the same locale and localeOptions` : ``}). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.${field}, { indexType: BasicIndex, options: { compareOptions: { direction: "asc", nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.`;
+    } else {
+      detail = `found an index on "${field}" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`;
+    }
+    console.warn(
+      `${prefix} ${detail} Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request.`
+    );
+  }
+}
+export function processOrderBy(rawQuery, pipeline, orderByClause, selectClause, grouping, collection, optimizableOrderByCollections, setWindowFn, limit, offset, groupKeyFn) {
+  const compiledOrderBy = orderByClause.map((clause) => {
+    const clauseWithoutAggregates = grouping ? grouping.replaceAggregatesByRefs(
+      clause.expression,
+      selectClause,
+      `$selected`
+    ) : clause.expression;
+    return {
+      compiledExpression: compileExpression(clauseWithoutAggregates),
+      compareOptions: buildCompareOptions(clause, collection)
+    };
+  });
+  const valueExtractor = (row) => {
+    if (orderByClause.length > 1) {
+      return compiledOrderBy.map((compiled) => compiled.compiledExpression(row));
+    }
+    return orderByClause.length === 1 ? compiledOrderBy[0].compiledExpression(row) : null;
+  };
+  const compare = (a, b) => {
+    if (orderByClause.length > 1) {
+      const arrayA = a;
+      const arrayB = b;
+      for (let i = 0; i < orderByClause.length; i++) {
+        const clause = compiledOrderBy[i];
+        const compareFn = makeComparator(clause.compareOptions);
+        const result = compareFn(arrayA[i], arrayB[i]);
+        if (result !== 0) {
+          return result;
+        }
+      }
+      return arrayA.length - arrayB.length;
+    }
+    if (orderByClause.length === 1) {
+      const clause = compiledOrderBy[0];
+      const compareFn = makeComparator(clause.compareOptions);
+      return compareFn(a, b);
+    }
+    return defaultComparator(a, b);
+  };
+  let setSizeCallback;
+  let orderByOptimizationInfo;
+  if (limit !== void 0 && orderByClause.length > 0 && !groupKeyFn && rawQuery.from.type !== `unionFrom` && rawQuery.from.type !== `unionAll`) {
+    let index;
+    let followRefCollection;
+    let orderByAlias = rawQuery.from.alias;
+    let orderBySourceId;
+    const firstClause = orderByClause[0];
+    const firstOrderByExpression = firstClause.expression;
+    const followRefResult = firstOrderByExpression.type === `ref` ? followRef(rawQuery, firstOrderByExpression, collection) : void 0;
+    if (firstOrderByExpression.type === `ref` && followRefResult) {
+      followRefCollection = followRefResult.collection;
+      orderBySourceId = followRefResult.sourceId;
+      const fieldName = followRefResult.path[0];
+      const compareOpts = buildCompareOptions(firstClause, collection);
+      if (fieldName) {
+        ensureIndexForField(
+          fieldName,
+          followRefResult.path,
+          followRefCollection,
+          compareOpts,
+          supportsOrderedIndexStructure
+        );
+      }
+      index = findIndexForField(
+        followRefCollection,
+        followRefResult.path,
+        compareOpts,
+        supportsOrderedRange
+      );
+      warnOrderIndexFallback(
+        followRefCollection,
+        followRefResult.path,
+        compareOpts,
+        index
+      );
+      orderByAlias = firstOrderByExpression.path.length > 1 ? String(firstOrderByExpression.path[0]) : rawQuery.from.alias;
+      orderBySourceId ??= collectCollectionSources(rawQuery).find(
+        (source) => source.alias === orderByAlias && source.collection === followRefCollection
+      )?.sourceId;
+    }
+    if (orderBySourceId && followRefResult) {
+      const sourceOrderBy = resolveOrderBy(
+        orderByClause,
+        collection.compareOptions
+      );
+      const sourceOrderIsDirect = orderByClause.every(({ expression }) => {
+        if (expression.type !== `ref`) return false;
+        return followRef(rawQuery, expression, collection)?.sourceId === orderBySourceId;
+      });
+      const extract = compileExpression(
+        new PropRef(followRefResult.path),
+        true
+      );
+      const compareTerm = makeComparator(sourceOrderBy[0].compareOptions);
+      const compareSourceRows = (a, b) => compareTerm(a ? extract(a) : a, b ? extract(b) : b);
+      const hasCrossAliasWhere = rawQuery.where?.some(
+        (where) => [...getSourceAliasesFromExpression(getWhereExpression(where))].some(
+          (alias) => alias !== orderByAlias
+        )
+      ) ?? false;
+      const joinedFilterSourceId = hasCrossAliasWhere && rawQuery.join?.length === 1 && rawQuery.join[0].type === `left` && rawQuery.join[0].from.type === `collectionRef` ? rawQuery.join[0].from.sourceId : void 0;
+      const info = {
+        sourceId: orderBySourceId,
+        alias: orderByAlias,
+        offset: offset ?? 0,
+        limit,
+        comparator: compareSourceRows,
+        valueExtractorForRawRow: extract,
+        index,
+        orderBy: sourceOrderBy,
+        joinedFilterSourceId,
+        sourceHoldsAllRows: followRefResult.collection.config.syncMode !== `on-demand`,
+        requiresFullSource: sourceOrderBy.some(
+          ({ compareOptions }) => compareOptions.stringSort === `custom`
+        ) || !sourceOrderIsDirect || rawQuery.from.type !== `collectionRef` || rawQuery.from.sourceId !== orderBySourceId || // Only a LEFT join keeps every root row of a bounded prefix and
+        // adds no row the prefix cannot place: inner and cross joins drop
+        // root rows, and right, full and outer joins add joined rows whose
+        // root match may sit past the prefix.
+        (rawQuery.join?.some(({ type }) => type !== `left`) ?? false) || (rawQuery.where?.some(isResidualWhere) ?? false) || hasCrossAliasWhere && joinedFilterSourceId === void 0 || (rawQuery.fnWhere?.length ?? 0) > 0 || rawQuery.groupBy !== void 0 || rawQuery.having !== void 0 || rawQuery.fnHaving !== void 0 || rawQuery.distinct === true
+      };
+      orderByOptimizationInfo = info;
+      optimizableOrderByCollections[orderBySourceId] = info;
+      const needsCount = info.joinedFilterSourceId !== void 0 && !info.sourceHoldsAllRows;
+      if (index || needsCount) {
+        setSizeCallback = (getSize) => {
+          info.dataNeeded = (boundary) => {
+            const size = getSize(
+              boundary && ((row) => compareSourceRows(
+                row[orderByAlias],
+                boundary
+              ) <= 0)
+            );
+            return Math.max(0, info.limit - size);
+          };
+        };
+      }
+    }
+  }
+  if (groupKeyFn) {
+    return pipeline.pipe(
+      groupedOrderByWithFractionalIndex(valueExtractor, {
+        limit,
+        offset,
+        comparator: compare,
+        setSizeCallback,
+        groupKeyFn,
+        setWindowFn: (windowFn) => {
+          setWindowFn((options) => {
+            windowFn(options);
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset = options.offset ?? orderByOptimizationInfo.offset;
+              orderByOptimizationInfo.limit = options.limit ?? orderByOptimizationInfo.limit;
+            }
+          });
+        }
+      })
+    );
+  }
+  return pipeline.pipe(
+    orderByWithFractionalIndex(valueExtractor, {
+      limit,
+      offset,
+      comparator: compare,
+      setSizeCallback,
+      setWindowFn: (windowFn) => {
+        setWindowFn(
+          // We wrap the move function such that we update the orderByOptimizationInfo
+          // because that is used by the `dataNeeded` callback to determine if we need to load more data
+          (options) => {
+            windowFn(options);
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset = options.offset ?? orderByOptimizationInfo.offset;
+              orderByOptimizationInfo.limit = options.limit ?? orderByOptimizationInfo.limit;
+            }
+          }
+        );
+      }
+    })
+    // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
+  );
+}
+export function buildCompareOptions(clause, collection) {
+  return resolveCompareOptions(clause, collection.compareOptions);
+}
+function resolveOrderBy(orderBy, defaults) {
+  return orderBy.map((clause) => ({
+    expression: clause.expression,
+    compareOptions: resolveCompareOptions(clause, defaults)
+  }));
+}
+function resolveCompareOptions(clause, defaults) {
+  return clause.compareOptions.stringSort === void 0 ? {
+    ...defaults,
+    direction: clause.compareOptions.direction,
+    nulls: clause.compareOptions.nulls
+  } : clause.compareOptions;
+}

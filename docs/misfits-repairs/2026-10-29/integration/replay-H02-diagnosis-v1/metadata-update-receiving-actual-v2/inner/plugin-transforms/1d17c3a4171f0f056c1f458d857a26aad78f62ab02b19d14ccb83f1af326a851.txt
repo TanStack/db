@@ -1,0 +1,72 @@
+import { CollectionConfigurationError } from "../errors";
+export class CollectionRequiresGetKeyError extends CollectionConfigurationError {
+  constructor() {
+    super(
+      `Collection requires a "getKey" function in the config.
+
+The getKey function extracts a unique identifier from each item.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })`
+    );
+  }
+}
+export class InvalidGetKeyError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"getKey" must be a function, but received ${actualType}.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })`
+    );
+  }
+}
+export class InvalidSyncConfigError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"sync" must be an object with a "sync" function, but received ${actualType}.
+
+Example:
+  createCollection({
+    getKey: (item) => item.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        // your sync logic
+      },
+    },
+  })`
+    );
+  }
+}
+export class InvalidSyncFunctionError extends CollectionConfigurationError {
+  constructor(actualType) {
+    super(
+      `"sync.sync" must be a function, but received ${actualType}.
+
+The sync property should be an object containing a sync function:
+  sync: {
+    sync: ({ begin, write, commit, markReady }) => {
+      // your sync logic
+    },
+  }`
+    );
+  }
+}
+export class InvalidCallbackOptionError extends CollectionConfigurationError {
+  constructor(optionName, actualType) {
+    super(`"${optionName}" must be a function, but received ${actualType}.`);
+  }
+}
+export class InvalidOptionTypeError extends CollectionConfigurationError {
+  constructor(optionName, expectedType, actualType) {
+    super(
+      `"${optionName}" must be ${expectedType}, but received ${actualType}.`
+    );
+  }
+}

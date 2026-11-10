@@ -1,0 +1,294 @@
+{
+  "kind": "pure-comparison-calibration",
+  "controls": [
+    {
+      "name": "legitimate held host gap",
+      "outcome": "accepted"
+    },
+    {
+      "name": "missing host-gap operation cannot establish a pending request",
+      "outcome": "rejected"
+    },
+    {
+      "name": "empty host-gap operation cannot establish a pending request",
+      "outcome": "rejected"
+    },
+    {
+      "name": "unknown host-gap operation cannot establish a pending request",
+      "outcome": "rejected"
+    },
+    {
+      "name": "empty optional host-gap operation identity is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "answer settlement cannot fulfill gap operation",
+      "outcome": "rejected"
+    },
+    {
+      "name": "new partial operation remains pending",
+      "outcome": "accepted"
+    },
+    {
+      "name": "new gap call cannot return literal true",
+      "outcome": "rejected"
+    },
+    {
+      "name": "quiescent held flush retains obligation",
+      "outcome": "accepted"
+    },
+    {
+      "name": "no-delta held flush cannot report success",
+      "outcome": "rejected"
+    },
+    {
+      "name": "actual held selected receipt keeps operation pending",
+      "outcome": "accepted"
+    },
+    {
+      "name": "omitting selected output obligation is visible",
+      "outcome": "rejected"
+    },
+    {
+      "name": "successful certificate cannot precede selected output application",
+      "outcome": "rejected"
+    },
+    {
+      "name": "old observer cannot poison retry",
+      "outcome": "accepted"
+    },
+    {
+      "name": "old completion failure poisoning retry is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "successful retry preserves the old rejected operation",
+      "outcome": "accepted"
+    },
+    {
+      "name": "retryable tail ends only authored attached operation",
+      "outcome": "accepted"
+    },
+    {
+      "name": "subscriber fail-all is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "production-derived affected-set substitution is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "terminal graph ends unfinished operations before peer",
+      "outcome": "accepted"
+    },
+    {
+      "name": "terminal graph waiting for unanswered peer is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "terminal graph cannot replace an operation's first error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "state14 legal cleanup abandonment",
+      "outcome": "accepted"
+    },
+    {
+      "name": "accepted live rejection cannot masquerade as cleanup abandonment",
+      "outcome": "rejected"
+    },
+    {
+      "name": "stale dispatch preserves positive current progress",
+      "outcome": "accepted"
+    },
+    {
+      "name": "stale callback clearing current task is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "same-revision throwing recheck rejects",
+      "outcome": "accepted"
+    },
+    {
+      "name": "recheck cannot omit the observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "recheck cannot use an empty observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "recheck requires an authored tail failure",
+      "outcome": "rejected"
+    },
+    {
+      "name": "recheck cannot compare two absent failures as equal",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed candidate preserves a real authored tail error",
+      "outcome": "accepted"
+    },
+    {
+      "name": "installed candidate cannot omit the observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed candidate cannot use an empty observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed candidate requires an authored tail failure",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed candidate cannot compare two absent failures as equal",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed baseline preserves a real authored tail error",
+      "outcome": "accepted"
+    },
+    {
+      "name": "installed baseline cannot omit the observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed baseline cannot use an empty observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed baseline requires an authored tail failure",
+      "outcome": "rejected"
+    },
+    {
+      "name": "installed baseline cannot compare two absent failures as equal",
+      "outcome": "rejected"
+    },
+    {
+      "name": "scoped candidate cannot omit the observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "scoped candidate cannot use an empty observed tail error",
+      "outcome": "rejected"
+    },
+    {
+      "name": "scoped candidate requires an authored tail failure",
+      "outcome": "rejected"
+    },
+    {
+      "name": "scoped candidate cannot compare two absent failures as equal",
+      "outcome": "rejected"
+    },
+    {
+      "name": "omitted revision pairs do not establish unchanged revisions",
+      "outcome": "rejected"
+    },
+    {
+      "name": "saved successful checkpoint cannot certify throwing tail",
+      "outcome": "rejected"
+    },
+    {
+      "name": "torn nested public snapshot is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "unknown candidate cut is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "invalid enqueue identities cannot establish repeated yield",
+      "outcome": "rejected"
+    },
+    {
+      "name": "invalid facade sequence cannot establish ordered failure",
+      "outcome": "rejected"
+    },
+    {
+      "name": "legitimate coherent callback uses shared event comparison",
+      "outcome": "accepted"
+    },
+    {
+      "name": "duplicate callback payload is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "torn callback synchronous read is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "unknown delivery phase is rejected",
+      "outcome": "rejected"
+    },
+    {
+      "name": "unchanged publication interval permits zero row callbacks",
+      "outcome": "accepted"
+    },
+    {
+      "name": "zero callbacks cannot hide changed root content",
+      "outcome": "rejected"
+    },
+    {
+      "name": "root callback cannot substitute for missing downstream callback",
+      "outcome": "rejected"
+    },
+    {
+      "name": "both public event replicas reach their authored interval",
+      "outcome": "accepted"
+    },
+    {
+      "name": "zero callbacks cannot hide changed facade content",
+      "outcome": "rejected"
+    },
+    {
+      "name": "facade content advances without a parent handle update",
+      "outcome": "accepted"
+    },
+    {
+      "name": "omitted initialization stream cannot establish nonempty roots",
+      "outcome": "rejected"
+    },
+    {
+      "name": "root initialization cannot hide absent public facade initial batch",
+      "outcome": "rejected"
+    },
+    {
+      "name": "public facade initial batches complete initialization",
+      "outcome": "accepted"
+    },
+    {
+      "name": "empty facade content permits zero row callbacks",
+      "outcome": "accepted"
+    },
+    {
+      "name": "failed flush cannot expose forward facade content",
+      "outcome": "rejected"
+    },
+    {
+      "name": "retired facade cannot deliver as the active public handle",
+      "outcome": "rejected"
+    },
+    {
+      "name": "ordinary source failure keeps existing peer aggregation",
+      "outcome": "accepted"
+    },
+    {
+      "name": "ordinary source failure cannot acquire terminal fail-fast policy",
+      "outcome": "rejected"
+    },
+    {
+      "name": "winning partial window succeeds after its complete tail",
+      "outcome": "accepted"
+    },
+    {
+      "name": "partial options cannot report the prior settled window after success",
+      "outcome": "rejected"
+    }
+  ],
+  "accepted": 21,
+  "rejected": 50,
+  "receiving": 0,
+  "generatedProgramsExecuted": 0,
+  "runtimeMutants": 0
+}

@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-30T04:17:51.965871+00:00",
+  "classification": "launcher setup / sandbox permission failure",
+  "exitCode": 127,
+  "failingCommand": "/bin/ps -o pid=,pgid=,rss=,args= -p $$",
+  "execCommandChunkId": "80c7c3",
+  "beforeNodeExec": true,
+  "vitestStarted": false,
+  "selectedTestsExecuted": 0,
+  "receivingHistoriesExecuted": 0,
+  "receivingGroupsCreated": 0,
+  "bindingVerifierExecuted": false,
+  "progressVerdict": "none",
+  "productGreen": false,
+  "pidPgid": "unavailable: ps failed before capture; Node and receiving worker never started",
+  "autoReviewCalled": false,
+  "autoReviewRejected": false,
+  "successorAdmission": "root separately authorizes exactly one same-byte launch with require_escalated; original outcome preserved first"
+}

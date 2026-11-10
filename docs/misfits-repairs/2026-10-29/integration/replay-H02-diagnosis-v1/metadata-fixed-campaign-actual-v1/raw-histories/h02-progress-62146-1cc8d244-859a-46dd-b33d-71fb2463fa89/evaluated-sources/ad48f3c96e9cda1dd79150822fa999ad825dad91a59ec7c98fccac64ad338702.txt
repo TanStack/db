@@ -1,0 +1,17 @@
+__vite_ssr_exportName__("compareKeys", () => { try { return __vite_ssr_import_4__.compareKeys } catch {} });
+__vite_ssr_exportName__("serializeValue", () => { try { return __vite_ssr_import_4__.serializeValue } catch {} });
+__vite_ssr_exportName__("registerOpaqueHash", () => { try { return __vite_ssr_import_5__.registerOpaqueHash } catch {} });
+const __vite_ssr_import_0__ = await __vite_ssr_import__("/packages/db-ivm/src/d2.ts");
+__vite_ssr_exportAll__(__vite_ssr_import_0__);
+const __vite_ssr_import_1__ = await __vite_ssr_import__("/packages/db-ivm/src/multiset.ts");
+__vite_ssr_exportAll__(__vite_ssr_import_1__);
+const __vite_ssr_import_2__ = await __vite_ssr_import__("/packages/db-ivm/src/operators/index.ts");
+__vite_ssr_exportAll__(__vite_ssr_import_2__);
+const __vite_ssr_import_3__ = await __vite_ssr_import__("/packages/db-ivm/src/types.ts");
+__vite_ssr_exportAll__(__vite_ssr_import_3__);
+const __vite_ssr_import_4__ = await __vite_ssr_import__("/packages/db-ivm/src/utils.ts", {"importedNames":["compareKeys","serializeValue"]});
+const __vite_ssr_import_5__ = await __vite_ssr_import__("/packages/db-ivm/src/hashing/hash.ts", {"importedNames":["registerOpaqueHash"]});
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUEsQ0FBQTs7O0FBQUE7O0FBQ0E7O0FBQ0E7O0FBQ0E7O0FBQ0E7QUFDQSIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiaW5kZXgudHMiXSwic291cmNlc0NvbnRlbnQiOlsiZXhwb3J0ICogZnJvbSAnLi9kMi5qcydcbmV4cG9ydCAqIGZyb20gJy4vbXVsdGlzZXQuanMnXG5leHBvcnQgKiBmcm9tICcuL29wZXJhdG9ycy9pbmRleC5qcydcbmV4cG9ydCAqIGZyb20gJy4vdHlwZXMuanMnXG5leHBvcnQgeyBjb21wYXJlS2V5cywgc2VyaWFsaXplVmFsdWUgfSBmcm9tICcuL3V0aWxzLmpzJ1xuZXhwb3J0IHsgcmVnaXN0ZXJPcGFxdWVIYXNoIH0gZnJvbSAnLi9oYXNoaW5nL2hhc2guanMnXG4iXSwiZmlsZSI6Ii9wYWNrYWdlcy9kYi1pdm0vc3JjL2luZGV4LnRzIn0=
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJ1cmwiOiIyIiwiaW1wb3J0ZWRVcmxzIjoiMyIsIm1hcHBpbmdzIjpmYWxzZX0sIi9Vc2Vycy9reWxlLm1hdGhld3MvcHJvZ3JhbXMvdGFuc3RhY2stZGIvLndvcmt0cmVlcy9jb2RleC1taXNmaXRzLXN1cnZleS1vcGVuLWl0ZW1zL2RvY3MvbWlzZml0cy1yZXBhaXJzLzIwMjYtMTAtMjkvaW50ZWdyYXRpb24vcmVwbGF5LUgwMi1kaWFnbm9zaXMtdjEvbWV0YWRhdGEtdXBkYXRlLXNvdXJjZS12My9zb3VyY2VzL3BhY2thZ2VzL2RiLWl2bS9zcmMvaW5kZXgudHMiLCIvcGFja2FnZXMvZGItaXZtL3NyYy9pbmRleC50cyIsW11d

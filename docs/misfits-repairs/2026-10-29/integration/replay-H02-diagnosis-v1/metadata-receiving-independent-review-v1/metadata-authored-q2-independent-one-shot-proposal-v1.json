@@ -1,0 +1,79 @@
+{
+  "kind": "Independent source-reviewed exact one-shot proposal; ROOT decision required",
+  "sourceReviewDisposition": "Eligible for ROOT one-shot admission decision; not admitted by this artifact.",
+  "packet": {
+    "manifest": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/packet-manifest.json",
+    "manifestSha256": "7e06d8eff512e65a546d49c70c5b2b2524a19034c1606258e889eabf1cabaa58",
+    "binding": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/binding.json",
+    "bindingSha256": "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c",
+    "firstCommand": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/first-command.json",
+    "firstCommandSha256": "ab46c417199a7ddb1c7eb82f1f21de78962eee59c61cb6912c87d4ed1508c887"
+  },
+  "F01Correction": {
+    "freeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/correction-freeze.json",
+    "sha256": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4",
+    "disposition": "F01 corrected at source-plan/classifier level only; no actual mutant evidence."
+  },
+  "independentStaticAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-authored-q2-and-F01-independent-audit-v2.json",
+    "sha256": "107c4579fdd2d1b3767e1a5bf3f9184f4c20f6fdb01d4f7211bc3d44acda4805",
+    "checkCount": 233,
+    "allPass": true
+  },
+  "exactProposal": {
+    "status": "UNADMITTED AND UNEXECUTED. Exact proposed outer command; independent review and separate root one-shot admission required.",
+    "executable": "/bin/zsh",
+    "argv": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/launcher-scope-authored-q2.zsh",
+      "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+    "bindingSha256": "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c",
+    "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+    "maxInvocations": 1,
+    "outerOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q2",
+    "actualExecutionRequirement": "If separately admitted, actual exec_command sandbox_permissions=require_escalated on this exact zsh launch is required for unchanged supervisor ps; preflight permission alone is insufficient. Root owns actual outer lifecycle/completion. No hard outer watchdog is claimed.",
+    "selection": {
+      "displayName": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+      "filterName": "queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2",
+      "expectedPassedTests": 1,
+      "expectedSkippedTests": 19,
+      "historyCount": 1,
+      "declaredStateCount": 31,
+      "generatedCampaign": false,
+      "property": null,
+      "runMultiplier": 1,
+      "seedSuffix": null,
+      "suppliedSeed": null,
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      }
+    },
+    "actualEvidenceRequired": "All evidence-requirements.json obligations: exactly one fully attributable successful raw authored q2 history, all31 states at1, complete root/downstream callback reads/current/previous rows and deltas at all promised cuts, exact current-run identities/keys, normal cleanup/no kills or observer errors, actual outer final completion distinct from child outcome, original recorded PID/group absence and complete original artifacts. No count or result inferred from source.",
+    "after": "Stop after one actual invocation on any outcome. No retry/replay/next lane, M01 ID edit, no-op grammar edit, mutant, production/oracle/driver/config/budget change, imports/compiler/discovery/probes/install/Git/PR/canonical action follows.",
+    "limits": [
+      "Stable output metadata/direct eager source-sync through a real QueryClient graph only; this authored q2 singleton remains unexecuted.",
+      "No deterministic M01 driver ID change or source successor; current-run actual root/downstream/source IDs must be recorded and distinct, not inferred from allocation order.",
+      "Default fixed/unseeded campaigns are separate qualified evidence. This singleton supplies no authored generated/no-op/subscription/conflicting-cache progress/changing-fetched-metadata/framework evidence.",
+      "No dedicated UUID-console ordinal or finish/assert receipt; parent invocation/finalizer source-order assumption remains.",
+      "No new parent-checker V8 proof or initial inner getpgid proof; retain actual current-run parent/outer identity evidence and qualify missing observations.",
+      "Native coverage/typecheck disabled; separate prior exact-byte standalone noEmit evidence only.",
+      "No actual hostile production mutant, production repair, progress repair, bug-class closure or PR-readiness credit.",
+      "Nine named own-package maps/2544 own payloads do not prove full transitive host/native/dist equivalence.",
+      "Prior v2 observer failure, raw predecessor diagnostics and independent lexical-path audit correction remain preserved."
+    ]
+  },
+  "reviewer": "/root/replay_covering_authority",
+  "runtimeAdmission": false,
+  "followupProgression": false,
+  "rootOwnsLint": true
+}

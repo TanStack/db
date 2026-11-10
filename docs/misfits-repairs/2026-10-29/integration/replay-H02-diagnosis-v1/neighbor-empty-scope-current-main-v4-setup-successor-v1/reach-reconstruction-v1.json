@@ -1,0 +1,58 @@
+{
+  "status": "Every original finite runner reach reconstructed once from complete raw receipts",
+  "history": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "scope",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": false,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "counts": {
+    "empty-prior": 1,
+    "held-provider-read": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 1,
+    "downstream-change": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "receiptSequences": {
+    "empty-prior": [
+      109
+    ],
+    "held-provider-read": [
+      165
+    ],
+    "completed-enqueue": [
+      180
+    ],
+    "answer-executed": [
+      181
+    ],
+    "root-change": [
+      190
+    ],
+    "downstream-change": [
+      191
+    ],
+    "final-publication": [
+      192
+    ],
+    "worker-cleaned": [
+      213
+    ]
+  },
+  "reloadStartSequences": [
+    110
+  ],
+  "cleanupStartSequences": [
+    193
+  ],
+  "rawReceiptCount": 213,
+  "rawReceiptSha256": "901e0ba156d49cc53b46806973d58c385008783ff51bce27484f803f4107127d",
+  "basis": "Exact unchanged source runner predicates and reload-start to cleanup-start event cut; normal native test passed its original assertReached. No console output or independent model result is invented by this static trace audit."
+}

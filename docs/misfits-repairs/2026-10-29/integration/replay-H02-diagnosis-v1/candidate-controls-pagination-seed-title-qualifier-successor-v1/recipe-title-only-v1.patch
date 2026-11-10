@@ -1,0 +1,11 @@
+--- frozen-N/run-recipe.json
++++ source-only-successor/run-recipe.json
+@@ -64,7 +64,7 @@
+   "stderrPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/stderr.log",
+   "expectedOutput": {
+     "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1/vitest-report.json",
+-    "title": "retains complete windows across joined failure histories for a fixed seed",
++    "title": "retains complete windows across joined failure histories for a fixed seed (with seed=1665)",
+     "ancestorTitles": [
+       "pagination recomputation oracle",
+       "joined window failure for a fixed seed"

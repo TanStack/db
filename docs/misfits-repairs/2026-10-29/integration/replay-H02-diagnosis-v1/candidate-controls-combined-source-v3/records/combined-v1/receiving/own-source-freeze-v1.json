@@ -1,0 +1,110 @@
+{
+  "at": "2026-10-30T08:22:48.319666+00:00",
+  "status": "own twelve-source immutable snapshot; combined independent review pending; no runtime admission",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "base": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "sources": {
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts": "bfdd331b3459168184c31e3d8fc219ad5a580fb0af870dadf851db388858d1d3",
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts": "4816305d73e96c55d109c5807a91cadd9fbe90257a4b70b0554e626ebe2a8dce",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts": "d0a1e76c56b86d49d8abd55e9d26bf53be392ac6fdf530af7a48d189eaf4c96c",
+    "packages/query-db-collection/tests/queued-answer-completion-driver.ts": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts": "1ee4156048a0e61c2efd73378433d3e99a99fa7e0aa0b8801eef1b94078b9992",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+    "scripts/h02-progress/completion-tsconfig.json": "1767c6ce1c2a4411549d8debc6501835aadd95c3600ae96710b6f738ebb3f89f",
+    "scripts/h02-progress/completion-eslint.config.mjs": "a4837103c5a8a5d203c031003eecbd20ecd7724c547f7f09394badf1336ab5b4",
+    "scripts/h02-progress/completion-receiving.config.ts": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+    "scripts/h02-progress/completion-parent.config.ts": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+    "scripts/h02-progress/completion-parent.mjs": "405d762f1bbd6c492e4d30913b7fc5ad47fbc58909b008e0a87145dc783eb9f7"
+  },
+  "sourceCount": 12,
+  "records": {
+    "lint3.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "type.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "own-source-list.json": "d00a6f1f1351d4744ff50217de2c02b107246cd17b6ff5bc34642a5018167682",
+    "source-identity-v2.json": "a2bcf1dc4ffee1193a9e4391ea5fc52bd33ff93828aa3003787bcac11fa11f10",
+    "type3.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-identity.json": "c593f97f1eed71ae6da532a34eb74c18090d9b2b7af936922bb5811890d9dcca",
+    "format3.stdout.log": "e97f0390d64f6ea46d0b3d7927118989ccd830514bf21161b5c5d7c9fa09a8ee",
+    "type2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint-changed3.json": "af8a6102c686c224a068311e30c714bffb63637d6a14bf85c6f780e51ecdcd20",
+    "lint-changed.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint-changed.json": "02594d226bf27ab214651224521ccb181d31d2be23f49ea671e0be541e2b4326",
+    "lint-changed3.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "launcher-syntax.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "launcher-syntax.json": "fc61b79c2a5d4c601ee9d131684f51dc4eb857a491d165bafa80f38f1e1aefa4",
+    "launcher-syntax3.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint2.json": "862a0c574e88089a58ddccde7def60e0eaf5501e7b64bb200df4674b46ca1722",
+    "format2.stdout.log": "2123239bcde5d697a318fa1aca19627ab3ce6006471a2640cd1038f7f3feac8f",
+    "launcher-syntax3.json": "6b6bba0eeaf186cc53aa68bb2f047a4dbba98aa0cdcdab1e7ff6f039efc8999e",
+    "type3.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "type3.json": "26f6d4218fd34c769e9ae06ec5161100a95230d781c22a84f30c62f771f831ca",
+    "lint3.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "type.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.json": "ccbb7ef080726ce80021f44d268c102a50f966cf1f64f625bd18b8e53af31a1c",
+    "lint-changed.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint2.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.stdout.log": "11d1bfe5373a39b20f4454e0d7ba56545bf26a4af95dc1699d8dd105748b1b36",
+    "type2.json": "6b33347e80c6e3f5359a7802ff64dc7a6e0dd05606e2f34809f1a02ffefd264a",
+    "lint3.json": "647a8b44c1e5417f7f62489675189a530203c29921ba8fb9161b2744938e260d",
+    "type2.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format3.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format.stdout.log": "5bb8b8267f14a3c6db12482d02dc559ce75a7e76e080cf29ec390ad1244df388",
+    "type.json": "28478e5466953fedffab9d7b2646e1c0cbd29d33e5ada8a8f3e0df6a065d529b",
+    "format3.json": "631cc68ef16c55f28c97f63d2f34e9c380fdfd864c3aba3d0a0e356f463c27fd",
+    "lint-changed3.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format.json": "33ae330bb51f9fef42aea1b3a4d9062cd4de44af80497f5ebc403dc199c23b81",
+    "launcher-syntax3.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "format2.json": "10e0cd755897f335b019b42e0517d5131ae44fe10ef4763b28e61a287f04a63d",
+    "launcher-syntax.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-report-v1.md": "b677e1d0a2b161a47597dfd71a61626fda2d13b619009ffd71b025b0e7145145"
+  },
+  "frozenSourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v1/frozen-own-source-v1/sources",
+  "frozenRecordRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-receiving-source-preparation-v1/frozen-own-source-v1/records",
+  "initialInventorySha256": "85d859af3b2f46cfd89876203a953040432bbcf12cfd1bf4f1343aa4f3baff6b",
+  "production": {
+    "total": 511,
+    "unchanged": 511,
+    "changed": []
+  },
+  "shared": {
+    "total": 18,
+    "unchanged": 18,
+    "changed": []
+  },
+  "originalInstruments": {
+    "total": 34,
+    "unchanged": 33,
+    "changed": [
+      {
+        "path": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+        "original": "d80dea940e2fa9613a803b7f942bba17e389b68045ecba6984e88f86db26724c",
+        "current": "a891036c62fe8fe565595681eee016ac39c8f47b183759d0efc024d1d1fa9c4e"
+      }
+    ]
+  },
+  "slot": 2,
+  "workers": 1,
+  "finalStaticGates": [
+    "format3",
+    "type3",
+    "lint3",
+    "launcher-syntax3",
+    "lint-changed3"
+  ],
+  "runtime": {
+    "receiving": 0,
+    "generatedHistories": 0,
+    "campaigns": 0,
+    "productMutants": 0,
+    "testCollection": 0,
+    "productionEdits": 0,
+    "installCommitPush": false
+  },
+  "candidateRaw20": "all UNREACHED",
+  "containedGroupsClaim": "original plus synchronously registered actual child groups only; spawn-registration interruption and escape limits explicit"
+}

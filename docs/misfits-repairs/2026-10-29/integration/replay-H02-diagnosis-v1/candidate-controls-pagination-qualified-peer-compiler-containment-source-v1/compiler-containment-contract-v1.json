@@ -1,0 +1,124 @@
+{
+  "schema": "h02-compiler-containment-contract-v1",
+  "status": "INERT CONDITIONAL source candidate; no compiler admission",
+  "wrapper": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v1/contain-compiler-v1.py.txt",
+    "sha256": "424612a8f21c68feebe4920cd859da5800c818eede4ca6b3fd2e9c0ac9fa08e9"
+  },
+  "python": {
+    "path": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "resolved": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "limits": "Pins interpreter binary/version/isolated flags; no universal OS, native-library or Python installation census is claimed."
+  },
+  "gate": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/proposed-minimum-compile-gate-v1.json",
+    "sha256": "5804ede864ce3adfd596453fc8bba1b5f7ec03d8d1bb672f30ef1ed7980ac6da"
+  },
+  "command": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+      "--project",
+      "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+      "--noEmit",
+      "--incremental",
+      "false",
+      "--pretty",
+      "false",
+      "--listFiles"
+    ],
+    "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code"
+  },
+  "binding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/source-freeze-v1.json.txt",
+    "sha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca"
+  },
+  "plan": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-materialization-plan-v1.json",
+    "sha256": "0f81439c660770d62b2a96fdebcf8de70c51258501d29c77fd836db9755a1b26"
+  },
+  "geometry": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/explicit-copy-geometry-v1.json",
+    "sha256": "1c738e4ecd4d9677ad4cd1127bca5c8699711d3433cc5d298b318638f164589c"
+  },
+  "finiteToolInputs": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/supplemental-tool-inputs.json",
+    "sha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50"
+  },
+  "ps": {
+    "path": "/bin/ps",
+    "sha256": "16d273739778797145fd22cba76113d2aaa99c759313d56ef87ed56a16bca083"
+  },
+  "limits": {
+    "compilerWallMs": 45000,
+    "groupRssBytes": 2147483648,
+    "samplingMs": 100,
+    "psInvocationTimeoutMs": 1000,
+    "cleanupMs": 2000
+  },
+  "heap": "Node default, unchanged V argv; no heap flag added",
+  "prerequisites": [
+    "Independent actual-copy acceptance is PENDING and must be supplied by ROOT before admission.",
+    "Independent review of this exact wrapper/contract/tool source.",
+    "Separate exact one-compiler-only ROOT admission; no authority transfers from copy or this packet."
+  ],
+  "copyActualTool": {
+    "initialChunk": "e63808",
+    "session": 46686,
+    "finalChunk": "97749a",
+    "exitCode": 0,
+    "scope": "ROOT-provided original copy tool facts; distinct from compiler result, independent actual-copy acceptance pending"
+  },
+  "copyReceipts": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1/stdout.jsonl",
+      "sha256": "a448255c72105bc6b8d26918f036e0731d7150f7127a077ff2e93e0a2666f4b1"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourcePacketRefs": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/packet-manifest-v1.json",
+      "sha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/packet-manifest-v1.json",
+      "sha256": "9abbc7da757afc7ce98b60f1b07a3ed70f851875efff27e729efdd1b0b2bb298"
+    }
+  ],
+  "mechanicalReuse": {
+    "source": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/sources/scripts/h02-progress/ownership-parent.mjs.txt",
+      "sha256": "0a7e145856aae03a3ecee668f87a0e3cdade3ff64035c4796b0c32e2824e786e"
+    },
+    "parts": [
+      "owned original detached process group",
+      "direct child stdout/stderr file descriptors",
+      "100ms sampled owned-group RSS",
+      "SIGKILL original negative PGID on wall/resource/observation/recording faults",
+      "group absence, separate child/outer outcomes and before/after identities"
+    ],
+    "adaptation": "Standalone small Python adapter; no ownership test recipe validator, test expected-result classifier, model, receiving runner or heap flag is imported. Timer thread can request group kill while ps observes with a one-second timeout."
+  },
+  "outputRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v1",
+  "wallMeaning": "45s policy cutoff for the owned compiler from its spawn. A separate timer requests SIGKILL and the sampling loop also checks elapsed time. This is not a measured hard real-time guarantee or a total bound on preflight/postflight hashing or tool return. Cleanup observes for2s with each ps call capped at1s; positive final group absence is required. No receiving/product deadline credit.",
+  "stopScope": "Only original compiler PGID is signaled; ps is a short-lived owned observer with its own subprocess timeout. No process search/kill by name, shared tree, receiving group or unrelated target. Abrupt supervisor termination/registration gap or escaped groups are outside guarantee.",
+  "identityScope": "Before and after: copied597 code-lock +6controls, exact227dir/4link geometry, Node, ps, two locks, existing known255-package payload maps and declared edges/absences. No new census. Actual --listFiles paths must map to the independently bound finite source/tool inputs and retain path/realpath/hash.",
+  "qualification": "Receipt/setup/resource/containment/compiler failure remains operational/static evidence. Preserve raw bytes and partial fresh outputs; no retry/install/exclusion/repair/native authority, and no unconditional error or cleanup fidelity.",
+  "executed": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

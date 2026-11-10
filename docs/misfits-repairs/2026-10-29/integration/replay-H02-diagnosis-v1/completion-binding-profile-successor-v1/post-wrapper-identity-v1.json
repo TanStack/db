@@ -1,0 +1,40 @@
+{
+  "links": {
+    "node_modules": {
+      "isSymlink": true,
+      "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules",
+      "matches": true
+    },
+    "packages/query-db-collection/node_modules": {
+      "isSymlink": true,
+      "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/query-db-collection/node_modules",
+      "matches": true
+    },
+    "packages/db/node_modules": {
+      "isSymlink": true,
+      "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/db/node_modules",
+      "matches": true
+    },
+    "packages/db-ivm/node_modules": {
+      "isSymlink": true,
+      "resolved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/packages/db-ivm/node_modules",
+      "matches": true
+    }
+  },
+  "locks": {
+    "repoPnpmLock": {
+      "sha256": "554050977c82b1254ccb63fff05dad33b214555c341551ed8a76d74144a22d08",
+      "matches": true
+    },
+    "installedPnpmLock": {
+      "sha256": "0ca770f6dfbf410f9e4786c34905309f1e143b6c807fe8b395765b969c57b3fa",
+      "matches": true
+    }
+  },
+  "payloadFilesChecked": 2544,
+  "payloadDrift": [],
+  "nodeMatches": true,
+  "automaticInstall": "attempted by pnpm dependency status check; aborted before removal; no successful install",
+  "wrapperCommand": "pnpm lint:changed > /tmp/h02-completion-binding-profile-lint-changed-v1.log 2>&1",
+  "wrapperExit": 1
+}

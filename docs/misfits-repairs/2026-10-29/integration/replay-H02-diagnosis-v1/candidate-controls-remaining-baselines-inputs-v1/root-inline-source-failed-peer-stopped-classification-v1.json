@@ -1,0 +1,25 @@
+{
+  "classifiedBy": "/root",
+  "cell": "inline-source-failed-peer",
+  "verdict": "STOPPED: fixture checked held-request premise too early",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-source-failed-peer-result-freeze-v1.json",
+    "sha256": "029a8eb1cf46e59d84cdf6d52cb7f56837b962b829922672e76630df26b49957"
+  },
+  "independentDiagnosis": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-source-failed-peer-actual-independent-diagnosis-v1.md",
+    "sha256": "cbefec3d064be49f80dc6b2c4ee6f84285ae8f492340976cc45371488bc138b0"
+  },
+  "actualOuterExitCode": 1,
+  "actualToolCompletion": "f6e194",
+  "parentTestChildExitCode": 1,
+  "primary": "pendingProviderAnswers0 at held cut raw207; exact selected marked[3]/children[3] requests appear later at raw216/raw244 during teardown",
+  "secondary": "native supervisor observation-trigger group kill EPERM retained; OS cause unknown and failure-kill path unvalidated despite positive fixture cleanup and clean outer containment",
+  "productRedGreenCredit": false,
+  "newRuntimeAdmitted": false,
+  "remaining13": "UNRUN; serial batch stopped",
+  "next": "narrow fixture wait for both exact live selected requests and unapplied original receipts; preserve model/hold assertion/ownership/publication law",
+  "candidate20": "all UNREACHED",
+  "state14": "proposed, not adopted",
+  "canonicalImport": false
+}

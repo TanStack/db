@@ -1,0 +1,40 @@
+{
+  "status": "Operational setup failure; entire remaining-three batch stopped; no product verdict",
+  "selectedPath": "empty scope-key publication",
+  "launcherAttempts": 1,
+  "maxLauncherAttempts": 1,
+  "vitestInvocationsStarted": 0,
+  "receivingChildrenStarted": 0,
+  "outerExitCode": 127,
+  "failedCommand": "/bin/ps -o pid=,pgid=,rss=,args= -p $$ > launcher-process.txt",
+  "failureBoundary": "First launcher observation after cd; set -euo pipefail exits before exec env node/Vitest",
+  "cause": "Filesystem/process sandbox denied /bin/ps execution",
+  "launcherProcessReceipt": {
+    "path": "launcher-process.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "missingEvidence": [
+    "original outer shell PID/PGID (ps denied before recording)",
+    "child PID/PGID (no child launched)",
+    "native selector result",
+    "actual history",
+    "raw receiving receipts",
+    "effective source binding",
+    "finite reach",
+    "direct driver cleanup"
+  ],
+  "laterControls": {
+    "literal true initial cut": "unrun; admission unconsumed",
+    "ordinary synchronous mutation cut": "unrun; admission unconsumed"
+  },
+  "retryStarted": false,
+  "nextControlStarted": false,
+  "sourceIdentityBeforeAndAfter": {
+    "sourceEntries": 563,
+    "packagePayloads": 2544,
+    "nodeLocksLinksMatched": true
+  },
+  "processQualification": "Tool reports failed command complete exit127 and no live session. Original shell PID/PGID not captured; independent original-id absence cannot be asserted. Exact set-e launcher exits before any node/receiving child.",
+  "limits": "No normal success, bounded progress RED, final publication, adapter cleanup or product conclusion. Any recovery needs separate root review/admission; no launcher change or retry authorized."
+}

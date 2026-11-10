@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  03:45:09
+   Duration  2.50s (transform 61ms, setup 0ms, import 109ms, tests 2.32s, environment 0ms)
+

@@ -1,0 +1,32 @@
+{
+  "classifiedBy": "/root",
+  "boundedAccepted": true,
+  "newRuntimeAdmitted": false,
+  "stage": "universe",
+  "bindingSha256": "86ccd3bf644d96f43e726f1e805c4b8850754707b7bb88c48ccd802cd90bd7b9",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-result-freeze-v2.json",
+    "sha256": "da91882f1c06b924a8956be32d668d74ac9268dee9b78916821407e861573c5e"
+  },
+  "resultFreezeSha256": "da91882f1c06b924a8956be32d668d74ac9268dee9b78916821407e861573c5e",
+  "actualOuterReturnSha256": "3fd3c8b2bf930ba2a2a1596d1b8ee54d6d29c039edaebb82e9958cf8fae383ba",
+  "rootAbsenceSha256": "fbc062b2d54ffcf9a06cb32a8d55c238cc911cd76feba60019a279bec70e915a",
+  "independentReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-native-discovery-actual-result-review-v2.md",
+    "sha256": "85b9b88c166cc8f7d2f6393af6f3e5d500ea8d7c9eef06ac789fe1ae4ed087bf"
+  },
+  "independentReviewSha256": "85b9b88c166cc8f7d2f6393af6f3e5d500ea8d7c9eef06ac789fe1ae4ed087bf",
+  "independentActualResultAccepted": true,
+  "actualOuterExitCode": 0,
+  "nativeChildExitCode": 0,
+  "qualified": true,
+  "exactNameCount": 20,
+  "originalObservedIdsAbsent": true,
+  "sourceIdentitiesMatch": true,
+  "productPassCredit": false,
+  "receivingReachCredit": false,
+  "limits": "Registration universe only; no selected singleton, test body, receiving comparison, generated reach or mutant credit",
+  "originalStoppedEpoch": "preserved, not substituted or waived",
+  "canonicalImport": false
+}

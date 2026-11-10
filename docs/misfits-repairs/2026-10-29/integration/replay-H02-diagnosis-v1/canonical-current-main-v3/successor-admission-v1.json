@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-30T04:18:07.339451+00:00",
+  "authorization": "Root authorizes exactly one same accepted source/recipe/launcher successor via exec_command require_escalated after original pre-Node ps denial freeze",
+  "previousAttemptManifestSha256": "b4a99a5e0855c6672e29f9553a1c96e972be3faa43a088fcf729f12a20567b9b",
+  "acceptedBytes": {
+    "source-freeze-v3.json": "d2c221f64302dc0ad10d666d40e2308ffc0e8a3e4c953f73c106d98631ee78b3",
+    "recipes-v3.json": "3b12d4de033cddaadbb86ec39fce4952990acd0cb7b2eda84b1f5da03a19d84c",
+    "launcher-v3.zsh": "55e339e8ae598eee29bb066a34fcc1c5ffe64623954ca6b430dab82c6d8079c1",
+    "packet-sha256-v3.json": "ed6c78ed0bfc78d69136ee18bbd3470753f8145d10780300bf0afaad374427b8"
+  },
+  "sandboxPermissions": "require_escalated",
+  "purpose": "ps is required to identify and supervise the detached local test process group",
+  "maximumReceivingHistories": 1,
+  "noFurtherRetry": true,
+  "limitsUnchanged": true
+}

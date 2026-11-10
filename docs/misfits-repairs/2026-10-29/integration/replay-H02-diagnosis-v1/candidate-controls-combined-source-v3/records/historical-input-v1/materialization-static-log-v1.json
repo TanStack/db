@@ -1,0 +1,44 @@
+{
+  "slot": 2,
+  "workers": 1,
+  "serial": true,
+  "authorization": "root granted brief bounded serial TypeScript emit and constructor-only 16-input materialization; no model/history execution, native registration/collection/receiving",
+  "before": {
+    "chunk_id": "44be02",
+    "wall_time_seconds": 0.016686875,
+    "exit_code": 0,
+    "original_token_count": 52,
+    "output": "{\"manifest\": \"8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1\", \"packet\": \"548364227e5949d42548b8d8c47f49cca0c8798e06920a26422d6111a044f3de\", \"allFrozenPacketAndLiveSourcesMatched\": true}\n"
+  },
+  "emit": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=1536 node_modules/typescript/bin/tsc --noEmitOnError --outDir /private/tmp/h02-completion-inputs-8dcb8f95 --rootDir /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1 --skipLibCheck --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+    "chunk_id": "ee9465",
+    "wall_time_seconds": 0.328949375,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "constructorOnly": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node --max-old-space-size=384 --input-type=module - <<'JS'\nimport { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { createHash } from 'node:crypto'\nimport { constructCompletionBaselineProgram } from '/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js'\nconst root='/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1'\nconst sourceFreeze='/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-combined-source-v2/source-freeze-v2.json'\nconst hash=(p)=>createHash('sha256').update(readFileSync(p)).digest('hex')\nconst sourceFreezeSha256=hash(sourceFreeze)\nif(sourceFreezeSha256!=='8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1')throw new Error('combined source identity changed')\nconst freeze=JSON.parse(readFileSync(sourceFreeze,'utf8'))\nconst plan=JSON.parse(readFileSync(resolve(root,'selection-plan-v1.json'),'utf8'))\nconst inputRoot=resolve(root,'frozen-inputs-v1')\nif(existsSync(inputRoot))throw new Error('refuse overwrite exact input directory')\nmkdirSync(resolve(inputRoot,'programs'),{recursive:true})\nmkdirSync(resolve(inputRoot,'recipes'))\nconst cells=[]\nfor(const cell of plan.cells){\n const program=constructCompletionBaselineProgram(cell.parameters,cell.profile,cell.gate)\n const programFile=resolve(inputRoot,'programs',cell.id+'.json')\n writeFileSync(programFile,JSON.stringify(program,null,2)+'\\n')\n const recipe={kind:'h02-completion-baseline-constituent',mode:'baseline-constituent',worktree:freeze.worktree,executable:freeze.node.executable,args:['--max-old-space-size=384',resolve(freeze.packages.vitest.resolved,'vitest.mjs'),'run','--config','scripts/h02-progress/completion-parent.config.ts','packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts','-t','checks a selected baseline constituent through the shared judgment'],sourceFreeze,sourceFreezeSha256,programFile,programSha256:hash(programFile),gate:cell.gate,profile:cell.profile,outputDirectory:resolve(root,'runtime-output-v1',cell.id),limits:plan.limitsPerCell}\n const recipeFile=resolve(inputRoot,'recipes',cell.id+'.json')\n writeFileSync(recipeFile,JSON.stringify(recipe,null,2)+'\\n')\n cells.push({...cell,programFile,programSha256:hash(programFile),recipeFile,recipeSha256:hash(recipeFile),publicationEpochs:program.publicationEpochs.length,semanticActionsAuthored:program.steps.filter(x=>x.kind==='semantic').length,observationCutsAuthored:program.steps.filter(x=>x.kind==='baseline-observe').length})\n}\nconst record={kind:'constructor-only-input-materialization',sourceFreeze,sourceFreezeSha256,cells,constructorCalls:cells.length,fixtureConstructionsIfAllAdmitted:cells.reduce((n,c)=>n+c.fixtureConstructions,0),semanticActionsExecuted:0,modelHistoriesExecuted:0,fcSamples:0,testCollection:0,receiving:0,runtimeMutants:0,sourceModule:'/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js',sourceModuleSha256:hash('/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js')}\nwriteFileSync(resolve(root,'materialized-inputs-v1.json'),JSON.stringify(record,null,2)+'\\n')\nprocess.stdout.write(JSON.stringify({constructorCalls:record.constructorCalls,fixtureConstructionsIfAllAdmitted:record.fixtureConstructionsIfAllAdmitted,semanticActionsExecuted:0,modelHistoriesExecuted:0,fcSamples:0,testCollection:0,receiving:0,runtimeMutants:0})+'\\n')\nJS",
+    "chunk_id": "51b0cc",
+    "wall_time_seconds": 0.044369916,
+    "exit_code": 0,
+    "original_token_count": 46,
+    "output": "{\"constructorCalls\":16,\"fixtureConstructionsIfAllAdmitted\":18,\"semanticActionsExecuted\":0,\"modelHistoriesExecuted\":0,\"fcSamples\":0,\"testCollection\":0,\"receiving\":0,\"runtimeMutants\":0}\n"
+  },
+  "after": {
+    "chunk_id": "cae456",
+    "wall_time_seconds": 0.019818875,
+    "exit_code": 0,
+    "original_token_count": 52,
+    "output": "{\"manifest\": \"8dcb8f95b3a3c1292666444b0024e528ad6283f7cdaed1e4a05b9ce15f7b50f1\", \"packet\": \"548364227e5949d42548b8d8c47f49cca0c8798e06920a26422d6111a044f3de\", \"allFrozenPacketAndLiveSourcesMatched\": true}\n"
+  },
+  "runtime": {
+    "semanticActionsExecuted": 0,
+    "modelHistoriesExecuted": 0,
+    "fcSamples": 0,
+    "testCollection": 0,
+    "receiving": 0,
+    "runtimeMutants": 0
+  }
+}

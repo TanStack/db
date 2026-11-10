@@ -1,0 +1,1042 @@
+{
+  "actualFinalChunk": "59a0d2",
+  "actualInitialChunk": "6e3e50",
+  "actualOuterExitCode": 0,
+  "actualSessionId": 94881,
+  "budget": 8,
+  "chosenSeed": null,
+  "chosenSeedEvidence": "Unavailable on successful unchanged unseeded campaign; no seed inferred.",
+  "cumulativeReach": [
+    {
+      "answer-executed": 1,
+      "callback-downstream": 1,
+      "callback-root": 1,
+      "completed-enqueue": 1,
+      "final-downstream": 1,
+      "final-root": 1,
+      "followup-acquisitions-settled": 1,
+      "followup-final-downstream": 1,
+      "followup-final-root": 1,
+      "followup-messages-downstream": 1,
+      "followup-messages-root": 1,
+      "followup-previous-value-downstream": 1,
+      "followup-previous-value-root": 1,
+      "followup-retained-key-downstream": 1,
+      "followup-retained-key-root": 1,
+      "followup-started": 1,
+      "followup-update-downstream": 1,
+      "followup-update-root": 1,
+      "held-downstream": 1,
+      "held-root": 1,
+      "initial-downstream": 1,
+      "initial-root": 1,
+      "messages-downstream": 1,
+      "messages-root": 1,
+      "nonempty-prior": 1,
+      "positive-held-provider-read": 1,
+      "reload-baseline-compared": 1,
+      "reload-started": 1,
+      "selected-upstream-metadata": 1,
+      "source-applied": 1,
+      "worker-cleaned": 1
+    },
+    {
+      "answer-executed": 2,
+      "callback-downstream": 2,
+      "callback-root": 2,
+      "completed-enqueue": 2,
+      "final-downstream": 2,
+      "final-root": 2,
+      "followup-acquisitions-settled": 2,
+      "followup-final-downstream": 2,
+      "followup-final-root": 2,
+      "followup-messages-downstream": 2,
+      "followup-messages-root": 2,
+      "followup-previous-value-downstream": 2,
+      "followup-previous-value-root": 2,
+      "followup-retained-key-downstream": 2,
+      "followup-retained-key-root": 2,
+      "followup-started": 2,
+      "followup-update-downstream": 2,
+      "followup-update-root": 2,
+      "held-downstream": 2,
+      "held-root": 2,
+      "initial-downstream": 2,
+      "initial-root": 2,
+      "messages-downstream": 2,
+      "messages-root": 2,
+      "nonempty-prior": 2,
+      "positive-held-provider-read": 2,
+      "reload-baseline-compared": 2,
+      "reload-started": 2,
+      "selected-upstream-metadata": 2,
+      "source-applied": 2,
+      "worker-cleaned": 2
+    },
+    {
+      "answer-executed": 3,
+      "callback-downstream": 3,
+      "callback-root": 3,
+      "completed-enqueue": 3,
+      "final-downstream": 3,
+      "final-root": 3,
+      "followup-acquisitions-settled": 3,
+      "followup-final-downstream": 3,
+      "followup-final-root": 3,
+      "followup-messages-downstream": 3,
+      "followup-messages-root": 3,
+      "followup-previous-value-downstream": 3,
+      "followup-previous-value-root": 3,
+      "followup-retained-key-downstream": 3,
+      "followup-retained-key-root": 3,
+      "followup-started": 3,
+      "followup-update-downstream": 3,
+      "followup-update-root": 3,
+      "held-downstream": 3,
+      "held-root": 3,
+      "initial-downstream": 3,
+      "initial-root": 3,
+      "messages-downstream": 3,
+      "messages-root": 3,
+      "nonempty-prior": 3,
+      "positive-held-provider-read": 3,
+      "reload-baseline-compared": 3,
+      "reload-started": 3,
+      "selected-upstream-metadata": 3,
+      "source-applied": 3,
+      "worker-cleaned": 3
+    },
+    {
+      "answer-executed": 4,
+      "callback-downstream": 4,
+      "callback-root": 4,
+      "completed-enqueue": 4,
+      "final-downstream": 4,
+      "final-root": 4,
+      "followup-acquisitions-settled": 4,
+      "followup-final-downstream": 4,
+      "followup-final-root": 4,
+      "followup-messages-downstream": 4,
+      "followup-messages-root": 4,
+      "followup-previous-value-downstream": 4,
+      "followup-previous-value-root": 4,
+      "followup-retained-key-downstream": 4,
+      "followup-retained-key-root": 4,
+      "followup-started": 4,
+      "followup-update-downstream": 4,
+      "followup-update-root": 4,
+      "held-downstream": 4,
+      "held-root": 4,
+      "initial-downstream": 4,
+      "initial-root": 4,
+      "messages-downstream": 4,
+      "messages-root": 4,
+      "nonempty-prior": 4,
+      "positive-held-provider-read": 4,
+      "reload-baseline-compared": 4,
+      "reload-started": 4,
+      "selected-upstream-metadata": 4,
+      "source-applied": 4,
+      "worker-cleaned": 4
+    },
+    {
+      "answer-executed": 5,
+      "callback-downstream": 5,
+      "callback-root": 5,
+      "completed-enqueue": 5,
+      "final-downstream": 5,
+      "final-root": 5,
+      "followup-acquisitions-settled": 5,
+      "followup-final-downstream": 5,
+      "followup-final-root": 5,
+      "followup-messages-downstream": 5,
+      "followup-messages-root": 5,
+      "followup-previous-value-downstream": 5,
+      "followup-previous-value-root": 5,
+      "followup-retained-key-downstream": 5,
+      "followup-retained-key-root": 5,
+      "followup-started": 5,
+      "followup-update-downstream": 5,
+      "followup-update-root": 5,
+      "held-downstream": 5,
+      "held-root": 5,
+      "initial-downstream": 5,
+      "initial-root": 5,
+      "messages-downstream": 5,
+      "messages-root": 5,
+      "nonempty-prior": 5,
+      "positive-held-provider-read": 5,
+      "reload-baseline-compared": 5,
+      "reload-started": 5,
+      "selected-upstream-metadata": 5,
+      "source-applied": 5,
+      "worker-cleaned": 5
+    },
+    {
+      "answer-executed": 6,
+      "callback-downstream": 6,
+      "callback-root": 6,
+      "completed-enqueue": 6,
+      "final-downstream": 6,
+      "final-root": 6,
+      "followup-acquisitions-settled": 6,
+      "followup-final-downstream": 6,
+      "followup-final-root": 6,
+      "followup-messages-downstream": 6,
+      "followup-messages-root": 6,
+      "followup-previous-value-downstream": 6,
+      "followup-previous-value-root": 6,
+      "followup-retained-key-downstream": 6,
+      "followup-retained-key-root": 6,
+      "followup-started": 6,
+      "followup-update-downstream": 6,
+      "followup-update-root": 6,
+      "held-downstream": 6,
+      "held-root": 6,
+      "initial-downstream": 6,
+      "initial-root": 6,
+      "messages-downstream": 6,
+      "messages-root": 6,
+      "nonempty-prior": 6,
+      "positive-held-provider-read": 6,
+      "reload-baseline-compared": 6,
+      "reload-started": 6,
+      "selected-upstream-metadata": 6,
+      "source-applied": 6,
+      "worker-cleaned": 6
+    },
+    {
+      "answer-executed": 7,
+      "callback-downstream": 7,
+      "callback-root": 7,
+      "completed-enqueue": 7,
+      "final-downstream": 7,
+      "final-root": 7,
+      "followup-acquisitions-settled": 7,
+      "followup-final-downstream": 7,
+      "followup-final-root": 7,
+      "followup-messages-downstream": 7,
+      "followup-messages-root": 7,
+      "followup-previous-value-downstream": 7,
+      "followup-previous-value-root": 7,
+      "followup-retained-key-downstream": 7,
+      "followup-retained-key-root": 7,
+      "followup-started": 7,
+      "followup-update-downstream": 7,
+      "followup-update-root": 7,
+      "held-downstream": 7,
+      "held-root": 7,
+      "initial-downstream": 7,
+      "initial-root": 7,
+      "messages-downstream": 7,
+      "messages-root": 7,
+      "nonempty-prior": 7,
+      "positive-held-provider-read": 7,
+      "reload-baseline-compared": 7,
+      "reload-started": 7,
+      "selected-upstream-metadata": 7,
+      "source-applied": 7,
+      "worker-cleaned": 7
+    },
+    {
+      "answer-executed": 8,
+      "callback-downstream": 8,
+      "callback-root": 8,
+      "completed-enqueue": 8,
+      "final-downstream": 8,
+      "final-root": 8,
+      "followup-acquisitions-settled": 8,
+      "followup-final-downstream": 8,
+      "followup-final-root": 8,
+      "followup-messages-downstream": 8,
+      "followup-messages-root": 8,
+      "followup-previous-value-downstream": 8,
+      "followup-previous-value-root": 8,
+      "followup-retained-key-downstream": 8,
+      "followup-retained-key-root": 8,
+      "followup-started": 8,
+      "followup-update-downstream": 8,
+      "followup-update-root": 8,
+      "held-downstream": 8,
+      "held-root": 8,
+      "initial-downstream": 8,
+      "initial-root": 8,
+      "messages-downstream": 8,
+      "messages-root": 8,
+      "nonempty-prior": 8,
+      "positive-held-provider-read": 8,
+      "reload-baseline-compared": 8,
+      "reload-started": 8,
+      "selected-upstream-metadata": 8,
+      "source-applied": 8,
+      "worker-cleaned": 8
+    }
+  ],
+  "finishEvidence": "Exact frozen run/check/finish order plus selected campaign pass; no dedicated finalizer/assert receipt or new parent-checker V8 provenance.",
+  "histories": [
+    {
+      "bindingStatus": "bound",
+      "bytes": 31375074,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-080e45f4-5839-4360-821f-e34f795fbc9e",
+      "childExitCode": 0,
+      "detachedLeaderPid": 99793,
+      "elapsedMs": 2347,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 20,
+        "kind": "query",
+        "metadataFollowupQuarter": 1,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 12,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 489455616,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-080e45f4-5839-4360-821f-e34f795fbc9e",
+      "rawReceipts": 206,
+      "receiptWriterPid": 99815,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[23,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[23,null]",
+              "$origin": "remote",
+              "id": 23,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[23,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 36
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[23,null]",
+              "$origin": "remote",
+              "id": 23,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[23,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 39
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[23,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[23,null]",
+              "$origin": "remote",
+              "id": 23,
+              "markers": [],
+              "rank": 36
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[23,null]",
+              "$origin": "remote",
+              "id": 23,
+              "markers": [],
+              "rank": 39
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31375134,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-1ebab393-4787-4e62-a9c6-60ca0671b141",
+      "childExitCode": 0,
+      "detachedLeaderPid": 99998,
+      "elapsedMs": 2348,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 10,
+        "kind": "query",
+        "metadataFollowupQuarter": 1,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 9,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 483278848,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-1ebab393-4787-4e62-a9c6-60ca0671b141",
+      "rawReceipts": 206,
+      "receiptWriterPid": 102,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[13,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[13,null]",
+              "$origin": "remote",
+              "id": 13,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[13,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 27
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[13,null]",
+              "$origin": "remote",
+              "id": 13,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[13,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 29.25
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[13,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[13,null]",
+              "$origin": "remote",
+              "id": 13,
+              "markers": [],
+              "rank": 27
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[13,null]",
+              "$origin": "remote",
+              "id": 13,
+              "markers": [],
+              "rank": 29.25
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31374450,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-4520166f-d602-4275-b4a4-273ba745a3a9",
+      "childExitCode": 0,
+      "detachedLeaderPid": 223,
+      "elapsedMs": 2380,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 5,
+        "kind": "query",
+        "metadataFollowupQuarter": 1,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 16,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 451313664,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-4520166f-d602-4275-b4a4-273ba745a3a9",
+      "rawReceipts": 206,
+      "receiptWriterPid": 226,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[8,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[8,null]",
+              "$origin": "remote",
+              "id": 8,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[8,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 48
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[8,null]",
+              "$origin": "remote",
+              "id": 8,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[8,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 52
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[8,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[8,null]",
+              "$origin": "remote",
+              "id": 8,
+              "markers": [],
+              "rank": 48
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[8,null]",
+              "$origin": "remote",
+              "id": 8,
+              "markers": [],
+              "rank": 52
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31374476,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-5cd22b6c-6d58-43e8-8e0a-7d8a9d728ec4",
+      "childExitCode": 0,
+      "detachedLeaderPid": 123,
+      "elapsedMs": 2439,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 1,
+        "kind": "query",
+        "metadataFollowupQuarter": 3,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 5,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 475840512,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-5cd22b6c-6d58-43e8-8e0a-7d8a9d728ec4",
+      "rawReceipts": 206,
+      "receiptWriterPid": 126,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[4,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[4,null]",
+              "$origin": "remote",
+              "id": 4,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[4,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 15
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[4,null]",
+              "$origin": "remote",
+              "id": 4,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[4,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 18.75
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[4,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[4,null]",
+              "$origin": "remote",
+              "id": 4,
+              "markers": [],
+              "rank": 15
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[4,null]",
+              "$origin": "remote",
+              "id": 4,
+              "markers": [],
+              "rank": 18.75
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31374414,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-612881a1-52be-4fbc-b6fe-7c30d64c4566",
+      "childExitCode": 0,
+      "detachedLeaderPid": 99953,
+      "elapsedMs": 2359,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 0,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 6,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 449675264,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-612881a1-52be-4fbc-b6fe-7c30d64c4566",
+      "rawReceipts": 206,
+      "receiptWriterPid": 99964,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[3,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[3,null]",
+              "$origin": "remote",
+              "id": 3,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[3,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 18
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[3,null]",
+              "$origin": "remote",
+              "id": 3,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[3,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 21
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[3,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[3,null]",
+              "$origin": "remote",
+              "id": 3,
+              "markers": [],
+              "rank": 18
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[3,null]",
+              "$origin": "remote",
+              "id": 3,
+              "markers": [],
+              "rank": 21
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31374418,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-74a104da-3d53-4dc6-9bf5-a0d2458bdd49",
+      "childExitCode": 0,
+      "detachedLeaderPid": 99835,
+      "elapsedMs": 2500,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 2,
+        "kind": "query",
+        "metadataFollowupQuarter": 2,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 12,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 449642496,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-74a104da-3d53-4dc6-9bf5-a0d2458bdd49",
+      "rawReceipts": 206,
+      "receiptWriterPid": 99838,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[5,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[5,null]",
+              "$origin": "remote",
+              "id": 5,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[5,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 36
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[5,null]",
+              "$origin": "remote",
+              "id": 5,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[5,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 42
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[5,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[5,null]",
+              "$origin": "remote",
+              "id": 5,
+              "markers": [],
+              "rank": 36
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[5,null]",
+              "$origin": "remote",
+              "id": 5,
+              "markers": [],
+              "rank": 42
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31375040,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-7ca6f4c7-66da-4ab3-89a9-519f7eb65c60",
+      "childExitCode": 0,
+      "detachedLeaderPid": 276,
+      "elapsedMs": 2349,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 17,
+        "kind": "query",
+        "metadataFollowupQuarter": 3,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 1,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 453427200,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-7ca6f4c7-66da-4ab3-89a9-519f7eb65c60",
+      "rawReceipts": 206,
+      "receiptWriterPid": 279,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[20,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[20,null]",
+              "$origin": "remote",
+              "id": 20,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[20,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 3
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[20,null]",
+              "$origin": "remote",
+              "id": 20,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[20,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 3.75
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[20,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[20,null]",
+              "$origin": "remote",
+              "id": 20,
+              "markers": [],
+              "rank": 3
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[20,null]",
+              "$origin": "remote",
+              "id": 20,
+              "markers": [],
+              "rank": 3.75
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    },
+    {
+      "bindingStatus": "bound",
+      "bytes": 31375019,
+      "capturedDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-actual-v1/raw-histories/h02-progress-99770-e8d0d186-a3e5-4ff7-a399-ac2467cd22bf",
+      "childExitCode": 0,
+      "detachedLeaderPid": 299,
+      "elapsedMs": 2365,
+      "files": 1948,
+      "followupPublicationSequence": 185,
+      "followupStartSequence": 162,
+      "history": {
+        "cacheIdentity": "scope",
+        "includes": true,
+        "keyShift": 12,
+        "kind": "query",
+        "metadataFollowupQuarter": 1,
+        "metadataKeys": "default",
+        "nonemptyPrior": true,
+        "rankScale": 2,
+        "scheduler": "microtask",
+        "window": true
+      },
+      "maxSampledGroupRssBytes": 452771840,
+      "originalDirectory": "/private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-99770-e8d0d186-a3e5-4ff7-a399-ac2467cd22bf",
+      "rawReceipts": 206,
+      "receiptWriterPid": 302,
+      "retainedReceipts": 23,
+      "updates": {
+        "downstream": {
+          "callbackSequences": [
+            183
+          ],
+          "change": {
+            "key": "[15,null]",
+            "previousValue": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[15,null]",
+              "$origin": "remote",
+              "id": 15,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[15,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 6
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-2",
+              "$hasPendingWrites": false,
+              "$key": "[15,null]",
+              "$origin": "remote",
+              "id": 15,
+              "markers": [],
+              "observedCollectionId": "live-query-1",
+              "observedKey": "[15,null]",
+              "observedOrigin": "remote",
+              "observedPending": false,
+              "rank": 6.5
+            }
+          }
+        },
+        "root": {
+          "callbackSequences": [
+            182
+          ],
+          "change": {
+            "key": "[15,null]",
+            "previousValue": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[15,null]",
+              "$origin": "remote",
+              "id": 15,
+              "markers": [],
+              "rank": 6
+            },
+            "type": "update",
+            "value": {
+              "$collectionId": "live-query-1",
+              "$hasPendingWrites": false,
+              "$key": "[15,null]",
+              "$origin": "remote",
+              "id": 15,
+              "markers": [],
+              "rank": 6.5
+            }
+          }
+        }
+      },
+      "workerCleanedSequence": 206
+    }
+  ],
+  "limits": [
+    "authored-key lane unvalidated",
+    "zero-quarter no-op unvalidated",
+    "subscription/conflicting-cache progress requires separate reviewed repair/freeze",
+    "no hostile production-mutant kill or product repair/bug-class closure",
+    "stable output metadata only; no changing-fetched-metadata, held-reload follow-up or new attribution law",
+    "no framework receiving, PR readiness, canonical import or publication",
+    "Only this unseeded scope/default lane is proposed; no subsequent receiving or replay automatically admitted."
+  ],
+  "minimumInSource": 1,
+  "multiplier": 1,
+  "observedEveryStatePerHistory": true,
+  "passedTests": 1,
+  "rawBytes": 251024553,
+  "rawFiles": 15587,
+  "rawHistoryArtifacts": 8,
+  "reachBasis": "Source beginHistory resets per-history deduplication; eight actual cumulative log increments require every state per serial history. Eight individual raw paths back the recorded transitions. No dedicated UUID-to-log-ordinal receipt is invented.",
+  "selectedDisplayName": "queued-answer metadata receiving > generated 'scope' 'default' > checks the unseeded generated campaign or selected replay",
+  "skippedTests": 19,
+  "suppliedSeed": null
+}

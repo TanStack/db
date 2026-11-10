@@ -1,0 +1,4 @@
+    emit(`completion-baseline-checkpoint-captured`, {
+      ...common,
+      phase: `completion-baseline-checkpoint-captured`,
+    })

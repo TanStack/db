@@ -1,0 +1,78 @@
+{
+  "classification": "bounded queued-answer progress RED under accepted measured-premise watchdog plan",
+  "progressVerdictGate": {
+    "firstKillTrigger": "post-enqueue-window",
+    "reason": "wall",
+    "bindingStatus": "bound",
+    "actualConflict": 214,
+    "completedEnqueue": 216,
+    "finalDrainExecution": false,
+    "heapDiagnosticDetected": false,
+    "observationFailure": false,
+    "cleanupErrors": []
+  },
+  "hostScheduler": "microtask",
+  "enqueueReturned": true,
+  "pendingAtom": "[\"h02-progress-markers\",2,[3]]",
+  "cachedVersion": 4,
+  "emptyVersion": 10,
+  "receiptSummary": {
+    "contiguous": 47739,
+    "lastSequence": 47739,
+    "lastPhase": "acquisition-accepted",
+    "bytes": 12655962,
+    "invalidActualPrefixes": 0,
+    "phaseCounts": {
+      "worker-start": 1,
+      "actual-key-prefix": 23883,
+      "query-key-callback": 9524,
+      "source-establishing-receipt": 1,
+      "acquisition-attempt": 4765,
+      "source-stack": 4,
+      "provider-request": 13,
+      "provider-answer": 10,
+      "acquisition-accepted": 4765,
+      "acquisition-release": 4756,
+      "cache-success": 9,
+      "public-change": 1,
+      "initial-publication": 1,
+      "reload-start": 1,
+      "release-scope": 2,
+      "conflicting-cache-premise": 1,
+      "retained-publication": 1,
+      "answer-queued": 1
+    }
+  },
+  "supervisor": {
+    "elapsedMsIncludingVerifier": 3534,
+    "maxSampledGroupRssBytes": 662372352,
+    "postEnqueue": {
+      "postEnqueueWindowMs": 1000,
+      "conflictSequence": 214,
+      "queuedSequence": 216,
+      "queuedAtParentMonotonicMs": 2298.608833,
+      "receiptCount": 47739,
+      "acquisitionCount": 4765,
+      "releaseCount": 4756,
+      "lastSequence": 47739,
+      "lastPhase": "acquisition-accepted"
+    },
+    "latestGroupRows": [],
+    "killAttempted": true,
+    "exitCode": null,
+    "signal": "SIGKILL"
+  },
+  "cleanup": {
+    "directCollectionCleanupEstablished": false,
+    "receivingGroupAbsentInSupervisor": true,
+    "rootIndependentGroupsAbsent": true
+  },
+  "timingLimit": "Only final supervisor.json is retained; monitoring and before-kill snapshots overwrite that file. No separate kill-time monotonic scalar was recorded. The first post-enqueue-window trigger is emitted only by frozen source after expired() reaches1000ms. Final elapsed includes verifier and is not queue-to-kill duration.",
+  "limits": [
+    "One finite canonical microtask history only; no generated campaign",
+    "Accepted bounded watchdog RED, not an infinite-cycle proof",
+    "Allocation attribution remains unmeasured",
+    "No final publication, direct Collection cleanup, neighbor receiving GREEN or production repair is established",
+    "No receiving retry, production/model/grammar edits, commit or publication"
+  ]
+}

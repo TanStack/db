@@ -1,0 +1,65 @@
+{
+  "kind": "static declaration identity only; no runtime",
+  "unchanged": {
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": {
+      "queuedAnswerExample": {
+        "sha256": "dbb8577beec7c071caaf5a8a2e14605395dbf03780c8d389d4fccb4e42116a7c",
+        "byteIdentical": true
+      },
+      "progressExamples": {
+        "sha256": "3187d2697468fff27f930d57c6f16ce805a0769f20c7572456e67f8f3b80fa63",
+        "byteIdentical": true
+      },
+      "progressHistoryArbitrary": {
+        "sha256": "dc218162cc68c1c4247c31e242304d7fa4f8ed641eeae320874e8979ff056747",
+        "byteIdentical": true
+      },
+      "progressHistoryFamily": {
+        "sha256": "9cd40bfc61ff265f9a79c3bb0b0ec5f51be155e5c8a2573dbc9f44fa04129cb9",
+        "byteIdentical": true
+      },
+      "progressFacts": {
+        "sha256": "05860540a44960f544beafd214dadddb55602de904afeec0f955eb99fbe1d447",
+        "byteIdentical": true
+      },
+      "modelProgressValue": {
+        "sha256": "845e47dbb74cbe4b78547d1c6855a545747ff74b6ab395eb78990492b22507f8",
+        "byteIdentical": true
+      }
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts": {
+      "paths": {
+        "sha256": "79d5db9fecd9acbcf8ad1ecb476bda17b970b67659dc10c0b7cb28a961c31a20",
+        "byteIdentical": true
+      },
+      "nativeTitle": {
+        "sha256": "cb15ee20bb56b9a6223ad6fd8ccbf671197e98382550e81e3ff9b700d8f9813e",
+        "byteIdentical": true
+      }
+    },
+    "packages/query-db-collection/tests/queued-answer-progress-driver.ts": {
+      "sha256": "f69c0f5c4857cc53b0cf0bf4cd847d58913ac5c30093da3115dc657a597980cc",
+      "byteIdentical": true
+    },
+    "packages/db/tests/query/load-subset-retained-publication-oracle.ts": {
+      "sha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+      "byteIdentical": true
+    },
+    "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts": {
+      "sha256": "6146871f28ffbb468e36fff565b55f9e8fc4a0df1800821e0e023b1bcaec5472",
+      "byteIdentical": true
+    },
+    "scripts/h02-progress/vitest.config.ts": {
+      "sha256": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6",
+      "byteIdentical": true
+    },
+    "scripts/h02-progress/receiving-monitor.mjs": {
+      "sha256": "1bb6427d29290e12270a09140d36584f3cd3ab8e5bde37cef1f00eb921f8d338",
+      "byteIdentical": true
+    },
+    "scripts/h02-progress/ownership-parent.mjs": {
+      "sha256": "0a7e145856aae03a3ecee668f87a0e3cdade3ff64035c4796b0c32e2824e786e",
+      "byteIdentical": true
+    }
+  }
+}

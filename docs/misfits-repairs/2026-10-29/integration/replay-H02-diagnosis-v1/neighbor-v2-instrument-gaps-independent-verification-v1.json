@@ -1,0 +1,87 @@
+{
+  "ownershipManifest": {
+    "sha256": "122db9bbfa850093ba7271af583c5abbc34fa92d74c1f66263c059996c6b4b99",
+    "members": 17,
+    "bytes": 409843,
+    "mismatches": [],
+    "missing": [],
+    "extra": []
+  },
+  "qualificationSha256": "6cbae5527e20100689fb804488df0b13226b2c2fcb46f30d19512e1a5713b110",
+  "qualification": {
+    "classification": "finite ownership test command passed42; required per-history capture absent; baseline GREEN qualification remains open",
+    "invocations": 1,
+    "outerExitCode": 0,
+    "outerPid": 85463,
+    "outerPgid": 85463,
+    "childPid": 85477,
+    "childOriginalPgid": 85477,
+    "vitestSummary": {
+      "passed": 42,
+      "skipped": 220,
+      "totalDiscovered": 262,
+      "testFilesPassed": 1
+    },
+    "perHistoryReachRecordsObserved": 0,
+    "perHistoryResultsOrExactTestNamesObserved": 0,
+    "expectedFiniteHistories": 42,
+    "expectedFreshNoRefetch": 6,
+    "expectedStaleRefetch": 36,
+    "perHistoryFreshStaleCounts": "UNESTABLISHED from retained runtime records;6/36 is unchanged static grammar only",
+    "assertions": "Summary reports42 passing selected tests. Each frozen selected runner calls full model comparison and reach.assertReached, but individual outcomes/counts/names were not recorded.",
+    "recordingGap": "console.info reach output absent from stdout290bytes/stderr0; no invented records or retrospective source-based reach counts",
+    "wrapperOutcome": {
+      "classification": "finite test command passed; inspect assertions and reach evidence",
+      "heap": false,
+      "identityMatched": true,
+      "remainingGroup": 0,
+      "cleanupErrors": 0,
+      "exitCode": 0,
+      "signal": null,
+      "cleanupDiagnostics": [],
+      "elapsedMonotonicMs": 2603.0015,
+      "maxSampledGroupRssBytes": 441499648,
+      "originalPgid": 85477,
+      "stdoutSha256": "fa75a503e8b9c6f0a799ac6bb9f1775c393134e55d56f62ec2a4f283e42fa1ff",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "limits": "Finite ownership assertions and reaches require review. Operational failures never supply product RED. Only the original process group is captured; no escaped-group claim."
+    },
+    "identityBefore": {
+      "diskSourcesMatched": 562,
+      "payloadFilesMatched": 2497,
+      "nodeAndLocksAndLinksMatched": true
+    },
+    "identityAfter": {
+      "diskSourcesMatched": 562,
+      "payloadFilesMatched": 2497,
+      "nodeAndLocksAndLinksMatched": true
+    },
+    "firstKillRecordPresent": false,
+    "rootIndependentAbsenceReceiptSha256": "396271b99fe12ace147afd0249ba4c7a6e7f176a07e335a28c65065ff2f05294",
+    "limits": "No product GREEN, bug-class closure, generated coverage, complete per-history observation, or V8 loaded-source identity is established. No retry/source edit occurred."
+  },
+  "ownershipStdoutBytes": 290,
+  "ownershipStderrBytes": 0,
+  "ownershipReachMarkerOccurrences": 0,
+  "scopeOuterLogSha256": "7a246b948035ec183288df7479e291c61c62e1e953708a6a041c9356783457df",
+  "scopeOuterLog": "\n RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1\n\n\n Test Files  1 skipped (1)\n      Tests  5 skipped (5)\n   Start at  00:25:35\n   Duration  394ms (transform 53ms, setup 25ms, import 78ms, tests 0ms, environment 199ms)\n\n",
+  "method": "Read-only standard-library parse/hash and native dependency source reading; no native formatter, collection, project verifier, test, build or receiving execution.",
+  "inspectedNativeSources": {
+    "runner": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js",
+      "sha256": "bf6af6d2f4469911879a67e83b8f9e7b20332cf42795032c53457b10ccc1c617"
+    },
+    "display": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+utils@4.1.12/node_modules/@vitest/utils/dist/display.js",
+      "sha256": "d1ee20c8d65fe2e69c32bf69f13529e763e50e0d4f81b0711e9dede14f636762"
+    },
+    "reporterResolution": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/coverage.DM_a_rWm.js",
+      "sha256": "e509f3cc1bd81ae6426265253fa926cbde02be5cebfe35b1df422017bffdca31"
+    },
+    "reporters": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/index.UpGiHP7g.js",
+      "sha256": "cdafaf8e508042dddba72f8c7bbae84e2836ddb6b06c7026520c35d91af4e798"
+    }
+  }
+}

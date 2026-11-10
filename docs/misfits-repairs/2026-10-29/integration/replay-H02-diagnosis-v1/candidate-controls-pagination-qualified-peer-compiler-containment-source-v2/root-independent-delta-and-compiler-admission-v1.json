@@ -1,0 +1,20 @@
+{
+  "kind": "Root independent delta review and exact one-shot compiler decision",
+  "acceptedBy": "/root",
+  "sourceAuthor": "queued_progress_design",
+  "originalIndependentReviewSha256": "5bd1c92895b308d912b7560954dc8dd2d7d1f782595863cae38b41808b92a47f",
+  "rootDeltaCheck": {
+    "chunk": "83b273",
+    "exitCode": 0,
+    "exact": "Only threading.Lock to threading.RLock; every other contract field unchanged."
+  },
+  "reason": "The synchronous signal handler may reenter stop on the main thread. RLock permits same-thread reentry and preserves serialization between threads.",
+  "copyAcceptance": "../candidate-controls-pagination-qualified-peer-materialization-root-actual-acceptance-v1.json",
+  "wrapperSha256": "b6eb889598747265dd83b023d1e07f63beba4da3002df56947becca9bee772e4",
+  "contractSha256": "6db3581c88484df8ccbff6b3374cfd23d191fd1be047247ada8c143cb0a22a1b",
+  "toolProposalSha256": "030cb056b3a148501ef5e19a6fd9263856967085ba434250c4e7dba5b8d8da45",
+  "decision": "Admit exact proposed compiler-only tool invocation once with actual require_escalated. No receiving runtime or automatic retry.",
+  "reservedHeavySlot": 1,
+  "maxInvocations": 1,
+  "limits": "Static compiler gate only, raw streams and outer/child outcomes remain separate; no product RED/GREEN, closure or PR mutation."
+}

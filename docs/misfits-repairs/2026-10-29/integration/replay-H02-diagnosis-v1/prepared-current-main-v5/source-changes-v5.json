@@ -1,0 +1,43 @@
+{
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "productionChanged": 0,
+  "sharedChanged": 0,
+  "modelGrammarBudgetRegistryCoverageChanged": 0,
+  "changes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "previousSha256": "5ab01ce82607ecff372577ef1ccba7ca46848a0b7adfb0eabd57466257059d21",
+      "sha256": "d4c5ac9162a931291bd1ba4692f288c7827d017f21c81c4ab456b78efd58bbb8"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts",
+      "previousSha256": "6e4e7c067695016d3cffc16771eeb7f903dc4ce875019e0d369b2d24bdd18bac",
+      "sha256": "a1a2762148b16db893bb0793796fbea0c55da58d1a045324de9bb625ef770446"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "previousSha256": "ec15efd9ca0b827a531db4cf560cd06040215d4c7e9bd556721283432ee50208",
+      "sha256": "decdca8c04444a441d943aeb1cb05737f9eee149a29c74bdeaee2545fdd02c58"
+    },
+    {
+      "path": "scripts/h02-progress/bindings-calibration.test.mjs",
+      "previousSha256": "ce36cb923806e7289646c24b9e1276c3f4b7d4031cd34a67e689415953c7214a",
+      "sha256": "a9cf96481a289bd6f32f0a6ec8fe8e10370c15d2e8046f335468d6abdade3167"
+    },
+    {
+      "path": "scripts/h02-progress/verify-bindings.mjs",
+      "previousSha256": "1f08564ce3f321d1d57b9eda6bf009ac045114e57c26bf051ed783c4e4aaae73",
+      "sha256": "52af8faf846cbb20b53b01cd3f0a67b50adcafcd4bd2e28d369f60ccac54554c"
+    },
+    {
+      "path": "scripts/h02-progress/receipt-transport.mjs",
+      "previousSha256": null,
+      "sha256": "38b80467fe38d4062d28511905358b06d1b83092ebcc18764ffbf3ec45d5f5da"
+    },
+    {
+      "path": "scripts/h02-progress/receipt-transport.test.mjs",
+      "previousSha256": null,
+      "sha256": "f5520c40b8ca33369046ada7dd3ff148398177e852d186270243e6ec96bb3d49"
+    }
+  ]
+}

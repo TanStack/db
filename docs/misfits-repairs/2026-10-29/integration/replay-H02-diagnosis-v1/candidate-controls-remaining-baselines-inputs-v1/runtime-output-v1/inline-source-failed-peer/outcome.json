@@ -1,0 +1,35 @@
+{
+  "classification": "finite test command failed; inspect original assertion diagnostics",
+  "heap": false,
+  "identityMatched": true,
+  "remainingGroup": 0,
+  "cleanupErrors": 0,
+  "exitCode": 1,
+  "signal": null,
+  "cleanupDiagnostics": [],
+  "elapsedMonotonicMs": 3394.449083,
+  "maxSampledGroupRssBytes": 766967808,
+  "originalPgid": 64497,
+  "registeredReceivingGroups": [
+    {
+      "pid": 64503,
+      "pgid": 64503,
+      "parentPid": 64500,
+      "detached": true,
+      "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+      "executable": "/Users/kyle.mathews/.n/bin/node",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/completion-receiving.config.ts",
+        "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+      ],
+      "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-64500-7babee3e-9792-42f2-9516-bcd8ff75ef3e"
+    }
+  ],
+  "stdoutSha256": "ff316acda7df4f9e4668828f8a1d27275dd0dc60760936b9effe42230a522af9",
+  "stderrSha256": "2e38dba598609bbc0b8cedd9c02f703744a0ee777e36dd2fb6c0543e9e57a581",
+  "limits": "Finite baseline assertions and reaches require review. Operational failures never supply product RED. RSS aggregates the original group and each synchronously registered receiving group without double-counting. Cleanup verifies these owned groups only. A supervisor interrupted between spawn and registration can leave an unknown group; no unregistered/escaped-group claim is made."
+}

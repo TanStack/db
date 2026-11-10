@@ -1,0 +1,129 @@
+{
+  "reviewer": "/root/review_h02_prepared",
+  "at": "2026-10-30T06:40:40.848104+00:00",
+  "status": "ACCEPT SOURCE AND RECIPES ONLY; NO RUN ADMISSION",
+  "method": "Independent Python standard-library read/hash/parse/text checks. No project code, tests, builds, native formatter/collection execution, process checks, source edits or receiving runtime ran. Reports outside frozen packet only.",
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "identities": {
+    "packet-sha256-v3.json": "9f7d9bb74a1a1906a39d7125af27be8927480ba84bc3a28fba8cf64bd61eac26",
+    "source-freeze-v3.json": "cc2c1f0c8dee86e95506cfe6bcfd5c948c15c946fe640b86e75485cefba2daeb",
+    "finite-recipes-v3.json": "397c4ed0fb02671cf93903aae17851deb902b88483d1fa23b0a9bb15291feae8",
+    "ownership-recipe-v3.json": "3061c26c3ce942d65a4e105b1d9f5ce4601425d7e2886275ccdaf4ef3a8c2de2"
+  },
+  "packet": {
+    "members": 164,
+    "bytes": 1611225,
+    "exactMembershipAndHashes": true
+  },
+  "source": {
+    "production": 511,
+    "instrument": 34,
+    "shared": 17,
+    "snapshots": 51,
+    "receivingProductionSubset": 161,
+    "onlyChangedFiles": [
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts"
+    ],
+    "exactDelta": "Two reporter options plus two console provenance fields. No production, model, grammar, schedule, judgment, budget or containment source change.",
+    "nodeLocksFourReuseLinksMatched": true,
+    "nineOwnPackagePayloadMaps": {
+      "vitest": 114,
+      "vite": 39,
+      "query-core": 307,
+      "jsdom": 533,
+      "fast-check": 946,
+      "typescript": 132,
+      "eslint": 426,
+      "vitest-runner": 13,
+      "vitest-utils": 34
+    },
+    "ownPackagePayloadTotal": 2544,
+    "packageLimit": "Own regular payload inventory excludes nested node_modules and symlinks; no full transitive dependency closure claimed."
+  },
+  "nativeCalibration": {
+    "commands": [
+      "all-inert.command.json",
+      "native-list.command.json",
+      "old-plain.command.json",
+      "selected-0.command.json",
+      "selected-1.command.json",
+      "selected-2.command.json",
+      "selected-3.command.json",
+      "selected-4.command.json"
+    ],
+    "identityInputsEach": 10,
+    "allBeforeAfterAndCurrentHashesMatched": true,
+    "tableAndTitleVerbatimInActualAndInertSource": true,
+    "allInertPassed": 5,
+    "oldPlainPassed": 0,
+    "oldPlainSkipped": 5,
+    "boundSummarySha256": "bdd48b87e801e8a5aa64e6ea018120f2e7458711cb175732b097adcf409b2edf",
+    "selections": [
+      {
+        "path": "nonempty conflicting replay",
+        "selector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty conflicting replay'$",
+        "passed": 1,
+        "skipped": 4,
+        "launcherExact": true,
+        "outputDirectoryExistsAtReview": false
+      },
+      {
+        "path": "nonempty scope-key publication",
+        "selector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$",
+        "passed": 1,
+        "skipped": 4,
+        "launcherExact": true,
+        "outputDirectoryExistsAtReview": false
+      },
+      {
+        "path": "empty scope-key publication",
+        "selector": "^queued-answer receiving neighbors checks receiving neighbor 'empty scope-key publication'$",
+        "passed": 1,
+        "skipped": 4,
+        "launcherExact": true,
+        "outputDirectoryExistsAtReview": false
+      },
+      {
+        "path": "literal true initial cut",
+        "selector": "^queued-answer receiving neighbors checks receiving neighbor 'literal true initial cut'$",
+        "passed": 1,
+        "skipped": 4,
+        "launcherExact": true,
+        "outputDirectoryExistsAtReview": false
+      },
+      {
+        "path": "ordinary synchronous mutation cut",
+        "selector": "^queued-answer receiving neighbors checks receiving neighbor 'ordinary synchronous mutation cut'$",
+        "passed": 1,
+        "skipped": 4,
+        "launcherExact": true,
+        "outputDirectoryExistsAtReview": false
+      }
+    ],
+    "limit": "Both config and CLI specify explicit reporters; no isolated config-only reporter calibration. Inert registration/capture only, no DB import/history."
+  },
+  "ownership": {
+    "referenceHashAndParentCommandMatched": true,
+    "histories": 42,
+    "freshNoRefetch": 6,
+    "staleRefetch": 36,
+    "limits": {
+      "wallMs": 60000,
+      "nodeHeapMiB": 384,
+      "groupRssBytes": 1073741824,
+      "samplingMs": 100
+    },
+    "outputDirectoryExistsAtReview": false,
+    "actualCaptureRequired": true
+  },
+  "remaining": [
+    "Actual database receiving reach and comparisons remain unmeasured by V3 calibration.",
+    "Ownership must retain 42 actual names and reach payloads, six fresh/no-refetch and36 stale/refetch, sourceModule/currentTestName, original assertions and exclusions, identity and containment/cleanup evidence. Exit0 alone is insufficient.",
+    "sourceModule/currentTestName records positive instrumentation/task/path evidence, not ownership V8 body identity.",
+    "Progress uses unchanged default reporter configuration; reconstruct per-path reach from raw child receipts if successful finally-console counts are suppressed.",
+    "Candidate-only 20 required states remain UNREACHED and attachments remain separately required.",
+    "V2 raw results, reviewer selector miss and historical probable reporter diagnosis remain qualified; source acceptance does not replace them."
+  ],
+  "preservationLimit": "Prior archived packet preservation is inherited from earlier independent V2 review and V3 supplied preservation receipt; no additional broad archive recheck in this final source correction review."
+}

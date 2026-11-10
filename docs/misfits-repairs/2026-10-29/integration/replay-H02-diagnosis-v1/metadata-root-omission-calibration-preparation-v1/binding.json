@@ -1,0 +1,90 @@
+{
+  "files": {
+    "/Users/kyle.mathews/.n/bin/node": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/capture-manifest.json": "9522fa338cd148a0353553bf0964202d527c56f76a4c7e2c0ddd9265966fe4e4",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/raw-histories/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b/history.json": "48b8ce8317a91836b0ae3154d217b442b3491879dc8349e59e9909cad67d6a0b",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/raw-histories/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b/receipts.jsonl": "6287c60245c2f99f9045d21fbb3d48eb5e2b417137db3787f45bacf7bc2cc13a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/raw-histories/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b/supervisor.json": "fac0489b928bec0c0c2d84b17e202b1ddc5b0db352f6f4cf0478a8e7fa3bd824",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/raw-manifest.json": "f665deab9129653f917989234ebff891b1907460f99b4ac26bfc317880693e1f",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-root-actual-classification-v1.json": "4339f336b5fd89702455f4c95f90d384f4185d88ea804fbd9619c3540e4ffee3",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-root-original-absence-v1.json": "f094e8ad4510453459efda4c9ed1fdb1d0d4761c33dd4eca40b1bb1986d56413",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/correction-freeze.json": "720909bea5b688c93a4ad43aa87df1dd1e3a9c77ffefda64f6464efaa65bd5b4",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/calibration-config.mjs.txt": "355356885558a585d68288df3cae8d75499a7e15d6c429bcb970bdbac76e028f",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/calibration-source.template.txt": "fc8ef50335d78c483f98b65bdb45a1b638bbe845a0b14a9eb2c7e831ab25107a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/launch-calibration.py.txt": "2163ef0b3872fd7451c001c6302512d87a22333a598890154ac6596ce67fce76",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/metadata-previous-value-calibration-oracle.test.ts.txt": "4a47eb7d67429acd289893e678770828826ad8847f8d4b9436e6e29bf38365ba",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/package.json.txt": "a90fc33418afa2b9cbf4768524b021135b965ecdf993457505bfae3ac44a8428",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/preparation-author-diagnostic.json": "e158025e8b0e3e03e453ac19e3e30fe656c3f7155f0998735bd76b31d5578de1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-preparation-v1/proposal.md": "3552d41591b50513d6f9960c36551480a72456b9aa8d99ad3d403a3a0704c838",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-inventory.json": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources/packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634"
+  },
+  "fixture": {
+    "directory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-actual-v1/raw-histories/h02-progress-71040-04724b7e-0737-4566-bdf4-576d7363ee6b",
+    "expectedFirstDivergenceSequence": 185,
+    "generatedCampaignCount": 0,
+    "healthyStates": 31,
+    "mutationSequence": 182,
+    "newReceivingHistoryCount": 0,
+    "rawReceipts": 206
+  },
+  "freshWorkspace": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-root-omission-calibration-run-v1",
+  "freshWorkspaceAbsentAtPreparation": true,
+  "kind": "Inert exact root omission checker-calibration source/tool binding",
+  "limits": [
+    "Wrong observation checker calibration only; no production-mutant RED or bug-class closure.",
+    "First divergence final; no later metadata comparison, finish, cleanup or downstream sensitivity credit.",
+    "No new production driver, QueryClient, provider work, framework, generated-history, no-op or broader receiving evidence.",
+    "Named package own maps are not complete transitive host/native/dist equivalence.",
+    "No native source coverage, dedicated receiving provenance or fresh TypeScript/compiler evidence.",
+    "One worker and10s test timeout/384MiB heap; test timeout is not a hard outer watchdog. Root owns actual lifecycle/admission/lint."
+  ],
+  "materializedFiles": {
+    "calibration.config.mjs": "calibration-config.mjs.txt",
+    "metadata-previous-value-calibration-oracle.test.ts": "metadata-previous-value-calibration-oracle.test.ts.txt",
+    "package.json": "package.json.txt"
+  },
+  "nativeArgv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "calibration.config.mjs",
+    "metadata-previous-value-calibration-oracle.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism",
+    "--reporter=verbose",
+    "--silent=false"
+  ],
+  "plannedMaterializedSha256": {
+    "calibration.config.mjs": "355356885558a585d68288df3cae8d75499a7e15d6c429bcb970bdbac76e028f",
+    "metadata-previous-value-calibration-oracle.test.ts": "4a47eb7d67429acd289893e678770828826ad8847f8d4b9436e6e29bf38365ba",
+    "package.json": "a90fc33418afa2b9cbf4768524b021135b965ecdf993457505bfae3ac44a8428"
+  },
+  "removeEnvironment": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_BINDING_DIR",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS",
+    "H02_PROGRESS_SOURCE_FREEZE",
+    "VITEST_MAX_WORKERS",
+    "VITEST_DEBUG_DUMP",
+    "VITEST_MODULE_DIRECTORIES",
+    "npm_config_VITEST_MODULE_DIRECTORIES"
+  ],
+  "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "sourceRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+  "status": "UNEXECUTED; no calibration workspace materialized",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe"
+}

@@ -1,0 +1,9 @@
+{
+  "authority": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-root-classification-v2.json",
+  "authoritySha256": "a7122694df31dbbea26314c0a3268e4a81e74a13d92d4abd9904498ccf6e037f",
+  "law": "Retained post-run traces preserve observation-stage boundaries needed to judge every retained callback against the same independent model stage as realtime observation.",
+  "repair": "Extract the actual retained-receipt selector into pure support and add followup-start/followup-publication. Preserve model, comparison and finalization semantics.",
+  "nativeExecutionAuthorized": false,
+  "productionEditAuthorized": false,
+  "sourceMembersCopied": 588
+}

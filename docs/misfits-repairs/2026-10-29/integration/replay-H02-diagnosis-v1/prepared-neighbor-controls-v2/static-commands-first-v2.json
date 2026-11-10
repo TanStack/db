@@ -1,0 +1,64 @@
+[
+  {
+    "name": "format-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--write",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.317,
+    "log": "format-v2.log"
+  },
+  {
+    "name": "pure-ownership-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=384",
+      "--test",
+      "scripts/h02-progress/ownership-parent.test.mjs"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 0.109,
+    "log": "pure-ownership-v2.log"
+  },
+  {
+    "name": "typescript-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+      "--project",
+      "/private/tmp/h02-neighbor-v2-static-tsconfig.json"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 2.088,
+    "log": "typescript-v2.log"
+  },
+  {
+    "name": "eslint-v2",
+    "args": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+      "--config",
+      "scripts/h02-progress/eslint.config.mjs",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 4.379,
+    "log": "eslint-v2.log"
+  }
+]

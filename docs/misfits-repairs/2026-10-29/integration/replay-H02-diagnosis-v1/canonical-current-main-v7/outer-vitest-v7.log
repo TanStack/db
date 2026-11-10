@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts (4 tests | 1 failed | 3 skipped) 3541ms
+     × replays the finite five-root queued-answer history 3541ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts > queued backend answer progress > replays the finite five-root queued-answer history
+Error: bounded queued-answer progress failure after reached premise: /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-66781-157a8912-0d3a-4f1f-8007-dc76944ea611/receipts.jsonl
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:358:13
+    356|   if (outcome.reason === `wall`) {
+    357|     if (queued && premise && !executed) {
+    358|       throw new Error(
+       |             ^
+    359|         `bounded queued-answer progress failure after reached premise:…
+    360|       )
+ ❯ run packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:60:5
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:65:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  23:46:26
+   Duration  3.93s (transform 52ms, setup 23ms, import 82ms, tests 3.54s, environment 207ms)
+

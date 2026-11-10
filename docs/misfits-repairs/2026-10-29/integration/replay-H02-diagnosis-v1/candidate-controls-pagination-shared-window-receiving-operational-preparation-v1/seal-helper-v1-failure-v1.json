@@ -1,0 +1,8 @@
+{
+  "actual": "3204b7",
+  "exit": 1,
+  "classification": "incorrect helper assertion expected historical postAudit allChecksPassed true; root accepted record intentionally remains false for4newA38preformat supporting files, separately covered by formatting account",
+  "currentIdentityMismatch": false,
+  "partialOperationalFreeze": false,
+  "correction": "v2 verifies exact accepted recovery disposition and preserves false/errors; no source/tool mutation or false-to-true normalization"
+}

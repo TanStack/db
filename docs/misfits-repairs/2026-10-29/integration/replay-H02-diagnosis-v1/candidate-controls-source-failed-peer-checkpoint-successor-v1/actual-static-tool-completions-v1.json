@@ -1,0 +1,26 @@
+{
+  "offlineControls": {
+    "initialAndFinal": "5633b3",
+    "exitCode": 0,
+    "argv": [
+      "/Users/kyle.mathews/.n/bin/node",
+      "/private/tmp/h02-source-failed-peer-checkpoint-controls-v1.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/before/baseline-driver.ts.txt",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/offline-predicate-controls-v1.json"
+    ]
+  },
+  "lint": {
+    "initial": "8eabb0",
+    "session": 67821,
+    "final": "2c830c",
+    "exitCode": 0,
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+    "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+    "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+  },
+  "productImports": 0,
+  "fixtureConstructions": 0,
+  "testCollection": 0,
+  "nativeReceiving": 0
+}

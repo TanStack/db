@@ -1,0 +1,22 @@
+{
+  "status": "pre-freeze source challenge; no successor acceptance",
+  "sourcePath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts",
+  "sourceSha256": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+  "review": [
+    "Read required/permitted source-domain axes and fixture-start/answer-release provenance for all three source-answer recipe cells.",
+    "No concrete missing-knowledge counterexample identified for selected cells; final receiving binding remains pending.",
+    "Exact applied receipt must belong to original initiating source load; public operation or queryFn settlement alone is insufficient.",
+    "Rows knowledge needs exact root values from independently authored facts.",
+    "Complete-domain knowledge must establish full authored marker/child predicate domain through original applied load; returned parent IDs or arbitrary narrower/capped predicates do not establish it.",
+    "Upper permitted domain is a fixture selection restriction; lawful broader batching is operational unsupported premise, never a product RED.",
+    "Initial first-two domains appear consistent with actual capped root provider and first rank-tie pair; no general broader batching or other source profile claim follows."
+  ],
+  "authorControlReport": {
+    "accepted": 21,
+    "rejected": 50,
+    "total": 71,
+    "status": "author-reported only; reviewer did not execute controls"
+  },
+  "runtimeExecuted": 0,
+  "candidateRaw20": "all UNREACHED"
+}

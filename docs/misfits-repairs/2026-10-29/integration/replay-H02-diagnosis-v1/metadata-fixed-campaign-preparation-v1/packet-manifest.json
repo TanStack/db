@@ -1,0 +1,60 @@
+{
+  "artifacts": {
+    "authority.json": {
+      "bytes": 679,
+      "sha256": "5ae5831e8db889477f91e6faa1bb4c752392e1af04f7d4c8f4f0ba6c5c4b0d15"
+    },
+    "binding.json": {
+      "bytes": 6123,
+      "sha256": "26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1"
+    },
+    "evidence-requirements.json": {
+      "bytes": 6207,
+      "sha256": "30e9bb4e98f6238a52f9da0baa61965cb393d446fe872c686217557a38b9ac71"
+    },
+    "first-command.json": {
+      "bytes": 2296,
+      "sha256": "dfecc2cf7c666f4995435e8500dc30aa57801e0014aaee4eafe3c88f3feb0354"
+    },
+    "launcher-scope-default-fixed.zsh": {
+      "bytes": 2777,
+      "sha256": "ce96cb270478f13c9a0769ec4294d65defec8591c27357ad4452fd2749295841"
+    },
+    "recipe.json": {
+      "bytes": 2820,
+      "sha256": "a3a5e7e3f317ac6d4f9e84acb9e4a228e36fb28a632c69abd8df8df698dfc9e1"
+    },
+    "report.md": {
+      "bytes": 6833,
+      "sha256": "3ec72353b9961e3d94281fd0e15f163472ba8bc3f619c380de89df183788c97c"
+    },
+    "static-results.json": {
+      "bytes": 6478,
+      "sha256": "e71ce9e16059337564890c577e6aafa6cfdd3528867635fbbc4d871d9fcd8173"
+    },
+    "title-evidence.json": {
+      "bytes": 3539,
+      "sha256": "e148990035b0449f148df45329f9f629e13a435ce1a97c81c26f34b2b139b9c0"
+    },
+    "verify.py": {
+      "bytes": 4850,
+      "sha256": "dca490c410a8f19681f0b4bb3faa45009f9bf64396a22d7c24a8b57b7003af51"
+    },
+    "zsh-syntax.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "bindingSha256": "26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1",
+  "nativeDiscoveries": 0,
+  "nativeImports": 0,
+  "nativeLaunches": 0,
+  "newRuntimeAdmitted": false,
+  "next": "Independent source/preparation review, then separate exact one-shot root admission. No fresh discovery or native import required by this source preparation.",
+  "processProbes": 0,
+  "qualifiedFixedReceivingClassificationSha256": "8efa5fa507687d318c20722605ea07d2d87d6237adfb080f291a26b4e59a4e11",
+  "scope": "Exact existing scope/default fixed-seed campaign, seed20261030,budget8,multiplier1 only",
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+  "status": "FROZEN SOURCE-ONLY PREPARATION; no runtime admission or execution"
+}

@@ -1,0 +1,23 @@
+{
+  "extends": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+    "paths": {
+      "@tanstack/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@tanstack/db-ivm": [
+        "packages/db-ivm/src/index.ts"
+      ],
+      "@standard-schema/spec": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@standard-schema+spec@1.1.0/node_modules/@standard-schema/spec/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress*.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/*.ts",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/ownership-parent.mjs"
+  ]
+}

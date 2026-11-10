@@ -1,0 +1,27 @@
+import { topKWithFractionalIndex } from "./topKWithFractionalIndex.js";
+import { consolidate } from "./consolidate.js";
+export function orderByWithFractionalIndex(valueExtractor, options) {
+  const limit = options?.limit ?? Infinity;
+  const offset = options?.offset ?? 0;
+  const setSizeCallback = options?.setSizeCallback;
+  const setWindowFn = options?.setWindowFn;
+  const comparator = options?.comparator ?? ((a, b) => {
+    if (a === b) return 0;
+    if (a < b) return -1;
+    return 1;
+  });
+  return (stream) => {
+    return stream.pipe(
+      topKWithFractionalIndex(
+        (a, b) => comparator(valueExtractor(a), valueExtractor(b)),
+        {
+          limit,
+          offset,
+          setSizeCallback,
+          setWindowFn
+        }
+      ),
+      consolidate()
+    );
+  };
+}

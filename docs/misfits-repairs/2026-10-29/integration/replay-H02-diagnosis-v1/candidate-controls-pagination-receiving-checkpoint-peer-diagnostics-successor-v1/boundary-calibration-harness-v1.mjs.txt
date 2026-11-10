@@ -1,0 +1,175 @@
+import assert from 'node:assert/strict'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { resolve } from 'node:path'
+
+// This executes only exact plain-JavaScript transport functions and selected
+// parent routing statements. All file operations inside that transport use
+// controlled in-memory files. No target, config, model or production import.
+const packet = process.argv[2]
+const map = JSON.parse(readFileSync(resolve(packet, 'copy-prefix-map-v1.json')))
+const source = (relative) => readFileSync(resolve(packet,
+  map.copies.find((item) => item.canonicalRelativePath === relative).inactiveCopyRelativePath), 'utf8')
+const hash = (text) => createHash('sha256').update(text).digest('hex')
+const transport = source('scripts/h02-progress/receipt-transport.mjs')
+const parent = source('packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts')
+const driver = source('packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts')
+const output = resolve(packet, 'boundary-calibration-v1')
+mkdirSync(output)
+const extracts = []
+function extractFunction(name) {
+  const start = transport.indexOf(`export function ${name}(`)
+  assert(start >= 0)
+  const end = transport.indexOf('\n}\n', start) + 2
+  assert(end > start)
+  const exact = transport.slice(start, end)
+  extracts.push({ name, source: 'scripts/h02-progress/receipt-transport.mjs', start, end, sha256: hash(exact), adaptation: 'only export keyword removed for isolated evaluation' })
+  writeFileSync(resolve(output, `${name}.js.txt`), exact)
+  return exact.replace(/^export /, '')
+}
+const writerCode = extractFunction('createReceiptWriter')
+const decoderCode = extractFunction('createReceiptDecoder')
+const readerCode = extractFunction('createReceiptReader')
+function branch(phase, next) {
+  const header = `} else if (receipt.phase === \`${phase}\`) {`
+  const start = parent.indexOf(header)
+  const end = parent.indexOf(`} else if (receipt.phase === \`${next}\`) {`, start + header.length)
+  assert(start >= 0 && end > start)
+  const body = parent.slice(start + header.length, end)
+  extracts.push({ name: phase, source: 'packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts', start: start + header.length, end, sha256: hash(body), adaptation: 'exact branch body; harness supplies controlled free variables' })
+  writeFileSync(resolve(output, `${phase}.js.txt`), body)
+  return body
+}
+const startBranch = branch('completion-baseline-epoch-start', 'completion-baseline-epoch-end')
+const endBranch = branch('completion-baseline-epoch-end', 'completion-baseline-action')
+const cutBranch = branch('completion-baseline-cut', 'completion-baseline-semantic-failure')
+const guardEnd = cutBranch.indexOf('        const observation = receipt as unknown as CompletionBaselineObservation')
+assert(guardEnd > 0)
+const cutGuard = cutBranch.slice(0, guardEnd)
+const compareStart = cutBranch.indexOf('        compare(`public cut ${observation.boundary}`, () =>')
+const compareEnd = cutBranch.indexOf('        cuts++', compareStart) + '        cuts++'.length
+assert(compareStart > guardEnd && compareEnd > compareStart)
+const cutCompare = cutBranch.slice(compareStart, compareEnd)
+writeFileSync(resolve(output, 'cut-guard.js.txt'), cutGuard)
+writeFileSync(resolve(output, 'cut-compare-dispatch.js.txt'), cutCompare)
+extracts.push({name:'cut guard and final comparison dispatch', guardSha256:hash(cutGuard), comparisonSha256:hash(cutCompare), adaptation:'Harness binds observation=receipt separately instead of executing the TypeScript-only assertion. Failure-barrier product comparisons are omitted because controlled boundary=held-window. checkCompletionBaselineObservation is a call-count spy; no product judgment executes.'})
+const markerStart = driver.indexOf('    emit(`completion-baseline-checkpoint-captured`, {')
+const markerEnd = driver.indexOf('\n    })', markerStart) + '\n    })'.length
+assert(markerStart > 0 && markerEnd > markerStart)
+const correctedEmission = driver.slice(markerStart, markerEnd)
+extracts.push({name:'copied local checkpoint emission', source:'packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts', start:markerStart,end:markerEnd,sha256:hash(correctedEmission),adaptation:'exact statement with controlled emit and common free variables'})
+writeFileSync(resolve(output,'corrected-marker-emission.js.txt'), correctedEmission)
+const emitCorrected = new Function('emit', 'common', correctedEmission)
+const oldEmission = 'emit(`completion-baseline-checkpoint-captured`, common)'
+const emitOld = new Function('emit','common',oldEmission)
+writeFileSync(resolve(output,'old-collision-emission.js.txt'),oldEmission+'\n')
+function controlledIo(short) {
+  let nextFd = 1
+  let nextInode = 1
+  const files = new Map()
+  const fds = new Map()
+  function file(path) { const entry=files.get(path);assert(entry,`missing controlled file ${path}`);return entry }
+  function fdFile(fd) { const entry=fds.get(fd);assert(entry && !entry.closed);return entry }
+  const io = {
+    openSync(path,flags) {
+      if(flags==='wx') {assert(!files.has(path)); files.set(path,{bytes:Buffer.alloc(0),ino:nextInode++})}
+      else assert.equal(flags,'r')
+      const entry=file(path);const fd=nextFd++;fds.set(fd,{entry,position:0,closed:false});return fd
+    },
+    closeSync(fd) {fdFile(fd).closed=true},
+    fstatSync(fd) {const {entry}=fdFile(fd);return {isFile:()=>true,dev:1,ino:entry.ino,size:entry.bytes.length}},
+    lstatSync(path) {const entry=file(path);return {isFile:()=>true,dev:1,ino:entry.ino,size:entry.bytes.length}},
+    writeFileSync(path,bytes,options) {assert.equal(options.flag,'wx');assert(!files.has(path));files.set(path,{bytes:Buffer.from(bytes),ino:nextInode++})},
+    writeSync(fd,bytes,offset,length) {const held=fdFile(fd);const count=Math.min(length,short ? 7 : length);held.entry.bytes=Buffer.concat([held.entry.bytes,bytes.subarray(offset,offset+count)]);held.position+=count;return count},
+    readSync(fd,bytes,offset,length,position) {const {entry}=fdFile(fd);const count=Math.min(length,entry.bytes.length-position,short ? 7 : length);entry.bytes.copy(bytes,offset,position,position+count);return count},
+  }
+  return {io,files,fds}
+}
+function makeTransport(io) {
+  return new Function('openSync','fstatSync','writeFileSync','writeSync','closeSync','readSync','lstatSync','TextDecoder',`${writerCode}\n${decoderCode}\n${readerCode}\nreturn {createReceiptWriter, createReceiptReader}`)(io.openSync,io.fstatSync,io.writeFileSync,io.writeSync,io.closeSync,io.readSync,io.lstatSync,TextDecoder)
+}
+function makeRoute() {
+  const state={comparisons:[],cutCalls:0,checkpointCalls:0}
+  const build = new Function('state', `
+    const publicationEpochs=[{id:'1:held-window',kind:'publication'}]
+    let epochIndex=0, activeEpoch, orderedIndex=0, cuts=0
+    const epochModels=new Map([['1:held-window',{}]])
+    const exposedFacades=new Set(),subscribedFacades=new Set()
+    const orderedSteps=[{kind:'baseline-observe',boundary:'held-window'}]
+    const model={}
+    const deliveryCheck={checkpoint(){state.checkpointCalls++}}
+    const checkCompletionBaselineObservation=(actualModel,observation)=>{
+      state.cutCalls++
+      state.lastObservation={phase:observation.phase,boundary:observation.boundary}
+    }
+    const compare=(label,invoke)=>{state.comparisons.push(label);invoke()}
+    return {route(receipt) {
+      if(receipt.phase==='completion-baseline-epoch-start') {${startBranch}}
+      else if(receipt.phase==='completion-baseline-epoch-end') {${endBranch}}
+      else if(receipt.phase==='completion-baseline-cut') {
+        const observation=receipt
+        ${cutGuard}
+        ${cutCompare}
+      }
+    },snapshot(){return {activeEpoch,epochIndex,orderedIndex,cuts}}}
+  `)
+  return {...build(state),state}
+}
+const originalReceipts=readFileSync(resolve(packet,'../candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/inner-raw/receipts.jsonl'),'utf8').trimEnd().split('\n').map(JSON.parse)
+const {h02,sequence,...common}=originalReceipts.find((receipt)=>receipt.sequence===291)
+assert.equal(common.phase,'completion-baseline-cut')
+assert.equal(common.boundary,'held-window')
+const results=[]
+for(const mode of ['corrected','old-collision','wrong-preclose-cut']) {
+ for(const delivery of ['live','final']) {
+  for(const short of [false,true]) {
+   const name=`${mode}-${delivery}-${short?'short':'whole'}`
+   const memory=controlledIo(short)
+   const {createReceiptWriter,createReceiptReader}=makeTransport(memory.io)
+   const writer=createReceiptWriter('controlled/receipts.jsonl')
+   const routing=makeRoute()
+   const accepted=[]
+   const reader=createReceiptReader('controlled/receipts.jsonl',(receipt)=>{accepted.push(receipt);routing.route(receipt)})
+   const samples=[]
+   let failure
+   function drain(label,final=false) {
+    if(failure) return
+    try {reader.drain(final)} catch(error) {failure={message:String(error.message),stack:String(error.stack)}}
+    samples.push({label,cutCalls:routing.state.cutCalls,checkpointCalls:routing.state.checkpointCalls,snapshot:routing.snapshot()})
+   }
+   function wrote(label) {if(delivery==='live') drain(label)}
+   writer.emit('completion-baseline-epoch-start',{epoch:'1:held-window'});wrote('start')
+   if(mode==='old-collision') emitOld(writer.emit.bind(writer),common)
+   else emitCorrected(writer.emit.bind(writer),common)
+   wrote('physical marker')
+   if(mode==='wrong-preclose-cut') {writer.emit('completion-baseline-cut',common);wrote('hostile complete cut before close')}
+   writer.emit('completion-baseline-epoch-end',{epoch:'1:held-window'});wrote('epoch end')
+   writer.emit('completion-baseline-cut',{...common,operation:'window',pendingProviderAnswers:2});wrote('complete cut')
+   writer.close();drain('final',true);reader.close()
+   const raw=memory.files.get('controlled/receipts.jsonl').bytes
+   const records=raw.toString('utf8').trimEnd().split('\n').map(JSON.parse)
+   if(mode==='corrected') {
+    assert.equal(failure,undefined)
+    assert.deepEqual(records.map(({phase})=>phase),['completion-baseline-epoch-start','completion-baseline-checkpoint-captured','completion-baseline-epoch-end','completion-baseline-cut'])
+    assert.equal(routing.state.cutCalls,1);assert.equal(routing.state.checkpointCalls,1)
+    assert.equal(routing.snapshot().cuts,1);assert.equal(routing.snapshot().orderedIndex,1)
+    if(delivery==='live') {
+     assert.equal(samples.find(({label})=>label==='physical marker').cutCalls,0)
+     assert.equal(samples.find(({label})=>label==='physical marker').checkpointCalls,0)
+     assert.equal(samples.find(({label})=>label==='epoch end').cutCalls,0)
+    }
+   } else {
+    assert.equal(failure?.message,'public cut preceded its complete callback interval')
+    assert.equal(routing.state.cutCalls,0);assert.equal(routing.state.checkpointCalls,0)
+    assert.equal(routing.snapshot().activeEpoch,'1:held-window')
+    assert.equal(routing.snapshot().cuts,0)
+   }
+   assert([...memory.fds.values()].every(({closed})=>closed))
+   writeFileSync(resolve(output,`${name}.receipts.jsonl`),raw)
+   results.push({name,mode,delivery,shortIo:short,rawSha256:hash(raw),rawPhases:records.map(({phase})=>phase),acceptedPhases:accepted.map(({phase})=>phase),samples,failure:failure??null,routing:routing.state,finalRouting:routing.snapshot(),allControlledDescriptorsClosed:true,classification:mode==='corrected'?'bounded instrument path accepted':'hostile instrument control rejected at unchanged active-epoch guard'})
+  }
+ }
+}
+writeFileSync(resolve(output,'extraction-bindings-v1.json'),JSON.stringify({sourceOnly:true,noTargetOrConfigOrModelOrProductionImports:true,extracts},null,2)+'\n')
+writeFileSync(resolve(output,'result-v1.json'),JSON.stringify({scope:'12 bounded pure writer/reader/routing boundary calibrations; controlled in-memory IO; no receiving/product execution',passed:true,cases:results,sourceHashes:{transport:hash(transport),parent:hash(parent),copiedDriver:hash(driver)},productRed:false,productGreen:false,receivingRetry:false,reachCredit:false,limits:'Only held-window marker/end/complete-cut routing; shared semantic model/checker are call-count spies and do not execute. Diagnostic helpers remain source-only. No typecheck, config import, target import, process probe or production claim.'},null,2)+'\n')
+console.log(JSON.stringify({passed:true,cases:results.length,corrected:results.filter(x=>x.mode==='corrected').length,rejectedControls:results.filter(x=>x.mode!=='corrected').length,resultSha256:hash(readFileSync(resolve(output,'result-v1.json')))}))

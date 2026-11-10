@@ -1,0 +1,49 @@
+{
+  "accepted": 1,
+  "controls": [
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "wrong source root",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "wrong source freeze",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "reused output",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "different program quarter",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "different selected name",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "changed test timeout",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "changed inner wall budget",
+      "rejected": true
+    },
+    {
+      "error": "singleton differs beyond source root/freeze and fresh output",
+      "name": "changed inner RSS budget",
+      "rejected": true
+    }
+  ],
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "rejected": 8,
+  "status": "pure recipe rebind only"
+}

@@ -1,0 +1,7 @@
+# Remaining fifteen exact inputs: final checks
+
+All fifteen programs remain byte-identical to the historical freeze. All fifteen recipes preserve every value except the five approved source/profile/path bindings. Their fresh output leaves remain absent. The 53-entry input packet and 275-entry combined-v3 packet rehash after lint, and every historical key resolves through the explicit archive map (45 freeze files, 46 packet entries, eight substitutions). The first successor result freeze and its 1,974 files remain unchanged; this is an identity check, not first-baseline classification.
+
+Report-only changed lint completed at chunk 2f38d0, exit 0, with an empty log. It ran the exact lint:changed script body using the existing root Git-output-buffer shim. The actual initial and final tool returns are retained. No rule, selection, budget, runtime limit, source, dependency or immutable input changed. Slot 2 was returned after actual completion.
+
+No compiler, constructor, pure calibration, model/history, test collection, native receiving or runtime mutant ran. Runtime admission remains false for every remaining cell. The immutable mandatory gate requires independent all-fifteen source review, independent actual first-result review, the root's exact first-baseline classification, and a separate root batch admission before any cell. All raw20 states remain UNREACHED; State14 remains proposed.

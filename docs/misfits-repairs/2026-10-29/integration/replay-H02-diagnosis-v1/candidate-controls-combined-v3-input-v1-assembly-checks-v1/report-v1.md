@@ -1,0 +1,9 @@
+# Exact source/input successor assembly checks
+
+Combined-v3 and the one new inline-park-root input are immutable and await independent final gate/root runtime admission. They pin the accepted four-source completion profile repair, unchanged model-v3 and program bytes, the first failed provenance result, and the explicit historical input archive resolver/root relocation. The new output leaf is absent. No compiler, constructor, model/history, sample, registering test or receiving run was performed.
+
+Postassembly checks explicitly rehashed nine manifest identities, all 222 predecessor/275 current-source/16 new-input packet entries, every one of the first failed run's 1,974 assets, and every historical input key via the archive map (45 freeze/46 packet/eight substitutions). One final assertion in the initial assembly shell had accidentally used a vacuous conditional expression; it supplied no check. The retained postassembly record makes this limitation visible and replaces it with explicit assertions. No frozen file was revised.
+
+Changed-file lint passed in both worktrees using the pinned Node and exact package-script body. Source actual completion was chunk f1029e, exit 0. The first report attempt, chunk 5016df, exited 1 before lint selection because Git's untracked path output exceeded Node's default capture buffer. Root's existing inspected shim raises only Git maxBuffer to 8 MiB; the same report lint then completed at chunk d98225, exit 0. The failed log, exact shim bytes and actual initial/final tool returns are preserved. No lint rule, scope, budget, ignore, runtime limit, source module or dependency changed. Slot 2 was returned after the actual exits.
+
+These are source/input instrument checks. They grant no product RED/GREEN, candidate-state reach, metadata credit or automatic native retry. All raw20 states remain UNREACHED; State14 remains proposed.

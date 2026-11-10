@@ -1,0 +1,10 @@
+{
+  "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "exitCode": 0,
+  "stdout": "$ node scripts/agent-lint-feedback.mjs\n",
+  "stderr": "",
+  "preload": "Inspected; only git execFileSync maxBuffer raised to at least 8 MiB. Lint scope and rules unchanged.",
+  "nativeCollection": false,
+  "receivingExecution": false
+}

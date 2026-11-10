@@ -1,0 +1,199 @@
+{
+  "at": "2026-10-30T10:46:37.101150+00:00",
+  "mode": "Static read/hash/source/JSON only; no test, JavaScript, model, product, native or process probe.",
+  "knownHashes": {
+    "packet-sha256-v1.json": "2a6e992f2e25fa4dcbfb05456924bfb597bd583a59234a8b445b95a139773a75",
+    "source-freeze-v1.json": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+    "report-v1.md": "632f936b9ee3759ea62de0befabadfe50f77c1b91bd614fd901b38bb04136b61"
+  },
+  "packetEntries": 105,
+  "sourceBindings": 595,
+  "sourceCopies": 84,
+  "unchangedProduction": 511,
+  "priorSourceKeys": 584,
+  "oldBindingDeltas": {
+    "packages/db/tests/oracle-config.ts": {
+      "before": "ef56c55cd1e7c759d056ed4d9be85e9cd79d2cdfc9743454170562240c50c908",
+      "after": "2549b168c978ab0d6adfabf95cf02ac70b54097b4ee4261d7c45f6a304ca9827"
+    }
+  },
+  "addedSourceInputs": [
+    "packages/db/tests/query/pagination-oracle.property.test.ts",
+    "packages/db/tests/query/pagination-support.ts",
+    "packages/db/tests/trace-runner.ts",
+    "packages/db/tests/optimistic-history-oracle.ts",
+    "packages/db/vite.config.ts",
+    "packages/db/tsconfig.json",
+    "packages/db/tsconfig.test.json",
+    "packages/db/mangle-cache.json",
+    "packages/db/tests/test-setup.ts",
+    "packages/db/tests/indexed-db/setup.ts",
+    "scripts/commonjs-declarations.mjs"
+  ],
+  "preservedPriorPacketResultEntries": 2063,
+  "preservedPriorCounts": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/packet-sha256-v1.json": 88,
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/inline-source-failed-peer-result-freeze-v1.json": 1975
+  },
+  "dependencyPackages": 9,
+  "dependencyPayloads": 2544,
+  "Node": 1,
+  "locks": 2,
+  "links": 4,
+  "budgetsUnchanged": [
+    [
+      "orderedScenarioRuns",
+      "12 * multiplier"
+    ],
+    [
+      "transitionScenarioRuns",
+      "8 * multiplier"
+    ]
+  ],
+  "orderedFailureCheckpointPositions": [
+    76,
+    166,
+    262,
+    369,
+    525,
+    642,
+    976,
+    1349,
+    1373,
+    1431,
+    1467
+  ],
+  "exactProposedRed": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "vite.config.ts",
+      "tests/query/pagination-oracle.property.test.ts",
+      "-t",
+      "retains complete windows across joined failure histories for a fixed seed",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+    "environment": {
+      "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1"
+    },
+    "requiredUnsetEnvironment": [
+      "TANSTACK_DB_ORACLE_SEED",
+      "TANSTACK_DB_ORACLE_PATH",
+      "TANSTACK_DB_ORACLE_PROPERTY",
+      "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH"
+    ],
+    "campaign": "new fixed-seed generated family only; seed 1665; existing transitionScenarioRuns=8 at multiplier 1; no prior campaign budget changed",
+    "assertionCheckpoint": "original source rejection handled as exact lastSubsetError while original child peer remains pending; compare every nonthrowing captured callback and current read to independently computed prior window before releasing peer or awaiting setWindow",
+    "runtimeAdmission": "NOT ADMITTED; freeze exact outer containment/launcher separately before any run",
+    "scope": "proposal only; package config keeps its ordinary coverage/typecheck setup; no copied native completion launcher is suitable for this primary command",
+    "numericalDeadline": "no product deadline; root must admit operational containment separately",
+    "nativeReceiving": 0
+  },
+  "sourceOnlyLimits": {
+    "fullChildPayloadCompared": false,
+    "downstreamOrEventReplicaCompared": false,
+    "failureRole": "anti-join only; include failure remains another planned dimension",
+    "normalReplayNeedsExplicitTestNameFilter": true,
+    "normalReplayReason": "older tests in this same file do not use oracleReplayTest; only new fixed/random/pin registrations do",
+    "receivingSuccessor": "required and not prepared/run here",
+    "outerContainment": "not prepared/admitted by this source packet",
+    "runActual": "all primary reaches UNREACHED; source-only success is not product GREEN"
+  },
+  "staticRecords": {
+    "scope": "direct installed static CLIs; no pnpm install; no test collection/product imports/fixture construction",
+    "prettierFinal": {
+      "chunk": "e3c59a",
+      "exit": 0,
+      "log": "prettier-check-v1.log"
+    },
+    "eslintCappedOriginal": {
+      "initial": "1e8dae",
+      "session": 87342,
+      "final": "cca4f8",
+      "exit": 134,
+      "log": "eslint-v1.log",
+      "classification": "tool heap OOM; preserved; no product verdict"
+    },
+    "eslintDefaultHeapV2": {
+      "initial": "5dff30",
+      "session": 14645,
+      "final": "e989a6",
+      "exit": 0,
+      "log": "eslint-v2.log"
+    },
+    "typecheckV1": {
+      "initial": "112464",
+      "session": 24514,
+      "final": "1640a5",
+      "exit": 2,
+      "log": "typecheck-v1.log",
+      "classification": "temporary config did not resolve installed Node typings; also exposed new-test errors"
+    },
+    "typecheckV2": {
+      "initial": "dfade3",
+      "session": 93396,
+      "final": "7025b9",
+      "exit": 2,
+      "log": "typecheck-v2.log",
+      "classification": "Node typing resolved; one optional getWindow spread error remained"
+    },
+    "typecheckFinal": {
+      "initial": "c9cfac",
+      "session": 66052,
+      "final": "117c8f",
+      "exit": 0,
+      "log": "typecheck-v3.log",
+      "config": "typecheck-config-v2.json",
+      "defaultHeap": true
+    },
+    "eslintFinal": {
+      "initial": "8ee8d1",
+      "session": 17971,
+      "final": "ce7104",
+      "exit": 0,
+      "log": "eslint-v3.log",
+      "defaultHeap": true,
+      "files": [
+        "packages/db/tests/query/pagination-oracle.property.test.ts",
+        "packages/db/tests/oracle-config.ts",
+        "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts"
+      ]
+    },
+    "sourceOracleFeedbackFinal": {
+      "initial": "51f54e",
+      "session": 64902,
+      "final": "4a1e06",
+      "exit": 0,
+      "log": "source-oracle-feedback-v2.log",
+      "cwdDelegatedTo": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+    },
+    "reportWorktreeRequiredLint": {
+      "initial": "794be5",
+      "session": 34172,
+      "final": "82385f",
+      "exit": 0,
+      "log": "exact-pnpm-lint-changed-v1.log",
+      "exactShellCommand": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items"
+    },
+    "serialSchedulingException": "Author polled source feedback at 5fe40a, received still running, then mistakenly launched report-WT lint. Both read-only static checks overlapped briefly; root was told immediately. Both completed exit 0; no other process launched until both completed.",
+    "productionEdits": 0,
+    "primaryRuntime": 0,
+    "nativeReceiving": 0,
+    "installation": 0
+  },
+  "allAuditChecksPass": true,
+  "errors": [],
+  "productExecutions": 0,
+  "nativeExecutions": 0,
+  "modelExecutions": 0,
+  "processProbes": 0,
+  "primaryReach": "UNREACHED",
+  "candidateRaw20": "all UNREACHED",
+  "actualHelperNoActiveOperation": "required and UNREACHED",
+  "state14": "proposed/unadopted"
+}

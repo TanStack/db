@@ -1,0 +1,55 @@
+{
+  "status": "All eight source-declared finite reaches reconstructed once from complete contiguous raw receipts",
+  "history": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "scope",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "counts": {
+    "nonempty-prior": 1,
+    "held-provider-read": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 1,
+    "downstream-change": 1,
+    "final-publication": 1,
+    "worker-cleaned": 1
+  },
+  "receiptSequences": {
+    "nonempty-prior": [
+      86
+    ],
+    "held-provider-read": [
+      133
+    ],
+    "completed-enqueue": [
+      151
+    ],
+    "answer-executed": [
+      152
+    ],
+    "root-change": [
+      157
+    ],
+    "downstream-change": [
+      158
+    ],
+    "final-publication": [
+      159
+    ],
+    "worker-cleaned": [
+      176
+    ]
+  },
+  "reloadStartSequence": 87,
+  "cleanupStartSequence": 160,
+  "heldProviderAnswers": 3,
+  "rawReceiptFile": "receiving/receipts.jsonl",
+  "rawReceiptSha256": "2e4c1832b7dfd95f2d07f48129b3542c403b94d810117fb17cbd53dfd849257f",
+  "basis": "Same source runner predicates and reload-start to cleanup-start event cut. Live exact native test passed its original assertReached(); console was suppressed, so raw receipts retain the measured witnesses. This static audit does not create new receiving execution."
+}

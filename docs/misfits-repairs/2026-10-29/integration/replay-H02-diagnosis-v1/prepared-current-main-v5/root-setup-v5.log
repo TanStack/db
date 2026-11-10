@@ -1,0 +1,39 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ scripts/h02-progress/root-setup-calibration.test.ts (2 tests | 2 failed) 2ms
+   × separates client URL normalization from module and global URL semantics 1ms
+   × derives the actual supervisor root and rejects stale or substituted paths 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/h02-progress/root-setup-calibration.test.ts > separates client URL normalization from module and global URL semantics
+Error: setup calibration paths required
+ ❯ scripts/h02-progress/root-setup-calibration.test.ts:20:11
+     18|   const freezePath = process.env.H02_PROGRESS_SOURCE_FREEZE
+     19|   if (!directory || !freezePath)
+     20|     throw new Error(`setup calibration paths required`)
+       |           ^
+     21|   const freeze: { worktree: string } = JSON.parse(
+     22|     readFileSync(freezePath, `utf8`),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  scripts/h02-progress/root-setup-calibration.test.ts > derives the actual supervisor root and rejects stale or substituted paths
+Error: setup calibration paths required
+ ❯ scripts/h02-progress/root-setup-calibration.test.ts:83:11
+     81|   const freezePath = process.env.H02_PROGRESS_SOURCE_FREEZE
+     82|   if (!directory || !freezePath)
+     83|     throw new Error(`setup calibration paths required`)
+       |           ^
+     84|   const freeze: { worktree: string } = JSON.parse(
+     85|     readFileSync(freezePath, `utf8`),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  22:45:30
+   Duration  476ms (transform 28ms, setup 0ms, import 37ms, tests 2ms, environment 350ms)
+

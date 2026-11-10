@@ -1,0 +1,249 @@
+import { codedMessage, devBuild } from "./error-message";
+function getIDBFactory(idbFactory) {
+  if (idbFactory) {
+    return idbFactory;
+  }
+  if (typeof window !== "undefined" && window.indexedDB) {
+    return window.indexedDB;
+  }
+  if (typeof globalThis !== "undefined" && globalThis.indexedDB) {
+    return globalThis.indexedDB;
+  }
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production` ? "IndexedDB is not available in this environment. Ensure you are running in a browser or provide a custom IDBFactory for testing." : codedMessage(179)
+  );
+}
+function executeRequest(createRequest, describeFailure) {
+  return new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = createRequest();
+    } catch (error) {
+      reject(
+        new Error(
+          describeFailure(
+            error instanceof Error ? error.message : String(error)
+          ),
+          { cause: error }
+        )
+      );
+      return;
+    }
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      const errorMessage = request.error?.message || "Unknown error";
+      reject(
+        new Error(describeFailure(errorMessage), {
+          cause: request.error
+        })
+      );
+    };
+  });
+}
+export function openDatabase(name, version, onUpgrade, idbFactory, onBlocked) {
+  return new Promise((resolve, reject) => {
+    const factory = getIDBFactory(idbFactory);
+    let request;
+    try {
+      request = factory.open(name, version);
+    } catch (error) {
+      reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Failed to open IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}` : codedMessage(182, { name, error }),
+          { cause: error }
+        )
+      );
+      return;
+    }
+    request.onupgradeneeded = (event) => {
+      const db = request.result;
+      const transaction = request.transaction;
+      if (onUpgrade && transaction) {
+        try {
+          onUpgrade(
+            db,
+            event.oldVersion,
+            event.newVersion ?? version,
+            transaction
+          );
+        } catch (error) {
+          transaction.abort();
+          reject(
+            new Error(
+              devBuild() && process.env.NODE_ENV !== `production` ? `Database upgrade failed for "${name}": ${error instanceof Error ? error.message : String(error)}` : codedMessage(183, { name, error }),
+              { cause: error }
+            )
+          );
+        }
+      }
+    };
+    if (onBlocked) request.addEventListener("blocked", onBlocked);
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      const errorMessage = request.error?.message || "Unknown error";
+      reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Failed to open IndexedDB database "${name}": ${errorMessage}` : codedMessage(184, { name, errorMessage }),
+          { cause: request.error }
+        )
+      );
+    };
+  });
+}
+export function createObjectStore(db, storeName, options) {
+  try {
+    return db.createObjectStore(storeName, options);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "InvalidStateError") {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot create object store "${storeName}": This operation is only allowed during a database upgrade. Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase.` : codedMessage(185, { storeName }),
+        { cause: error }
+      );
+    }
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Object store "${storeName}" already exists in the database. Check the database version and only create stores when needed.` : codedMessage(186, { storeName }),
+        { cause: error }
+      );
+    }
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Failed to create object store "${storeName}": ${error instanceof Error ? error.message : String(error)}` : codedMessage(187, { storeName, error }),
+      { cause: error }
+    );
+  }
+}
+export function executeTransaction(db, storeNames, mode, callback) {
+  return new Promise((resolve, reject) => {
+    const storeNamesArray = Array.isArray(storeNames) ? storeNames : [storeNames];
+    let transaction;
+    try {
+      transaction = db.transaction(storeNamesArray, mode);
+    } catch (error) {
+      reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Failed to create transaction for stores [${storeNamesArray.join(", ")}]: ${error instanceof Error ? error.message : String(error)}` : codedMessage(188, { storeNames: storeNamesArray, error }),
+          { cause: error }
+        )
+      );
+      return;
+    }
+    const stores = {};
+    for (const storeName of storeNamesArray) {
+      try {
+        stores[storeName] = transaction.objectStore(storeName);
+      } catch (error) {
+        reject(
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Object store "${storeName}" not found in the database. Ensure the store was created during the database upgrade.` : codedMessage(189, { storeName }),
+            { cause: error }
+          )
+        );
+        return;
+      }
+    }
+    const completed = new Promise((complete, abort) => {
+      transaction.addEventListener("complete", () => complete());
+      transaction.addEventListener(
+        "abort",
+        () => abort(
+          transaction.error ?? new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? "Transaction was aborted" : codedMessage(190)
+          )
+        )
+      );
+    });
+    let result;
+    try {
+      result = callback(transaction, stores);
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+    const callbackResult = Promise.resolve(result).catch((error) => {
+      try {
+        transaction.abort();
+      } catch {
+      }
+      throw error;
+    });
+    Promise.all([callbackResult, completed]).then(
+      ([value]) => resolve(value),
+      reject
+    );
+  });
+}
+export function getAll(objectStore) {
+  return executeRequest(
+    () => objectStore.getAll(),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to get all items from object store "${objectStore.name}": ${cause}` : codedMessage(204, { name: objectStore.name, cause })
+  );
+}
+export function getAllKeys(objectStore) {
+  return executeRequest(
+    () => objectStore.getAllKeys(),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to get all keys from object store "${objectStore.name}": ${cause}` : codedMessage(200, { name: objectStore.name, cause })
+  );
+}
+export function getByKey(objectStore, key) {
+  return executeRequest(
+    () => objectStore.get(key),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${cause}` : codedMessage(205, {
+      key: String(key),
+      name: objectStore.name,
+      cause
+    })
+  );
+}
+export function put(objectStore, value, key) {
+  return executeRequest(
+    () => key !== void 0 ? objectStore.put(value, key) : objectStore.put(value),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to write item to object store "${objectStore.name}": ${cause}` : codedMessage(201, { name: objectStore.name, cause })
+  );
+}
+export function deleteByKey(objectStore, key) {
+  return executeRequest(
+    () => objectStore.delete(key),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${cause}` : codedMessage(202, {
+      key: String(key),
+      name: objectStore.name,
+      cause
+    })
+  );
+}
+export function clear(objectStore) {
+  return executeRequest(
+    () => objectStore.clear(),
+    (cause) => devBuild() && process.env.NODE_ENV !== `production` ? `Failed to clear object store "${objectStore.name}": ${cause}` : codedMessage(203, { name: objectStore.name, cause })
+  );
+}
+export function deleteDatabase(name, idbFactory, onBlocked) {
+  return new Promise((resolve, reject) => {
+    const factory = getIDBFactory(idbFactory);
+    let request;
+    try {
+      request = factory.deleteDatabase(name);
+    } catch (error) {
+      reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Failed to delete IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}` : codedMessage(191, { name, error }),
+          { cause: error }
+        )
+      );
+      return;
+    }
+    if (onBlocked) request.addEventListener("blocked", onBlocked);
+    request.onsuccess = () => {
+      resolve();
+    };
+    request.onerror = () => {
+      const errorMessage = request.error?.message || "Unknown error";
+      reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Failed to delete IndexedDB database "${name}": ${errorMessage}` : codedMessage(192, { name, errorMessage }),
+          { cause: request.error }
+        )
+      );
+    };
+  });
+}

@@ -1,0 +1,8 @@
+export function getOrCreate(entries, key, create) {
+  let value = entries.get(key);
+  if (value === void 0) {
+    value = create();
+    entries.set(key, value);
+  }
+  return value;
+}

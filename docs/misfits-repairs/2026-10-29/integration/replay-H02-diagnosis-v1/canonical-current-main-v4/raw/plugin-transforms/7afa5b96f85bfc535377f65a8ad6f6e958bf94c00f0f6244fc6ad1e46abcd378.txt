@@ -1,0 +1,96 @@
+import { DEFAULT_COMPARE_OPTIONS } from "../utils";
+import { indexableOperations } from "../query/builder/functions.js";
+import { hasVirtualPropPath } from "../virtual-props";
+import { findIndexForField } from "../utils/index-optimization.js";
+import { codedWarning, devBuild } from "../error-message.js";
+import { checkCollectionSizeForIndex, isDevModeEnabled } from "./index-registry";
+function shouldAutoIndex(collection) {
+  return collection.config.autoIndex === `eager`;
+}
+export function ensureIndexForField(fieldName, fieldPath, collection, compareOptions, canUse) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return;
+  }
+  const autoIndex = shouldAutoIndex(collection);
+  if (!autoIndex && !isDevModeEnabled()) {
+    return;
+  }
+  const compareOpts = compareOptions ?? {
+    ...DEFAULT_COMPARE_OPTIONS,
+    ...collection.compareOptions
+  };
+  const existingIndex = findIndexForField(
+    collection,
+    fieldPath,
+    compareOpts,
+    canUse
+  );
+  if (existingIndex) {
+    return;
+  }
+  if (!autoIndex) {
+    checkCollectionSizeForIndex(
+      collection.id || `unknown`,
+      collection.size,
+      fieldPath
+    );
+    return;
+  }
+  try {
+    collection.createIndex(
+      (row) => {
+        let current = row;
+        for (const part of fieldPath) {
+          current = current[part];
+        }
+        return current;
+      },
+      {
+        name: `auto:${fieldPath.join(`.`)}`,
+        options: { compareOptions: compareOpts }
+      }
+    );
+  } catch (error) {
+    console.warn(
+      devBuild() && process.env.NODE_ENV !== `production` ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":` : codedWarning(215, { id: collection.id, value: fieldPath.join(`.`) }),
+      error
+    );
+  }
+}
+export function ensureIndexForExpression(expression, collection) {
+  if (!shouldAutoIndex(collection) && !isDevModeEnabled()) return;
+  const indexableExpressions = extractIndexableExpressions(expression);
+  for (const { fieldName, fieldPath } of indexableExpressions) {
+    ensureIndexForField(fieldName, fieldPath, collection);
+  }
+}
+function extractIndexableExpressions(expression) {
+  const results = [];
+  function extractFromExpression(expr) {
+    if (expr.type !== `func`) {
+      return;
+    }
+    const func = expr;
+    if (func.name === `and`) {
+      for (const arg of func.args) {
+        extractFromExpression(arg);
+      }
+      return;
+    }
+    if (!indexableOperations.includes(func.name)) {
+      return;
+    }
+    if (func.args.length < 1 || func.args[0].type !== `ref`) {
+      return;
+    }
+    const fieldRef = func.args[0];
+    const fieldPath = fieldRef.path;
+    if (fieldPath.length === 0) {
+      return;
+    }
+    const fieldName = fieldPath.join(`_`);
+    results.push({ fieldName, fieldPath });
+  }
+  extractFromExpression(expression);
+  return results;
+}

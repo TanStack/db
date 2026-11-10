@@ -1,0 +1,28 @@
+{
+  "classifiedBy": "/root",
+  "verdict": "bounded-baseline-GREEN",
+  "cell": "inline-held-window",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/inline-held-window-result-freeze-v1.json",
+    "sha256": "578b8ca87c283a0767fa3783f2d46f3e67dac59786d30ef642dad36c26b4d485"
+  },
+  "independentActualReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-held-window-actual-independent-review-v1.md",
+    "sha256": "b855ed8a3114d6fa317ed77845c5f66164ff39c190642a7c82ee93cbb5796245"
+  },
+  "actualOuterToolCompletion": "cc297f",
+  "actualOuterExitCode": 0,
+  "parentChildExitCode": 0,
+  "evidenceFilesRehashed": 1975,
+  "scope": "Exact held window baseline, actual held provider answer and pending original window promise, withheld publication, applied source answers, coherent final three-row window and fulfilled operation.",
+  "parentProofBoundary": "on-disk identity and exact test/control-flow inference, no parent V8 binding",
+  "subsequentBatchState": "stopped at inline-source-failed-peer; remaining13 unrun; this classification grants no retry or new runtime",
+  "noCredit": [
+    "candidate20 states",
+    "queued-answer recovery progress",
+    "actual-helper/no-active-operation neighbor",
+    "mutant closure"
+  ],
+  "state14": "proposed, not adopted",
+  "canonicalImport": false
+}

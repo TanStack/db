@@ -1,0 +1,73 @@
+import { createSerialPacer } from "./serial-pacer";
+import { runWithCommitCompletion } from "./commit-completion";
+export function throttleStrategy(options) {
+  const leading = options.leading === true || options.leading === void 0 && options.trailing !== true;
+  const trailing = options.trailing !== false;
+  const serial = createSerialPacer(options.wait);
+  let nextAllowedAt = Number.NEGATIVE_INFINITY;
+  let trailingTimeout;
+  const trailingRuns = /* @__PURE__ */ new Map();
+  function hasTrailingTimer() {
+    return trailingTimeout !== void 0;
+  }
+  function clearTrailingIfEmpty() {
+    if (trailingRuns.size === 0) {
+      if (trailingTimeout !== void 0) clearTimeout(trailingTimeout);
+      trailingTimeout = void 0;
+    }
+  }
+  function discardCanceledTrailing() {
+    for (const [owner, pending] of trailingRuns)
+      if (pending.isCanceled()) trailingRuns.delete(owner);
+    clearTrailingIfEmpty();
+  }
+  return {
+    _type: `throttle`,
+    options,
+    execute: (fn, onAdmit, onCommit) => {
+      const run = () => runWithCommitCompletion(fn, onCommit);
+      const now = Date.now();
+      if (leading && trailingTimeout === void 0 && now >= nextAllowedAt) {
+        const previousAllowedAt = nextAllowedAt;
+        nextAllowedAt = now + options.wait;
+        let owner2 = fn;
+        try {
+          owner2 = onAdmit?.() ?? fn;
+        } catch (error) {
+          discardCanceledTrailing();
+          if (!hasTrailingTimer()) nextAllowedAt = previousAllowedAt;
+          throw error;
+        }
+        trailingRuns.delete(owner2);
+        clearTrailingIfEmpty();
+        serial.schedule(run, owner2);
+        return;
+      }
+      if (!trailing) return false;
+      const transaction = onAdmit?.();
+      const owner = transaction ?? fn;
+      if (serial.hasPending(owner)) {
+        serial.schedule(run, owner);
+        return;
+      }
+      trailingRuns.set(owner, {
+        run,
+        isCanceled: () => transaction?.state === `failed`
+      });
+      if (trailingTimeout === void 0) {
+        const delay = leading ? Math.max(0, nextAllowedAt - now) : options.wait;
+        trailingTimeout = setTimeout(() => {
+          trailingTimeout = void 0;
+          nextAllowedAt = Date.now() + options.wait;
+          for (const [pendingOwner, pending] of trailingRuns)
+            if (!pending.isCanceled())
+              serial.schedule(pending.run, pendingOwner);
+          trailingRuns.clear();
+        }, delay);
+      }
+      return;
+    },
+    cleanup: () => {
+    }
+  };
+}

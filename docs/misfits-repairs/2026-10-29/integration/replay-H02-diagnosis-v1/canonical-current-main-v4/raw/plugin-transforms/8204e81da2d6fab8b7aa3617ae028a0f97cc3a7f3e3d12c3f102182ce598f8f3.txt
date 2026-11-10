@@ -1,0 +1,442 @@
+import { LiveQueryObserverDisposedError } from "./errors.js";
+import { runAllCallbacks } from "./utils/callbacks.js";
+import {
+  getLiveQueryStatusFlags,
+  getPublicCollection,
+  isFailedStatus,
+  isSingleResultCollection
+} from "./live-query-primitives.js";
+import { describeProblem } from "./collection/lifecycle.js";
+const DISABLED_SNAPSHOT = {
+  state: void 0,
+  data: void 0,
+  collection: void 0,
+  layoutRevision: 0,
+  status: `disabled`,
+  isLoading: false,
+  isReady: true,
+  isIdle: false,
+  isLoadingError: false,
+  isCrashed: false,
+  isCleanedUp: false,
+  isEnabled: false,
+  isSyncError: false,
+  health: void 0
+};
+class LiveQueryObserverImpl {
+  // Sync activation belongs to the first subscription (attach), so building
+  // an observer cannot activate collection resources on its own. Server
+  // request clients still record ownership here because React may render an
+  // observer without ever subscribing to it.
+  constructor(collection, wholesale, client, queryHash, onPreload, suspendUntilReady) {
+    this.snapshotDirty = true;
+    // Whether the cached snapshot was built for the hydration read.
+    this.cachedServerView = false;
+    this.cachedSnapshot = DISABLED_SNAPSHOT;
+    this.layoutRevision = 0;
+    this.subscriptions = /* @__PURE__ */ new Set();
+    // Publications are dispatched FIFO: an emit that happens while another
+    // publication is being delivered (a listener mutating the collection
+    // synchronously) is queued, never delivered reentrantly.
+    this.publicationQueue = [];
+    this.dispatching = false;
+    this.blockDelivery = false;
+    this.attached = false;
+    this.collectionUnsub = null;
+    this.disposed = false;
+    this.collection = collection;
+    this.wholesale = wholesale;
+    this.onPreload = onPreload;
+    this.clientBinding = client?._bindLiveQueryObserver(
+      collection,
+      queryHash,
+      suspendUntilReady,
+      {
+        observer: this,
+        read: (server) => this.getSnapshot(server),
+        entries: () => collection ? this.getVisibleEntries(collection) : [],
+        isAttached: () => this.attached,
+        isDisposed: () => this.disposed,
+        dirty: () => {
+          this.snapshotDirty = true;
+        },
+        publish: (changes, entries) => {
+          const revision = entries && collection ? this.getCollectionRevision(collection) : void 0;
+          if (entries) {
+            this.updateCachedEntries(entries, revision);
+            this.snapshotDirty = true;
+          }
+          this.emit(
+            this.wholesale ? void 0 : changes,
+            void 0,
+            entries,
+            collection?.status,
+            revision,
+            entries && collection ? this.getCollectionLayoutRevision(collection) : void 0,
+            entries !== void 0
+          );
+        },
+        preload: () => this.preloadCollection()
+      }
+    );
+    this.clientBinding?.registerResource();
+  }
+  getSnapshot(forServerSnapshot = false) {
+    const collection = this.collection;
+    if (!collection) return DISABLED_SNAPSHOT;
+    this.clientBinding?.sync(forServerSnapshot);
+    if (!this.attached) this.refreshDetachedState(collection);
+    if (this.cachedServerView !== forServerSnapshot && this.clientBinding?.seed && isFailedStatus(this.visibleStatus ?? collection.status)) {
+      this.snapshotDirty = true;
+    }
+    if (this.snapshotDirty) {
+      const entries = this.getVisibleEntries(collection);
+      const data = entries.map(([, value]) => value);
+      const singleResult = isSingleResultCollection(collection);
+      const liveStatus = this.visibleStatus ?? collection.status;
+      const status = this.clientBinding?.failed ? `error` : this.clientBinding?.seed && (forServerSnapshot || !isFailedStatus(liveStatus)) ? this.clientBinding.seed.snapshot.status ?? `ready` : liveStatus;
+      this.cachedServerView = forServerSnapshot;
+      const prevKeys = this.lastLayoutKeys;
+      let layoutChanged = prevKeys === void 0 || prevKeys.length !== entries.length;
+      if (!layoutChanged) {
+        for (let i = 0; i < entries.length; i++) {
+          if (prevKeys[i] !== entries[i][0]) {
+            layoutChanged = true;
+            break;
+          }
+        }
+      }
+      if (layoutChanged) {
+        this.lastLayoutKeys = entries.map(([key]) => key);
+        this.layoutRevision++;
+      }
+      const health = this.publishedHealth ? this.publishedHealth.tree : collection.health;
+      let state;
+      this.cachedSnapshot = {
+        get state() {
+          return state ??= new Map(entries);
+        },
+        data: singleResult ? data[0] : data,
+        collection: getPublicCollection(collection),
+        layoutRevision: this.layoutRevision,
+        status,
+        ...getLiveQueryStatusFlags(status, health),
+        isEnabled: true
+      };
+      this.snapshotDirty = false;
+    }
+    return this.cachedSnapshot;
+  }
+  getServerSnapshot(preloadRequested = false) {
+    return this.clientBinding?.getServerSnapshot(preloadRequested) ?? this.getSnapshot();
+  }
+  getError() {
+    this.clientBinding?.sync();
+    return this.clientBinding?.error;
+  }
+  dehydrate() {
+    const collection = this.collection;
+    if (!collection) return { rows: [] };
+    const entries = this.clientBinding?.seed && this.clientBinding.seed.snapshot.status === void 0 ? this.clientBinding.seed.entries : this.readEntries(collection).entries;
+    return {
+      rows: entries.map(([key, value]) => ({
+        key,
+        value
+      }))
+    };
+  }
+  getVisibleEntries(collection) {
+    if (this.clientBinding?.seed) return this.clientBinding.seed.entries;
+    return this.cachedEntries ?? this.captureEntries(collection).entries;
+  }
+  getCollectionRevision(collection) {
+    const revision = collection._stateRevision;
+    return typeof revision === `number` ? revision : void 0;
+  }
+  getCollectionLayoutRevision(collection) {
+    const revision = collection._layoutRevision;
+    return typeof revision === `number` ? revision : void 0;
+  }
+  readEntries(collection) {
+    const entries = Array.from(collection.entries());
+    const revision = this.getCollectionRevision(collection);
+    return { entries, revision };
+  }
+  captureEntries(collection) {
+    const { entries, revision } = this.readEntries(collection);
+    this.updateCachedEntries(entries, revision);
+    return { entries, revision };
+  }
+  updateCachedEntries(entries, revision) {
+    const changed = revision !== void 0 ? this.cachedEntries === void 0 || revision !== this.cachedCollectionRevision : !this.entriesEqual(this.cachedEntries, entries);
+    this.cachedEntries = entries;
+    this.cachedCollectionRevision = revision;
+    if (changed) this.snapshotDirty = true;
+  }
+  entriesEqual(left, right) {
+    if (!left || left.length !== right.length) return false;
+    return left.every(
+      ([key, value], index) => right[index][0] === key && right[index][1] === value
+    );
+  }
+  /**
+   * While detached there is no delivered-publication clock, so fall back to
+   * the collection revision. Compatible cross-copy collections that predate
+   * `_stateRevision` are compared structurally instead.
+   */
+  refreshDetachedState(collection) {
+    const status = collection.status;
+    const revision = this.getCollectionRevision(collection);
+    const layoutRevision = this.getCollectionLayoutRevision(collection);
+    if (revision !== void 0) {
+      if (this.cachedEntries === void 0 || revision !== this.cachedCollectionRevision || layoutRevision !== this.cachedCollectionLayoutRevision) {
+        this.captureEntries(collection);
+        this.cachedCollectionLayoutRevision = layoutRevision;
+        this.snapshotDirty = true;
+      }
+    } else {
+      const entries = Array.from(collection.entries());
+      this.updateCachedEntries(entries, void 0);
+    }
+    if (this.visibleStatus !== status || this.cachedSnapshot.health !== collection.health) {
+      this.visibleStatus = status;
+      this.snapshotDirty = true;
+    }
+  }
+  subscribe(listener) {
+    if (this.disposed) throw new LiveQueryObserverDisposedError();
+    if (this.subscriptions.size === 0) this.clientBinding?.assertSources();
+    const record = { listener, active: true };
+    const release = () => {
+      if (!record.active) return;
+      record.active = false;
+      this.subscriptions.delete(record);
+      if (this.subscriptions.size === 0) this.detach();
+    };
+    this.subscriptions.add(record);
+    const attaching = !this.attached;
+    try {
+      if (attaching) {
+        this.attach();
+      } else {
+        if (!this.wholesale) this.seed(record);
+      }
+    } catch (error) {
+      if (attaching) this.detach();
+      release();
+      throw error;
+    }
+    return release;
+  }
+  /** Deliver the collection's current rows to one late subscription as inserts. */
+  seed(record) {
+    const collection = this.collection;
+    if (!collection) return;
+    const seedChanges = [];
+    for (const [key, value] of this.getVisibleEntries(collection)) {
+      seedChanges.push({ type: `insert`, key, value });
+    }
+    if (seedChanges.length === 0) return;
+    this.emit(seedChanges, [record]);
+  }
+  attach() {
+    const collection = this.collection;
+    if (!collection || this.disposed) return;
+    const releases = [];
+    const release = () => runAllCallbacks(releases.splice(0));
+    this.collectionUnsub = release;
+    const ownRelease = (unsubscribe) => {
+      if (this.collectionUnsub === release) releases.push(unsubscribe);
+      else unsubscribe();
+    };
+    this.clientBinding?.registerResource();
+    this.clientBinding?.sync();
+    this.refreshDetachedState(collection);
+    this.attached = true;
+    this.visibleStatus ??= collection.status;
+    this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection);
+    const attachedWithHydrationSeed = !!this.clientBinding?.seed;
+    this.blockDelivery = this.wholesale || attachedWithHydrationSeed;
+    const notify = (changes, status = collection.status, explicitLayoutChange = false) => {
+      if (this.disposed || this.subscriptions.size === 0) return;
+      if (this.clientBinding?.seed) {
+        if (isFailedStatus(status) && !this.blockDelivery)
+          this.clientBinding.handoff();
+        else if (status === `ready` || isFailedStatus(status))
+          this.clientBinding.scheduleHandoff();
+        return;
+      }
+      if (status === `ready` && !collection.isLoadingSubset) {
+        this.clientBinding?.markAuthoritative();
+      }
+      const layoutRevision = this.getCollectionLayoutRevision(collection);
+      let layoutChanged = explicitLayoutChange;
+      if (!explicitLayoutChange && changes !== void 0 && changes.length === 0) {
+        if (layoutRevision === void 0 || layoutRevision === this.deliveredLayoutRevision) {
+          return;
+        }
+        layoutChanged = true;
+      }
+      if (changes !== void 0 && layoutRevision !== void 0) {
+        this.deliveredLayoutRevision = layoutRevision;
+      }
+      const captured = changes !== void 0 ? this.readEntries(collection) : status === `cleaned-up` ? this.readEntries(collection) : void 0;
+      this.emit(
+        changes,
+        void 0,
+        captured?.entries,
+        status,
+        captured?.revision,
+        layoutRevision,
+        layoutChanged
+      );
+    };
+    const healthOf = () => collection.health;
+    this.publishedHealth = { tree: healthOf() };
+    ownRelease(() => {
+      this.publishedHealth = void 0;
+    });
+    ownRelease(
+      collection.on(`status:change`, ({ status }) => {
+        this.publishedHealth = { tree: healthOf() };
+        notify(void 0, status);
+      })
+    );
+    ownRelease(
+      collection.on(`health:change`, () => {
+        const health = healthOf();
+        if (health === this.publishedHealth?.tree) return;
+        this.publishedHealth = { tree: health };
+        this.snapshotDirty = true;
+        notify(void 0, collection.status);
+      })
+    );
+    const subscribeLayoutChanges = collection._subscribeLayoutChanges;
+    if (typeof subscribeLayoutChanges === `function`) {
+      ownRelease(
+        subscribeLayoutChanges.call(
+          collection,
+          () => notify([], collection.status, true)
+        )
+      );
+    }
+    if (this.clientBinding) ownRelease(this.clientBinding.subscribe());
+    const subscription = collection.subscribeChanges(
+      (changes) => notify(changes),
+      { includeInitialState: !this.wholesale && !attachedWithHydrationSeed }
+    );
+    ownRelease(() => subscription.unsubscribe());
+    this.blockDelivery = false;
+    if (this.collectionUnsub !== release) return;
+    if (this.wholesale || attachedWithHydrationSeed) {
+      this.flushPublications(!this.wholesale);
+      const revision = this.getCollectionRevision(collection);
+      const layoutRevision = this.getCollectionLayoutRevision(collection);
+      if (revision === void 0 || this.cachedEntries === void 0 || revision !== this.cachedCollectionRevision || layoutRevision !== this.cachedCollectionLayoutRevision) {
+        const { entries } = this.readEntries(collection);
+        this.updateCachedEntries(entries, revision);
+        this.cachedCollectionLayoutRevision = layoutRevision;
+      }
+    }
+    if (this.clientBinding?.seed) {
+      if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]);
+      if (collection.status === `ready` || isFailedStatus(collection.status)) {
+        this.clientBinding.scheduleHandoff();
+      }
+    }
+  }
+  detach() {
+    const release = this.collectionUnsub;
+    const unregister = this.clientBinding?.takeResourceRelease();
+    this.collectionUnsub = null;
+    this.attached = false;
+    this.blockDelivery = false;
+    this.publicationQueue.length = 0;
+    runAllCallbacks([() => release?.(), () => unregister?.()]);
+  }
+  emit(changes, targets = Array.from(this.subscriptions), entries, status = this.collection?.status ?? `cleaned-up`, collectionRevision, collectionLayoutRevision, layoutChanged = false) {
+    this.publicationQueue.push({
+      changes,
+      targets,
+      entries,
+      status,
+      collectionRevision,
+      collectionLayoutRevision,
+      layoutChanged
+    });
+    if (this.dispatching || this.blockDelivery) return;
+    this.flushPublications();
+  }
+  flushPublications(deliver = true) {
+    if (this.dispatching) return;
+    let failure;
+    this.dispatching = true;
+    try {
+      while (this.publicationQueue.length > 0) {
+        const publication = this.publicationQueue.shift();
+        if (publication.entries) {
+          this.updateCachedEntries(
+            publication.entries,
+            publication.collectionRevision
+          );
+        }
+        if (publication.collectionLayoutRevision !== void 0) {
+          this.cachedCollectionLayoutRevision = publication.collectionLayoutRevision;
+        }
+        if (publication.layoutChanged) {
+          this.snapshotDirty = true;
+        }
+        if (this.visibleStatus !== publication.status) {
+          this.visibleStatus = publication.status;
+          this.snapshotDirty = true;
+        }
+        if (deliver) {
+          for (const subRecord of publication.targets) {
+            if (this.disposed) break;
+            try {
+              subRecord.listener(publication.changes);
+            } catch (error) {
+              failure ??= { error };
+            }
+          }
+        }
+      }
+    } finally {
+      this.dispatching = false;
+    }
+    if (failure) throw failure.error;
+  }
+  preload() {
+    return this.clientBinding?.preload() ?? this.preloadCollection();
+  }
+  preloadCollection() {
+    if (this.preloadPromise) return this.preloadPromise;
+    this.onPreload?.();
+    const promise = this.collection?.preload() ?? Promise.resolve();
+    this.preloadPromise = promise;
+    const clear = () => {
+      if (this.preloadPromise === promise) this.preloadPromise = void 0;
+    };
+    void promise.then(clear, clear);
+    return promise;
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.detach();
+    for (const subRecord of this.subscriptions) subRecord.active = false;
+    this.subscriptions.clear();
+    this.publicationQueue.length = 0;
+  }
+}
+export const toBoundaryError = (cause) => cause instanceof Error ? cause : new Error(describeProblem(cause).message, { cause });
+export function createLiveQueryObserver(collection, options = {}) {
+  return new LiveQueryObserverImpl(
+    collection ?? null,
+    options.mode === `wholesale`,
+    options.client,
+    options.queryHash,
+    options.onPreload,
+    options.suspendUntilReady === true
+  );
+}

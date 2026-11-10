@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "../../packages/query-db-collection/tests/queued-answer-completion*.ts",
+    "./completion-*.ts"
+  ]
+}

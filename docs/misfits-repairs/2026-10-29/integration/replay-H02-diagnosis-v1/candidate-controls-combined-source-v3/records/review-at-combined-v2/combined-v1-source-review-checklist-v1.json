@@ -1,0 +1,107 @@
+{
+  "status": "combined v1 source review rejected; successor required; no runtime admission",
+  "combinedFreezeSha256": "1f3d40799d7d0eba6b6c9755bcbde3c1c581ab8a858c5e1aa9a6bbdb6a0d7de2",
+  "combinedPacketSha256": "4e99eb94ebca470fd2ed039703102b3b8470b97fe353d7271ba26be8be1fb299",
+  "packetEntriesRehashed": 139,
+  "packetMismatches": [],
+  "receivingOwnPacketEntriesRehashed": 44,
+  "receivingOwnFrozenSourcesRehashed": 12,
+  "receivingOwnFrozenRecordsRehashed": 43,
+  "receivingOwnMismatches": [],
+  "receivingSourcesFullyRead": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+      "sha256": "bfdd331b3459168184c31e3d8fc219ad5a580fb0af870dadf851db388858d1d3",
+      "lines": 854
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+      "sha256": "4816305d73e96c55d109c5807a91cadd9fbe90257a4b70b0554e626ebe2a8dce",
+      "lines": 588
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+      "sha256": "d0a1e76c56b86d49d8abd55e9d26bf53be392ac6fdf530af7a48d189eaf4c96c",
+      "lines": 685
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+      "sha256": "0de9e92992088078a786a5392149e078e932cb8b956504dc506cdbd7ae266533",
+      "lines": 8
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+      "sha256": "a27eb990a1cb9dbcca9280d07067e7e50c6464817a8fc55820499d78bf591a5a",
+      "lines": 547
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+      "sha256": "1ee4156048a0e61c2efd73378433d3e99a99fa7e0aa0b8801eef1b94078b9992",
+      "lines": 148
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+      "sha256": "d82ec53dd7247eae0b457b62c684684b9d72cbb7fe18742dd389dbbe2389c9bc",
+      "lines": 47
+    },
+    {
+      "path": "scripts/h02-progress/completion-tsconfig.json",
+      "sha256": "1767c6ce1c2a4411549d8debc6501835aadd95c3600ae96710b6f738ebb3f89f",
+      "lines": 7
+    },
+    {
+      "path": "scripts/h02-progress/completion-eslint.config.mjs",
+      "sha256": "a4837103c5a8a5d203c031003eecbd20ecd7724c547f7f09394badf1336ab5b4",
+      "lines": 17
+    },
+    {
+      "path": "scripts/h02-progress/completion-receiving.config.ts",
+      "sha256": "2a9e62396bd65d44f7a99642911236077a50034515bf2f213a951484cc014219",
+      "lines": 16
+    },
+    {
+      "path": "scripts/h02-progress/completion-parent.config.ts",
+      "sha256": "c1910f5c767eca981ed013ac8c4760fc7720acf81bd39b8847cfec002e4a1e2c",
+      "lines": 18
+    },
+    {
+      "path": "scripts/h02-progress/completion-parent.mjs",
+      "sha256": "405d762f1bbd6c492e4d30913b7fc5ad47fbc58909b008e0a87145dc783eb9f7",
+      "lines": 658
+    }
+  ],
+  "acceptedSourceScope": [
+    "original primary eight histories, model laws and budgets remain preserved per standalone own-v2 independent review",
+    "native baseline refuses future unbound candidate programs",
+    "factory failure is fatal operational setup failure in one-program worker; no contaminated retry",
+    "outer aggregates original and registered actual receiving groups under same1GiB RSS ceiling; explicit spawn-registration/escape limits",
+    "20s inner wall,60s outer wall,384MiB heaps and single workers remain unchanged as instrument limits"
+  ],
+  "blockingFindings": [
+    "H02-CAND-INDEP-COMB-V1-01",
+    "H02-CAND-INDEP-COMB-V1-02",
+    "H02-CAND-INDEP-COMB-V1-03",
+    "H02-CAND-INDEP-COMB-V1-04",
+    "H02-CAND-INDEP-COMB-V1-05"
+  ],
+  "successorReviewRequirements": [
+    "post-exact-applied source-answer binding",
+    "correct action/callback cut ordering without final-drain substitution",
+    "positive fixture and worker cleanup",
+    "captured invocation inputs preserved and checked postflight",
+    "explicit source-scope abstraction and source-specific acquisition facts",
+    "per-cell parameter/tie declaration and exact singleton selection",
+    "no-active-operation actual-helper neighbor remains a separate primary obligation",
+    "state14 mapping remains proposed pending maintainer adoption"
+  ],
+  "candidateRaw20": "all UNREACHED",
+  "runtimeExecuted": {
+    "receiving": 0,
+    "generatedHistories": 0,
+    "testCollection": 0,
+    "productionImports": 0,
+    "builds": 0,
+    "processProbes": 0
+  },
+  "mutationScope": "reviewer additive artifacts only; canonical status/cutoff/accounting untouched"
+}

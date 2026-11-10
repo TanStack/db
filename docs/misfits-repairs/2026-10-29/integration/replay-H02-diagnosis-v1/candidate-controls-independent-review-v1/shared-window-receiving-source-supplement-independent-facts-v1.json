@@ -1,0 +1,68 @@
+{
+  "at": "2026-10-30T11:25:49.269217+00:00",
+  "mode": "Additive static byte/hash audit only; no product/model/test imports or execution.",
+  "knownQ": {
+    "source-freeze-v1.json": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+    "packet-sha256-v1.json": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+    "report-v1.md": "c8ab425db65bbdef057a1456fb5d39bcea3991190b5469435d0d778cd2c869a0",
+    "report-erratum-v1.md": "1702c0b59c8045052e907c45df64e70beb20ffe70e32b9df2e13256f497ce835",
+    "artifact-snapshot-relocation-v1/path-map-v1.json": "2be52168ecf9ed3c12aa6eb738e632c1abafaf363a73f5dcac0236eefe2d723e",
+    "packet-sha256-with-snapshot-relocation-v2.json": "e36b9780ca9891cbc25233618117e121619bca1c2b0aa29974fb9ffcc80d7462"
+  },
+  "historicalEntriesRehashedThroughExactMap": 126,
+  "currentPacketEntriesRehashed": 133,
+  "liveSourceBindingsUnchanged": 596,
+  "immutableCopiesUnchanged": 85,
+  "unchangedProductionCount": 511,
+  "relocation": {
+    "from": "before/packages/db/tests/query/pagination-oracle.property.test.ts",
+    "to": "before/packages/db/tests/query/pagination-oracle.property.test.ts.txt",
+    "sha256": "6f26a439c6bcf949364e6c32c238a72b98d1d29d929c355622e32232c56e4f32",
+    "bytes": 230217,
+    "meaning": "non-executable historical TypeScript text snapshot; no byte or expected-result change"
+  },
+  "reportWordingFinding": {
+    "id": "H02-Q-REPORT-BODY-OVERCLAIM",
+    "status": "already-fixed",
+    "technicalValidity": "Original before-the-body claim overstates retained evidence; additive erratum corrects it.",
+    "durableValue": "Missing selected reports do not prove zero body execution; operational stops earn no product/reach credit."
+  },
+  "savedRootLint": {
+    "account": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/validation-account-v1.json",
+    "accountSha256": "f9b32bf4d346b6778c94284cfae13ebf235a140bb666fb05a7868d6117d76c76",
+    "first": {
+      "initial": "49a854",
+      "session": 94183,
+      "final": "b5a770",
+      "exit": 1,
+      "logSha256": "ac1bb41ec638eb0f0fdbb9b2fd95b609f86afa48a1f4d8668ba7642386e79511",
+      "finding": "33oracle/no-unit-test reports solelyinQhistoricalbeforebackup.ts; activeWsourceunchanged"
+    },
+    "second": {
+      "initial": "d5af1a",
+      "session": 90690,
+      "final": "74ba81",
+      "exit": 0,
+      "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+      "after": "Artifact-only backup .ts to.ts.txt move; exactbytes preserved via explicitold126entrypathmap. No lintconfigscope/rule/testlaw/sourcebytes changed."
+    },
+    "command": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+    "independentlyReexecuted": false
+  },
+  "ledgerPrefix": {
+    "rows": 104,
+    "sha256": "7562e500c2afeb8d04f8e83ec96153bde509f17a91854872a9160cfc142e994c",
+    "bytes": 92405
+  },
+  "allAuditChecksPass": false,
+  "errors": [
+    "exact first33 historical findings"
+  ],
+  "productExecutions": 0,
+  "modelExecutions": 0,
+  "testExecutions": 0,
+  "nativeRunInvocations": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0,
+  "slot2": "returned; not consumed"
+}

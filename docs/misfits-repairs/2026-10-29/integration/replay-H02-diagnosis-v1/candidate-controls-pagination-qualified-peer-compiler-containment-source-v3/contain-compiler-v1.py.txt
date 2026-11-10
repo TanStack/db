@@ -1,0 +1,245 @@
+"""Inactive compiler-only adapter of ownership-parent's mechanical containment.
+No test validator or product judgment is imported. Separate ROOT admission and
+independent actual-copy acceptance are required before this exact candidate runs.
+"""
+import hashlib
+import json
+import os
+import signal
+import stat
+import subprocess
+import sys
+import threading
+import time
+import traceback
+
+
+def require(value, message):
+    if not value:
+        raise ValueError(message)
+
+
+def sha(path):
+    require(stat.S_ISREG(os.lstat(path).st_mode), "not regular: " + path)
+    with open(path, "rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def pairs(items):
+    result = {}
+    for key, value in items:
+        require(key not in result, "duplicate JSON key: " + key)
+        result[key] = value
+    return result
+
+
+def load(ref):
+    require(sha(ref["path"]) == ref["sha256"], "reference hash: " + ref["path"])
+    with open(ref["path"], "rb") as stream:
+        return json.load(stream, object_pairs_hook=pairs,
+                         parse_constant=lambda value: require(False, "nonfinite JSON: " + value))
+
+
+def main():
+    require(len(sys.argv) == 3, "exact contract path/SHA required")
+    ref = {"path": sys.argv[1], "sha256": sys.argv[2]}
+    c = load(ref)
+    require(c["schema"] == "h02-compiler-containment-contract-v1", "contract schema")
+    require(sha(__file__) == c["wrapper"]["sha256"], "wrapper identity")
+    require(os.path.abspath(__file__) == c["wrapper"]["path"], "wrapper path")
+    require(sha(sys.executable) == c["python"]["sha256"] and sys.version == c["python"]["version"], "Python identity")
+    require(sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode, "Python flags")
+    gate, binding, plan = load(c["gate"]), load(c["binding"]), load(c["plan"])
+    require(c["command"] == gate["command"], "unchanged V compiler command")
+    geometry = load(c["geometry"])
+    root = plan["proposedRoot"]
+    regulars = plan["regularCodeAndLockFiles"] + plan["regularControlFiles"]
+    expected_files = {item["runtimePath"]: item["fromSha256"] for item in regulars}
+    expected_links = {item["runtimePath"]: item["target"] for item in plan["dependencyReuseSymlinks"]}
+    supplemental = load(c["finiteToolInputs"])
+    inputs = dict(expected_files)
+    inputs[binding["node"]["executable"]] = binding["node"]["sha256"]
+    inputs[c["ps"]["path"]] = c["ps"]["sha256"]
+    inputs[binding["worktree"] + "/node_modules/.pnpm/lock.yaml"] = binding["lockfiles"]["installedPnpmLock"]
+    for package in list(binding["packages"].values()) + supplemental["packages"]:
+        for name, expected in package["regularPayloadFilesMap"].items():
+            path = package["resolved"] + "/" + name
+            require(path not in inputs or inputs[path] == expected, "conflicting finite input")
+            inputs[path] = expected
+
+    compiler_supplement = load(c["compilerInputSupplement"])
+    extra_inputs = compiler_supplement["files"] + compiler_supplement["packageMetadata"]
+    for item in extra_inputs:
+        path, expected = item["path"], item["sha256"]
+        require(path not in inputs or inputs[path] == expected, "conflicting fixed compiler input")
+        inputs[path] = expected
+
+    def identities():
+        # Hash only the already bound finite inputs, with no new tool census.
+        for item in [ref, c["wrapper"], c["python"], c["gate"], c["binding"], c["plan"], c["geometry"], c["finiteToolInputs"], c["compilerInputSupplement"], *c["copyReceipts"], *c["sourcePacketRefs"], *compiler_supplement["originEvidence"]]:
+            require(sha(item["path"]) == item["sha256"], "identity: " + item["path"])
+        require(stat.S_ISDIR(os.lstat(root).st_mode) and os.path.realpath(root) == root, "copied root directory identity")
+        for item in extra_inputs:
+            require(os.path.realpath(item["path"]) == item["resolved"], "fixed compiler input resolution")
+        for path, expected in inputs.items():
+            require(sha(path) == expected, "input identity: " + path)
+        actual_files, actual_links, actual_dirs = set(), {}, set()
+        for directory, dirs, files in os.walk(root, followlinks=False):
+            actual_dirs.add(directory)
+            for name in dirs + files:
+                path = os.path.join(directory, name)
+                if os.path.islink(path):
+                    actual_links[path] = os.readlink(path)
+                elif name in files:
+                    actual_files.add(path)
+        require(actual_files == set(expected_files) and actual_dirs == set(geometry["directories"]), "copied regular/directory closure")
+        require(actual_links == expected_links, "copied link strings")
+        for path, target in expected_links.items():
+            require(os.path.realpath(path) == target, "copied link resolution")
+        for edge in supplemental["resolutionEdges"]:
+            require(os.path.realpath(edge["logical"]) == edge["resolved"], "finite resolution edge")
+        for item in supplemental["uninstalledDeclaredOptionalOrPeerDependencies"]:
+            parent = item["from"]
+            while True:
+                require(not os.path.lexists(parent + "/node_modules/" + item["dependency"]), "finite optional/peer appeared")
+                if parent == os.path.dirname(parent):
+                    break
+                parent = os.path.dirname(parent)
+
+    outdir = c["outputRoot"]
+    os.mkdir(outdir, 0o700)
+    def save(name, data):
+        with open(outdir + "/" + name, "x") as stream:
+            json.dump(data, stream, indent=2)
+            stream.write("\n")
+    child, pgid, timer = None, None, None
+    trigger, stop_errors = [], []
+    stop_lock = threading.RLock()
+    def stop(reason):
+        with stop_lock:
+            if not trigger:
+                trigger.append(reason)
+            if pgid is not None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError as error:
+                    stop_errors.append(str(error))
+    def rows():
+        observed = subprocess.run([c["ps"]["path"], "-axo", "pid=,pgid=,rss="],
+                                  capture_output=True, check=True, timeout=1, text=True)
+        result = []
+        for line in observed.stdout.splitlines():
+            if not line.strip():
+                continue
+            fields = line.split()
+            require(len(fields) == 3, "malformed process observation")
+            if int(fields[1]) == pgid:
+                pid, group, rss = map(int, fields)
+                require(pid > 0 and rss >= 0, "invalid owned process row")
+                result.append({"pid": pid, "pgid": group, "rssBytes": rss * 1024, "raw": line})
+        return result
+    started, child_code, remaining = None, None, None
+    passed = False
+    previous_handlers = {}
+    with open(outdir + "/outer.stdout.jsonl", "x") as outer, open(outdir + "/outer.stderr.log", "x") as errors:
+        def emit(event, **details):
+            line = json.dumps({"event": event, **details}) + "\n"
+            outer.write(line); outer.flush()
+            sys.stdout.write(line); sys.stdout.flush()
+        try:
+            identities()
+            save("identity-before.json", {"matched": True, "finiteInputCount": len(inputs)})
+            emit("compiler-preflight", command=c["command"], wrapperPid=os.getpid(), limits=c["limits"])
+            with open(outdir + "/compiler.stdout.log", "xb") as stdout, open(outdir + "/compiler.stderr.log", "xb") as stderr:
+                environment = dict(os.environ)
+                for name in list(environment):
+                    if name in ["NODE_OPTIONS", "NODE_PATH", "NODE_V8_COVERAGE"] or name.startswith(("H02_PROGRESS_", "TANSTACK_DB_ORACLE_")):
+                        del environment[name]
+                started = time.monotonic()
+                child = subprocess.Popen([c["command"]["executable"], *c["command"]["args"]], cwd=c["command"]["cwd"],
+                                         env=environment, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
+                pgid = child.pid
+                timer = threading.Timer(c["limits"]["compilerWallMs"] / 1000, stop, args=("wall",))
+                timer.daemon = True; timer.start()
+                for sig in [signal.SIGINT, signal.SIGTERM]:
+                    previous_handlers[sig] = signal.signal(sig, lambda number, frame: stop("outer-signal-" + str(number)))
+                save("child.json", {"pid": child.pid, "originalPgid": pgid, "newSession": True, "command": c["command"]})
+                while child.poll() is None:
+                    owned = rows()
+                    emit("owned-resource", elapsedMs=(time.monotonic() - started) * 1000, rows=owned)
+                    if sum(item["rssBytes"] for item in owned) > c["limits"]["groupRssBytes"]:
+                        stop("rss")
+                    if (time.monotonic() - started) * 1000 >= c["limits"]["compilerWallMs"]:
+                        stop("wall")
+                    time.sleep(c["limits"]["samplingMs"] / 1000)
+                child_code = child.returncode
+                timer.cancel(); timer.join()
+                remaining = rows()
+                if remaining:
+                    stop("leader-exit-with-live-group")
+                deadline = time.monotonic() + c["limits"]["cleanupMs"] / 1000
+                while remaining and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                    remaining = rows()
+            require(not remaining and not stop_errors, "owned compiler group cleanup failed")
+            identities()
+            save("identity-after.json", {"matched": True, "finiteInputCount": len(inputs)})
+            allowed = {os.path.realpath(path): expected for path, expected in inputs.items()}
+            with open(outdir + "/compiler.stdout.log") as stream:
+                listed = stream.read().splitlines()
+            resolved = []
+            for line in listed:
+                if not line.strip():
+                    continue
+                require(os.path.isabs(line) and os.path.isfile(line), "compiler diagnostic or unrecognized listFiles line")
+                expected = allowed.get(os.path.realpath(line))
+                require(expected is not None and sha(line) == expected, "unbound resolved compiler input: " + line)
+                resolved.append({"path": line, "resolved": os.path.realpath(line), "sha256": expected})
+            save("resolved-compiler-inputs.json", resolved)
+            require(child_code == 0 and not trigger and resolved and os.path.getsize(outdir + "/compiler.stderr.log") == 0,
+                    "compiler nonzero, diagnostics, containment trigger or missing input closure")
+            passed = True
+        except BaseException:
+            stop("operational")
+            failure = traceback.format_exc()
+            errors.write(failure); errors.flush()
+            sys.stderr.write(failure); sys.stderr.flush()
+        finally:
+            if timer is not None:
+                timer.cancel(); timer.join()
+            if child is not None and child.poll() is None:
+                stop("finally")
+                try:
+                    child.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            if pgid is not None:
+                try:
+                    remaining = rows()
+                    if remaining:
+                        stop("finally-live-group")
+                        deadline = time.monotonic() + c["limits"]["cleanupMs"] / 1000
+                        while remaining and time.monotonic() < deadline:
+                            time.sleep(0.1)
+                            remaining = rows()
+                    if remaining or stop_errors:
+                        passed = False
+                    save("cleanup-final.json", {"originalPgid": pgid, "rows": remaining, "trigger": trigger, "stopErrors": stop_errors,
+                                                "childReturnCode": None if child is None else child.poll()})
+                except BaseException:
+                    passed = False
+                    stop("final-observation")
+                    errors.write(traceback.format_exc()); errors.flush()
+            for sig, handler in previous_handlers.items():
+                signal.signal(sig, handler)
+        passed = bool(passed and not trigger and not stop_errors)
+        save("outcome.json", {"compilerCode": child_code, "remainingOwnedRows": remaining, "trigger": trigger,
+                              "staticGatePassed": passed, "nativeAuthority": False})
+        emit("compiler-gate-passed" if passed else "compiler-operational-failure", compilerCode=child_code, nativeAuthority=False)
+        return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

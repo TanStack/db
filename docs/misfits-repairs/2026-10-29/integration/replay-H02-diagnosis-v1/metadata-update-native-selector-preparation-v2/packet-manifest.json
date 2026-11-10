@@ -1,0 +1,53 @@
+{
+  "acceptedFreshUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "artifacts": {
+    "binding.json": {
+      "bytes": 1368,
+      "sha256": "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6"
+    },
+    "calibrate.py": {
+      "bytes": 7302,
+      "sha256": "b314bb86021d52aa861d235dae7fd9a4f71f992774b12d8be21eb0b3d4b39ad5"
+    },
+    "first-command.json": {
+      "bytes": 1548,
+      "sha256": "c5908ce3831e00f75a00276b1dea991cbe5ac7118501859e5921fa3ff4885ea7"
+    },
+    "pure-results.json": {
+      "bytes": 3775,
+      "sha256": "dd9129d0bd4fe1544d18dad25c8fec6ac4bfd710f1e3fa920572288bd22cea01"
+    },
+    "recipes.json": {
+      "bytes": 3074,
+      "sha256": "f33433085cda8e1d2dcf0253a576327b9e246d34623c3a6e83f64a72d5651537"
+    },
+    "report.md": {
+      "bytes": 5838,
+      "sha256": "bdd9aabc7071f850b099684711e9951891089a2a063928d70e832247c124f127"
+    },
+    "run.py": {
+      "bytes": 1462,
+      "sha256": "3580f0f6b16a9ea3802360cd79f7de771e4f1813005630bbf625c7c8a4439224"
+    },
+    "static-results.json": {
+      "bytes": 890,
+      "sha256": "105cf57d80bcd9ae8bf112088d1c170f29a8d72db8259dd29170a28c312653f9"
+    },
+    "verify.py": {
+      "bytes": 5206,
+      "sha256": "fde777b817463a6abdae8482b96cbd206518a2dad986d70c43b27dcfeb413307"
+    }
+  },
+  "bindingSha256": "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalCleanSuccessRequirementsPreserved": true,
+  "receivingPrepared": false,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceRefreezes": 0,
+  "status": "FROZEN SOURCE/PURE exact-selector preparation; independent review and root admission pending",
+  "stoppedSuccessExemption": false
+}

@@ -1,0 +1,629 @@
+{
+  "actualOuterExitCode": 1,
+  "bindingStatus": "bound",
+  "cleanupErrors": [],
+  "firstOuterFailure": "checkQueuedAnswerProgress final reload callback expected rank30 but observed follow-up rank35",
+  "interpretation": "Suspected checker stage gap pending independent result/source diagnosis; no product RED/GREEN or receiver readiness credit",
+  "killAttempted": false,
+  "limits": "Stable metadata/direct eager source-sync only; original initial-getpgid and parent/child compiled-binding limits preserved",
+  "maxSampledGroupRssBytes": 450707456,
+  "metadataExplicitFinishCompleted": false,
+  "metadataReachCountersReported": 31,
+  "reason": "exited",
+  "receiptCount": 206,
+  "receiptPhaseCounts": {
+    "acquisition-accepted": 12,
+    "acquisition-attempt": 12,
+    "acquisition-release": 8,
+    "actual-key-prefix": 97,
+    "answer-executed": 1,
+    "answer-queued": 1,
+    "cache-success": 8,
+    "cleanup-start": 1,
+    "downstream-change": 4,
+    "final-publication": 1,
+    "followup-acquisition-settled": 1,
+    "followup-publication": 1,
+    "followup-settled": 1,
+    "followup-source-accepted": 1,
+    "followup-source-applied": 1,
+    "followup-start": 1,
+    "initial-publication": 1,
+    "metadata-identities": 1,
+    "provider-answer": 8,
+    "provider-request": 8,
+    "public-change": 4,
+    "query-key-callback": 23,
+    "release-scope": 2,
+    "reload-settled": 1,
+    "reload-start": 1,
+    "retained-publication": 1,
+    "source-establishing-receipt": 1,
+    "source-stack": 2,
+    "worker-cleaned": 1,
+    "worker-start": 1
+  },
+  "receivingChildExitCode": 0,
+  "selectedObservedReceipts": [
+    {
+      "changes": [
+        {
+          "key": "[4,null]",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "[4,null]",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 83
+    },
+    {
+      "changes": [
+        {
+          "key": "[4,null]",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[4,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[4,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "[4,null]",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "[4,null]",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "sequence": 84,
+      "upstreamEntries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ]
+    },
+    {
+      "changes": [],
+      "entries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[4,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "[4,null]",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "[4,null]",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 40
+        }
+      ],
+      "sequence": 85,
+      "upstreamEntries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ]
+    },
+    {
+      "changes": [],
+      "entries": [
+        [
+          "[4,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "[4,null]",
+          "$origin": "remote",
+          "id": 4,
+          "markers": [],
+          "rank": 40
+        }
+      ],
+      "sequence": 86
+    },
+    {
+      "h02": true,
+      "phase": "reload-settled",
+      "sequence": 155
+    },
+    {
+      "changes": [
+        {
+          "key": "[3,null]",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        },
+        {
+          "key": "[4,null]",
+          "type": "delete",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "rank": 40
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 30
+        }
+      ],
+      "sequence": 159
+    },
+    {
+      "changes": [
+        {
+          "key": "[4,null]",
+          "type": "delete",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[4,null]",
+            "$origin": "remote",
+            "id": 4,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[4,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 40
+          }
+        },
+        {
+          "key": "[3,null]",
+          "type": "insert",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "[3,null]",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 30
+        }
+      ],
+      "sequence": 160,
+      "upstreamEntries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          }
+        ]
+      ]
+    },
+    {
+      "h02": true,
+      "phase": "followup-start",
+      "sequence": 162
+    },
+    {
+      "h02": true,
+      "phase": "followup-source-applied",
+      "sequence": 177
+    },
+    {
+      "changes": [
+        {
+          "key": "[3,null]",
+          "previousValue": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "public-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 182
+    },
+    {
+      "changes": [
+        {
+          "key": "[3,null]",
+          "previousValue": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 30
+          },
+          "type": "update",
+          "value": {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        }
+      ],
+      "entries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "downstream-change",
+      "rows": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "[3,null]",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "sequence": 183,
+      "upstreamEntries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ]
+    },
+    {
+      "downstream": [
+        {
+          "$collectionId": "live-query-2",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "observedCollectionId": "live-query-1",
+          "observedKey": "[3,null]",
+          "observedOrigin": "remote",
+          "observedPending": false,
+          "rank": 35
+        }
+      ],
+      "downstreamEntries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-2",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "observedCollectionId": "live-query-1",
+            "observedKey": "[3,null]",
+            "observedOrigin": "remote",
+            "observedPending": false,
+            "rank": 35
+          }
+        ]
+      ],
+      "entries": [
+        [
+          "[3,null]",
+          {
+            "$collectionId": "live-query-1",
+            "$hasPendingWrites": false,
+            "$key": "[3,null]",
+            "$origin": "remote",
+            "id": 3,
+            "markers": [],
+            "rank": 35
+          }
+        ]
+      ],
+      "h02": true,
+      "phase": "followup-publication",
+      "ready": true,
+      "rows": [
+        {
+          "$collectionId": "live-query-1",
+          "$hasPendingWrites": false,
+          "$key": "[3,null]",
+          "$origin": "remote",
+          "id": 3,
+          "markers": [],
+          "rank": 35
+        }
+      ],
+      "sequence": 185,
+      "syncError": false
+    },
+    {
+      "h02": true,
+      "phase": "worker-cleaned",
+      "sequence": 206
+    }
+  ],
+  "selectedTests": {
+    "failed": 1,
+    "passed": 0,
+    "skipped": 19
+  },
+  "signal": null,
+  "sourceIdentityAgrees": true,
+  "status": "ACTUAL RECEIVING CHILD EXIT0; OUTER TEST FAILED1; qualification pending",
+  "supervisorElapsedMs": 2451,
+  "supervisorPhase": "final-with-binding",
+  "uniqueActualIdentitySha256": "3b22c2dae80e7e33d6237c1e2f3354c26805139ad7e2d2d6f04f6919f0a39530"
+}

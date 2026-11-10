@@ -1,0 +1,734 @@
+{
+  "receivingMode": "baseline-constituent",
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/completion-receiving.config.ts",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "historyPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/history.json",
+  "directory": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6",
+  "receiptTransport": {
+    "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/receipts.jsonl",
+    "flags": "wx",
+    "mode": 384,
+    "stdoutPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/worker.stdout.log",
+    "stderrPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/worker.stderr.log"
+  },
+  "limits": {
+    "wallMs": 20000,
+    "groupRssBytes": 1073741824,
+    "nodeHeapMiB": 384,
+    "postEnqueueWindowMs": 1000
+  },
+  "phase": "final-with-binding",
+  "pid": 86065,
+  "elapsedMs": 2504,
+  "maxSampledGroupRssBytes": 455835648,
+  "latestGroupRows": [],
+  "killAttempted": false,
+  "heapDiagnosticDetected": false,
+  "postEnqueue": {
+    "postEnqueueWindowMs": 1000,
+    "receiptCount": 328,
+    "acquisitionCount": 0,
+    "releaseCount": 0,
+    "lastSequence": 328,
+    "lastPhase": "worker-cleaned"
+  },
+  "outcome": {
+    "reason": "exited",
+    "exitCode": 0,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "mode": "baseline-constituent",
+        "program": {
+          "gate": "park-root",
+          "parameters": {
+            "keyShift": 0,
+            "rankScale": 10,
+            "nonemptyPrior": true,
+            "partial": "limit",
+            "tie": true,
+            "selectedOutput": "root",
+            "answerScheduler": "microtask"
+          },
+          "setup": {
+            "run": "run-1",
+            "profile": "inline",
+            "facts": {
+              "roots": [
+                {
+                  "id": 1,
+                  "rank": 10
+                },
+                {
+                  "id": 2,
+                  "rank": 10
+                },
+                {
+                  "id": 3,
+                  "rank": 20
+                },
+                {
+                  "id": 4,
+                  "rank": 20
+                },
+                {
+                  "id": 5,
+                  "rank": 30
+                },
+                {
+                  "id": 6,
+                  "rank": 30
+                }
+              ],
+              "marked": [
+                3,
+                4,
+                5,
+                6
+              ],
+              "children": [
+                {
+                  "id": 101,
+                  "parent": 1
+                },
+                {
+                  "id": 102,
+                  "parent": 1
+                },
+                {
+                  "id": 201,
+                  "parent": 2
+                },
+                {
+                  "id": 202,
+                  "parent": 2
+                },
+                {
+                  "id": 301,
+                  "parent": 3
+                },
+                {
+                  "id": 302,
+                  "parent": 3
+                },
+                {
+                  "id": 401,
+                  "parent": 4
+                },
+                {
+                  "id": 402,
+                  "parent": 4
+                },
+                {
+                  "id": 501,
+                  "parent": 5
+                },
+                {
+                  "id": 502,
+                  "parent": 5
+                },
+                {
+                  "id": 601,
+                  "parent": 6
+                },
+                {
+                  "id": 602,
+                  "parent": 6
+                }
+              ]
+            },
+            "window": {
+              "offset": 0,
+              "limit": 2
+            },
+            "ready": true
+          },
+          "changedFacts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 11
+              },
+              {
+                "id": 2,
+                "rank": 11
+              },
+              {
+                "id": 3,
+                "rank": 21
+              },
+              {
+                "id": 4,
+                "rank": 21
+              },
+              {
+                "id": 5,
+                "rank": 31
+              },
+              {
+                "id": 6,
+                "rank": 31
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              }
+            ]
+          },
+          "target": "root",
+          "overlay": {
+            "id": "baseline-hold",
+            "kind": "root",
+            "row": {
+              "id": 1,
+              "rank": 9.9,
+              "children": [
+                101,
+                102
+              ]
+            }
+          },
+          "selectedKeys": {
+            "root": 1,
+            "facadeA": 1,
+            "facadeB": 2,
+            "pivot": 3,
+            "optimisticChild": 199
+          },
+          "answerScopes": {
+            "failure": {
+              "source": "marked",
+              "scope": [
+                3
+              ]
+            },
+            "peer": {
+              "source": "children",
+              "scope": [
+                3
+              ]
+            }
+          },
+          "errors": {
+            "source": "baseline-source",
+            "tail": "baseline-tail",
+            "graph": "baseline-graph",
+            "facadeB": "baseline-facade-B"
+          },
+          "steps": [
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "optimistic-overlay",
+                "overlay": {
+                  "id": "baseline-hold",
+                  "kind": "root",
+                  "row": {
+                    "id": 1,
+                    "rank": 9.9,
+                    "children": [
+                      101,
+                      102
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "kind": "control",
+              "control": "bind-output-holds"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "source-write",
+                "facts": {
+                  "roots": [
+                    {
+                      "id": 1,
+                      "rank": 11
+                    },
+                    {
+                      "id": 2,
+                      "rank": 11
+                    },
+                    {
+                      "id": 3,
+                      "rank": 21
+                    },
+                    {
+                      "id": 4,
+                      "rank": 21
+                    },
+                    {
+                      "id": 5,
+                      "rank": 31
+                    },
+                    {
+                      "id": 6,
+                      "rank": 31
+                    }
+                  ],
+                  "marked": [
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "id": 101,
+                      "parent": 1
+                    },
+                    {
+                      "id": 102,
+                      "parent": 1
+                    },
+                    {
+                      "id": 201,
+                      "parent": 2
+                    },
+                    {
+                      "id": 202,
+                      "parent": 2
+                    },
+                    {
+                      "id": 301,
+                      "parent": 3
+                    },
+                    {
+                      "id": 302,
+                      "parent": 3
+                    },
+                    {
+                      "id": 401,
+                      "parent": 4
+                    },
+                    {
+                      "id": 402,
+                      "parent": 4
+                    },
+                    {
+                      "id": 501,
+                      "parent": 5
+                    },
+                    {
+                      "id": 502,
+                      "parent": 5
+                    },
+                    {
+                      "id": 601,
+                      "parent": 6
+                    },
+                    {
+                      "id": 602,
+                      "parent": 6
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "require",
+                "requirement": {
+                  "id": "selected",
+                  "kind": "output"
+                }
+              }
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "stage-output",
+                "requirement": "selected",
+                "target": "root",
+                "snapshot": "desired",
+                "disposition": "retained"
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "held-output"
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "settle-optimistic",
+                "overlay": "baseline-hold"
+              }
+            },
+            {
+              "kind": "semantic",
+              "action": {
+                "type": "apply-output",
+                "requirement": "selected"
+              }
+            },
+            {
+              "kind": "baseline-observe",
+              "boundary": "public-state"
+            }
+          ],
+          "publicationEpochs": [
+            {
+              "id": "initialization",
+              "kind": "initialization",
+              "fromStep": -1,
+              "throughStep": -1
+            },
+            {
+              "id": "1:held-output",
+              "kind": "publication",
+              "fromStep": 0,
+              "throughStep": 5
+            },
+            {
+              "id": "2:public-state",
+              "kind": "publication",
+              "fromStep": 6,
+              "throughStep": 8
+            }
+          ],
+          "sourceAnswerPremises": {}
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 186,
+        "phase": "completion-baseline-view",
+        "setup": {
+          "run": "run-1",
+          "profile": "inline",
+          "facts": {
+            "roots": [
+              {
+                "id": 1,
+                "rank": 10
+              },
+              {
+                "id": 2,
+                "rank": 10
+              },
+              {
+                "id": 3,
+                "rank": 20
+              },
+              {
+                "id": 4,
+                "rank": 20
+              },
+              {
+                "id": 5,
+                "rank": 30
+              },
+              {
+                "id": 6,
+                "rank": 30
+              }
+            ],
+            "marked": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "children": [
+              {
+                "id": 101,
+                "parent": 1
+              },
+              {
+                "id": 102,
+                "parent": 1
+              },
+              {
+                "id": 201,
+                "parent": 2
+              },
+              {
+                "id": 202,
+                "parent": 2
+              },
+              {
+                "id": 301,
+                "parent": 3
+              },
+              {
+                "id": 302,
+                "parent": 3
+              },
+              {
+                "id": 401,
+                "parent": 4
+              },
+              {
+                "id": 402,
+                "parent": 4
+              },
+              {
+                "id": 501,
+                "parent": 5
+              },
+              {
+                "id": 502,
+                "parent": 5
+              },
+              {
+                "id": 601,
+                "parent": 6
+              },
+              {
+                "id": 602,
+                "parent": 6
+              }
+            ]
+          },
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "ready": true
+        },
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 10,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 297,
+        "phase": "completion-baseline-cut",
+        "boundary": "held-output",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 9.9,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 9.9,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 10,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        },
+        "operations": [],
+        "receipts": [
+          {
+            "requirement": "selected",
+            "target": "root",
+            "role": "forward",
+            "returnedPromise": true,
+            "pending": true
+          }
+        ]
+      },
+      {
+        "h02": true,
+        "sequence": 324,
+        "phase": "completion-baseline-cut",
+        "boundary": "public-state",
+        "run": "run-1",
+        "view": {
+          "roots": [
+            {
+              "id": 1,
+              "rank": 11,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 11,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "facades": [],
+          "downstream": [
+            {
+              "id": 1,
+              "rank": 11,
+              "children": [
+                101,
+                102
+              ]
+            },
+            {
+              "id": 2,
+              "rank": 11,
+              "children": [
+                201,
+                202
+              ]
+            }
+          ],
+          "window": {
+            "offset": 0,
+            "limit": 2
+          },
+          "status": "ready",
+          "requestErrors": []
+        },
+        "operations": []
+      },
+      {
+        "h02": true,
+        "sequence": 328,
+        "phase": "worker-cleaned",
+        "mode": "baseline-constituent",
+        "gate": "park-root"
+      }
+    ],
+    "keyCallbacks": 0,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6/receipts.jsonl",
+    "bindingStatus": "unresolved",
+    "bindingError": "Error: Command failed: /Users/kyle.mathews/.n/bin/node --max-old-space-size=384 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-86062-c46afaf7-3948-43cb-9304-bcc1ecbffdc6 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/runtime-output-v1/inline-park-root/source-freeze.json\nfile:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306\nif (failures.length) throw new Error(failures.join(`\\n`))\n                           ^\n\nError: actual evaluated-module startup inventory missing\nrequired evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts\nrequired evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-driver.ts\nrequired evaluated receiving instrument missing: packages/query-db-collection/tests/queued-answer-progress-oracle.ts\nrequired evaluated receiving instrument missing: packages/db/tests/query/load-subset-retained-publication-oracle.ts\nrequired evaluated receiving instrument missing: scripts/h02-progress/witness-premise.ts\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/verify-bindings.mjs:306:28\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at async node:internal/modules/esm/loader:643:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\n\nNode.js v24.19.0\n"
+  }
+}

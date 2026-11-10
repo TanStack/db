@@ -1,0 +1,72 @@
+import { compareKeys } from "@tanstack/db-ivm";
+export class ReverseIndex {
+  /**
+   * @param nullsFirst - Whether nullish values come first in the reversed
+   * order. The original index keeps them at the opposite end, so reversing
+   * it alone would move them; ordered reads put them back. Omit it to read
+   * the original index's plain reversed walk, as earlier releases did.
+   */
+  constructor(index, nullsFirst) {
+    this.nullsFirst = nullsFirst;
+    this.originalIndex = index;
+  }
+  // Define the reversed operations
+  lookup(operation, value) {
+    const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation;
+    return this.originalIndex.lookup(reverseOperation, value);
+  }
+  rangeQuery(options = {}) {
+    return this.originalIndex.rangeQueryReversed(options);
+  }
+  // Reversing the original index moves its nullish group to the opposite
+  // end, so reads put the group back at the end the query asks for. Nullish
+  // keys come in ascending key order; equal non-null values come in the
+  // reversed walk's order. Each read gathers the nullish group, so its cost
+  // grows with the number of nullish keys.
+  take(n, from, filterFn) {
+    if (this.nullsFirst === void 0) {
+      return this.originalIndex.takeReversed(n, from, filterFn);
+    }
+    return this.read(n, filterFn, from ?? null);
+  }
+  takeFromStart(n, filterFn) {
+    if (this.nullsFirst === void 0) {
+      return this.originalIndex.takeReversedFromEnd(n, filterFn);
+    }
+    return this.read(n, filterFn);
+  }
+  /** Reads after `from` (`null` is the nullish group), or from the start. */
+  read(n, filterFn, from) {
+    const nullish = /* @__PURE__ */ new Set([
+      ...this.originalIndex.equalityLookup(null),
+      ...this.originalIndex.equalityLookup(void 0)
+    ]);
+    const keep = (key) => filterFn?.(key) ?? true;
+    const accept = (key) => !nullish.has(key) && keep(key);
+    const values = (count) => count <= 0 ? [] : from == null ? this.originalIndex.takeReversedFromEnd(count, accept) : this.originalIndex.takeReversed(count, from, accept);
+    const nulls = (count) => count <= 0 ? [] : [...nullish].sort(compareKeys).filter(keep).slice(0, count);
+    if (from === null) return this.nullsFirst ? values(n) : [];
+    if (this.nullsFirst && from === void 0) {
+      const head = nulls(n);
+      return [...head, ...values(n - head.length)];
+    }
+    const keys = values(n);
+    return this.nullsFirst ? keys : [...keys, ...nulls(n - keys.length)];
+  }
+  // All operations below delegate to the original index
+  supports(operation) {
+    return this.originalIndex.supports(operation);
+  }
+  get supportsRangeOptimization() {
+    return this.originalIndex.supportsRangeOptimization;
+  }
+  get supportsOrderOptimization() {
+    return this.originalIndex.supportsOrderOptimization === true;
+  }
+  canOptimizeRangeFor(value) {
+    return this.originalIndex.canOptimizeRangeFor?.(value) ?? true;
+  }
+  get keyCount() {
+    return this.originalIndex.keyCount;
+  }
+}

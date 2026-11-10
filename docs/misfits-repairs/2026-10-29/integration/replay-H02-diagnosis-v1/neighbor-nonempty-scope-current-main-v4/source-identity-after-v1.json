@@ -1,0 +1,9 @@
+{
+  "sourceMapEntries": 563,
+  "namedPackagePayloadFiles": 2544,
+  "allMatched": true,
+  "nodeLocksAndReuseLinksMatched": true,
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "sharedJudgmentSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+  "limits": "Disk identity after run; actual compiled/evaluated/V8 source binding records are separately retained with their limits."
+}

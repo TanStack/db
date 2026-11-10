@@ -1,0 +1,10 @@
+{
+  "checkedProtectedEntries": 548,
+  "consumedSourceIdentitiesMatched": true,
+  "ownershipModelAndGrammarByteIdentical": true,
+  "v7PreparationManifestSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+  "v7ResultManifestSha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+  "v7ResultMembersRehashed": 1951,
+  "sourceOverlayApplied": false,
+  "receivingInvocations": 0
+}

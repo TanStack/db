@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-30T11:38:03.169611+00:00",
+  "initialChunk": "d611ac",
+  "sessionId": 85147,
+  "finalChunk": "c3846f",
+  "exitCode": 0,
+  "mode": "independent immutable actual-result read/hash/JSON/source audit only",
+  "script": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-2gib-shared-primary-actual-v1.py",
+  "scriptSha256": "1b761a75fef1add7e4adc1df25d34b3fa2269839d9393677cb6fb4b1cea49ef9",
+  "facts": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-facts-v1.json",
+  "factsSha256": "1bbf37c96e526d252a717af233f0e1353704139e212416681720f617349e6d51",
+  "report": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-review-v1.md",
+  "reportSha256": "1a995f97683d8240b53260748a25bd16b92f6206c271a649dd72ddf185475923",
+  "actualResultFreezeSha256": "ec7775de91e14a892dbfe17360cd8d2b73fb2766a0919605c66ee71561a09669",
+  "actualResultAudit": "16 assets /3499565 bytes; all hashes and expected identities match",
+  "classification": "bounded product RED at controlled primary first post-failure callback; wrapper capture failure remains separate/unfixed",
+  "newTargetExecutionsOrProbes": 0,
+  "newBoundImports": 0,
+  "slot2": "returned after independent report",
+  "productionOrReceivingAdmission": false
+}

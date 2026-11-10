@@ -1,0 +1,979 @@
+{
+  "status": "42 actual raw stdout payloads parsed as data only; native passed names and headers matched",
+  "records": [
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 344,
+      "rawBytes": 730,
+      "rawSha256": "f7bbb80554df77155c78410a23262536195ce3af3596ef0c2b7355187d7557d4"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 1303,
+      "rawBytes": 699,
+      "rawSha256": "f3ba37a3314bb62583211889e9ba3db101026a5c56a81fcf459f7f969ab5e0d8"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 2238,
+      "rawBytes": 713,
+      "rawSha256": "83f104a74550425677d3d1cf28090e718e376008ab9ebe12f16ba6b830c77438"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 3182,
+      "rawBytes": 703,
+      "rawSha256": "b207f89aafbb9256a78b6a63d38b48fb901377c95403d3c4a8d9c6880574b341"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 4123,
+      "rawBytes": 717,
+      "rawSha256": "ce32cd158827fe56661aab73acb7072c766c266bd4c60cb3fbb722e9eeaa8f95"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 5067,
+      "rawBytes": 695,
+      "rawSha256": "521ef9b231b2b2c682079253738631d69ad048819039635f15ef8e072a5f8eda"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 46957,
+      "rawBytes": 709,
+      "rawSha256": "930e1a2535db6b732c41d1552b782725a1a180d18316ba43785e9cf0b9240771"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 47908,
+      "rawBytes": 730,
+      "rawSha256": "c68eed98a0aa2c9bf39a36b9a862531ec230868b19fe16d7dad0384ead2c0058"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 48867,
+      "rawBytes": 699,
+      "rawSha256": "b5a8d8063ee9504e72e6f4cb2902cb352118b078ba8e6ae39b0215226d17b7c0"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 49802,
+      "rawBytes": 713,
+      "rawSha256": "7b63ecf6d758a3476a5cef3c817d138f63ad436805f3e5dc6953e2d3c8f22ab8"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 50746,
+      "rawBytes": 703,
+      "rawSha256": "af515bed4e6f8b204507ba7eecd0fe4f407a2e643914a15c032c2d5f7b67e97c"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 51687,
+      "rawBytes": 717,
+      "rawSha256": "0fe5e51a3f49a68485bb16e44b174d9aed34cc9209741fb37a8b5559a1198ed6"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 54254,
+      "rawBytes": 695,
+      "rawSha256": "dbcb94e2ea8525f57af34e2fdb1427e7aa27ddbbaaefb2fbc271d6396c151ce8"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 0,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 55183,
+      "rawBytes": 709,
+      "rawSha256": "9cde968f0e4109f25e89cd8e04f4c8746c1d713c06121a732604f990a23a78aa"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 56133,
+      "rawBytes": 729,
+      "rawSha256": "000d69de957525f48329e9ea78ad925b27024218fbb371f8873154976089fd4d"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 57090,
+      "rawBytes": 698,
+      "rawSha256": "c92fa7b91ce5ec7ccf927e120dfc04a00b60d4fd981dee5d9f48ab48c5ce6dd9"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 58023,
+      "rawBytes": 712,
+      "rawSha256": "be66c94f1708bf82a07d5f8bb4a3cfa959fe8013473c36053a60928ca523387f"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 58965,
+      "rawBytes": 702,
+      "rawSha256": "6dd449f8265e98bbf69a853803b922604d453b8dc1d22810145cc59bb2eda79d"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 61059,
+      "rawBytes": 716,
+      "rawSha256": "3bbeee79bd5c807830073e4e989a7e444331c62752956906dd65cac219e93c89"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 62001,
+      "rawBytes": 694,
+      "rawSha256": "cda01d10edeca6b519a7281b0626f153a7ec4b1d7c5d499091d45e6f73a47300"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 62928,
+      "rawBytes": 708,
+      "rawSha256": "3c05e19cd21895e7a720e337ef4c15c0ff21d2d34ea367e6cffe7e9f9862d228"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 63877,
+      "rawBytes": 729,
+      "rawSha256": "7103673d67af3c210c26b09ace19fd1a89c299d81ab548b1e098e72f0ff50296"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 64834,
+      "rawBytes": 698,
+      "rawSha256": "bcebeeb8436607fad7772393a139a81d5eae0c076f9c8aba38a31045aa07734e"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 67150,
+      "rawBytes": 712,
+      "rawSha256": "7f5d68a0d89b112c33a7ac689598313243212ab05885303d438c1c74ff3d1a57"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 68092,
+      "rawBytes": 702,
+      "rawSha256": "defabe252225cc8cebf409d067bae60404a2fd5e27a5ef97b009f5310dd5534b"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 69031,
+      "rawBytes": 716,
+      "rawSha256": "22828264a32704681c348cc3b499dbbacdd34c32612517815d3094118aac31c4"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 69973,
+      "rawBytes": 694,
+      "rawSha256": "1763b90f26e7db33e7cf0786a61418b08f5abffa84a8cf97417d830a2861c924"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 1,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 70900,
+      "rawBytes": 708,
+      "rawSha256": "1905dcd2fb266fa7b02c61590aaefa1b9c6a41821aad39e2a16540c0163ef110"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 73000,
+      "rawBytes": 729,
+      "rawSha256": "cec5384ad89fb93bbcbda84049b50ba61fae07606e7302e9506b4806010459c4"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 73957,
+      "rawBytes": 698,
+      "rawSha256": "e100079cf2910c8c1105ae649a01c854e1fd75a16451ae955c860c8f0d2d466d"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 74890,
+      "rawBytes": 712,
+      "rawSha256": "8f3a0f0d2f7415ba654ca842c467a9002460e0760661f5362e8e2f7074c43fbf"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 75832,
+      "rawBytes": 702,
+      "rawSha256": "c985f395cedc1e3c3775570bac749d5571bfcf051963c704a806dec99e975cf3"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 76771,
+      "rawBytes": 716,
+      "rawSha256": "31b9b26eb0c3bd24de6e4b7d5c1d57e42bcc1f6d4d24b074054d48e1399fedc8"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 78874,
+      "rawBytes": 694,
+      "rawSha256": "49a22063e2462ae6613ca13831924f60c12568f96615a3837b6cb8d13a46a606"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 1)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 1
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 79801,
+      "rawBytes": 708,
+      "rawSha256": "42d074abc9df76c3cb6551b0964820ecdf930786781fc4a6171d9792a34701cb"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+      "history": {
+        "staleTime": "Infinity",
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "fresh-cache-without-refetch": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 80750,
+      "rawBytes": 729,
+      "rawSha256": "4c5f623204752060b2fd783e8f44bc8019586536c51c4038a1d6ada36b585b35"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 81707,
+      "rawBytes": 698,
+      "rawSha256": "c02566b0f7193623f9f60147202904efeefc55388924c3287d8b3daf146c0fc1"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "rejects",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 82640,
+      "rawBytes": 712,
+      "rawSha256": "cef63344e5ca1a2aa6d8fc2b7bde30dd4e087150a41334b1f4302bd85710333f"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 84502,
+      "rawBytes": 702,
+      "rawSha256": "8605399201aa10e5adc0b4a48d00e5d0c57a19261d4991597cc0cce97950e28a"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "same-rows",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 85441,
+      "rawBytes": 716,
+      "rawSha256": "ff8dbea9765c688ca39dd436a04c3380dbd54212bfa8bedb2990d8cd5ef2d0c6"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "while-held",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 86383,
+      "rawBytes": 694,
+      "rawSha256": "7ed38def3e2bbca6dd99722167fb5f6e349f57bed0aebbe5d5761d922eef6dfb"
+    },
+    {
+      "sourceModule": "file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "testName": "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 2)",
+      "history": {
+        "staleTime": 0,
+        "refetch": "empty",
+        "settles": "after-publication",
+        "peers": 2,
+        "rows": 2
+      },
+      "counts": {
+        "older-release-held": 1,
+        "cached-reacquisition-held": 1,
+        "older-release-published": 1,
+        "refetch-outcome-settled": 1,
+        "all-peers-released": 1,
+        "final-lease-released": 1
+      },
+      "rawOffset": 87310,
+      "rawBytes": 708,
+      "rawSha256": "702a04a0a70a6cb9ca3ef495832eefaee4d5645f87e0275da3a84bb0e0dd07c1"
+    }
+  ],
+  "freshNoRefetch": 6,
+  "staleRefetch": 36,
+  "countsPerHistory": 6,
+  "rawStdoutSha256": "21125a6c6bf622c98fae6fd3a5dda8da9c2b25513d95d335de12fc1f607cfbea",
+  "parser": "TypeScript AST data-only object/string/number/Infinity parser; no eval",
+  "nativePassedNames": [
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers +0, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 1, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 1)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime Infinity, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'while-held', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'same-rows', settles 'after-publication', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'while-held', peers 2, rows 2)",
+    "query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'empty', settles 'after-publication', peers 2, rows 2)"
+  ],
+  "expectedGrammarComparison": "42 actual payload histories/order equal unchanged 3 peers x2 row-count x(1 fresh+6 stale outcomes/cuts) grammar; expected table does not supply reach evidence"
+}

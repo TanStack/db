@@ -1,0 +1,19 @@
+{
+  "map": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/archive-map-v1.json",
+  "mapSha256": "06c0f44a6f0d348bc80c1d5ba27fbf66ceab1ef9b8546b41c3456a5c16f244b9",
+  "resolver": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-materialization-archive-v1/resolve-historical-input-v1.py",
+  "resolverSha256": "837e9572f5191fab7714eb154a02c7aefdf57cb35211c31a2204ffdcc383b847",
+  "rootPreservationReviewSha256": "29e60b6bb033d252dac16c4db040963ba3bc59188173d28d1c8561006f533b88",
+  "rootRelocationReceiptSha256": "b1ddfe9f148ef2f7c713eb8d260e26f97369c5edb7e4078fec98b688a26258f6",
+  "oldDirectPathsSuperseded": 8,
+  "historicalInputFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-freeze-v1.json",
+  "historicalInputFreezeSha256": "198836b8e5c2c84736fea32bebc8e8e0857cb0b1791845aa6435988fb91a4625",
+  "historicalInputPacket": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-baseline-batch-preparation-v1/input-packet-sha256-v1.json",
+  "historicalInputPacketSha256": "7acab132e8d7b192f2fa02ef9a6bf8be34c71c7d8c2f67e423d68a86b3e2fdd6",
+  "oldDirectPathPolicy": "eight mapped constructor emit evidence paths superseded; explicit archive resolver required; other historical keys remain direct",
+  "actualHistoricalConstructorImport": {
+    "path": "/private/tmp/h02-completion-inputs-8dcb8f95/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.js",
+    "sha256": "d382141f90e988b96f8e609e8b8d63b044a787226c3c9d59832b2ce46510682d"
+  },
+  "noNewMaterialization": true
+}

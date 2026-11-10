@@ -1,0 +1,139 @@
+const RANDOM_SEED = randomHash();
+const STRING_MARKER = randomHash();
+const BIG_INT_MARKER = randomHash();
+const NEG_BIG_INT_MARKER = randomHash();
+const SYMBOL_MARKER = randomHash();
+const symbolIds = createSymbolIdStore();
+const registeredSymbolIds = /* @__PURE__ */ new Map();
+let nextSymbolId = 0;
+export function getSymbolIdentity(symbol) {
+  const registeredKey = Symbol.keyFor(symbol);
+  if (registeredKey !== void 0) {
+    let id2 = registeredSymbolIds.get(registeredKey);
+    if (id2 === void 0) {
+      id2 = ++nextSymbolId;
+      registeredSymbolIds.set(registeredKey, id2);
+    }
+    return id2;
+  }
+  let id = symbolIds.get(symbol);
+  if (id === void 0) {
+    id = ++nextSymbolId;
+    symbolIds.set(symbol, id);
+  }
+  return id;
+}
+function createSymbolIdStore() {
+  const weakIds = /* @__PURE__ */ new WeakMap();
+  const probe = /* @__PURE__ */ Symbol();
+  try {
+    weakIds.set(probe, 0);
+    if (weakIds.get(probe) === 0) return weakIds;
+  } catch {
+  }
+  return /* @__PURE__ */ new Map();
+}
+export function randomHash() {
+  return Math.random() * (2 ** 31 - 1) >>> 0;
+}
+const dv = new DataView(new ArrayBuffer(8));
+export class MurmurHashStream {
+  constructor() {
+    this.hash = RANDOM_SEED;
+    this.length = 0;
+    this.carry = 0;
+    this.carryBytes = 0;
+  }
+  _mix(k1) {
+    k1 = Math.imul(k1, 3432918353);
+    k1 = k1 << 15 | k1 >>> 17;
+    k1 = Math.imul(k1, 461845907);
+    this.hash ^= k1;
+    this.hash = this.hash << 13 | this.hash >>> 19;
+    this.hash = Math.imul(this.hash, 5) + 3864292196;
+  }
+  writeByte(byte) {
+    this.carry |= (byte & 255) << 8 * this.carryBytes;
+    this.carryBytes++;
+    this.length++;
+    if (this.carryBytes === 4) {
+      this._mix(this.carry >>> 0);
+      this.carry = 0;
+      this.carryBytes = 0;
+    }
+  }
+  /** Write four bytes, low byte first, as four `writeByte` calls would. */
+  writeWord(word) {
+    this.length += 4;
+    if (this.carryBytes === 0) {
+      this._mix(word >>> 0);
+      return;
+    }
+    const shift = 8 * this.carryBytes;
+    this._mix((this.carry | word << shift) >>> 0);
+    this.carry = word >>> 32 - shift;
+  }
+  update(chunk) {
+    switch (typeof chunk) {
+      case `symbol`: {
+        this.update(SYMBOL_MARKER);
+        this.update(getSymbolIdentity(chunk));
+        return;
+      }
+      case `string`:
+        this.update(STRING_MARKER);
+        {
+          const pairs = chunk.length - chunk.length % 2;
+          for (let i = 0; i < pairs; i += 2) {
+            this.writeWord(
+              chunk.charCodeAt(i) | chunk.charCodeAt(i + 1) << 16
+            );
+          }
+          if (pairs < chunk.length) {
+            const code = chunk.charCodeAt(pairs);
+            this.writeByte(code & 255);
+            this.writeByte(code >>> 8 & 255);
+          }
+        }
+        return;
+      case `number`:
+        dv.setFloat64(0, chunk, true);
+        this.writeWord(dv.getUint32(0, true));
+        this.writeWord(dv.getUint32(4, true));
+        return;
+      case `bigint`: {
+        let value = chunk;
+        if (value < 0n) {
+          value = -value;
+          this.update(NEG_BIG_INT_MARKER);
+        } else {
+          this.update(BIG_INT_MARKER);
+        }
+        while (value > 0n) {
+          this.writeByte(Number(value & 0xffn));
+          value >>= 8n;
+        }
+        if (chunk === 0n) this.writeByte(0);
+        return;
+      }
+      default:
+        throw new TypeError(`Unsupported input type: ${typeof chunk}`);
+    }
+  }
+  digest() {
+    if (this.carryBytes > 0) {
+      let k1 = this.carry >>> 0;
+      k1 = Math.imul(k1, 3432918353);
+      k1 = k1 << 15 | k1 >>> 17;
+      k1 = Math.imul(k1, 461845907);
+      this.hash ^= k1;
+    }
+    this.hash ^= this.length;
+    this.hash ^= this.hash >>> 16;
+    this.hash = Math.imul(this.hash, 2246822507);
+    this.hash ^= this.hash >>> 13;
+    this.hash = Math.imul(this.hash, 3266489909);
+    this.hash ^= this.hash >>> 16;
+    return this.hash >>> 0;
+  }
+}

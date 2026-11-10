@@ -1,0 +1,53 @@
+{
+  "schema": "h02-compiler-only-exact-tool-proposal-v1",
+  "status": "INERT CONDITIONAL PROPOSAL ONLY; pending independent actual-copy acceptance and source review; separate ROOT admission required",
+  "tool": "exec_command",
+  "arguments": {
+    "cmd": "exec /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -I -S -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/contain-compiler-v1.py.txt /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/compiler-containment-contract-v1.json b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1",
+    "shell": "/bin/sh",
+    "login": false,
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+    "sandbox_permissions": "require_escalated",
+    "justification": "Run the separately admitted single compiler-only static gate with observation and cleanup confined to its owned compiler process group.",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 10000
+  },
+  "shell": {
+    "path": "/bin/sh",
+    "sha256": "68c831f7c8468a09979fa812f3cab7b2043a42101160a526a20a09719db342fa"
+  },
+  "argv": [
+    "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "-I",
+    "-S",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/contain-compiler-v1.py.txt",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/compiler-containment-contract-v1.json",
+    "b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1"
+  ],
+  "contract": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/compiler-containment-contract-v1.json",
+    "sha256": "b8696880080eb8cebf4d34c4d4c95fc280074718b6396d632d040b31ca20e5f1"
+  },
+  "maxInvocations": 1,
+  "childCommandExactlyV": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+      "--project",
+      "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+      "--noEmit",
+      "--incremental",
+      "false",
+      "--pretty",
+      "false",
+      "--listFiles"
+    ],
+    "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code"
+  },
+  "outerVsChild": "Actual tool initial/session/final and outer exit are distinct from child.json compiler argv/PID/PGID, raw compiler stdout/stderr and compiler returncode. Persist outer.stdout.jsonl/outer.stderr.log separately. No pipes/line rewrite for compiler raw streams.",
+  "success": "One outer0 plus child0, zero diagnostic/unrecognized output, complete nonempty --listFiles identity map, unchanged before/after identities, no containment/receipt/observation fault, positive final original-group absence. Then review actual result; no native authority.",
+  "failure": "Nonzero child, diagnostic, unknown input, timeout, RSS/observer/receipt/source fault, signal, residual group or incomplete tail grants no pass/retry/repair/native result. Preserve outputs and actual tool facts.",
+  "executed": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

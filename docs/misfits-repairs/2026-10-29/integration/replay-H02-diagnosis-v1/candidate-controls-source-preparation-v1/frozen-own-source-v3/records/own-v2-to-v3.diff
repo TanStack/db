@@ -1,0 +1,461 @@
+--- own-v2/packages/query-db-collection/tests/queued-answer-completion-oracle.ts
++++ own-v3/packages/query-db-collection/tests/queued-answer-completion-oracle.ts
+@@ -1588,6 +1588,11 @@
+       }>
+     }
+ 
++export type CompletionDeliveryCheck = {
++  (model: CompletionModel, delivery: CompletionDelivery): void
++  checkpoint: (model: CompletionModel) => void
++}
++
+ /**
+  * Accumulate actual events without collapsing duplicates. Each layer's callback
+  * payload and synchronous read match its independently authored installed state.
+@@ -1595,11 +1600,22 @@
+  * through the facade's own events, so a parent event replica compares root
+  * id/rank/handle, not a snapshot of that mutable child Collection's contents.
+  * Inline roots retain their full immutable child payload in the replica.
++ *
++ * Call checkpoint at the end of every authored publication interval. It checks
++ * the same replicas even when no callback arrived. Zero callbacks are legal
++ * only when those replicas already contain the promised projected result.
++ * This judges payload reconstruction, not event counts or virtual metadata.
++ * Replica membership ignores layout order; callback snapshots still compare
++ * order. A layout-only notification omitted with unchanged payload needs a
++ * separate layout observation and is outside this checkpoint's evidence.
++ * A newly exposed facade starts empty and consumes its public initial batch;
++ * an empty facade needs no row event. Retired facade events cannot impersonate
++ * an active handle, and cleanup lifecycle events use their separate judgment.
+  */
+ export function createCompletionDeliveryCheck(
+   setup: CompletionSetup,
+   initialMembership: `setup` | `empty` = `setup`,
+-) {
++): CompletionDeliveryCheck {
+   // Use `empty` only for the actual initialization insert stream. A receiver
+   // beginning after established publication seeds the prior setup instead.
+   const initial = modelCompletionView(
+@@ -1621,7 +1637,20 @@
+       new Map(facade.rows.map((id) => [id, id])),
+     ]),
+   )
+-  return (model: CompletionModel, delivery: CompletionDelivery): void => {
++  const expectedRoots = (view: CompletionPublicView) =>
++    view.roots
++      .map((row) => [
++        row.id,
++        rootValue(
++          row,
++          view.facades.find((facade) => facade.bucket === row.id)?.handle,
++        ),
++      ])
++      .sort(([left], [right]) => Number(left) - Number(right))
++  const check = (
++    model: CompletionModel,
++    delivery: CompletionDelivery,
++  ): void => {
+     demand(
+       runtimeTag(delivery.phase, `candidate-delivery`),
+       `unknown candidate delivery phase`,
+@@ -1728,18 +1757,33 @@
+     }
+     equal(
+       [...replica].sort(([left], [right]) => left - right),
+-      rows
+-        .map((row) => [
+-          row.id,
+-          rootValue(
+-            row,
+-            expected.facades.find((facade) => facade.bucket === row.id)?.handle,
+-          ),
+-        ])
+-        .sort(([left], [right]) => Number(left) - Number(right)),
++      expectedRoots({ ...expected, roots: rows }),
+       `event membership and values reconstruct the complete callback snapshot`,
+     )
+   }
++  return Object.assign(check, {
++    checkpoint(model: CompletionModel): void {
++      const expected = modelCompletionView(model)
++      equal(
++        [...roots].sort(([left], [right]) => left - right),
++        expectedRoots(expected),
++        `root events reconstruct the authored publication interval`,
++      )
++      equal(
++        [...downstream].sort(([left], [right]) => left - right),
++        expectedRoots({ ...expected, roots: expected.downstream }),
++        `downstream events reconstruct the authored publication interval`,
++      )
++      for (const facade of expected.facades)
++        equal(
++          [...(facades.get(facade.handle)?.values() ?? [])].sort(
++            (left, right) => left - right,
++          ),
++          facade.rows,
++          `facade events reconstruct the authored publication interval`,
++        )
++    },
++  })
+ }
+ 
+ export function checkCompletionBaselineView(
+--- own-v2/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts
++++ own-v3/packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts
+@@ -1,10 +1,15 @@
+ import { declareOracle } from '../../db/tests/oracle-declaration.js'
+ import { completionFacts } from './queued-answer-completion-history-oracle.js'
++import {
++  createCompletionModel,
++  stepCompletionModel,
++} from './queued-answer-completion-oracle.js'
+ import type { CompletionParameters } from './queued-answer-completion-history-oracle.js'
+ import type {
+   CompletionAction,
+   CompletionBaselineObservation,
+   CompletionFacts,
++  CompletionModel,
+   CompletionOverlay,
+   CompletionSetup,
+   CompletionTarget,
+@@ -52,6 +57,19 @@
+       kind: `baseline-observe`
+       boundary: CompletionBaselineObservation[`boundary`]
+     }
++export type CompletionBaselinePublicationEpoch = {
++  id: string
++  kind: `initialization` | `publication` | `cleanup`
++  fromStep: number
++  throughStep: number
++}
++export type CompletionBaselineSourcePremise = {
++  source: `roots` | `marked` | `children`
++  requiredKeys: Array<number>
++  permittedKeys: Array<number>
++  knowledge: `rows` | `complete-domain`
++  since: `fixture-start` | `answer-release`
++}
+ export type CompletionBaselineProgram = {
+   gate: CompletionBaselineGate
+   parameters: CompletionParameters
+@@ -72,6 +90,8 @@
+     peer: { source: `children`; scope: Array<number> }
+   }
+   steps: Array<CompletionBaselineStep>
++  publicationEpochs: Array<CompletionBaselinePublicationEpoch>
++  sourceAnswerPremises: Record<string, Array<CompletionBaselineSourcePremise>>
+ }
+ const semantic = (action: CompletionAction): CompletionBaselineStep => ({
+   kind: `semantic`,
+@@ -161,6 +181,77 @@
+               : [...prior.children, { id: root.id * 100 + 3, parent: root.id }],
+         }
+   const steps: Array<CompletionBaselineStep> = []
++  // These keys author the information needed at the answer cut. They are not
++  // inferred from actual loads or Query keys. Complete-domain knowledge includes
++  // an empty marker/child answer; returned row membership alone cannot prove it.
++  // Root rows instead require the authored value under the actual ordered load.
++  const initialKeys = prior.roots
++    .slice(0, setup.window.limit)
++    .map(({ id }) => id)
++  const pivot = parameters.keyShift + 3
++  const pivotRank = prior.roots.find(({ id }) => id === pivot)!.rank
++  const windowKeys = prior.roots
++    .filter(({ id, rank }) => initialKeys.includes(id) || rank === pivotRank)
++    .map(({ id }) => id)
++  const sourceAnswerPremises: CompletionBaselineProgram[`sourceAnswerPremises`] =
++    gate === `initial-status-tail`
++      ? {
++          answer: [
++            {
++              source: `roots`,
++              requiredKeys: initialKeys,
++              permittedKeys: prior.roots.map(({ id }) => id),
++              knowledge: `rows`,
++              since: `answer-release`,
++            },
++            ...([`marked`, `children`] as const).map((source) => ({
++              source,
++              requiredKeys: initialKeys,
++              permittedKeys: initialKeys,
++              knowledge: `complete-domain` as const,
++              since: `answer-release` as const,
++            })),
++          ],
++        }
++      : gate === `held-window`
++        ? {
++            answer: [
++              {
++                source: `marked`,
++                requiredKeys: [pivot],
++                permittedKeys: windowKeys,
++                knowledge: `complete-domain`,
++                since: `answer-release`,
++              },
++              {
++                source: `roots`,
++                requiredKeys: [pivot],
++                permittedKeys: prior.roots.map(({ id }) => id),
++                knowledge: `rows`,
++                since: `fixture-start`,
++              },
++              {
++                source: `children`,
++                requiredKeys: [pivot],
++                permittedKeys: windowKeys,
++                knowledge: `complete-domain`,
++                since: `fixture-start`,
++              },
++            ],
++          }
++        : gate === `source-failed-peer`
++          ? {
++              peer: [
++                {
++                  source: `children`,
++                  requiredKeys: [pivot],
++                  permittedKeys: [pivot],
++                  knowledge: `complete-domain`,
++                  since: `answer-release`,
++                },
++              ],
++            }
++          : {}
+   const installAll = (): Array<CompletionBaselineStep> => [
+     ...(profile === `facade`
+       ? prior.roots.map((row) =>
+@@ -272,7 +363,9 @@
+           semantic({
+             type: `source-answer`,
+             requirement: `peer`,
+-            facts: answered,
++            // The pivot child load establishes its unchanged children. It
++            // supplies no new root ranks or retained first-two child values.
++            facts: prior,
+           }),
+           observe(`public-state`),
+         )
+@@ -281,7 +374,9 @@
+           semantic({
+             type: `source-answer`,
+             requirement: `answer`,
+-            facts: answered,
++            // Only marked demand is replayed here. Root ranks and retained
++            // children keep their prior facts until their own source writes.
++            facts: { ...prior, marked: answered.marked },
+           }),
+           ...installAll(),
+           observe(`completed-window`),
+@@ -365,7 +460,90 @@
+     },
+     errors,
+     steps,
+-  }
++    publicationEpochs: authorCompletionBaselinePublicationEpochs(setup, steps),
++    sourceAnswerPremises,
++  }
++}
++
++/**
++ * A publication epoch is a model-only observation interval, not a production
++ * task, receipt, generation, or promise. These baseline programs arrange at
++ * most one net public payload in each interval. An optimistic hold publishes
++ * its overlay; its settlement publishes the queued output with the drop.
++ * Failed-flush atomicity forbids forward/restoration events in the rollback
++ * interval. The later drop and queued forward/restore publish only their net
++ * restored value. Retry is a separate interval. Source replay and window holds
++ * retain prior payload until their completed answer interval. A graph failure
++ * keeps prior payload. Initial readiness exposes one completed initial window.
++ * Authority is ARCHITECTURE's Coherent publication: accepted sync transactions
++ * publish with the optimistic drop (1709–1712), and a failed flush emits no
++ * facade event or layout revision (1724–1733). The optimistic-history-oracle
++ * opening contract (24–34) states the same atomic drop. Atomic window
++ * publication owns completed window/initial intervals. These expectations are
++ * not scheduling choices inferred from recorded callbacks.
++ *
++ * Each authored observe cut closes its interval. Ready fixtures first establish
++ * their setup through the actual initial callback stream. Cleanup is a separate
++ * raw lifecycle interval: old teardown is not a publication by the replacement
++ * run. The replacement's next interval starts its event replicas empty.
++ */
++export function authorCompletionBaselinePublicationEpochs(
++  setup: CompletionSetup,
++  steps: ReadonlyArray<CompletionBaselineStep>,
++): Array<CompletionBaselinePublicationEpoch> {
++  const epochs: Array<CompletionBaselinePublicationEpoch> = setup.ready
++    ? [
++        {
++          id: `initialization`,
++          kind: `initialization`,
++          fromStep: -1,
++          throughStep: -1,
++        },
++      ]
++    : []
++  let fromStep = 0
++  for (const [index, step] of steps.entries()) {
++    if (step.kind !== `baseline-observe`) continue
++    epochs.push({
++      id: `${epochs.length}:${step.boundary}`,
++      kind: step.boundary === `cleanup-abandoned` ? `cleanup` : `publication`,
++      fromStep,
++      throughStep: index,
++    })
++    fromStep = index + 1
++  }
++  if (fromStep !== steps.length)
++    throw new Error(`completion grammar: every publication interval has a cut`)
++  return epochs
++}
++
++/**
++ * Compute one expectation before running its physical interval. Replay only
++ * authored semantic actions in a fresh model; no actual request, output,
++ * callback, or late mutable outcome model supplies this value. A driver arms
++ * the returned snapshot before fromStep, compares every public callback at
++ * capture, and checks its persistent replicas at throughStep. Main outcome
++ * actions still wait for their exact physical boundaries before being stepped.
++ */
++export function modelCompletionBaselinePublicationEpoch(
++  program: CompletionBaselineProgram,
++  epoch: CompletionBaselinePublicationEpoch,
++): CompletionModel {
++  const authored = authorCompletionBaselinePublicationEpochs(
++    program.setup,
++    program.steps,
++  ).find((entry) => entry.id === epoch.id)
++  if (
++    !authored ||
++    authored.kind !== epoch.kind ||
++    authored.fromStep !== epoch.fromStep ||
++    authored.throughStep !== epoch.throughStep
++  )
++    throw new Error(`completion grammar: unknown authored publication interval`)
++  const model = createCompletionModel(program.setup)
++  for (const step of program.steps.slice(0, epoch.throughStep + 1))
++    if (step.kind === `semantic`) stepCompletionModel(model, step.action)
++  return model
+ }
+ 
+ export const completionBaselineGates: ReadonlyArray<CompletionBaselineGate> = [
+@@ -397,7 +575,9 @@
+ }
+ 
+ declareOracle({
++  model: [modelCompletionBaselinePublicationEpoch],
+   grammar: [
++    authorCompletionBaselinePublicationEpochs,
+     constructCompletionBaselineProgram,
+     completionBaselineProgramFamily,
+   ],
+--- own-v2/scripts/h02-progress/completion-checker-controls.ts
++++ own-v3/scripts/h02-progress/completion-checker-controls.ts
+@@ -578,6 +578,106 @@
+   rejects(`unknown delivery phase is rejected`, () =>
+     createCompletionDeliveryCheck(setup)(deliveredModel, unknownDelivery),
+   )
++  accepts(`unchanged publication interval permits zero row callbacks`, () =>
++    createCompletionDeliveryCheck(setup).checkpoint(
++      createCompletionModel(setup),
++    ),
++  )
++  rejects(`zero callbacks cannot hide changed root content`, () =>
++    createCompletionDeliveryCheck(setup).checkpoint(deliveredModel),
++  )
++  rejects(
++    `root callback cannot substitute for missing downstream callback`,
++    () => deliveryCheck.checkpoint(deliveredModel),
++  )
++  deliveryCheck(deliveredModel, { ...delivery, layer: `downstream` })
++  accepts(`both public event replicas reach their authored interval`, () =>
++    deliveryCheck.checkpoint(deliveredModel),
++  )
++  const facadeSetup: CompletionSetup = { ...setup, profile: `facade` }
++  const facadeModel = createCompletionModel(facadeSetup)
++  step(
++    facadeModel,
++    {
++      type: `source-write`,
++      facts: {
++        ...setup.facts,
++        children: [...setup.facts.children, { id: 102, parent: 1 }],
++      },
++    },
++    { type: `install`, target: { bucket: 1 }, snapshot: `desired` },
++  )
++  const facadeView = modelCompletionView(facadeModel)
++  const facadeDelivery: CompletionDelivery = {
++    phase: `candidate-delivery`,
++    layer: `facade`,
++    bucket: 1,
++    handle: facadeView.facades[0]!.handle,
++    rows: [101, 102],
++    read: [101, 102],
++    changes: [{ type: `insert`, value: 102 }],
++  }
++  rejects(`zero callbacks cannot hide changed facade content`, () =>
++    createCompletionDeliveryCheck(facadeSetup).checkpoint(facadeModel),
++  )
++  const facadeCheck = createCompletionDeliveryCheck(facadeSetup)
++  facadeCheck(facadeModel, facadeDelivery)
++  accepts(`facade content advances without a parent handle update`, () =>
++    facadeCheck.checkpoint(facadeModel),
++  )
++  const initialize = createCompletionDeliveryCheck(facadeSetup, `empty`)
++  rejects(`omitted initialization stream cannot establish nonempty roots`, () =>
++    initialize.checkpoint(createCompletionModel(facadeSetup)),
++  )
++  const initialized = createCompletionModel(facadeSetup)
++  const initializedView = modelCompletionView(initialized)
++  for (const layer of [`root`, `downstream`] as const)
++    initialize(initialized, {
++      phase: `candidate-delivery`,
++      layer,
++      rows: initializedView.roots,
++      read: initializedView.roots,
++      changes: initializedView.roots.map((value) => ({
++        type: `insert`,
++        value,
++        handle: initializedView.facades.find(
++          (entry) => entry.bucket === value.id,
++        )!.handle,
++      })),
++    })
++  rejects(
++    `root initialization cannot hide absent public facade initial batch`,
++    () => initialize.checkpoint(initialized),
++  )
++  for (const facade of initializedView.facades)
++    initialize(initialized, {
++      phase: `candidate-delivery`,
++      layer: `facade`,
++      bucket: facade.bucket,
++      handle: facade.handle,
++      rows: facade.rows,
++      read: facade.rows,
++      changes: facade.rows.map((value) => ({ type: `insert`, value })),
++    })
++  accepts(`public facade initial batches complete initialization`, () =>
++    initialize.checkpoint(initialized),
++  )
++  const emptySetup: CompletionSetup = {
++    ...facadeSetup,
++    facts: { ...setup.facts, children: [] },
++  }
++  accepts(`empty facade content permits zero row callbacks`, () =>
++    createCompletionDeliveryCheck(emptySetup).checkpoint(
++      createCompletionModel(emptySetup),
++    ),
++  )
++  rejects(`failed flush cannot expose forward facade content`, () =>
++    createCompletionDeliveryCheck(facadeSetup)(initialized, facadeDelivery),
++  )
++  const staleHandle = { ...facadeDelivery, handle: `retired:1:1` }
++  rejects(`retired facade cannot deliver as the active public handle`, () =>
++    createCompletionDeliveryCheck(facadeSetup)(facadeModel, staleHandle),
++  )
+   const ordinary = waiting()
+   required(ordinary, `answer`, `source`)
+   required(ordinary, `peer`, `source`)

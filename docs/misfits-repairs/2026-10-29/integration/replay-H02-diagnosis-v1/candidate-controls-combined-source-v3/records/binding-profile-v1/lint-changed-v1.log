@@ -1,0 +1,17 @@
+Scope: all 45 workspace projects
+[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY
+
+If you are running pnpm in CI, set the CI environment variable to "true", or set "confirmModulesPurge" to "false".
+[ERROR] Command failed with exit code 1: pnpm install
+
+pnpm: Command failed with exit code 1: pnpm install
+    at getFinalError (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:28661:14)
+    at makeError (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:30968:21)
+    at getSyncResult (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:32812:10)
+    at spawnSubprocessSync (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:32772:14)
+    at execaCoreSync (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:32702:23)
+    at callBoundExeca (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:35230:23)
+    at boundExeca (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:35207:49)
+    at sync (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:35362:14)
+    at runPnpmCli (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:211015:5)
+    at runDepsStatusCheck (file:///Users/kyle.mathews/.n/lib/node_modules/pnpm/dist/pnpm.mjs:212719:7)

@@ -1,0 +1,23 @@
+{
+  "status": "PREPARED ONLY; no runtime authority",
+  "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "args": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/launch.py",
+    "--execute-exact-one",
+    "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf"
+  ],
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "sandbox_permissions": "require_escalated",
+  "justification": "Run the separately admitted exact fixed-seed primary pagination command once under the reviewed 30-second, 2-GiB supervisor.",
+  "yield_time_ms": 1000,
+  "outputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-primary-red-runtime-v1",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "admissionGates": [
+    "Independent source review of Q and this operational preparation accepted by ROOT.",
+    "Required report-worktree pnpm lint:changed result qualified by ROOT.",
+    "Separate exact-one ROOT runtime admission and native slot release."
+  ],
+  "noAutomaticRetry": true,
+  "receivingCommandsAdmitted": false,
+  "actualToolReceipt": "Caller must separately preserve initial tool chunk/session and final actual outer exit; child nonzero remains outer nonzero."
+}

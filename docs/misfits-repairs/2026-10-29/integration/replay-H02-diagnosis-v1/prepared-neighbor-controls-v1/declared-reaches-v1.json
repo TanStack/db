@@ -1,0 +1,182 @@
+{
+  "status": "DECLARED SOURCE ONLY; no receiving invocation; every measured count is zero",
+  "paths": [
+    {
+      "name": "nonempty conflicting replay",
+      "states": [
+        {
+          "name": "nonempty-prior",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "held-provider-read",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "conflicting-cache-premise",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "completed-enqueue",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "answer-executed",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "final-publication",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "worker-cleaned",
+          "minimum": 1,
+          "measured": 0
+        }
+      ],
+      "limit": "Known main progress RED may precede final/cleanup; report partial reach, no final GREEN"
+    },
+    {
+      "name": "nonempty scope-key publication",
+      "states": [
+        {
+          "name": "nonempty-prior",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "held-provider-read",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "completed-enqueue",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "answer-executed",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "root-change",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "downstream-change",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "final-publication",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "worker-cleaned",
+          "minimum": 1,
+          "measured": 0
+        }
+      ],
+      "limit": "Scope-key ablation cannot establish subscription-key completion"
+    },
+    {
+      "name": "literal true initial cut",
+      "states": [
+        {
+          "name": "literal-true-establishing-receipt",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "subscriber-return-before-preload",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "final-publication",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "worker-cleaned",
+          "minimum": 1,
+          "measured": 0
+        }
+      ],
+      "limit": "All-literal-true initial chain only"
+    },
+    {
+      "name": "ordinary synchronous mutation cut",
+      "states": [
+        {
+          "name": "ordinary-mutation-return-before-host-turn",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "final-publication",
+          "minimum": 1,
+          "measured": 0
+        },
+        {
+          "name": "worker-cleaned",
+          "minimum": 1,
+          "measured": 0
+        }
+      ],
+      "limit": "Unbounded ordinary mutation outside asynchronous publication barrier"
+    }
+  ],
+  "ownership": {
+    "histories": 42,
+    "grammar": "existing finite reacquisitionHistories, unchanged",
+    "eachHistoryStates": [
+      {
+        "name": "older-release-held",
+        "minimum": 1,
+        "measured": 0
+      },
+      {
+        "name": "cached-reacquisition-held",
+        "minimum": 1,
+        "measured": 0
+      },
+      {
+        "name": "older-release-published",
+        "minimum": 1,
+        "measured": 0
+      },
+      {
+        "name": "refetch-outcome-settled",
+        "minimum": 1,
+        "measured": 0
+      },
+      {
+        "name": "all-peers-released",
+        "minimum": 1,
+        "measured": 0
+      },
+      {
+        "name": "final-lease-released",
+        "minimum": 1,
+        "measured": 0
+      }
+    ],
+    "zeroPeerAblations": 14,
+    "positivePeerHistories": 28
+  },
+  "continuationSpecific": {
+    "status": "UNREACHED; current production has no continuation scheduler; no candidate implementation or hold installed",
+    "design": "design-review/queued-answer-progress-completion-api-v3.md",
+    "designSha256": "c53e3bf3767b0bff451d0c05541b31e0a5e51e569e039634a163f42f2803b0e1"
+  }
+}

@@ -1,0 +1,4 @@
+packages/db/tests/query/pagination-oracle.property.test.ts(2599,7): error TS2322: Type '{ offset?: number | undefined; limit?: number | undefined; }' is not assignable to type '{ offset: number; limit: number; }'.
+  Types of property 'offset' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.

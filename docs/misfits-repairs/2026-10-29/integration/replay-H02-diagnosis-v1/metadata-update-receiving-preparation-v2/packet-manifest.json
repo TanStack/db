@@ -1,0 +1,58 @@
+{
+  "acceptedSelectorClassificationSha256": "4fd95de65589d512920a37f7ff92d90abdee1f54a9f265441bacc808ebb692d4",
+  "acceptedUniverseClassificationSha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26",
+  "artifacts": {
+    "binding.json": {
+      "bytes": 1747,
+      "sha256": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238"
+    },
+    "calibrate.py": {
+      "bytes": 9614,
+      "sha256": "b37b2fa6f057e8c5fa6df0fc6d9604d37b7c5f12b2078726d3c77eca734b2509"
+    },
+    "first-command.json": {
+      "bytes": 3034,
+      "sha256": "569f116625ccc99fb75efc27934eb256ab82d602e698d8489a5be714a09d0a6c"
+    },
+    "launcher-scope-default-q2.zsh": {
+      "bytes": 2717,
+      "sha256": "ee040380e7acd9a496042e16f1f195dd7ee66e31704d2570dffe2760f2bab7aa"
+    },
+    "pure-results.json": {
+      "bytes": 7656,
+      "sha256": "88b111cf3872c65a094e090a789bcb149e779b154c71ecb156b6ceedeefe779a"
+    },
+    "recipes.json": {
+      "bytes": 3145,
+      "sha256": "c74f1bcc3dd370c0cc8fbeb0889d69ecfce1a2f8e91da512ef158ea27e6e6cf3"
+    },
+    "report.md": {
+      "bytes": 8826,
+      "sha256": "dd0a1fe806643952aea0d9f30692050edc7362fd570935f89d94b7fd943cf472"
+    },
+    "static-results.json": {
+      "bytes": 1105,
+      "sha256": "8f16e9ff8dd846775334e14b17c484c04a702ae18ceffe4f1137cc112f870f0f"
+    },
+    "verify.py": {
+      "bytes": 6579,
+      "sha256": "e7d4fab7945dfe254f36c24792ddf56b7beef355275f048f725a53bef4c535ab"
+    },
+    "zsh-syntax.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "bindingSha256": "ec925ca31d325cadf8a28e597c1d6ea0185fe79b0e1d4ef8b97b5333e0f5f238",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newGuardian": false,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalCleanSuccessRequirementsPreserved": true,
+  "originalReceivingSupervisorUnchanged": true,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceRefreezes": 0,
+  "status": "FROZEN SOURCE/STATIC/PURE receiving preparation; exact source/runtime-suitability review and root admission pending"
+}

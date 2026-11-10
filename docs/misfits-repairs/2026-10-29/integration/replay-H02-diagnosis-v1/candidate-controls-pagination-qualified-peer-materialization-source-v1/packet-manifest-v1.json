@@ -1,0 +1,52 @@
+{
+  "schema": "h02-qualified-copy-only-source-packet-v1",
+  "status": "FROZEN SOURCE-ONLY copy materializer and exact invocation candidate; independent source review then separate ROOT materialization-only admission required",
+  "fileCount": 7,
+  "files": {
+    "copy-only-contract-v1.json": {
+      "sha256": "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+      "bytes": 6264
+    },
+    "explicit-copy-geometry-v1.json": {
+      "sha256": "1c738e4ecd4d9677ad4cd1127bca5c8699711d3433cc5d298b318638f164589c",
+      "bytes": 89180
+    },
+    "materialize-qualified-peer-v1.py.txt": {
+      "sha256": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09",
+      "bytes": 13761
+    },
+    "proposed-exact-copy-only-tool-invocation-v1.json": {
+      "sha256": "2df5c78a10bbcb0b82b3cec7bf139bbd85603a775cbd8021fa91f4eac2e68b4f",
+      "bytes": 4822
+    },
+    "report-v1.md": {
+      "sha256": "7e53a40b6a6e55d7089e229c055ea38f8f6a15e9ec2b84d8684d25dc9272a913",
+      "bytes": 8435
+    },
+    "static-source-preparation-audit-v1.json": {
+      "sha256": "50ec1c7b6d5926ee44da3c899f476977f4b446c3035c63e479513859f22b7470",
+      "bytes": 1619
+    },
+    "static-tool-return-v1.json": {
+      "sha256": "fe4a600435d8b3f57fa3b6adf168eacad9eafb44f306f3a3a80dc46d8db0f87e",
+      "bytes": 495
+    }
+  },
+  "selfExcluded": true,
+  "materializerSha256": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09",
+  "contractSha256": "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+  "geometrySha256": "1c738e4ecd4d9677ad4cd1127bca5c8699711d3433cc5d298b318638f164589c",
+  "toolInvocationProposalSha256": "2df5c78a10bbcb0b82b3cec7bf139bbd85603a775cbd8021fa91f4eac2e68b4f",
+  "reportSha256": "7e53a40b6a6e55d7089e229c055ea38f8f6a15e9ec2b84d8684d25dc9272a913",
+  "staticAuditSha256": "50ec1c7b6d5926ee44da3c899f476977f4b446c3035c63e479513859f22b7470",
+  "sealedUManifestSha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0",
+  "sealedVManifestSha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5",
+  "materialization": 0,
+  "candidateExecution": 0,
+  "targetOrConfigImports": 0,
+  "compile": 0,
+  "nativeInvocations": 0,
+  "processProbes": 0,
+  "laterArtifactLint": "PENDING ROOT",
+  "slot2": "returned after source freeze"
+}

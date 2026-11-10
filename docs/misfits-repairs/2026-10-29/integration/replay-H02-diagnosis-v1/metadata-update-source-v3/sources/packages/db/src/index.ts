@@ -1,0 +1,132 @@
+// Re-export all public APIs
+// Re-export IR types under their own namespace
+// because custom collections need access to the IR types
+import * as IR from './query/ir.js'
+
+export * from './collection/index.js'
+export * from './transactions'
+export * from './client.js'
+export { withCollectionConfigFactory } from './client.js'
+/** @internal First-party adapter ownership marker. */
+export { collectionOptionsClaim } from './collection-options.js'
+/** @internal */
+export { syncWriteNamesWholeRow } from './collection/sync.js'
+export * from './types'
+export * from './proxy'
+export * from './query/index.js'
+export * from './optimistic-action'
+export type { LiveQueryKey, LiveQueryOptions } from './live-query-options'
+/** @internal Unstable layer for the first-party framework adapters. */
+export * from './live-query-adapter'
+export * from './local-only'
+export * from './local-storage'
+export {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+  DatabaseRequiredError,
+  ObjectStoreNotFoundError,
+  NameRequiredError,
+  GetKeyRequiredError,
+  type CreateIndexedDBOptions,
+  type IndexedDBInstance,
+  type IndexedDBCollectionConfig,
+  type IndexedDBCollectionUtils,
+  type DatabaseInfo,
+} from './indexed-db'
+export {
+  openDatabase,
+  createObjectStore,
+  executeTransaction,
+  getAll,
+  getAllKeys,
+  getByKey,
+  put,
+  deleteByKey,
+  clear,
+  deleteDatabase,
+} from './indexed-db-wrapper'
+export * from './errors'
+/** @internal Unstable protocol for persistence-aware collection adapters. */
+export * from './sync-persistence'
+export * from './sync-receipt'
+export { deepEquals, equalPersistedSnapshotValues } from './utils'
+/** @internal Reports an adapter contract breach uncaught, as core does. */
+export { reportUncaught } from './utils/callbacks'
+export * from './paced-mutations'
+export * from './strategies/index.js'
+
+// Virtual properties exports
+export {
+  type VirtualRowProps,
+  type VirtualOrigin,
+  type WithVirtualProps,
+  type WithoutVirtualProps,
+  hasVirtualProps,
+} from './virtual-props.js'
+
+// Index system exports
+export { BaseIndex } from './indexes/base-index.js'
+export type {
+  IndexInterface,
+  IndexConstructor,
+  IndexOperation,
+  IndexReader,
+} from './indexes/base-index.js'
+export { type IndexOptions } from './indexes/index-options.js'
+
+// Index implementations
+export { BasicIndex } from './indexes/basic-index.js'
+export type {
+  BasicIndexOptions,
+  RangeQueryOptions,
+} from './indexes/basic-index.js'
+export { BTreeIndex } from './indexes/btree-index.js'
+export type { RangeQueryOptions as BTreeRangeQueryOptions } from './indexes/btree-index.js'
+export { ReverseIndex } from './indexes/reverse-index.js'
+
+// Index optimization utilities
+export {
+  optimizeExpressionWithIndexes,
+  findIndexForField,
+} from './utils/index-optimization.js'
+
+// Dev mode utilities
+export {
+  configureIndexDevMode,
+  isDevModeEnabled,
+  getIndexDevModeConfig,
+  trackQuery,
+  clearQueryPatterns,
+  getQueryPatterns,
+} from './indexes/index-registry.js'
+export type {
+  IndexDevModeConfig,
+  IndexSuggestion,
+} from './indexes/index-registry.js'
+
+// Expression helpers
+export * from './query/expression-helpers.js'
+
+// Reactive effects
+export {
+  createEffect,
+  type DeltaEvent,
+  type DeltaType,
+  type EffectConfig,
+  type EffectContext,
+  type Effect,
+  type EffectQueryInput,
+} from './query/effect.js'
+
+// UUID helper (safe in non-secure browser contexts, see #1541)
+export { safeRandomUUID } from './utils/uuid.js'
+
+// Re-export some stuff explicitly to ensure the type & value is exported
+export type { Collection } from './collection/index.js'
+export { IR }
+export { operators, type OperatorName } from './query/builder/functions.js'
+
+/** @internal Shared native ordering for first-party persistence. */
+export { compareTemporalValues } from './utils/comparison'
+/** @internal Used by first-party collection adapters. */
+export { makeComparator } from './utils/comparison'

@@ -1,0 +1,302 @@
+import {
+  createSingleRowRefProxy,
+  toExpression
+} from "../query/builder/ref-proxy";
+import { CollectionConfigurationError } from "../errors";
+import { isTemporal } from "../utils";
+import { builtInIndexResolverNames } from "../indexes/base-index";
+import { codedMessage, devBuild } from "../error-message";
+const INDEX_SIGNATURE_VERSION = 1;
+function isNativeTemporalIndexValue(value) {
+  if (!isTemporal(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype !== null && prototype !== Object.prototype;
+}
+function compareStringsCodePoint(left, right) {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+}
+function resolveResolverMetadata(resolver) {
+  const name = builtInIndexResolverNames.get(resolver) ?? resolver.name;
+  return {
+    kind: `constructor`,
+    ...name ? { name } : {}
+  };
+}
+function toSerializableIndexValue(value) {
+  if (value == null) {
+    return value;
+  }
+  switch (typeof value) {
+    case `string`:
+    case `boolean`:
+      return value;
+    case `number`:
+      return Number.isFinite(value) ? value : null;
+    case `bigint`:
+      return { __type: `bigint`, value: value.toString() };
+    case `function`:
+    case `symbol`:
+      return void 0;
+    case `undefined`:
+      return void 0;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => toSerializableIndexValue(entry) ?? null);
+  }
+  if (isNativeTemporalIndexValue(value)) {
+    return {
+      __type: value[Symbol.toStringTag],
+      value: String(value)
+    };
+  }
+  if (value instanceof Date) {
+    return {
+      __type: `date`,
+      value: value.toISOString()
+    };
+  }
+  if (value instanceof Set) {
+    const serializedValues = Array.from(value).map((entry) => toSerializableIndexValue(entry) ?? null).sort(
+      (a, b) => compareStringsCodePoint(
+        stableStringifyCollectionIndexValue(a),
+        stableStringifyCollectionIndexValue(b)
+      )
+    );
+    return {
+      __type: `set`,
+      values: serializedValues
+    };
+  }
+  if (value instanceof Map) {
+    const serializedEntries = Array.from(value.entries()).map(([mapKey, mapValue]) => ({
+      key: toSerializableIndexValue(mapKey) ?? null,
+      value: toSerializableIndexValue(mapValue) ?? null
+    })).sort(
+      (a, b) => compareStringsCodePoint(
+        stableStringifyCollectionIndexValue(a.key),
+        stableStringifyCollectionIndexValue(b.key)
+      )
+    );
+    return {
+      __type: `map`,
+      entries: serializedEntries
+    };
+  }
+  if (value instanceof RegExp) {
+    return {
+      __type: `regexp`,
+      value: value.toString()
+    };
+  }
+  const serializedObject = {};
+  const entries = Object.entries(value).sort(
+    ([leftKey], [rightKey]) => compareStringsCodePoint(leftKey, rightKey)
+  );
+  for (const [key, entryValue] of entries) {
+    const serializedEntry = toSerializableIndexValue(entryValue);
+    if (serializedEntry !== void 0) {
+      serializedObject[key] = serializedEntry;
+    }
+  }
+  return Object.hasOwn(serializedObject, `__type`) ? { __type: `object`, value: serializedObject } : serializedObject;
+}
+function stableStringifyCollectionIndexValue(value) {
+  if (value === null) {
+    return `null`;
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringifyCollectionIndexValue).join(`,`)}]`;
+  }
+  if (typeof value !== `object`) {
+    return JSON.stringify(value);
+  }
+  const sortedKeys = Object.keys(value).sort(
+    (left, right) => compareStringsCodePoint(left, right)
+  );
+  const serializedEntries = sortedKeys.map(
+    (key) => `${JSON.stringify(key)}:${stableStringifyCollectionIndexValue(value[key])}`
+  );
+  return `{${serializedEntries.join(`,`)}}`;
+}
+function createCollectionIndexMetadata(indexId, expression, name, resolver, options) {
+  const resolverMetadata = resolveResolverMetadata(resolver);
+  const serializedExpression = toSerializableIndexValue(expression) ?? null;
+  const serializedOptions = toSerializableIndexValue(options);
+  const signature = stableStringifyCollectionIndexValue({
+    signatureVersion: INDEX_SIGNATURE_VERSION,
+    expression: serializedExpression,
+    options: serializedOptions ?? null
+  });
+  return {
+    signatureVersion: INDEX_SIGNATURE_VERSION,
+    signature,
+    indexId,
+    name,
+    expression,
+    resolver: resolverMetadata,
+    ...serializedOptions === void 0 ? {} : { options: serializedOptions }
+  };
+}
+function cloneSerializableIndexValue(value) {
+  if (value === null || typeof value !== `object`) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => cloneSerializableIndexValue(entry));
+  }
+  const cloned = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    cloned[key] = cloneSerializableIndexValue(entryValue);
+  }
+  return cloned;
+}
+function cloneIndexExpressionValue(value) {
+  if (isNativeTemporalIndexValue(value)) return value;
+  if (value instanceof Date) return new Date(value.getTime());
+  if (Array.isArray(value)) return value.map(cloneIndexExpressionValue);
+  if (value !== null && typeof value === `object`) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        cloneIndexExpressionValue(entry)
+      ])
+    );
+  }
+  return value;
+}
+function cloneExpression(expression) {
+  return cloneIndexExpressionValue(expression);
+}
+export class CollectionIndexesManager {
+  constructor() {
+    this.indexes = /* @__PURE__ */ new Map();
+    this.indexMetadata = /* @__PURE__ */ new Map();
+    this.indexCounter = 0;
+  }
+  setDeps(deps) {
+    this.state = deps.state;
+    this.lifecycle = deps.lifecycle;
+    this.defaultIndexType = deps.defaultIndexType;
+    this.events = deps.events;
+  }
+  /**
+   * Creates an index on a collection for faster queries.
+   *
+   * @example
+   * ```ts
+   * // With explicit index type (recommended for tree-shaking)
+   * import { BasicIndex } from '@tanstack/db'
+   * collection.createIndex((row) => row.userId, { indexType: BasicIndex })
+   *
+   * // With collection's default index type
+   * collection.createIndex((row) => row.userId)
+   * ```
+   */
+  createIndex(indexCallback, config = {}) {
+    this.lifecycle.validateCollectionUsable(`createIndex`);
+    const indexId = ++this.indexCounter;
+    const singleRowRefProxy = createSingleRowRefProxy();
+    const indexExpression = indexCallback(singleRowRefProxy);
+    const expression = toExpression(indexExpression);
+    const IndexType = config.indexType ?? this.defaultIndexType;
+    if (!IndexType) {
+      throw new CollectionConfigurationError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `No index type specified and no defaultIndexType set on collection. Either pass indexType in config, or set defaultIndexType on the collection:
+  import { BasicIndex } from '@tanstack/db'
+  createCollection({ defaultIndexType: BasicIndex, ... })` : codedMessage(207)
+      );
+    }
+    const index = new IndexType(
+      indexId,
+      expression,
+      config.name,
+      config.options
+    );
+    index.build(this.state.entries());
+    this.indexes.set(indexId, index);
+    const metadata = createCollectionIndexMetadata(
+      indexId,
+      expression,
+      config.name,
+      IndexType,
+      config.options
+    );
+    this.indexMetadata.set(indexId, metadata);
+    this.events.emitIndexAdded(metadata);
+    return index;
+  }
+  /**
+   * Removes an index from this collection.
+   * Returns true when an index existed and was removed, false otherwise.
+   */
+  removeIndex(indexOrId) {
+    this.lifecycle.validateCollectionUsable(`removeIndex`);
+    const indexId = typeof indexOrId === `number` ? indexOrId : indexOrId.id;
+    const index = this.indexes.get(indexId);
+    if (!index) {
+      return false;
+    }
+    if (typeof indexOrId !== `number` && index !== indexOrId) {
+      return false;
+    }
+    this.indexes.delete(indexId);
+    const metadata = this.indexMetadata.get(indexId);
+    this.indexMetadata.delete(indexId);
+    if (metadata) {
+      this.events.emitIndexRemoved(metadata);
+    }
+    return true;
+  }
+  /**
+   * Returns a sorted snapshot of index metadata.
+   * This allows persisted wrappers to bootstrap from indexes that were created
+   * before they attached lifecycle listeners.
+   */
+  getIndexMetadataSnapshot() {
+    return Array.from(this.indexMetadata.values()).sort((left, right) => left.indexId - right.indexId).map((metadata) => ({
+      ...metadata,
+      expression: cloneExpression(metadata.expression),
+      resolver: { ...metadata.resolver },
+      ...metadata.options === void 0 ? {} : { options: cloneSerializableIndexValue(metadata.options) }
+    }));
+  }
+  /**
+   * Updates all indexes when the collection changes
+   */
+  updateIndexes(changes) {
+    try {
+      for (const index of this.indexes.values()) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+              index.add(change.key, change.value);
+              break;
+            case `update`:
+              if (change.previousValue) {
+                index.update(change.key, change.previousValue, change.value);
+              } else {
+                index.add(change.key, change.value);
+              }
+              break;
+            case `delete`:
+              index.remove(change.key, change.value);
+              break;
+          }
+        }
+      }
+    } catch (error) {
+      this.lifecycle.crash(error);
+      throw error;
+    }
+  }
+  /**
+   * Clean up indexes
+   */
+  cleanup() {
+    this.indexes.clear();
+    this.indexMetadata.clear();
+  }
+}

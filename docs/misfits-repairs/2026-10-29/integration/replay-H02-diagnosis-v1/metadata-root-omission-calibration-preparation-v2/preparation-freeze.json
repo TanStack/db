@@ -1,0 +1,34 @@
+{
+  "bindingSha256": "940748c3c4d23f6195af6298946a7cf31d14ce8ca9a7a77f4977e78d9056cf71",
+  "independentReviewFreezeSha256": "2a871c19f12f2af9fbfc5a82af56508df8a612ca991089b1d3f0aacf9a94c3b5",
+  "kind": "Immutable inactive minimal root omission invocation successor",
+  "materialized": false,
+  "members": {
+    "binding.json": {
+      "bytes": 13241,
+      "sha256": "940748c3c4d23f6195af6298946a7cf31d14ce8ca9a7a77f4977e78d9056cf71"
+    },
+    "correction.md": {
+      "bytes": 1637,
+      "sha256": "a85c951ac88556e7b194cb33ab94eb77dd00d8e61737e38127d7cec6faecd80b"
+    },
+    "delta-checks.json": {
+      "bytes": 1115,
+      "sha256": "853a79f34e027677738dbfadc885b4c2bc73aca39a9c30e41b81b04e679f980e"
+    },
+    "launch-calibration.py.txt": {
+      "bytes": 3178,
+      "sha256": "2163ef0b3872fd7451c001c6302512d87a22333a598890154ac6596ce67fce76"
+    },
+    "next-invocation.json": {
+      "bytes": 4082,
+      "sha256": "5bb7d785c03c641d231d5a898fde0acfffd92405108d8c15e6767fc20a86b5ec"
+    }
+  },
+  "nativeInvocations": 0,
+  "nextInvocationSha256": "5bb7d785c03c641d231d5a898fde0acfffd92405108d8c15e6767fc20a86b5ec",
+  "noClosureClaim": true,
+  "predecessorFreezeSha256": "71c1a266b201df6d3498973c193c464c36cbc31794db922526ed625a9785fcf3",
+  "productionEdits": 0,
+  "runtimeAdmission": false
+}

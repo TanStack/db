@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts (4 tests | 1 failed | 3 skipped) 7384ms
+     × replays the finite five-root queued-answer history 7383ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts > queued backend answer progress > replays the finite five-root queued-answer history
+Error: instrument receipt transport worker exit: nonzero exit without a worker-error receipt; inspect separate diagnostics
+ ❯ checkQueuedAnswerProgress packages/query-db-collection/tests/queued-answer-progress-oracle.ts:355:11
+    353|     )
+    354|   if (outcome.primaryObservationError)
+    355|     throw new Error(outcome.primaryObservationError)
+       |           ^
+    356|   if (outcome.reason === `wall`) {
+    357|     if (queued && premise && !executed) {
+ ❯ run packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:60:5
+ ❯ packages/query-db-collection/tests/queued-answer-progress-oracle.test.ts:65:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  22:51:32
+   Duration  7.72s (transform 47ms, setup 21ms, import 72ms, tests 7.38s, environment 172ms)
+

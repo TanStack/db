@@ -1,0 +1,48 @@
+{
+  "status": "All three output-only launcher deltas statically verified",
+  "changes": [
+    {
+      "selectedPath": "empty scope-key publication",
+      "originalRecipeEntry": 2,
+      "originalLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-empty-scope-v4.zsh",
+      "originalLauncherSha256": "0a0ab6339691ef7c2066087bbd59c159f666e74c58f06befed4465de62f91f4e",
+      "successorLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-empty-scope-v4.zsh",
+      "successorLauncherSha256": "770f1dc51af09e40044ab57b3c764c1759ef9bc90d1f085e83d03f09975444d1",
+      "originalOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4",
+      "successorOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-empty-scope-current-main-v4-setup-successor-v1",
+      "replacements": 2,
+      "reverseReplacementRestoresExactOriginal": true
+    },
+    {
+      "selectedPath": "literal true initial cut",
+      "originalRecipeEntry": 3,
+      "originalLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-sync-initial-v4.zsh",
+      "originalLauncherSha256": "b150e131e44c9bba6469be3b65e38fca1ec32909b7dc07865203a23735e7a9e9",
+      "successorLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-initial-v4.zsh",
+      "successorLauncherSha256": "77256cb66200cf4a9b4cea1523a30e7020e5b3159d735931786f8400b562f918",
+      "originalOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4",
+      "successorOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-initial-current-main-v4-setup-successor-v1",
+      "replacements": 2,
+      "reverseReplacementRestoresExactOriginal": true
+    },
+    {
+      "selectedPath": "ordinary synchronous mutation cut",
+      "originalRecipeEntry": 4,
+      "originalLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/launcher-sync-mutation-v4.zsh",
+      "originalLauncherSha256": "77cfed849bbcafdec36ff0e90736e1463946f607547b86e7da6df3b9523698b6",
+      "successorLauncher": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4-setup-successor-v1/launcher-sync-mutation-v4.zsh",
+      "successorLauncherSha256": "a92494e092f0cd88c63fa9a25a71b5b085ba0a944a9ac878391692b2ec1ae7bf",
+      "originalOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4",
+      "successorOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-sync-mutation-current-main-v4-setup-successor-v1",
+      "replacements": 2,
+      "reverseReplacementRestoresExactOriginal": true
+    }
+  ],
+  "originalCommandArgsEnvLimitsAndSelectorsUnchanged": true,
+  "readOnlyPsAndRedirectionUnchanged": true,
+  "sourceBindingUnchanged": true,
+  "newOutputsCurrentlyAbsent": true,
+  "testRuntimeExecuted": false,
+  "errors": [],
+  "limits": "No shell/native test invocation or automatic approval review. New require_escalated policy is external tool admission only, not a launcher code change."
+}

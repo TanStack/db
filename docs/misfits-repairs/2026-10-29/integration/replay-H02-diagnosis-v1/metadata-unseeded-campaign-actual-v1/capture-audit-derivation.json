@@ -1,0 +1,5 @@
+{
+  "derivation": "Reuse unchanged evidence consistency checks with exact current paths/session/chunks/original identities, no supplied/chosen seed, and additive actual-live outer/parent/group observations. No native/product import or rerun.",
+  "predecessor": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-actual-v1/capture-audit.py",
+  "predecessorSha256": "ee5f8737bcbd8156ceb1374622947f77ed900be130bf187fdc17e5c8da62a0cd"
+}

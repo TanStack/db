@@ -1,0 +1,11 @@
+{
+  "sessionId": 51279,
+  "actualToolReturn": {
+    "chunk_id": "ecbf3e",
+    "wall_time_seconds": 0.000016833,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "meaning": "Actual outer write_stdin completion; distinct from receiving-child outcomes."
+}

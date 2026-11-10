@@ -1,0 +1,1111 @@
+import { D2, output } from "@tanstack/db-ivm";
+import { compileCollectionQuery } from "../compiler/index.js";
+import {
+  LoadSubsetOperationAbortedError,
+  MissingAliasInputsError,
+  SetWindowFindOneLimitError,
+  SetWindowReentrancyError,
+  SetWindowRequiresOrderByError
+} from "../../errors.js";
+import { withPublicationContext } from "../../scheduler.js";
+import { createDeferred } from "../../deferred.js";
+import { deepEquals } from "../../utils.js";
+import { runAllCallbacks } from "../../utils/callbacks.js";
+import { normalizeError } from "../../utils/error.js";
+import { createSourceRecord } from "../../utils/source-record.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+import { collectSourceRefs } from "../ir.js";
+import { findProblems } from "../../collection/health-tree.js";
+import { isFailedStatus } from "../../live-query-primitives.js";
+import { reducePublicKeys } from "./public-key-reduction.js";
+import { CollectionSubscriber } from "./collection-subscriber.js";
+import { getCollectionBuilder } from "./collection-registry.js";
+import { LIVE_QUERY_INTERNAL } from "./internal.js";
+import { scheduleQueryGraphRun } from "./graph-scheduler.js";
+import { hasPendingJoinedWork as hasPendingJoinedSourceWork } from "./subset-demand-controller.js";
+import {
+  buildQueryFromConfig,
+  extractCollectionFromSource,
+  extractCollectionSources,
+  extractCollectionsFromQuery,
+  sourcePermitsInitialReadiness
+} from "./utils.js";
+let liveQueryCollectionCounter = 0;
+export class CollectionConfigBuilder {
+  constructor(config) {
+    this.config = config;
+    // WeakMap to store the keys of the results
+    // so that we can retrieve them in the getKey function
+    this.resultKeys = /* @__PURE__ */ new WeakMap();
+    // WeakMap to store the orderBy index for each result
+    this.orderByIndices = /* @__PURE__ */ new WeakMap();
+    this.isGraphRunning = false;
+    this.graphInputRevision = 0;
+    // Error state tracking
+    this.fatalQueryError = false;
+    // The query's own reload: its new run publishes nothing until its graph
+    // result is complete (law 9), then commits that result as the snapshot
+    // that replaces the kept rows and completes the reload.
+    this.reloadSnapshotPending = false;
+    this.builderDependencies = /* @__PURE__ */ new Set();
+    this.includeSourceIds = /* @__PURE__ */ new Set();
+    // Map of opaque source ID to subscription
+    this.subscriptions = createSourceRecord();
+    // Map of opaque source ID to demand callbacks for that lazy source
+    this.lazySourcesCallbacks = createSourceRecord();
+    // Set of opaque source IDs that are lazy (don't load initial state)
+    this.lazySources = /* @__PURE__ */ new Set();
+    this.activeDemands = /* @__PURE__ */ new Map();
+    this.demandGeneration = 0;
+    this.pendingOrderedLoads = /* @__PURE__ */ new Set();
+    this.orderedLoadFailed = false;
+    // Source replay cannot settle a failed imperative window operation.
+    this.windowFailed = false;
+    this.syncRunGeneration = 0;
+    this.windowOperationGeneration = 0;
+    // Counts setWindow calls, deferred or not. A separate count from window
+    // operations, so a deferred call does not drop the settlement of a move
+    // that already applied.
+    this.windowRequestGeneration = 0;
+    // Map of lexical source IDs to optimizable ORDER BY state
+    this.optimizableOrderByCollections = createSourceRecord();
+    this.id = config.id || `live-query-${++liveQueryCollectionCounter}`;
+    this.query = buildQueryFromConfig({
+      query: config.query,
+      requireObjectResult: true
+    });
+    this.initialWindow = this.query.orderBy?.length || this.query.singleResult ? {
+      offset: this.query.offset ?? 0,
+      limit: this.query.singleResult ? Math.min(this.query.limit ?? 1, 1) : this.query.limit ?? Infinity
+    } : void 0;
+    this.settledWindow = this.initialWindow;
+    this.collections = extractCollectionsFromQuery(this.query);
+    this.collectionSources = extractCollectionSources(this.query);
+    collectSourceRefs(this.query, this.includeSourceIds);
+    if (this.query.orderBy && this.query.orderBy.length > 0) {
+      this.compare = createOrderByComparator(this.orderByIndices);
+    }
+    this.queryCompareOptions = extractCollectionFromSource(
+      this.query
+    ).compareOptions;
+    this.compareOptions = this.config.defaultStringCollation ?? this.queryCompareOptions;
+    this.compileBasePipeline();
+  }
+  /**
+   * Reload each source with an error anywhere in its tree, then this query if
+   * its own node shows an error. A nested live query passes the reload down the
+   * same way. A source's reload keeps this query's status until it commits.
+   * A query that is not running starts once its sources reloaded, as any
+   * Collection's reload starts one; `query` is the live-query Collection,
+   * which a query that never started has not given this builder yet.
+   */
+  async reload(query = this.liveQueryCollection) {
+    if (query?.status === `crashed`) return query._sync.reload();
+    const failed = this.collectionSources.map(({ collection }) => collection).filter(
+      (collection, index, all) => all.indexOf(collection) === index && findProblems(collection.health).some((node) => node.error !== null)
+    );
+    const ended = query?.status === `idle` || query?.status === `cleaned-up`;
+    await Promise.all(failed.map((collection) => collection.reload()));
+    if (ended) return query.preload();
+    if (query?._lifecycle.problems.error || query?._lifecycle.reloading)
+      await query._sync.reload();
+  }
+  /** This live query as its sources' `subscribers` list it. */
+  dependent() {
+    const collection = this.liveQueryCollection;
+    if (!collection) return void 0;
+    return this.dependentEntry ??= {
+      kind: `live-query`,
+      collection,
+      get active() {
+        return collection.subscribers.length > 0;
+      },
+      end: () => collection.cleanup({ dependents: true })
+    };
+  }
+  /**
+   * Whether this live-query Collection had a subscriber or a preload in its
+   * current sync run. Until then it reads its source Collections without
+   * starting provider work.
+   */
+  hasSubscriberOrPreload() {
+    return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true;
+  }
+  /** Direct lexical source Collections, including joins, unions, and includes. */
+  getSourceCollections() {
+    return this.collectionSources.map(({ collection }) => collection);
+  }
+  /**
+   * Recursively checks if a query or any of its subqueries contains joins
+   */
+  hasJoins(query) {
+    if (query.join && query.join.length > 0) {
+      return true;
+    }
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true;
+      }
+    } else if (query.from.type === `unionFrom`) {
+      for (const source of query.from.sources) {
+        if (source.type === `queryRef` && this.hasJoins(source.query)) {
+          return true;
+        }
+      }
+    } else if (query.from.type === `unionAll`) {
+      for (const branch of query.from.queries) {
+        if (this.hasJoins(branch)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  getConfig() {
+    const builder = this;
+    return {
+      id: this.id,
+      getKey: this.config.getKey || ((item) => this.resultKeys.get(item) ?? item.$key),
+      sync: this.getSyncConfig(),
+      compare: this.compare,
+      defaultStringCollation: this.compareOptions,
+      gcTime: this.config.gcTime ?? 5e3,
+      // 5 seconds by default for live queries
+      schema: this.config.schema,
+      onInsert: this.config.onInsert,
+      onUpdate: this.config.onUpdate,
+      onDelete: this.config.onDelete,
+      startSync: this.config.startSync,
+      singleResult: this.query.singleResult,
+      utils: {
+        get lastSubsetError() {
+          return builder.lastSubsetError;
+        },
+        setWindow: this.setWindow.bind(this),
+        getWindow: this.getWindow.bind(this),
+        [LIVE_QUERY_INTERNAL]: {
+          getBuilder: () => this,
+          hasCustomGetKey: !!this.config.getKey,
+          hasJoins: this.hasJoins(this.query),
+          hasDistinct: !!this.query.distinct
+        }
+      }
+    };
+  }
+  setWindow(options) {
+    const windowFn = this.windowFn;
+    if (!windowFn) {
+      throw new SetWindowRequiresOrderByError();
+    }
+    if (this.query.singleResult) {
+      if (!this.query.orderBy?.length && (options.offset ?? 0) !== 0)
+        throw new SetWindowRequiresOrderByError();
+      if ((options.limit ?? this.initialWindow.limit) !== this.initialWindow.limit)
+        throw new SetWindowFindOneLimitError();
+    }
+    if (this.activeWindowOperation || this.isGraphRunning || Object.values(this.optimizableOrderByCollections).some(
+      (info) => info.isRequesting?.()
+    )) {
+      throw new SetWindowReentrancyError();
+    }
+    const baseWindow = this.currentWindow ?? this.settledWindow ?? this.initialWindow;
+    const requestedWindow = {
+      offset: options.offset ?? baseWindow?.offset,
+      limit: options.limit ?? baseWindow?.limit
+    };
+    const request = ++this.windowRequestGeneration;
+    const sourceRecovery = this.pendingSourceRecovery();
+    if (sourceRecovery) {
+      const syncRuns = this.syncRuns();
+      const resume = async () => {
+        for (let recovery = sourceRecovery; recovery; recovery = this.pendingSourceRecovery()) {
+          try {
+            await recovery;
+          } catch (error) {
+            if (!(error instanceof LoadSubsetOperationAbortedError) || syncRuns !== this.syncRuns())
+              throw error;
+          }
+        }
+        if (request !== this.windowRequestGeneration) {
+          await this.latestWindowRequest;
+          return;
+        }
+        const settlement2 = this.setWindow(requestedWindow);
+        this.latestWindowRequest = deferred;
+        if (settlement2 !== true) await settlement2;
+      };
+      const deferred = resume();
+      return this.latestWindowRequest = deferred;
+    }
+    if (this.hasFailedSourceRecovery()) {
+      return this.latestWindowRequest = Promise.reject(
+        this.lastSubsetError ?? new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Source recovery failed` : codedMessage(147)
+        )
+      );
+    }
+    const windowOperationGeneration = ++this.windowOperationGeneration;
+    const loadOperation = this.liveQueryCollection?._sync.beginLoadSubsetOperation();
+    for (const info of Object.values(this.optimizableOrderByCollections)) {
+      if (!info.joinedFilterSourceId) continue;
+      for (const plan of this.lazySourcesCallbacks[info.joinedFilterSourceId]?.plans ?? []) {
+        const participant = this.activeDemands.get(plan.id)?.participant;
+        if (participant?.isPending()) {
+          this.trackSubsetLoadOperationPromise(participant.promise);
+        }
+      }
+    }
+    const previousOperation = this.activeWindowOperation;
+    const operation = { generation: windowOperationGeneration, failed: false };
+    this.activeWindowOperation = operation;
+    this.windowFailed = false;
+    if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false;
+    try {
+      this.currentWindow = requestedWindow;
+      withPublicationContext(() => {
+        windowFn(requestedWindow);
+        this.maybeRunGraphFn?.();
+      });
+      if (operation.failed) throw operation.error;
+    } catch (error) {
+      if (windowOperationGeneration === this.windowOperationGeneration) {
+        this.windowFailed = true;
+        this.currentWindow = this.settledWindow;
+      }
+      loadOperation?.cancel();
+      throw error;
+    } finally {
+      this.activeWindowOperation = previousOperation;
+    }
+    const settlement = loadOperation?.wait() ?? true;
+    if (settlement === true) {
+      this.settledWindow = requestedWindow;
+      this.latestWindowRequest = void 0;
+      return true;
+    }
+    return this.latestWindowRequest = settlement.then(
+      () => {
+        if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.settledWindow = requestedWindow;
+        }
+        return request === this.windowRequestGeneration ? void 0 : this.latestWindowRequest;
+      },
+      (error) => {
+        if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.windowFailed = true;
+          this.currentWindow = this.settledWindow;
+        }
+        throw error;
+      }
+    );
+  }
+  getWindow() {
+    const window = this.settledWindow ?? this.initialWindow;
+    if (!this.windowFn || !window) {
+      return void 0;
+    }
+    return {
+      offset: window.offset ?? 0,
+      limit: window.limit ?? 0
+    };
+  }
+  isLazySource(sourceId) {
+    return this.lazySources.has(sourceId);
+  }
+  beginDemand(planId, pending = false) {
+    const generation = ++this.demandGeneration;
+    const previous = this.activeDemands.get(planId);
+    const participant = pending ? createDeferred() : void 0;
+    if (participant) {
+      void participant.promise.catch(() => {
+      });
+      this.trackSubsetLoadOperationPromise(participant.promise);
+    }
+    this.activeDemands.set(planId, {
+      generation,
+      settled: false,
+      participant
+    });
+    previous?.participant?.resolve();
+    return generation;
+  }
+  /** The source aliases of this query, in query order, for its health tree. */
+  healthSources() {
+    return this.collectionSources.map(({ sourceId, alias, collection }) => ({
+      id: sourceId,
+      alias,
+      collection,
+      ...this.includeSourceIds.has(sourceId) ? { kind: `include` } : {}
+    }));
+  }
+  settleDemand(planId, generation) {
+    const demand = this.activeDemands.get(planId);
+    if (!demand || demand.generation !== generation || demand.settled) return;
+    demand.settled = true;
+    try {
+      this.maybeRunGraphFn?.();
+      demand.participant?.resolve();
+    } catch (error) {
+      demand.participant?.reject(error);
+      throw error;
+    }
+  }
+  hasPendingJoinedWork(joinedSourceId) {
+    return hasPendingJoinedSourceWork(
+      joinedSourceId,
+      this.lazySourcesCallbacks,
+      this.subscriptions,
+      (planId) => this.activeDemands.get(planId)?.settled === false
+    );
+  }
+  failDemand(subscription, collection, planId, generation, error) {
+    const demand = this.activeDemands.get(planId);
+    if (!demand || demand.generation !== generation) return;
+    const normalized = this.recordSubsetError(error);
+    demand.participant?.reject(normalized);
+    if (this.liveQueryCollection?._lifecycle.status === `ready`) {
+      demand.settled = true;
+      if (this.collectionSources.some(
+        (source) => source.collection === collection && this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement
+      ))
+        subscription.failReplacement(normalized);
+      this.maybeRunGraphFn?.();
+      return;
+    }
+    this.failQuery(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Subset demand '${planId}' failed: ${normalized.message}` : codedMessage(228, { planId, cause: normalized.message }),
+      normalized
+    );
+  }
+  recordSubsetError(error, fatalBeforeReady = false) {
+    const normalized = normalizeError(error);
+    this.lastSubsetError = normalized;
+    if (this.activeWindowOperation) {
+      this.activeWindowOperation.failed = true;
+      this.activeWindowOperation.error = normalized;
+      this.orderedLoadFailed = true;
+    }
+    if (fatalBeforeReady) {
+      this.failQuery(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Initial subset load failed: ${normalized.message}` : codedMessage(229, { cause: normalized.message }),
+        normalized
+      );
+    }
+    return normalized;
+  }
+  trackSubsetLoadPromise(promise) {
+    this.liveQueryCollection._sync.trackLoadPromise(promise);
+  }
+  trackSubsetLoadOperationPromise(promise) {
+    this.liveQueryCollection._sync.trackLoadSubsetOperationPromise(promise);
+  }
+  hasActiveWindowOperation() {
+    return this.activeWindowOperation !== void 0;
+  }
+  getActiveWindowOperationGeneration() {
+    return this.activeWindowOperation?.generation;
+  }
+  scheduleGraphRunIfSyncRunCurrent(syncRunGeneration) {
+    if (syncRunGeneration !== this.syncRunGeneration || !this.currentSyncConfig || !this.currentSyncState) {
+      return;
+    }
+    this.scheduleGraphRun();
+  }
+  trackOrderedLoadPromise(promise, holdPublication = false) {
+    if (!holdPublication && !this.activeWindowOperation && this.liveQueryCollection?._lifecycle.inFirstLoad !== true && this.pendingOrderedLoads.size === 0) {
+      return;
+    }
+    const syncRunGeneration = this.syncRunGeneration;
+    if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false;
+    this.pendingOrderedLoads.add(promise);
+    const finish = (succeeded) => {
+      if (syncRunGeneration !== this.syncRunGeneration || !this.pendingOrderedLoads.delete(promise)) {
+        return;
+      }
+      if (!succeeded) this.orderedLoadFailed = true;
+      if (!this.orderedLoadFailed && this.pendingOrderedLoads.size === 0) {
+        this.scheduleGraphRun();
+      }
+    };
+    void promise.then(
+      () => finish(true),
+      () => finish(false)
+    );
+  }
+  retireDemand(planId) {
+    const demand = this.activeDemands.get(planId);
+    this.activeDemands.delete(planId);
+    demand?.participant?.resolve();
+  }
+  /** A root load of an eager source failed. */
+  failRootLoad(sourceId, error) {
+    this.reportFailedRequest(`root:${sourceId}`, [error]);
+  }
+  /** A later root load of the source succeeded. */
+  settleRootLoad(sourceId) {
+    this.clearFailedRequest(`root:${sourceId}`);
+  }
+  /** A source's truncate replay loaded the query's demand again. */
+  settleReplayedRequests(sourceId) {
+    this.settleRootLoad(sourceId);
+    this.clearFailedRequest(`replay:${sourceId}`);
+  }
+  /**
+   * A source's truncate replay could not load the query's data again: each
+   * of its failures, in failure order. Before the first ready the earliest
+   * fails the query.
+   */
+  failReplay(sourceId, errors) {
+    if (this.reportFailedRequest(`replay:${sourceId}`, errors)) return;
+    this.failQuery(errors[0].message, errors[0]);
+  }
+  // After the first ready, a failed load is a request error on this query's
+  // node. It clears when the failed request settles later or is released.
+  reportFailedRequest(key, errors) {
+    const lifecycle = this.liveQueryCollection?._lifecycle;
+    if (lifecycle?.status !== `ready`) return false;
+    lifecycle.reportRequestError(key, errors);
+    return true;
+  }
+  /** A request settled later, or the query no longer needs its data. */
+  clearFailedRequest(key) {
+    this.liveQueryCollection?._lifecycle.clearRequestError(key);
+  }
+  /** This query's sync run and its sources' sync runs. */
+  syncRuns() {
+    return [
+      this.syncRunGeneration,
+      ...this.collectionSources.map(
+        ({ collection }) => collection._sync.getSyncRunGeneration()
+      )
+    ].join();
+  }
+  /** Replays of other subscriptions to a source's collection that still load. */
+  siblingReplays(collection, sourceId) {
+    const pending = this.collectionSources.flatMap((source) => {
+      const subscription = this.subscriptions[source.sourceId];
+      return source.sourceId !== sourceId && source.collection === collection && subscription?.hasTruncateReplayWork && subscription.pendingTruncateReplacement ? [subscription.pendingTruncateReplacement] : [];
+    });
+    return pending.length > 0 ? Promise.allSettled(pending) : void 0;
+  }
+  hasPendingSourceRecovery() {
+    return Object.values(this.subscriptions).some(
+      (subscription) => subscription.hasPendingTruncateReplacement
+    );
+  }
+  pendingSourceRecovery() {
+    const pending = Object.values(this.subscriptions).flatMap(
+      (subscription) => subscription.pendingTruncateReplacement ? [subscription.pendingTruncateReplacement] : []
+    );
+    return pending.length > 0 ? Promise.all(pending).then(() => void 0) : void 0;
+  }
+  hasFailedSourceRecovery() {
+    return Object.values(this.subscriptions).some(
+      (subscription) => subscription.hasFailedTruncateReplacement
+    );
+  }
+  getSyncRunGeneration() {
+    return this.syncRunGeneration;
+  }
+  advanceGraphInputRevision() {
+    this.graphInputRevision++;
+  }
+  getGraphInputRevision() {
+    return this.graphInputRevision;
+  }
+  // Every graph turn checks ordered demand after D2 reaches a checkpoint.
+  // The source loader owns the fixed-point latches that prevent repeat requests.
+  maybeRunGraph() {
+    if (this.isGraphRunning) {
+      return;
+    }
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `maybeRunGraph called without active sync run. This should not happen.` : codedMessage(148)
+      );
+    }
+    this.isGraphRunning = true;
+    try {
+      const syncRunGeneration = this.syncRunGeneration;
+      const config = this.currentSyncConfig;
+      const { begin, commit } = config;
+      const syncState = this.currentSyncState;
+      const isCurrentSyncRun = () => syncRunGeneration === this.syncRunGeneration && this.currentSyncConfig === config && this.currentSyncState === syncState;
+      if (this.fatalQueryError) {
+        return;
+      }
+      if (syncState.subscribedToAllCollections) {
+        let checkedLoaders = false;
+        while (syncState.graph.pendingWork() || !checkedLoaders) {
+          if (syncState.graph.pendingWork()) {
+            try {
+              syncState.graph.run();
+            } catch (error) {
+              if (isCurrentSyncRun() && this.liveQueryCollection?._lifecycle.stoppedThisRun !== true) {
+                this.crashQuery(
+                  devBuild() && process.env.NODE_ENV !== `production` ? `Live query graph failed` : codedMessage(212),
+                  error
+                );
+              }
+              throw error;
+            }
+            if (!isCurrentSyncRun()) return;
+          }
+          this.loadMoreFn?.();
+          if (!isCurrentSyncRun()) return;
+          checkedLoaders = true;
+        }
+        syncState.flushPendingChanges?.();
+        if (!isCurrentSyncRun()) return;
+        if (syncState.messagesCount === 0 && !this.reloadSnapshotPending) {
+          begin();
+          commit();
+        }
+        this.updateLiveQueryStatus(config);
+      }
+    } finally {
+      this.isGraphRunning = false;
+    }
+  }
+  /**
+   * Schedules a graph run with the transaction-scoped scheduler.
+   * Ensures each builder runs at most once per transaction, with automatic dependency tracking
+   * to run parent queries before child queries. Outside a transaction, runs immediately.
+   *
+   * Multiple calls during a transaction are coalesced into a single execution.
+   * Dependencies are discovered from subscribed live queries.
+   *
+   * Uses the current sync run's config and syncState from instance properties.
+   *
+   * @param options - Optional scheduling configuration
+   * @param options.contextId - Transaction ID to group work; defaults to active transaction
+   */
+  scheduleGraphRun(options) {
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `scheduleGraphRun called without active sync run. This should not happen.` : codedMessage(149)
+      );
+    }
+    const syncRunGeneration = this.syncRunGeneration;
+    scheduleQueryGraphRun(
+      this,
+      this.builderDependencies,
+      () => {
+        if (syncRunGeneration === this.syncRunGeneration && this.currentSyncConfig && this.currentSyncState) {
+          this.maybeRunGraph();
+        }
+      },
+      options?.contextId
+    );
+  }
+  getSyncConfig() {
+    return {
+      rowUpdateMode: `full`,
+      sync: this.syncFn.bind(this)
+    };
+  }
+  syncFn(config) {
+    const syncRunGeneration = ++this.syncRunGeneration;
+    this.liveQueryCollection = config.collection;
+    this.reloadSnapshotPending = config.collection._lifecycle.reloading;
+    this.fatalQueryError = false;
+    this.lastSubsetError = void 0;
+    this.currentSyncConfig = config;
+    const syncState = {
+      messagesCount: 0,
+      subscribedToAllCollections: false,
+      unsubscribeCallbacks: /* @__PURE__ */ new Set()
+    };
+    let tornDown = false;
+    const teardown = () => {
+      if (tornDown) return;
+      tornDown = true;
+      if (this.syncRunGeneration === syncRunGeneration) {
+        this.syncRunGeneration++;
+      }
+      try {
+        runAllCallbacks(syncState.unsubscribeCallbacks);
+      } finally {
+        syncState.unsubscribeCallbacks.clear();
+        this.clearSyncRunState();
+      }
+    };
+    try {
+      const fullSyncState = this.extendPipelineWithChangeProcessing(
+        config,
+        syncState
+      );
+      this.currentSyncState = fullSyncState;
+      const loadingSubsetUnsubscribe = config.collection.on(
+        `loadingSubset:change`,
+        (event) => {
+          if (!event.isLoadingSubset) {
+            this.updateLiveQueryStatus(config);
+            if (this.hasPendingSourceRecovery()) this.maybeRunGraphFn?.();
+          }
+        }
+      );
+      syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe);
+      this.loadMoreFn = this.subscribeToAllCollections(config, fullSyncState);
+      this.maybeRunGraphFn = () => this.scheduleGraphRun();
+      this.scheduleGraphRun();
+    } catch (error) {
+      try {
+        teardown();
+      } catch {
+      }
+      throw error;
+    }
+    return teardown;
+  }
+  clearSyncRunState() {
+    this.windowOperationGeneration++;
+    this.currentSyncConfig = void 0;
+    this.currentSyncState = void 0;
+    this.maybeRunGraphFn = void 0;
+    this.loadMoreFn = void 0;
+    const lifecycle = this.liveQueryCollection?._lifecycle;
+    if (lifecycle?.reloading && !lifecycle.hasStartedCleanup())
+      this.currentWindow = this.settledWindow;
+    else {
+      this.currentWindow = void 0;
+      this.settledWindow = this.initialWindow;
+    }
+    this.fatalQueryError = false;
+    this.reloadSnapshotPending = false;
+    this.graphCache = void 0;
+    this.inputsCache = void 0;
+    this.pipelineCache = void 0;
+    this.sourceWhereClausesCache = void 0;
+    this.bucketFacadesCache = void 0;
+    this.includesRuntimeCache = void 0;
+    this.lazySources.clear();
+    for (const demand of this.activeDemands.values()) {
+      demand.participant?.reject(new LoadSubsetOperationAbortedError());
+    }
+    this.activeDemands.clear();
+    this.pendingOrderedLoads.clear();
+    this.orderedLoadFailed = false;
+    this.windowFailed = false;
+    this.optimizableOrderByCollections = createSourceRecord();
+    this.lazySourcesCallbacks = createSourceRecord();
+    Object.keys(this.subscriptions).forEach(
+      (key) => delete this.subscriptions[key]
+    );
+  }
+  /**
+   * Compiles the query pipeline with all declared aliases.
+   */
+  compileBasePipeline() {
+    this.graphCache = new D2();
+    const inputs = createSourceRecord();
+    for (const source of this.collectionSources) {
+      inputs[source.sourceId] = this.graphCache.newInput();
+    }
+    this.inputsCache = inputs;
+    const compilation = compileCollectionQuery(
+      this.query,
+      this.inputsCache,
+      this.collections,
+      this.subscriptions,
+      this.lazySourcesCallbacks,
+      this.lazySources,
+      this.optimizableOrderByCollections,
+      (windowFn) => {
+        this.windowFn = windowFn;
+        if (this.currentWindow) {
+          windowFn(this.currentWindow);
+        }
+      }
+    );
+    const includesRuntime = compilation.includes?.[0]?.runtime;
+    const getKey = this.config.getKey;
+    const materialized = includesRuntime ? includesRuntime.materializeCompilation(compilation, getKey) : getKey && this.hasJoins(this.query) ? reducePublicKeys(compilation, getKey) : { pipeline: compilation.pipeline, facades: void 0 };
+    this.pipelineCache = materialized.pipeline;
+    this.sourceWhereClausesCache = compilation.sourceWhereClauses;
+    this.bucketFacadesCache = materialized.facades;
+    this.includesRuntimeCache = includesRuntime;
+    const missingSources = this.collectionSources.map((source) => source.sourceId).filter((sourceId) => !Object.hasOwn(this.inputsCache, sourceId));
+    if (missingSources.length > 0) {
+      throw new MissingAliasInputsError(missingSources);
+    }
+  }
+  maybeCompileBasePipeline() {
+    if (!this.graphCache || !this.inputsCache || !this.pipelineCache) {
+      this.compileBasePipeline();
+    }
+    return {
+      graph: this.graphCache,
+      inputs: this.inputsCache,
+      pipeline: this.pipelineCache
+    };
+  }
+  extendPipelineWithChangeProcessing(config, syncState) {
+    const { begin, commit } = config;
+    const { graph, inputs, pipeline } = this.maybeCompileBasePipeline();
+    let pendingChanges = /* @__PURE__ */ new Map();
+    pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner();
+        syncState.messagesCount += messages.length;
+        messages.reduce(accumulateChanges, pendingChanges);
+      })
+    );
+    const facadeCompilations = this.bucketFacadesCache;
+    const includesRuntime = this.includesRuntimeCache;
+    const bucketFacades = facadeCompilations && includesRuntime ? includesRuntime.createBucketFacades(
+      this.id,
+      facadeCompilations,
+      (count) => {
+        syncState.messagesCount += count;
+      }
+    ) : void 0;
+    if (bucketFacades) {
+      syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup());
+    }
+    syncState.flushPendingChanges = () => {
+      const hasParentChanges = pendingChanges.size > 0;
+      const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false;
+      const snapshot = this.reloadSnapshotPending;
+      if (snapshot && !this.isResultComplete()) return;
+      const writesRoot = hasParentChanges || snapshot;
+      if (!writesRoot && !hasChildChanges) {
+        return;
+      }
+      if (this.windowFailed || this.orderedLoadFailed || this.hasPendingSourceRecovery() || this.pendingOrderedLoads.size > 0 || Object.values(this.optimizableOrderByCollections).some(
+        (info) => info.joinedFilterSourceId !== void 0 && this.hasPendingJoinedWork(info.joinedFilterSourceId)
+      )) {
+        return;
+      }
+      for (const [key, { inserts, deletes }] of pendingChanges) {
+        if (Math.abs(inserts - deletes) > 1) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production` ? `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.` : codedMessage(150, { key, change: inserts - deletes })
+          );
+        }
+      }
+      let facadePublication;
+      let rootPublication;
+      try {
+        facadePublication = bucketFacades?.flush();
+        rootPublication = writesRoot ? config.collection._deferPublication() : void 0;
+        const changesToApply = bucketFacades ? new Map(
+          [...pendingChanges].map(([key, changes]) => {
+            const resolved = {
+              ...changes,
+              value: bucketFacades.resolve(changes.value)
+            };
+            if (changes.previousValue !== void 0) {
+              resolved.previousValue = bucketFacades.resolve(
+                changes.previousValue
+              );
+            }
+            return [key, resolved];
+          })
+        ) : pendingChanges;
+        facadePublication?.prepare();
+        if (writesRoot) {
+          begin(snapshot ? { snapshot } : void 0);
+          let lookup;
+          const hasSyncedKey = (key) => {
+            if (snapshot) return false;
+            lookup ??= config.collection._state.createSyncedKeyLookup();
+            return lookup(key);
+          };
+          changesToApply.forEach(
+            this.applyChanges.bind(this, config, hasSyncedKey)
+          );
+          if (hasOrderOnlyMove(changesToApply)) {
+            markLayoutChange(config.collection);
+          }
+          commit();
+          this.reloadSnapshotPending = false;
+        }
+      } catch (error) {
+        rootPublication?.discard();
+        facadePublication?.rollback();
+        throw error;
+      }
+      pendingChanges = /* @__PURE__ */ new Map();
+      let publicationError;
+      for (const publish of [
+        rootPublication?.publish,
+        facadePublication?.publish
+      ]) {
+        if (!publish) continue;
+        try {
+          publish();
+        } catch (error) {
+          publicationError ??= error;
+        }
+      }
+      if (publicationError !== void 0) throw publicationError;
+    };
+    graph.finalize();
+    syncState.graph = graph;
+    syncState.inputs = inputs;
+    syncState.pipeline = pipeline;
+    return syncState;
+  }
+  applyChanges(config, hasSyncedKey, changes, key) {
+    const { write, collection } = config;
+    const { deletes, inserts, value, orderByIndex } = changes;
+    this.resultKeys.set(value, key);
+    if (orderByIndex !== void 0) {
+      this.orderByIndices.set(value, orderByIndex);
+    }
+    if (inserts && deletes === 0) {
+      write({
+        value,
+        type: `insert`
+      });
+    } else if (
+      // Insert & update(s) (updates are a delete & insert)
+      inserts > deletes || // A balanced delta updates an existing authoritative row, even if an
+      // optimistic delete hides it or its earlier insert is still queued.
+      inserts === deletes && hasSyncedKey(collection.getKeyFromItem(value))
+    ) {
+      write({
+        value,
+        type: `update`
+      });
+    } else if (deletes > 0) {
+      write({
+        value,
+        type: `delete`
+      });
+    } else {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.` : codedMessage(151)
+      );
+    }
+  }
+  /**
+   * Handle status changes from source collections
+   */
+  handleSourceStatusChange(config, sourceId, collectionId, event) {
+    const { status } = event;
+    if (status === `crashed`) {
+      this.crashQuery(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' crashed` : codedMessage(172, { collectionId }),
+        event.collection._lifecycle.getSyncError()
+      );
+      return;
+    }
+    if (status === `error`) {
+      if (this.liveQueryCollection?.status === `ready`) return;
+      this.failQuery(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' failed its first load` : codedMessage(260, { collectionId }),
+        event.collection._lifecycle.getSyncError()
+      );
+      return;
+    }
+    if (status === `cleaned-up`) {
+      this.handleSourceCleanupStart(collectionId);
+      return;
+    }
+    if (status === `ready`) {
+      if (Object.values(this.optimizableOrderByCollections).some(
+        (info) => info.joinedFilterSourceId === sourceId
+      )) {
+        this.maybeRunGraphFn?.();
+      }
+    }
+    this.updateLiveQueryStatus(config);
+  }
+  handleSourceCleanupStart(collectionId) {
+    if (this.fatalQueryError) return;
+    const error = new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. Live queries prevent automatic GC, so this was likely a manual cleanup() call.` : codedMessage(152, { collectionId, id: this.id })
+    );
+    this.crashQuery(error.message, error);
+    return error;
+  }
+  /**
+   * Update the live query status based on source collection statuses
+   */
+  updateLiveQueryStatus(config) {
+    if (this.fatalQueryError || !this.isResultComplete()) return;
+    if (this.reloadSnapshotPending)
+      this.currentSyncState?.flushPendingChanges?.();
+    if (!this.reloadSnapshotPending) config.markReady();
+  }
+  /** Whether the current run's graph result is complete. */
+  isResultComplete() {
+    const syncState = this.currentSyncState;
+    const allReady = this.allRequiredSourcesReady();
+    const allDemandsSettled = [...this.activeDemands.values()].every(
+      (demand) => demand.settled
+    );
+    const isLoading = this.liveQueryCollection?.isLoadingSubset;
+    return syncState?.subscribedToAllCollections === true && !syncState.graph.pendingWork() && allReady && allDemandsSettled && isLoading !== true && !this.hasPendingSourceRecovery();
+  }
+  /**
+   * The query's first load failed: status `error`. A sync problem or a
+   * request error after the first ready never reaches here.
+   */
+  failQuery(message, error) {
+    if (!this.enterErrorState(message)) return;
+    this.liveQueryCollection?._lifecycle.fail(error ?? new Error(message));
+  }
+  /**
+   * The query can no longer serve reads: a crashed source, a graph failure,
+   * or a contract violation such as a source cleaned up under this query.
+   */
+  crashQuery(message, error) {
+    this.enterErrorState(message);
+    this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message));
+  }
+  /** Returns false when the query already ended. */
+  enterErrorState(message) {
+    if (this.fatalQueryError) return false;
+    this.fatalQueryError = true;
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `[Live Query Error] ${message}` : message
+    );
+    return true;
+  }
+  allRequiredSourcesReady() {
+    return this.collectionSources.every(
+      ({ collection }) => sourcePermitsInitialReadiness(collection)
+    );
+  }
+  /**
+   * Creates one subscription per lexical collection source.
+   * Each source gets independent filters, even when aliases or collections repeat.
+   * Example: `{ employee: col, manager: col }` creates two separate subscriptions.
+   */
+  subscribeToAllCollections(config, syncState) {
+    if (this.collectionSources.length === 0) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Query '${this.id}' has no collection sources. This should not happen; please report.` : codedMessage(153, { id: this.id })
+      );
+    }
+    const relayed = /* @__PURE__ */ new Set();
+    const loaders = this.collectionSources.map((source) => {
+      const { sourceId, alias, collection } = source;
+      const collectionId = collection.id;
+      const dependencyBuilder = getCollectionBuilder(collection);
+      if (dependencyBuilder && dependencyBuilder !== this) {
+        this.builderDependencies.add(dependencyBuilder);
+      }
+      const collectionSubscriber = new CollectionSubscriber(
+        sourceId,
+        alias,
+        collection,
+        this
+      );
+      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+        this.handleSourceStatusChange(config, sourceId, collectionId, event);
+      });
+      if (!relayed.has(collection)) {
+        relayed.add(collection);
+        syncState.unsubscribeCallbacks.add(
+          collection.on(
+            `health:change`,
+            () => this.liveQueryCollection?._emitHealthChange()
+          )
+        );
+      }
+      let cleanupStartError;
+      const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
+        cleanupStartError = this.handleSourceCleanupStart(collectionId);
+      });
+      if (cleanupStartError) {
+        cleanupStartUnsubscribe();
+        statusUnsubscribe();
+        throw cleanupStartError;
+      }
+      syncState.unsubscribeCallbacks.add(statusUnsubscribe);
+      syncState.unsubscribeCallbacks.add(cleanupStartUnsubscribe);
+      if (isFailedStatus(collection.status)) {
+        this.handleSourceStatusChange(config, sourceId, collectionId, {
+          type: `status:change`,
+          collection,
+          status: collection.status,
+          previousStatus: collection.status
+        });
+      }
+      const subscription = collectionSubscriber.subscribe();
+      this.subscriptions[sourceId] = subscription;
+      if (subscription.isDeferringAcquisition()) {
+        syncState.unsubscribeCallbacks.add(
+          this.liveQueryCollection._onFirstSubscriberOrPreload(
+            () => subscription.resumeDeferredAcquisition()
+          )
+        );
+        if (this.hasSubscriberOrPreload()) {
+          subscription.resumeDeferredAcquisition();
+        }
+      }
+      const lazyCallbacks = this.lazySourcesCallbacks[sourceId];
+      if (lazyCallbacks) {
+        lazyCallbacks.setDemand = (plan, keys) => collectionSubscriber.setDemand(subscription, plan, keys);
+        for (const plan of lazyCallbacks.plans ?? []) {
+          if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
+            lazyCallbacks.setDemand(plan, plan.initialKeys);
+          }
+        }
+      }
+      const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+        collectionSubscriber,
+        subscription
+      );
+      return loadMore;
+    });
+    syncState.subscribedToAllCollections = true;
+    return () => runAllCallbacks(loaders);
+  }
+}
+function createOrderByComparator(orderByIndices) {
+  return (val1, val2) => {
+    const index1 = orderByIndices.get(val1);
+    const index2 = orderByIndices.get(val2);
+    if (index1 && index2) {
+      if (index1 < index2) {
+        return -1;
+      } else if (index1 > index2) {
+        return 1;
+      } else {
+        return 0;
+      }
+    }
+    return 0;
+  };
+}
+function accumulateChanges(acc, [[key, tupleData], multiplicity]) {
+  const [value, orderByIndex] = tupleData;
+  const changes = acc.get(key) || {
+    deletes: 0,
+    inserts: 0,
+    value,
+    orderByIndex
+  };
+  if (multiplicity < 0) {
+    if (changes.deletes === 0) {
+      changes.previousValue = value;
+      changes.previousOrderByIndex = orderByIndex;
+    }
+    changes.deletes += Math.abs(multiplicity);
+  } else if (multiplicity > 0) {
+    changes.inserts += multiplicity;
+    changes.value = value;
+    if (orderByIndex !== void 0) {
+      changes.orderByIndex = orderByIndex;
+    }
+  }
+  acc.set(key, changes);
+  return acc;
+}
+function hasOrderOnlyMove(changesToApply) {
+  for (const changes of changesToApply.values()) {
+    const isUpdate = changes.inserts > 0 && changes.deletes > 0;
+    if (isUpdate && changes.previousValue !== void 0 && deepEquals(changes.previousValue, changes.value) && changes.orderByIndex !== changes.previousOrderByIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+function markLayoutChange(collection) {
+  collection._markLayoutChange();
+}

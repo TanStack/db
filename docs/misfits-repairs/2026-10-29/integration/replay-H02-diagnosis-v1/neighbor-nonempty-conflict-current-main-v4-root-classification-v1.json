@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-30T07:16:29.003211+00:00",
+  "rootClassified": true,
+  "classifiedBy": "/root",
+  "classification": "accepted finite bounded nonempty-cache queued-answer progress RED under exact admitted gate",
+  "resultManifestSha256": "5c963f122c731a04c9a5e29e3a420d5a384089f5857866ada5bd8930122b5f46",
+  "rootRehashedMembers": 1960,
+  "independentResultReviewSha256": "6894f0f6f742e3a35c9c93c2e613c620cbcfc5978a81d60d43385a5ba43b0293",
+  "rawReceiptCount": 70961,
+  "conflictSequence": 182,
+  "completedEnqueueSequence": 184,
+  "answerExecuted": false,
+  "partialReach": {
+    "nonempty-prior": 1,
+    "held-provider-read": 1,
+    "conflicting-cache-premise": 1,
+    "completed-enqueue": 1,
+    "answer-executed": 0,
+    "final-publication": 0,
+    "worker-cleaned": 0
+  },
+  "rootProcessAbsenceSha256": "05a891e582a8d6f50f12e0c29c313fb7df82f230fc632e5bcc227e39b2b6bb5a",
+  "limits": [
+    "Not proof of infinite execution or a numerical product deadline.",
+    "Forced containment supplies no direct adapter cleanup or final publication evidence.",
+    "Temporal metadata receiving and candidate20 remain open; production progress fix unimplemented."
+  ]
+}

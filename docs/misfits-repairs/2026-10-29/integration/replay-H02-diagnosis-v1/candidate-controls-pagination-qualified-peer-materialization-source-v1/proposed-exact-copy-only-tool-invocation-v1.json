@@ -1,0 +1,56 @@
+{
+  "schema": "h02-qualified-copy-only-tool-proposal-v1",
+  "status": "PROPOSED ONLY; independent source review then separate exact ROOT copy-only admission",
+  "tool": "exec_command",
+  "arguments": {
+    "cmd": "exec /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -I -S -B /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed",
+    "shell": "/bin/sh",
+    "login": false,
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+    "sandbox_permissions": "use_default",
+    "yield_time_ms": 1000,
+    "max_output_tokens": 10000
+  },
+  "shell": {
+    "path": "/bin/sh",
+    "sha256": "68c831f7c8468a09979fa812f3cab7b2043a42101160a526a20a09719db342fa"
+  },
+  "argv": [
+    "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "-I",
+    "-S",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json",
+    "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed"
+  ],
+  "contract": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/copy-only-contract-v1.json",
+    "sha256": "f5964732cc403ebe13dc401775b38d5bf9caba1536a2c2a5d53e0961905b9bed"
+  },
+  "materializer": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt",
+    "sha256": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09"
+  },
+  "python": {
+    "path": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "resolved": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "limits": "Pins interpreter binary/version/isolated flags; no universal OS, native-library or Python installation census is claimed."
+  },
+  "maxInvocations": 1,
+  "receiptRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1",
+  "actualCompletion": "Preserve initial/session/final tool records, all yielded chunks, exact exit status and both persistent raw streams. If tool yields, poll only its returned session; polling is not another invocation. Never treat silence, timeout or missing tail as success.",
+  "acceptance": "One actual exit0 plus final copy-verified receipt and independent source/copy/link/dir/tool before-after verification. A partial or refused copy grants no retry, repair, compile or native authority. Receipt and root remain intact on failure.",
+  "containment": "Filesystem-only finite work, no child subprocess. Tool yield1000 permits observation; it is not a hard wall/memory bound. No receiving60s/20s limit is borrowed. A stop or timeout requires ROOT classification, not automatic retry.",
+  "executionScope": "Only shell exec, pinned Python and stdlib execute. Copied target/config/compiler/test/model/program bytes are not imported or evaluated. No process probe, installation, Git/PR/canonical action.",
+  "compilerContainment": "Still unselected; separately admitted after accepted copy evidence.",
+  "executed": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

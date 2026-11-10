@@ -1,0 +1,276 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/queued_progress_design",
+  "reservedHeavySlot": 2,
+  "runtimeAdmission": true,
+  "firstClassification": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/root-first-baseline-classification-v1.json",
+    "sha256": "b27e566437bf8033aa9b81eb3884adf9a5a702a36311b780baf6acd2837d485e"
+  },
+  "firstResultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/inline-park-root-result-freeze-v1.json",
+    "sha256": "0780b64244c8ee668e5187aa65e4f762d501be12e54405cee216f993e04d6b50"
+  },
+  "firstActualReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-park-root-actual-independent-review-v1.md",
+    "sha256": "fff79e37fba837244a11410ca5a7ecf219ba62ccd16029e5942aef96d319a797"
+  },
+  "remainingSourceReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/remaining15-source-inputs-independent-review-v1.md",
+    "sha256": "dbaeb72448d196a0c6b6378bf05bb8a18b38b96bc6de19f2a49002825ee58d48"
+  },
+  "remainingSourceFacts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/remaining15-source-inputs-independent-facts-v2.json",
+    "sha256": "6030c4f8a363ae252b3bf669fbee48ec50dff9d0a48811664960a940a7d2a09c"
+  },
+  "inputFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/input-freeze-v1.json",
+    "sha256": "7a819f08e33cd635c6479ba6f38c7d9471f322f38f60762b121be3e9859aa852"
+  },
+  "inputPacket": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/input-packet-sha256-v1.json",
+    "sha256": "0365e49182e79b8f6f7a2592bfacfd0c029699691a20cf5c28f5dc701344d4d9"
+  },
+  "selection": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/selection-plan-v1.json",
+    "sha256": "af1220160208b119c76254ecadb5a0a4fffc104f5aba9a445f262a959bfcb80e"
+  },
+  "mandatoryGate": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/mandatory-first-baseline-gate-v1.json",
+    "sha256": "bc7f7f9a9c8b56c12c6e2cf9bf3d477c7feb31a42278338c7a74ffb4a3a655ef"
+  },
+  "sourceFreezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "sourcePacketSha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+  "exactCommands": [
+    {
+      "ordinal": 2,
+      "id": "inline-held-window",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-held-window.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-held-window.json",
+        "sha256": "3c5a479f46ade8f48ba5fe07cc0035c3ee8743b481be783fca835ae11f879412"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 3,
+      "id": "inline-source-failed-peer",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-source-failed-peer.json",
+        "sha256": "6a9ed9c54037bea6067dd707c2b17ac79b958bf6d66bad403cb8e94d2d6964a0"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 4,
+      "id": "inline-subscriber-tail",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-subscriber-tail.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-subscriber-tail.json",
+        "sha256": "ea984438319ca08456680af5b88dc537cb8c3858e65fc3d67f1a6f8363a8c8df"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 5,
+      "id": "inline-initial-status-tail",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-initial-status-tail.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-initial-status-tail.json",
+        "sha256": "52fcadd7458181286bff851aee5c3c16dda16bfc0943b4b6fd77352a569a9f41"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 6,
+      "id": "inline-graph-failure",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-graph-failure.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-graph-failure.json",
+        "sha256": "fe12004d3f0c44caf0053b8728c98eea1aca66ab4a5924342ce6007aa85357bb"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 7,
+      "id": "inline-cleanup-abandonment",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-cleanup-abandonment.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/inline-cleanup-abandonment.json",
+        "sha256": "a7a01c92d332603237ff2a67812843fc1da544894cda69ef20875881af20e4a6"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 8,
+      "id": "facade-park-root",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-park-root.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-park-root.json",
+        "sha256": "c2823d692f40a23dfc6db308fcd9ecb8977e12339dcfe21bc775fc8f32e90696"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 9,
+      "id": "facade-park-facade",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-park-facade.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-park-facade.json",
+        "sha256": "496ffabac576ef2c97e6a908088f6c68f8742cbdb7adedfa7d14b433a2f790fe"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 10,
+      "id": "facade-facade-rollback",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-facade-rollback.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-facade-rollback.json",
+        "sha256": "09109793fe7c193ee96a09a5d2ea5e663f972bb40da647f9168a15c7b0d09745"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 11,
+      "id": "facade-held-window",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-held-window.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-held-window.json",
+        "sha256": "0d249e568b36e82d7feb39cdf28bf4884525b864c7651be64b986db73f2e0e64"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 12,
+      "id": "facade-source-failed-peer",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-source-failed-peer.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-source-failed-peer.json",
+        "sha256": "5b3904cbd51e05f0052c607b59f79270e9ab7213aca93443bfa239c2e025c8ce"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 13,
+      "id": "facade-subscriber-tail",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-subscriber-tail.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-subscriber-tail.json",
+        "sha256": "066b43f44f196400803fc1ccfd3b94c3d4202dbec96493c906861804e774f541"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 14,
+      "id": "facade-initial-status-tail",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-initial-status-tail.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-initial-status-tail.json",
+        "sha256": "3428c9cf19a2bba11e0011e3bb4fea66b64f4dd69ecfcb27c7ba282f4e0029d0"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 15,
+      "id": "facade-graph-failure",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-graph-failure.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-graph-failure.json",
+        "sha256": "745074f0f45829b6c5c5d021a32ea274d54f360071fb28d3a153f75646f54758"
+      },
+      "maxInvocations": 1
+    },
+    {
+      "ordinal": 16,
+      "id": "facade-cleanup-abandonment",
+      "argv": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-cleanup-abandonment.json"
+      ],
+      "recipe": {
+        "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-remaining-baselines-inputs-v1/frozen-inputs-v1/recipes/facade-cleanup-abandonment.json",
+        "sha256": "494b9bf24ed226accab76f63c961f67cf8993fe403eb85d22468aa1102086a38"
+      },
+      "maxInvocations": 1
+    }
+  ],
+  "executionPolicy": {
+    "workers": 1,
+    "serialOriginalOrder": true,
+    "stopOnFirstFailureOrUnreachedPremise": true,
+    "automaticReruns": 0,
+    "resourceIncreases": 0,
+    "actualOuterReturnRequiredPerCell": true,
+    "postReturnIdentityAndAbsenceRequired": true,
+    "requireProcessVisibilityPreflight": true
+  },
+  "limits": {
+    "outerWallMs": 60000,
+    "innerWallMs": 20000,
+    "nodeHeapMiB": 384,
+    "aggregateRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "evidencePolicy": "Preserve full raw streams, actual tool completion, bound runtime assets and positive cleanup; independent actual review required before GREEN classification. No product RED credit for setup/binding/containment failures.",
+  "canonicalImport": false,
+  "publishing": false
+}

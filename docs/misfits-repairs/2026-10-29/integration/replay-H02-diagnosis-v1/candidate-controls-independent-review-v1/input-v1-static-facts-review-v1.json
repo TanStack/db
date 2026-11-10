@@ -1,0 +1,457 @@
+{
+  "at": "2026-10-30T09:08:50.197754+00:00",
+  "scope": "Static parse of all 16 frozen JSON programs against the selected fixed fixture facts, step order, target/overlay and source acquisition restrictions; no constructor, oracle model, history or production execution",
+  "programs": 16,
+  "cells": [
+    {
+      "id": "inline-park-root",
+      "profile": "inline",
+      "gate": "park-root",
+      "stepSignature": [
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "source-write",
+        "require",
+        "stage-output",
+        "observe:held-output",
+        "settle-optimistic",
+        "apply-output",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-held-window",
+      "profile": "inline",
+      "gate": "held-window",
+      "stepSignature": [
+        "require",
+        "control:begin-replay",
+        "request-window",
+        "observe:held-window",
+        "source-answer",
+        "install",
+        "observe:completed-window"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "answer",
+          "changedSourcesFromPrior": [
+            "marked"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-source-failed-peer",
+      "profile": "inline",
+      "gate": "source-failed-peer",
+      "stepSignature": [
+        "require",
+        "require",
+        "control:hold-demand-sources",
+        "request-window",
+        "observe:held-window",
+        "source-failure",
+        "observe:source-failed-peer",
+        "source-answer",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "peer",
+          "changedSourcesFromPrior": []
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-subscriber-tail",
+      "profile": "inline",
+      "gate": "subscriber-tail",
+      "stepSignature": [
+        "require",
+        "control:arm-subscriber-tail",
+        "source-write",
+        "install",
+        "tail-failure",
+        "observe:installed-tail-exception"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-initial-status-tail",
+      "profile": "inline",
+      "gate": "initial-status-tail",
+      "stepSignature": [
+        "require",
+        "require",
+        "control:prepare-held-initial",
+        "control:arm-initial-status-tail",
+        "request-initial",
+        "source-answer",
+        "install",
+        "mark-ready",
+        "tail-failure",
+        "observe:installed-tail-exception"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "answer",
+          "changedSourcesFromPrior": [
+            "roots",
+            "marked",
+            "children"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-graph-failure",
+      "profile": "inline",
+      "gate": "graph-failure",
+      "stepSignature": [
+        "require",
+        "control:hold-demand-sources",
+        "request-window",
+        "control:throw-current-graph",
+        "graph-failure",
+        "observe:graph-exception"
+      ],
+      "factCuts": [],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "inline-cleanup-abandonment",
+      "profile": "inline",
+      "gate": "cleanup-abandonment",
+      "stepSignature": [
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "source-write",
+        "require",
+        "stage-output",
+        "observe:held-output",
+        "cleanup",
+        "restart",
+        "observe:cleanup-abandoned",
+        "control:establish-replacement",
+        "install",
+        "mark-ready",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        },
+        {
+          "action": "restart",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-park-root",
+      "profile": "facade",
+      "gate": "park-root",
+      "stepSignature": [
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "source-write",
+        "require",
+        "stage-output",
+        "observe:held-output",
+        "settle-optimistic",
+        "apply-output",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-park-facade",
+      "profile": "facade",
+      "gate": "park-facade",
+      "stepSignature": [
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "source-write",
+        "require",
+        "stage-output",
+        "observe:held-output",
+        "settle-optimistic",
+        "apply-output",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "children"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-facade-rollback",
+      "profile": "facade",
+      "gate": "facade-rollback",
+      "stepSignature": [
+        "require",
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "control:arm-facade-B-commit-fault",
+        "source-write",
+        "require",
+        "stage-output",
+        "require",
+        "stage-output",
+        "tail-failure",
+        "observe:facade-rollback",
+        "settle-optimistic",
+        "apply-output",
+        "apply-output",
+        "observe:public-state",
+        "control:retry-publication",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "children"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-held-window",
+      "profile": "facade",
+      "gate": "held-window",
+      "stepSignature": [
+        "require",
+        "control:begin-replay",
+        "request-window",
+        "observe:held-window",
+        "source-answer",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "observe:completed-window"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "answer",
+          "changedSourcesFromPrior": [
+            "marked"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-source-failed-peer",
+      "profile": "facade",
+      "gate": "source-failed-peer",
+      "stepSignature": [
+        "require",
+        "require",
+        "control:hold-demand-sources",
+        "request-window",
+        "observe:held-window",
+        "source-failure",
+        "observe:source-failed-peer",
+        "source-answer",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "peer",
+          "changedSourcesFromPrior": []
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-subscriber-tail",
+      "profile": "facade",
+      "gate": "subscriber-tail",
+      "stepSignature": [
+        "require",
+        "control:arm-subscriber-tail",
+        "source-write",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "tail-failure",
+        "observe:installed-tail-exception"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "roots"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-initial-status-tail",
+      "profile": "facade",
+      "gate": "initial-status-tail",
+      "stepSignature": [
+        "require",
+        "require",
+        "control:prepare-held-initial",
+        "control:arm-initial-status-tail",
+        "request-initial",
+        "source-answer",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "mark-ready",
+        "tail-failure",
+        "observe:installed-tail-exception"
+      ],
+      "factCuts": [
+        {
+          "action": "source-answer",
+          "requirement": "answer",
+          "changedSourcesFromPrior": [
+            "roots",
+            "marked",
+            "children"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-graph-failure",
+      "profile": "facade",
+      "gate": "graph-failure",
+      "stepSignature": [
+        "require",
+        "control:hold-demand-sources",
+        "request-window",
+        "control:throw-current-graph",
+        "graph-failure",
+        "observe:graph-exception"
+      ],
+      "factCuts": [],
+      "sourceAnswerPremisesChecked": true
+    },
+    {
+      "id": "facade-cleanup-abandonment",
+      "profile": "facade",
+      "gate": "cleanup-abandonment",
+      "stepSignature": [
+        "optimistic-overlay",
+        "control:bind-output-holds",
+        "source-write",
+        "require",
+        "stage-output",
+        "observe:held-output",
+        "cleanup",
+        "restart",
+        "observe:cleanup-abandoned",
+        "control:establish-replacement",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "install",
+        "mark-ready",
+        "observe:public-state"
+      ],
+      "factCuts": [
+        {
+          "action": "source-write",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "children"
+          ]
+        },
+        {
+          "action": "restart",
+          "requirement": null,
+          "changedSourcesFromPrior": [
+            "children"
+          ]
+        }
+      ],
+      "sourceAnswerPremisesChecked": true
+    }
+  ],
+  "failures": [],
+  "candidateRaw20": "all UNREACHED",
+  "runtimeAdmission": false
+}

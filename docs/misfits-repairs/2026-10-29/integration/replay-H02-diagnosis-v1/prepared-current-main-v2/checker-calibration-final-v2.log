@@ -1,0 +1,17 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > accepts complete prior-to-final publication after provider releases 1ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a wrong transient before a later valid final publication 1ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a bad payload even when the callback read is correct 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a return to prior after final first publishes 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a duplicate insert without normalizing it away 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a missing delete without normalizing it away 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects duplicate updates even when their final folded value is correct 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > compares an initial synchronous snapshot at the initiating subscriber cut 0ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  22:10:21
+   Duration  152ms (transform 24ms, setup 0ms, import 67ms, tests 4ms, environment 0ms)
+

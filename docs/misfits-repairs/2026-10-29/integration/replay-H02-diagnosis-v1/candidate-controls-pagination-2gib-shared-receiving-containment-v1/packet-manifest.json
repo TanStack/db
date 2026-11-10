@@ -1,0 +1,76 @@
+{
+  "status": "SEALED SOURCE-ONLY PREPARATION; external Q review/lint/operational review and ROOT runtime admission remain pending",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "runtimeAdmitted": false,
+  "runtimeInvocations": 0,
+  "files": {
+    "binding.json": {
+      "sha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+      "bytes": 2710
+    },
+    "launch.py": {
+      "sha256": "c0d06cba44016995d26517e0461a1c6acdbcdc9354ec973cf3a67199750702a0",
+      "bytes": 11735
+    },
+    "preparation-tool-record-v1.json": {
+      "sha256": "003465f9b42bda81ef1914996ec2043ab9d198b0b325d270345d3767be8c5944",
+      "bytes": 1126
+    },
+    "proposed-exact-one-launch-v1.json": {
+      "sha256": "58dbaab6c843ba1086bc3e17f091d7f002f15f5eb982103b7cf3a16379214c9b",
+      "bytes": 1607
+    },
+    "report-v1.md": {
+      "sha256": "e8c60d241a56f961d413668bad429fe4fd65c6133451925f62aac23ff5e314a1",
+      "bytes": 5041
+    },
+    "run-recipe.json": {
+      "sha256": "df774ef8fea7fa499b1afd78fa14bd916777c2b3a2df2430ba15799335197fb7",
+      "bytes": 4316
+    },
+    "source-validation-v1.json": {
+      "sha256": "ab15a4408e26b7b8f5e8e97efb32106b2a6ac02ab091fb008a35fc4121b4f428",
+      "bytes": 1447
+    },
+    "staging-status-v1.json": {
+      "sha256": "84acb0270c3d947af37adf25ad1dce7be41c818af943fbfed653b466573eee9b",
+      "bytes": 999
+    },
+    "supplemental-tool-inputs.json": {
+      "sha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+      "bytes": 1531103
+    },
+    "wrapper-explicit-successor-diff-v1.patch": {
+      "sha256": "ca39506d6a2e3b1adce40c81aea10ced60c63f822c5840a028c979fbc4e26428",
+      "bytes": 2906
+    }
+  },
+  "externalBindings": {
+    "supervisor": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-containment-preparation-v1/supervisor-2gib.py",
+      "sha256": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+      "reuse": "threshold-only successor: original run_one process control unchanged; configure report qualifier and UNSET only"
+    },
+    "proposedCommand": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/proposed-primary-fixed-red-command-v1.json",
+      "sha256": "4bcd806ceb130d742d7672d85ad606ebf79b31465c8ef2343f77fdf6cd684680"
+    },
+    "sourceFreeze": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+      "sha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193"
+    },
+    "ps": {
+      "path": "/bin/ps",
+      "sha256": "16d273739778797145fd22cba76113d2aaa99c759313d56ef87ed56a16bca083"
+    },
+    "toolchainRecovery": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/root-shared-toolchain-recovery-qualification-v1.json",
+      "sha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+      "scope": "ROOT accepted recovery for unaffected exact-binding work; no generic runtime authority"
+    }
+  },
+  "manifestExcludesItself": true,
+  "limits": "Pure static identity and AST/JSON validation only. No wrapper or supervisor import, test/config execution, native probe/calibration or product result.",
+  "members": 10,
+  "memberBytes": 1562990
+}

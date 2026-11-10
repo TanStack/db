@@ -1,0 +1,11 @@
+{
+  "kind": "Independent reviewer static audit schema error; no candidate or bound code ran",
+  "toolChunk": "853849",
+  "exitCode": 1,
+  "script": "audit-qualified-copy-actual-v1.py",
+  "scriptSha256": "f2f8e4dc528fd5589d6fccfa0f0d92db268de8a9c6223675ee8e0119aeb8bd06",
+  "error": "KeyError: sourceBindings at reviewer line141; U uses proposedSourceBindings and preserved accepted-map fields",
+  "disposition": "Preserve v1 unchanged; corrected reviewer schema in additive v2; no evidence/product defect inferred",
+  "snapshotsWrittenByFailedAttempt": 0,
+  "factsWrittenByFailedAttempt": 0
+}

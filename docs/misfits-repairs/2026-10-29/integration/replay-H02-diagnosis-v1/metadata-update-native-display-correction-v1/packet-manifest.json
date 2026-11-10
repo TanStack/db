@@ -1,0 +1,36 @@
+{
+  "artifacts": {
+    "binding.json": {
+      "bytes": 941,
+      "sha256": "a8427c94643a8dbbe25f3242ab1aa56c125831555765c4cb0596a67dca800fe8"
+    },
+    "calibrate.py": {
+      "bytes": 3782,
+      "sha256": "76a580203840650def8fe5d5814f551c58543899c6674439dd48ef011d0ec814"
+    },
+    "check.py": {
+      "bytes": 6242,
+      "sha256": "bc4c9bccff2917e8fa7aebe495c209d22040ef7ca83d325e1b4183ff723aad66"
+    },
+    "corrected-universe-recipe.json": {
+      "bytes": 4775,
+      "sha256": "9165f918ea443103ae87ce15af2fd75c9741cf1848c500b1b11004943b2cee0d"
+    },
+    "pure-results.json": {
+      "bytes": 5490,
+      "sha256": "80a599dd0e9e0bcd2b82ae15ddc743ebc312bca3222ab16e59ed2ff65aa99b94"
+    },
+    "report.md": {
+      "bytes": 4708,
+      "sha256": "369ffe59c97bd617c2b316cead6ede6e47648893883ff1976f01805eaffd833c"
+    }
+  },
+  "bindingSha256": "a8427c94643a8dbbe25f3242ab1aa56c125831555765c4cb0596a67dca800fe8",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newSupervisor": false,
+  "originalResultFreezeSha256": "6c2794c3b81b56cb2501013dc07e9cf9740f576bc6c06d8db7580a035ea01bb6",
+  "originalStopPreserved": true,
+  "sourceRefreeze": false,
+  "status": "FROZEN captured display correction source/pure only; independent review pending; no native execution/admission"
+}

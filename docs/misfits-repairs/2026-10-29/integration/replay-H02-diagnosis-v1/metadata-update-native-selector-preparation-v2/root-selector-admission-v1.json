@@ -1,0 +1,33 @@
+{
+  "admittedBy": "/root",
+  "executor": "/root/evaluate_metadata_external",
+  "runtimeAdmission": true,
+  "reservedHeavySlot": 4,
+  "maxInvocations": 1,
+  "stage": "selector",
+  "exactCommand": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-I",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-selector-preparation-v2/run.py",
+    "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "sandbox_permissions": "require_escalated",
+  "bindingSha256": "bdd159931e7c4603d30f5bec97ad1953257226bb3f93a24e24ea1dc76a97f4c6",
+  "packetManifestSha256": "9413a1653b12f1d8c3741ae9a003570d4f46f75060998a2a6d3fbf69972e1c0f",
+  "independentSourceReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-native-selector-preparation-review-v2.md",
+    "sha256": "a5bcbc916835175f2d12bef4218057a5bf9824ecf3ab053f2b57cabf86ece699"
+  },
+  "prerequisiteUniverseClassification": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-discovery-root-classification-v2.json",
+    "sha256": "2b07505ca12860a16210c4c6c4d6cb129224ee41d4e2d0b9de0596d935d5ba26"
+  },
+  "successRequirements": "actual outer0/qualified and native0; exact positive quarter2 scope/default singleton, original IDs absent, full identities agree",
+  "after": "Stop after one actual completion, preserve full outputs/final outer return/absence/hash evidence, independent actual review then root classification; no receiving/retry",
+  "productPassCredit": false,
+  "receivingReachCredit": false,
+  "canonicalImport": false,
+  "publishing": false
+}

@@ -1,0 +1,200 @@
+{
+  "version": 2,
+  "lawfulOriginalAndFollowupControls": 12,
+  "observations": [
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "scope",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "default",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 0,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "entire-optional-stage-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "followup-final-omitted",
+      "rejected": true,
+      "error": "declared follow-up publication was not compared"
+    },
+    {
+      "cacheIdentity": "subscription",
+      "keys": "authored",
+      "quarter": 2,
+      "fault": "worker-cleanup-omitted",
+      "rejected": true,
+      "error": "metadata worker cleanup was not observed"
+    }
+  ],
+  "rejected": 24,
+  "limits": "Pure authored observations only. No native registration, receiving, production execution or production RED/GREEN."
+}

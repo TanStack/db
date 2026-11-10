@@ -1,0 +1,10 @@
+{
+  "packages/query-db-collection/tests/queued-answer-progress-receipts.ts": {
+    "after": "ccf2e05f14d280839eaa718a1cdbc9c89a003c3b532688c9f5b7b81111bd8735",
+    "before": null
+  },
+  "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts": {
+    "after": "97aa5a63419a33d7d220dde14e81e5227f3e04a010da7a023ecc915777e09efc",
+    "before": "49a221be1f01db107b1d85218a48fdc3a30c3a6b233e5b119ec61925f1675772"
+  }
+}

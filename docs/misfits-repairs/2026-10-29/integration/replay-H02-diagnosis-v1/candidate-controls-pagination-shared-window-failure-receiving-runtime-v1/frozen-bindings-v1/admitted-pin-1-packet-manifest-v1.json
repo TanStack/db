@@ -1,0 +1,124 @@
+{
+  "status": "SEALED SOURCE-ONLY receiving operational preparation; independent map/config review and separate exact Root runtime admissions required",
+  "sourcePreparationFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "operationalFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+  "runtimeAdmitted": false,
+  "runtimeInvocations": 0,
+  "sourceBindingsUnchanged": 596,
+  "copiedSupportBindingsUnchanged": 85,
+  "productionBindingsUnchanged": 511,
+  "newSourceIdentities": 0,
+  "completionMetadataSubsetCount": 18,
+  "receivingProductionMetadataSubsetCount": 161,
+  "files": {
+    "completion-parent-syntax-v1.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "exact-closure-and-json-audit-v1.json": {
+      "sha256": "0faf0cd7a27859469ab1e74976f1069790b78ce74753cfba7a81eacc30ad8218",
+      "bytes": 3084
+    },
+    "exact-closure-helper-v1.py.txt": {
+      "sha256": "567ee660d207afaf65fea3348743f4b60d83d5032c191b1fe8e414d381e80c61",
+      "bytes": 3150
+    },
+    "frozen-inputs-v1/programs/inline-window-failure-first.json": {
+      "sha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "bytes": 4974
+    },
+    "frozen-inputs-v1/programs/inline-window-success.json": {
+      "sha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "bytes": 7269
+    },
+    "frozen-inputs-v1/recipes/inline-window-failure-first.json": {
+      "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86",
+      "bytes": 2107
+    },
+    "frozen-inputs-v1/recipes/inline-window-success.json": {
+      "sha256": "abc901dc7bc376988a463d44d42f9c3d851370abe3fdfdfa9b17140bdeeeafd0",
+      "bytes": 2088
+    },
+    "launch-path-readiness-v1.json": {
+      "sha256": "e86b3654ecc798ebe973a857022352565f3ab1138b1d53b3db9fef6be590f95f",
+      "bytes": 1522
+    },
+    "proposed-adaptation-v1.json": {
+      "sha256": "d01433dcc29672a04ed137737d7a9fe7df5abff0bc82db073fa4ea978e9e2cef",
+      "bytes": 14280
+    },
+    "proposed-exact-failure-first-command-v1.json": {
+      "sha256": "577a6f9f50e96cb286c51fa636b01c5c0e38e2b3404db57972491bd17d652817",
+      "bytes": 2821
+    },
+    "proposed-exact-success-command-v1.json": {
+      "sha256": "396b3275cda03ba028c92327639ae37d68b34ed6547768434e02a3bcbfface27",
+      "bytes": 2710
+    },
+    "registration-and-config-bindings-v1.json": {
+      "sha256": "34607c5c280f83525b0c7093e8fa32045a5bd1333fa2992f7af94630a1e308c7",
+      "bytes": 4012
+    },
+    "registration-exactness-audit-v1.json": {
+      "sha256": "71d2f5ac1cae14d1efb934e260e9f335d1a7753a701bc21066d718e18f7f8540",
+      "bytes": 1144
+    },
+    "report-v1.md": {
+      "sha256": "0f7ad52f7cfec72a504af360d7a724549b3b9abab99fb0b046e5b76c03d93530",
+      "bytes": 9940
+    },
+    "seal-helper-v1-failure-v1.json": {
+      "sha256": "18bc487dc95f8a48cb74e07925e4d2d9c68ea765646b6965a3f2f10a96a836e1",
+      "bytes": 491
+    },
+    "seal-helper-v1.py.txt": {
+      "sha256": "e9d42cd233b49c94427c3a71936b1f1e48923580053a6ce3aaf5ef590d86cd54",
+      "bytes": 12124
+    },
+    "seal-helper-v2.py.txt": {
+      "sha256": "f4b6cb56f944eece0fc2789bda9d70180fe7e3a4beb98291b25313728475d373",
+      "bytes": 12646
+    },
+    "source-and-tool-audit-v1.json": {
+      "sha256": "b789ee836db8949d0b55fa525cdb78d5745b76e531bdea4087dcc09623d31372",
+      "bytes": 14923
+    },
+    "source-freeze-receiving-v1.json": {
+      "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+      "bytes": 498574
+    },
+    "static-syntax-audit-v1.json": {
+      "sha256": "ce5d3dca716a36b1848449ab0203cfcd88ef1a6fd07eee2779b3c985c69b2795",
+      "bytes": 1993
+    },
+    "verify-bindings-syntax-v1.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "members": 21,
+  "memberBytes": 599852,
+  "manifestExcludesItself": true,
+  "actualStaticTools": {
+    "initialHelper": {
+      "actual": "3204b7",
+      "exit": 1,
+      "classification": "incorrect assertion about historical preserved false recovery audit; no source/tool mismatch or partial freeze"
+    },
+    "sealingHelper": {
+      "actual": "5f3af8",
+      "exit": 0
+    },
+    "syntax": {
+      "actual": "9840a8",
+      "exit": 0
+    },
+    "exactDependencyClosure": {
+      "initial": "6508ca",
+      "session": 47420,
+      "final": "2d32ed",
+      "exit": 0
+    }
+  },
+  "slot2": "return after current manifest rehash; no runtime"
+}

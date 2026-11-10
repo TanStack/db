@@ -1,0 +1,11 @@
+{
+  "actualChunkId": "29ab82",
+  "exitCode": 1,
+  "failure": "AssertionError: node_modules/vitest",
+  "location": "stdin line19 package logical path resolution",
+  "cause": "audit helper treated frozen relative logical package path as relative to default cwd instead of frozen worktree",
+  "partialOutputWritten": false,
+  "noSourceOrToolMutation": true,
+  "scope": "post-run read-only filesystem audit; no test invocation",
+  "successor": "resolve non-absolute material package logical paths against frozen worktree before comparison"
+}

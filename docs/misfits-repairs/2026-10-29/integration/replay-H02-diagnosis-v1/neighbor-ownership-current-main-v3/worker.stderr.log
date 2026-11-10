@@ -1,0 +1,72 @@
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-0-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-0-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers +0, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-0-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers +0, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-0-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-1-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-1-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 1, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-1-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 1, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-1-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-2-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 1)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-2-1,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'while-held', peers 2, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-while-held-2-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5323:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts > query collection ownership lifecycle > keeps a reacquired lease's result (staleTime +0, refetch 'rejects', settles 'after-publication', peers 2, rows 2)
+[QueryCollection] Error observing query reacquired-lease-0-rejects-after-publication-2-2,{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","detail"],["string","shared"]]]}]}}}: Error: refetch failed
+    at settleRefetch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5269:28)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts:5333:11
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+

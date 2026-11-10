@@ -1,0 +1,366 @@
+{
+  "status": "FROZEN; one admitted canonical v6 run completed; STOP; no retry or source edits",
+  "outerExitCode": 1,
+  "classification": "receiving V8 heap resource termination after conditional conflict premise and finite answer queued; no product RED/GREEN or closure",
+  "lawLimit": "An answer was queued, and no execution receipt appeared before resource termination. This finite resource-limited prefix is not an eventual-progress verdict or a wall-watchdog progress result. The exact heap allocation cause is not established.",
+  "originalSupervisorOutcome": {
+    "reason": "exited",
+    "exitCode": 1,
+    "signal": null,
+    "receipts": [
+      {
+        "h02": true,
+        "sequence": 1,
+        "phase": "worker-start",
+        "history": {
+          "kind": "query",
+          "scheduler": "microtask",
+          "cacheIdentity": "subscription",
+          "includes": true,
+          "window": true,
+          "nonemptyPrior": false,
+          "keyShift": 0,
+          "rankScale": 10
+        },
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1",
+        "execPath": "/Users/kyle.mathews/.n/bin/node"
+      },
+      {
+        "h02": true,
+        "sequence": 4,
+        "phase": "source-establishing-receipt",
+        "literalTrue": true
+      },
+      {
+        "h02": true,
+        "sequence": 8,
+        "phase": "source-stack",
+        "cut": "initial-acquisition",
+        "stack": "Error: H02 current initial acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:528:16)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/joins.ts:524:41)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.schedule (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:66:7)\n    at scheduleQueryGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/graph-scheduler.ts:23:30)\n    at CollectionConfigBuilder.scheduleGraphRun (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:935:5)\n    at CollectionConfigBuilder.syncFn (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1022:12)\n    at CollectionSyncManager.enterSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:284:26)\n    at CollectionSyncManager.startSync (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:219:31)\n    at CollectionChangesManager.startSyncIfStopped (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:446:17)\n    at CollectionChangesManager.startSyncForSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:425:10)\n    at CollectionChangesManager.addSubscriber (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:464:14)\n    at CollectionChangesManager.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:325:10)\n    at CollectionImpl.subscribeChanges (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/index.ts:1246:26)\n    at driveQueuedAnswerHistory (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:593:29)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts:25:11\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      },
+      {
+        "h02": true,
+        "sequence": 140,
+        "phase": "public-change",
+        "changes": [],
+        "rows": []
+      },
+      {
+        "h02": true,
+        "sequence": 141,
+        "phase": "initial-publication",
+        "rows": [],
+        "ready": true
+      },
+      {
+        "h02": true,
+        "sequence": 142,
+        "phase": "reload-start",
+        "pivot": 3
+      },
+      {
+        "h02": true,
+        "sequence": 213,
+        "phase": "source-stack",
+        "cut": "queued-answer-premise",
+        "stack": "Error: H02 current Query answer path\n    at tryQueueResolvingAnswer (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:327:14)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:488:11\n    at new Promise (<anonymous>)\n    at queryFn (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:470:16)\n    at queryFn (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2291:36)\n    at Object.fetchFn [as fn] (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:224:14)\n    at run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)\n    at Object.start (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)\n    at Query.fetch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:271:40)\n    at QueryObserver.#executeFetch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:179:38)\n    at QueryObserver.onSubscribe (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:52:27)\n    at QueryObserver.subscribe (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/subscribable.js:9:10)\n    at subscribeToQuery (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3389:40)\n    at createQueryFromOpts (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2380:11)\n    at CollectionSyncManager.callLoadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:1038:14)\n    at CollectionSyncManager.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:1017:27)\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:538:22)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:891:45\n    at Array.forEach (<anonymous>)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:890:27)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.flush (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:132:11)\n    at withPublicationContext (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:198:32)\n    at CollectionChangesManager.publishEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:272:5)\n    at CollectionChangesManager.emitEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:207:10)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1495:24\n    at capture (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1481:11)\n    at emit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1494:9)\n    at CollectionStateManager.commitNextPendingTransactionBatch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1504:21)\n    at CollectionStateManager.commitPendingTransactions (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1105:23)\n    at CollectionStateManager.acceptSyncTransaction (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:873:10)\n    at Object.commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:411:24)\n    at commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:4418:34)\n    at applySuccessfulResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2812:25)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3307:15\n    at enqueueResultApplication (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2992:23)\n    at handleQueryResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3306:13)\n    at applyResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3387:11)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:434:11\n    at Set.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:433:24\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at QueryObserver.#notify (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:431:19)\n    at QueryObserver.updateResult (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:409:17)\n    at QueryObserver.onQueryUpdate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:425:10)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:385:18\n    at Array.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:384:22\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at Query.#dispatch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:383:19)\n    at Query.setData (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:62:19)\n    at Query.fetch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:280:12)"
+      },
+      {
+        "h02": true,
+        "sequence": 214,
+        "phase": "conflicting-cache-premise",
+        "cut": "held-queryFn-registration",
+        "pivot": 3,
+        "pendingAtom": "[\"h02-progress-markers\",2,[3]]",
+        "pendingKey": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cached": {
+          "version": 4,
+          "backendVersion": 0,
+          "rows": [
+            3
+          ]
+        },
+        "emptySibling": {
+          "atom": "[\"h02-progress-markers\",1,[3]]",
+          "key": [
+            "h02-progress-markers",
+            1,
+            [
+              3
+            ]
+          ],
+          "answer": {
+            "version": 10,
+            "backendVersion": 1,
+            "rows": []
+          }
+        },
+        "observed": {
+          "pending": true,
+          "aborted": false,
+          "pendingScope": [
+            3
+          ],
+          "pendingOwner": 2,
+          "pendingStartCount": 1,
+          "pendingActualCount": 1,
+          "pendingStatus": "success",
+          "pendingFetchStatus": "fetching",
+          "siblingScope": [
+            3
+          ],
+          "siblingOwner": 1,
+          "siblingStartCount": 0,
+          "siblingActualCount": 1,
+          "siblingStatus": "success",
+          "siblingRows": [],
+          "physicalQueriesCurrent": true,
+          "pendingPhysicalQuery": 4,
+          "currentPhysicalQuery": 4,
+          "siblingPhysicalQuery": 10,
+          "siblingAnswerPhysicalQuery": 10
+        }
+      },
+      {
+        "h02": true,
+        "sequence": 215,
+        "phase": "retained-publication",
+        "rows": [],
+        "reason": "resolving answer still pending"
+      },
+      {
+        "h02": true,
+        "sequence": 216,
+        "phase": "answer-queued",
+        "kind": "resolving-conflict",
+        "atom": "[\"h02-progress-markers\",2,[3]]",
+        "key": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cachedVersion": 4,
+        "emptyVersion": 10,
+        "scheduler": "microtask",
+        "enqueueReturned": true
+      },
+      {
+        "h02": true,
+        "sequence": 223,
+        "phase": "source-stack",
+        "cut": "first-repeated-held-acquisition",
+        "attempt": 14,
+        "owner": 2,
+        "keys": [
+          3
+        ],
+        "stack": "Error: H02 repeated held acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:520:18)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:891:45\n    at Array.forEach (<anonymous>)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:890:27)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.flush (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:132:11)\n    at withPublicationContext (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:198:32)\n    at CollectionChangesManager.publishEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:272:5)\n    at CollectionChangesManager.emitEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:207:10)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1495:24\n    at capture (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1481:11)\n    at emit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1494:9)\n    at CollectionStateManager.commitNextPendingTransactionBatch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1504:21)\n    at CollectionStateManager.commitPendingTransactions (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1105:23)\n    at CollectionStateManager.acceptSyncTransaction (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:873:10)\n    at Object.commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:411:24)\n    at commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:4418:34)\n    at applySuccessfulResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2812:25)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3307:15\n    at enqueueResultApplication (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2992:23)\n    at handleQueryResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3306:13)\n    at applyResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3387:11)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:434:11\n    at Set.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:433:24\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at QueryObserver.#notify (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:431:19)\n    at QueryObserver.updateResult (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:409:17)\n    at QueryObserver.onQueryUpdate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:425:10)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:385:18\n    at Array.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:384:22\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at Query.#dispatch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:383:19)\n    at Query.setData (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:62:19)\n    at Query.fetch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:280:12)"
+      },
+      {
+        "h02": true,
+        "sequence": 224,
+        "phase": "source-stack",
+        "stack": "Error: H02 current acquisition path\n    at CollectionSyncManager.markers._sync.loadSubset (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-driver.ts:534:16)\n    at CollectionSubscription.startSubsetDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1243:42)\n    at CollectionSubscription.requestSnapshot (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/subscription.ts:1380:14)\n    at startSegment (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:330:34)\n    at SubsetDemandController.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/subset-demand-controller.ts:142:25)\n    at CollectionSubscriber.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-subscriber.ts:243:32)\n    at Object.lazyCallbacks.setDemand (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:1613:32)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:891:45\n    at Array.forEach (<anonymous>)\n    at TapOperator.<anonymous> (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/compiler/index.ts:890:27)\n    at TapOperator.inner (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/operators/tap.ts:24:10)\n    at TapOperator.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/graph.ts:128:33)\n    at D2.run (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db-ivm/src/d2.ts:71:14)\n    at CollectionConfigBuilder.maybeRunGraph (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:860:31)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/query/live/collection-config-builder.ts:944:16\n    at Scheduler.flush (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:132:11)\n    at withPublicationContext (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/scheduler.ts:198:32)\n    at CollectionChangesManager.publishEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:272:5)\n    at CollectionChangesManager.emitEvents (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/changes.ts:207:10)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1495:24\n    at capture (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1481:11)\n    at emit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1494:9)\n    at CollectionStateManager.commitNextPendingTransactionBatch (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1504:21)\n    at CollectionStateManager.commitPendingTransactions (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:1105:23)\n    at CollectionStateManager.acceptSyncTransaction (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/state.ts:873:10)\n    at Object.commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/src/collection/sync.ts:411:24)\n    at commit (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:4418:34)\n    at applySuccessfulResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2812:25)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3307:15\n    at enqueueResultApplication (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:2992:23)\n    at handleQueryResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3306:13)\n    at applyResult (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/src/query.ts:3387:11)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:434:11\n    at Set.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:433:24\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at QueryObserver.#notify (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:431:19)\n    at QueryObserver.updateResult (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:409:17)\n    at QueryObserver.onQueryUpdate (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/queryObserver.js:425:10)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:385:18\n    at Array.forEach (<anonymous>)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:384:22\n    at Object.batch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)\n    at Query.#dispatch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:383:19)\n    at Query.setData (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:62:19)\n    at Query.fetch (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/query.js:280:12)"
+      }
+    ],
+    "keyCallbacks": 28369,
+    "prefixViolations": 0,
+    "warnings": 0,
+    "cleanupErrors": [],
+    "logPath": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-75052-d4614e00-b2d1-4620-a0c7-cc7eebbd6509/receipts.jsonl",
+    "primaryObservationError": "instrument receipt transport worker exit: nonzero exit without a worker-error receipt; inspect separate diagnostics",
+    "bindingStatus": "bound"
+  },
+  "resourceDiagnosticLines": [
+    "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory"
+  ],
+  "supervisorClassifierLimit": "Original reason exited and primaryObservationError nonzero worker exit without worker-error are retained unchanged. The full separate stderr explicitly establishes heap exhaustion; the source monitor did not classify that diagnostic as heap.",
+  "processes": {
+    "outerPid": 75028,
+    "outerPgid": 75028,
+    "supervisingVitestWorkerPid": 75052,
+    "receivingCliPid": 75053,
+    "receivingPgid": 75053,
+    "receivingWorkerPid": 75057,
+    "independentAbsenceCheck": "pending root observation"
+  },
+  "containment": {
+    "elapsedMs": 6227,
+    "maxSampledGroupRssBytes": 831750144,
+    "killAttempted": false,
+    "latestGroupRows": []
+  },
+  "rawPreservation": {
+    "files": 1944,
+    "bytes": 67819486,
+    "allCopiedBytesEqual": true,
+    "sha256": "da54cc649bce7c6c3c7188a98ddd061c1694e041830a5242dfcc09c1cb293f32"
+  },
+  "receipts": {
+    "sha256": "7a6f8aa247a3a1e60f17b40f676ed6fe7bb3ae48ec7998b337e027f94f75b850",
+    "bytes": 37674726,
+    "count": 141963,
+    "lastSequence": 141963,
+    "gaps": [],
+    "newlineTerminated": true,
+    "writerFaultFilePresent": false,
+    "counts": {
+      "worker-start": 1,
+      "actual-key-prefix": 70995,
+      "query-key-callback": 28369,
+      "source-establishing-receipt": 1,
+      "acquisition-attempt": 14187,
+      "source-stack": 4,
+      "provider-request": 13,
+      "provider-answer": 10,
+      "acquisition-accepted": 14187,
+      "acquisition-release": 14179,
+      "cache-success": 9,
+      "public-change": 1,
+      "initial-publication": 1,
+      "reload-start": 1,
+      "release-scope": 2,
+      "conflicting-cache-premise": 1,
+      "retained-publication": 1,
+      "answer-queued": 1
+    },
+    "conflictingPremise": [
+      {
+        "h02": true,
+        "sequence": 214,
+        "phase": "conflicting-cache-premise",
+        "cut": "held-queryFn-registration",
+        "pivot": 3,
+        "pendingAtom": "[\"h02-progress-markers\",2,[3]]",
+        "pendingKey": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cached": {
+          "version": 4,
+          "backendVersion": 0,
+          "rows": [
+            3
+          ]
+        },
+        "emptySibling": {
+          "atom": "[\"h02-progress-markers\",1,[3]]",
+          "key": [
+            "h02-progress-markers",
+            1,
+            [
+              3
+            ]
+          ],
+          "answer": {
+            "version": 10,
+            "backendVersion": 1,
+            "rows": []
+          }
+        },
+        "observed": {
+          "pending": true,
+          "aborted": false,
+          "pendingScope": [
+            3
+          ],
+          "pendingOwner": 2,
+          "pendingStartCount": 1,
+          "pendingActualCount": 1,
+          "pendingStatus": "success",
+          "pendingFetchStatus": "fetching",
+          "siblingScope": [
+            3
+          ],
+          "siblingOwner": 1,
+          "siblingStartCount": 0,
+          "siblingActualCount": 1,
+          "siblingStatus": "success",
+          "siblingRows": [],
+          "physicalQueriesCurrent": true,
+          "pendingPhysicalQuery": 4,
+          "currentPhysicalQuery": 4,
+          "siblingPhysicalQuery": 10,
+          "siblingAnswerPhysicalQuery": 10
+        }
+      }
+    ],
+    "queued": [
+      {
+        "h02": true,
+        "sequence": 216,
+        "phase": "answer-queued",
+        "kind": "resolving-conflict",
+        "atom": "[\"h02-progress-markers\",2,[3]]",
+        "key": [
+          "h02-progress-markers",
+          2,
+          [
+            3
+          ]
+        ],
+        "cachedVersion": 4,
+        "emptyVersion": 10,
+        "scheduler": "microtask",
+        "enqueueReturned": true
+      }
+    ],
+    "executed": []
+  },
+  "binding": {
+    "status": "bound",
+    "entries": 486,
+    "failures": [],
+    "receiptTransport": {
+      "path": "/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-progress-75052-d4614e00-b2d1-4620-a0c7-cc7eebbd6509/receipts.jsonl",
+      "count": 141963
+    },
+    "sha256": "babca1bc2d10bb7e6dfb3cd88112bcc581ce9f4066a984f36716f940cc386482",
+    "startupSealSha256": "dcaf0ce2607f4eeff6da8fe061feba2307ff5fa422568e0516a2f09e397f5824",
+    "startupSealBindings": 162,
+    "skipAllPausesAcknowledged": true,
+    "debuggerDisableAcknowledged": true,
+    "inspectorDisconnectedBeforeHistory": true,
+    "acknowledgements": [
+      {
+        "phase": "inspector-ack",
+        "method": "Debugger.setSkipAllPauses"
+      },
+      {
+        "phase": "inspector-ack",
+        "method": "Debugger.enable"
+      },
+      {
+        "phase": "inspector-ack",
+        "method": "Debugger.disable"
+      }
+    ],
+    "v8Phases": {
+      "inspector-ack": 3,
+      "v8-compiled-script": 1619,
+      "binding-started": 1,
+      "evaluated-registry-captured": 3,
+      "inspector-disconnected-before-history": 1
+    }
+  },
+  "sourceAcceptance": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6-independent-static-acceptance-v1.md",
+    "sha256": "89556a995045fa65c41464a21fc6b8794e6fcc750b740cf28049321ec935234b"
+  },
+  "rootAdmission": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v6-root-admission-v1.json",
+    "sha256": "92dc1292f584ef261fe7e83f9ecb35bf7eb6c817887b31a1f34b482fd234e6e7"
+  },
+  "cleanupLimit": "No cleanup-start, worker-cleaned or worker-error receipt. Direct Collection cleanup is not established. Empty process-group rows, no kill attempt and no supervisor cleanup errors remain separate containment observations."
+}

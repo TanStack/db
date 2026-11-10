@@ -1,0 +1,74 @@
+{
+  "actualInvocations": 1,
+  "actualOuterExitCode": 0,
+  "evidenceFiles": {
+    "actual-final-exec-return.json": {
+      "bytes": 293,
+      "sha256": "edba78ef7f193358548e8b0ca1587017644ea288d3126f1a6acaeb382777ebaa"
+    },
+    "actual-initial-exec-return.json": {
+      "bytes": 914,
+      "sha256": "91f4fa274359f284dd6028ae65666f163c98be61bbda25f84c72757c1d023eed"
+    },
+    "actual-original-identity-absence.json": {
+      "bytes": 11099,
+      "sha256": "309fd88f9df67a9d1bd8a443e46830ba3de0b7ff2bff77fc8b83778252547afa"
+    },
+    "actual-outer-lifecycle-observation.json": {
+      "bytes": 2505,
+      "sha256": "38d672ea30fc715b67b7b552745db59a11d74efa8baad3e32574d8c478c503ef"
+    },
+    "capture-audit-derivation.json": {
+      "bytes": 559,
+      "sha256": "0689a7e6def1e8fa99dfc871c993aecd00fbd77374427c88578cb258a4e09dd2"
+    },
+    "capture-audit.py": {
+      "bytes": 14446,
+      "sha256": "cfe91aa7d2efea9c30b9b074a279558898d681cf816667712f0626fa32c67725"
+    },
+    "observation-summary.json": {
+      "bytes": 34276,
+      "sha256": "540df58376dd1a2daa4f62bb436ffb23e35e2b523e177e7e467cba00742ade83"
+    },
+    "original-process-identities.json": {
+      "bytes": 6408,
+      "sha256": "3abb790c50fb56515cf5d9cb3fa127ee01b6728de0518af129449876f4effb32"
+    },
+    "prelaunch-pins.json": {
+      "bytes": 1677,
+      "sha256": "db6fbae666c1c5ad2bba2cd146b219268b8e4d9e1641ec612b85cef8ed687392"
+    },
+    "python-postcheck.json": {
+      "bytes": 236,
+      "sha256": "6588dc8ccf2d9154e8b90017b4d8ec7e2d93fbc828a4acc954556aeba8b118b0"
+    },
+    "raw-manifest.json": {
+      "bytes": 7407535,
+      "sha256": "c3c1a5a73875be4f2b54c4084c1583b5dd3c50d1225404fec2f503c80f64b76d"
+    },
+    "report.md": {
+      "bytes": 6834,
+      "sha256": "3742d75fb4c02826a39b31a038b79980dd5c503cada8a7897d00f681e6e0ccd0"
+    },
+    "source-tool-postcheck.json": {
+      "bytes": 489,
+      "sha256": "365b13b43f494cf8a276102cdbbc5193b6bc18c4cd0421a34cfbc05bacd01da7"
+    }
+  },
+  "limits": "Successful chosen seed unavailable; existing source-order/finish/UUID-console/initial inner-group limitations retained. No further runtime admitted.",
+  "rawBytes": 251024553,
+  "rawFiles": 15587,
+  "rawManifestSha256": "c3c1a5a73875be4f2b54c4084c1583b5dd3c50d1225404fec2f503c80f64b76d",
+  "receivingChildExitCodes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "receivingChildren": 8,
+  "status": "FROZEN ACTUAL UNSEEDED RESULT; pending independent review and root classification"
+}

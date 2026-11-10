@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-30T09:38:06.821699+00:00",
+  "combinedFreezeSha256": "aa5f26fac905f604b3a3d24f752b57bf9312e0de563cabf3a2e4a9672b49aeb3",
+  "combinedPacketSha256": "88c6716b78897a288e15925518388e6e99afec832b990012280d06d50ed358d0",
+  "inputFreezeSha256": "b16d79c6f307e59a43f9bd1d06a64693aa98ca189dfd2893a7cb59c176fadcb5",
+  "inputPacketSha256": "da70aad067b328d48e400beda1bacb14b34cebbafee4c3cae2dd4ddcbfce36e5",
+  "all275CombinedAnd16InputPacketEntriesRehashedAfterLint": true,
+  "sourceLintActualCompletion": {
+    "chunk_id": "f1029e",
+    "wall_time_seconds": 0.498085459,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "reportLintBufferActualCompletion": {
+    "chunk_id": "d98225",
+    "wall_time_seconds": 7.167e-06,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "failedReportLintBeforeSelectionPreserved": true,
+  "shimOriginalPath": "/tmp/misfits-lint-git-buffer-v1.mjs",
+  "shimSha256": "0e6be6b0012f0b08188ef40da2c15f76d45c98c45efe2d3d25c5e1399d4b04c3",
+  "shimEffect": "git maxBuffer only; unchanged lint scope/rules/budgets",
+  "slot2Returned": true,
+  "runtimeAdmission": false,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted"
+}

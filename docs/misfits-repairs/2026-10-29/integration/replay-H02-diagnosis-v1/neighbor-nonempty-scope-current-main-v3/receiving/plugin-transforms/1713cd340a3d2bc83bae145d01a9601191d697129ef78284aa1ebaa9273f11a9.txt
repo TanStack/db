@@ -1,0 +1,139 @@
+import { isPlainObject } from "../../utils/type-guards.js";
+const ROUTED_SCALAR_VALUE = /* @__PURE__ */ Symbol(`tanstack_db_routed_scalar_value`);
+const ROUTE_METADATA = /* @__PURE__ */ Symbol(`tanstack_db_route_metadata`);
+export const INCLUDES_PUBLIC_KEY = /* @__PURE__ */ Symbol(`includesPublicKey`);
+export const INCLUDES_ROUTING = /* @__PURE__ */ Symbol(`includesRouting`);
+const INTERNAL_ROUTE_KEYS = /* @__PURE__ */ new Set([
+  ROUTE_METADATA,
+  INCLUDES_PUBLIC_KEY
+]);
+const INTERNAL_CALLBACK_KEYS = /* @__PURE__ */ new Set([
+  ...INTERNAL_ROUTE_KEYS,
+  INCLUDES_ROUTING
+]);
+export function attachRouteMetadata(value, correlationKey, parentContext) {
+  return Object.assign(value, {
+    [ROUTE_METADATA]: { correlationKey, parentContext }
+  });
+}
+export function getRouteMetadata(value) {
+  if (value == null || typeof value !== `object` || !(ROUTE_METADATA in value)) {
+    return void 0;
+  }
+  return value[ROUTE_METADATA];
+}
+export function getNamespacedRouteMetadata(row, source) {
+  return getRouteMetadata(row) ?? (row != null && typeof row === `object` ? getRouteMetadata(row[source]) : void 0);
+}
+export function stripRouteMetadata(value) {
+  const result = { ...value };
+  delete result[ROUTE_METADATA];
+  return result;
+}
+export function attachRouteMetadataToResult(value, correlationKey, parentContext, publicKey) {
+  if (correlationKey === void 0 && parentContext === void 0 && publicKey === void 0) {
+    return value;
+  }
+  if (isPlainObject(value)) {
+    return {
+      ...value,
+      [ROUTE_METADATA]: { correlationKey, parentContext },
+      [INCLUDES_PUBLIC_KEY]: publicKey
+    };
+  }
+  return {
+    [ROUTED_SCALAR_VALUE]: value,
+    [ROUTE_METADATA]: { correlationKey, parentContext },
+    [INCLUDES_PUBLIC_KEY]: publicKey
+  };
+}
+export function getRoutedScalarMetadata(value) {
+  if (value == null || typeof value !== `object` || !(ROUTED_SCALAR_VALUE in value)) {
+    return void 0;
+  }
+  const routed = value;
+  const route = routed[ROUTE_METADATA];
+  return {
+    value: routed[ROUTED_SCALAR_VALUE],
+    correlationKey: route.correlationKey,
+    parentContext: route.parentContext,
+    publicKey: routed[INCLUDES_PUBLIC_KEY]
+  };
+}
+export function stripInternalRouteMetadata(value) {
+  return transformPublicContainers(value, (leaf) => leaf, INTERNAL_ROUTE_KEYS);
+}
+export function stripInternalCallbackMetadata(value) {
+  return transformPublicContainers(
+    value,
+    (leaf) => leaf,
+    INTERNAL_CALLBACK_KEYS
+  );
+}
+export function transformPublicContainers(value, transformLeaf, omittedKeys) {
+  const rootReplacement = transformLeaf(value);
+  if (!Object.is(rootReplacement, value)) return rootReplacement;
+  if (!isPublicContainer(value)) return value;
+  const parents = /* @__PURE__ */ new WeakMap();
+  const properties = /* @__PURE__ */ new WeakMap();
+  const dirty = /* @__PURE__ */ new Set();
+  const visit = (current) => {
+    if (properties.has(current)) return;
+    const currentProperties = /* @__PURE__ */ new Map();
+    properties.set(current, currentProperties);
+    for (const key of Reflect.ownKeys(current)) {
+      if (omittedKeys.has(key)) {
+        dirty.add(current);
+        continue;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (!descriptor) continue;
+      const property = { descriptor };
+      currentProperties.set(key, property);
+      if (!descriptor.enumerable || !(`value` in descriptor)) continue;
+      const child = descriptor.value;
+      const replacement = transformLeaf(child);
+      property.value = { original: child, replacement };
+      if (!Object.is(replacement, child)) {
+        dirty.add(current);
+        continue;
+      }
+      if (!isPublicContainer(child)) continue;
+      const childParents = parents.get(child) ?? /* @__PURE__ */ new Set();
+      childParents.add(current);
+      parents.set(child, childParents);
+      visit(child);
+    }
+  };
+  visit(value);
+  const queue = [...dirty];
+  for (const current of queue) {
+    for (const parent of parents.get(current) ?? []) {
+      if (dirty.has(parent)) continue;
+      dirty.add(parent);
+      queue.push(parent);
+    }
+  }
+  if (!dirty.has(value)) return value;
+  const copies = /* @__PURE__ */ new WeakMap();
+  const copy = (current) => {
+    if (!dirty.has(current)) return current;
+    const existing = copies.get(current);
+    if (existing) return existing;
+    const result = Array.isArray(current) ? [] : Object.create(Object.getPrototypeOf(current));
+    copies.set(current, result);
+    for (const [key, property] of properties.get(current) ?? []) {
+      const descriptor = { ...property.descriptor };
+      if (property.value) {
+        const { original, replacement } = property.value;
+        descriptor.value = !Object.is(replacement, original) ? replacement : isPublicContainer(original) ? copy(original) : original;
+      }
+      Object.defineProperty(result, key, descriptor);
+    }
+    return result;
+  };
+  return copy(value);
+}
+function isPublicContainer(value) {
+  return Array.isArray(value) || isPlainObject(value);
+}

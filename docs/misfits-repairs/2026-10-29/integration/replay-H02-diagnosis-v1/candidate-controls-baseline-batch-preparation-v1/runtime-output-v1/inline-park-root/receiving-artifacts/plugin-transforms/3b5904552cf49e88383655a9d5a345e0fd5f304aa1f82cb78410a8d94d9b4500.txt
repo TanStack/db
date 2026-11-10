@@ -1,0 +1,72 @@
+import { DifferenceStreamWriter, UnaryOperator } from "../graph.js";
+import { StreamBuilder } from "../d2.js";
+import { MultiSet } from "../multiset.js";
+import {
+  TopKState,
+  handleMoveIn,
+  handleMoveOut,
+  topKBatch
+} from "./topKState.js";
+import { TopKArray, createKeyedComparator } from "./topKArray.js";
+export class TopKWithFractionalIndexOperator extends UnaryOperator {
+  #state;
+  constructor(id, inputA, output, comparator, options) {
+    super(id, inputA, output);
+    const limit = options.limit ?? Infinity;
+    const offset = options.offset ?? 0;
+    this.#state = new TopKState(
+      new TopKArray(offset, limit, createKeyedComparator(comparator))
+    );
+    options.setSizeCallback?.(
+      (counts) => counts ? this.#state.countLeadingInWindow(counts) : this.#state.size
+    );
+    options.setWindowFn?.(this.moveTopK.bind(this));
+  }
+  /**
+   * Moves the topK window based on the provided offset and limit.
+   * Any changes to the topK are sent to the output.
+   */
+  moveTopK({ offset, limit }) {
+    const result = [];
+    const diff = this.#state.move({ offset, limit });
+    diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result));
+    diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result));
+    if (diff.changes) {
+      this.output.sendData(new MultiSet(result));
+    }
+  }
+  run() {
+    const result = [];
+    for (const [[key, value], multiplicity] of topKBatch(
+      this.inputMessages()
+    )) {
+      this.processElement(key, value, multiplicity, result);
+    }
+    if (result.length > 0) {
+      this.output.sendData(new MultiSet(result));
+    }
+  }
+  processElement(key, value, multiplicity, result) {
+    const changes = this.#state.processElement(key, value, multiplicity);
+    handleMoveIn(changes.moveIn, result);
+    handleMoveOut(changes.moveOut, result);
+  }
+}
+export function topKWithFractionalIndex(comparator, options) {
+  const opts = options || {};
+  return (stream) => {
+    const output = new StreamBuilder(
+      stream.graph,
+      new DifferenceStreamWriter()
+    );
+    const operator = new TopKWithFractionalIndexOperator(
+      stream.graph.getNextOperatorId(),
+      stream.connectReader(),
+      output.writer,
+      comparator,
+      opts
+    );
+    stream.graph.addOperator(operator);
+    return output;
+  };
+}

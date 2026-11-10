@@ -1,0 +1,14 @@
+{
+  "actual": {
+    "chunk_id": "425e82",
+    "exit_code": 0
+  },
+  "mode": "static read/hash/source/JSON only",
+  "scriptSha256": "65f737d848d7d4c4bee83cca17fb9516e9764c904a11b5d57646b681f82a7583",
+  "factsSha256": "e9b7bc8e7f8440e12c4f66d892d4a1504908a2260aecb503a689882bd66923f4",
+  "reportSha256": "fa564e2739de52a397e8cea07aa7edc12ac8125c2869673b8a341ab5fd273e07",
+  "productExecutions": 0,
+  "nativeExecutions": 0,
+  "modelExecutions": 0,
+  "sourceEdits": 0
+}

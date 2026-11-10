@@ -1,0 +1,25 @@
+{
+  "allChecksPassed": true,
+  "ancestors": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-v1.json",
+      "sha256": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+      "entries": 126,
+      "explicitRelocations": 1
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-with-snapshot-relocation-v2.json",
+      "sha256": "e36b9780ca9891cbc25233618117e121619bca1c2b0aa29974fb9ffcc80d7462",
+      "entries": 133,
+      "explicitRelocations": 0
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403",
+      "entries": 21,
+      "explicitRelocations": 0
+    }
+  ],
+  "historicalFalseFlagsOrResultsChanged": false,
+  "limits": "Exact sealed manifest members only; no new runtime/tool-equivalence claim"
+}

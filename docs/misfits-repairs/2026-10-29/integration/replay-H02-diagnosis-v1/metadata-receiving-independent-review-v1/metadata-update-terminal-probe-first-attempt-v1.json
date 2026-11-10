@@ -1,0 +1,13 @@
+{
+  "classification": "first probe fixture error; no product or receiving verdict",
+  "firstV1Assertion": "4 !== 0",
+  "firstV1ExitCode": 1,
+  "firstV2ExitCode": 0,
+  "firstV2Limit": "Same four malformed whole-stage cases were rejected at the wrong cut; use only the separately corrected successor for the whole-stage sensitivity claim.",
+  "preservedScripts": {
+    "metadata-update-terminal-probe-v1.mjs": "9cccf43a259165cdf7a700b7585f15c614710bdfd95e52e0215a1378f81f9732",
+    "metadata-update-terminal-probe-v2.mjs": "7d360a8ccb84932b9a5e54329dece9a01556322c378b09db2f8ce7e5caa61b1a"
+  },
+  "reason": "Phase-prefix filtering removed followup-start but left positive public-change callbacks, so four cases failed on an earlier rank mismatch instead of demonstrating missing terminal enforcement.",
+  "repair": "Remove the complete contiguous followup-start through followup-publication interval, including actual callback receipts."
+}

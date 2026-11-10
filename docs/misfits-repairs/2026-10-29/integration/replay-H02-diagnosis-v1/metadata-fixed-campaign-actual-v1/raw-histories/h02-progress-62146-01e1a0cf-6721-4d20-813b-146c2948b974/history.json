@@ -1,0 +1,12 @@
+{
+  "kind": "query",
+  "scheduler": "microtask",
+  "cacheIdentity": "scope",
+  "includes": true,
+  "window": true,
+  "nonemptyPrior": true,
+  "keyShift": 0,
+  "rankScale": 3,
+  "metadataKeys": "default",
+  "metadataFollowupQuarter": 3
+}

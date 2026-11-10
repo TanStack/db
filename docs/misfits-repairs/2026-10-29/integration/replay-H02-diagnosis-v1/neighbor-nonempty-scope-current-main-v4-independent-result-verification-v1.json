@@ -1,0 +1,187 @@
+{
+  "kind": "Independent frozen finite receiving-result audit; Python standard-library only",
+  "verdict": "Accept one finite nonempty scope-key payload publication control; no general closure or next admission",
+  "packet": {
+    "manifestSha256": "131e0b62f992152ac09781b268e3b11c53880c2937d55612b443acae85960068",
+    "members": 1960,
+    "bytes": 31268419
+  },
+  "receivingArchive": {
+    "members": 1945,
+    "bytes": 30421152,
+    "allFrozenMemberHashesMatchCopyInventory": true,
+    "limits": "Original before/after equality is the retained author copy-verification receipt; this review rehashed frozen bytes."
+  },
+  "actualHistory": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "scope",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "selection": {
+    "exactAdmittedSelector": "^queued-answer receiving neighbors checks receiving neighbor 'nonempty scope-key publication'$",
+    "nativePassed": 1,
+    "nativeSkipped": 4,
+    "qualification": "Successful task name/finally console suppressed; no captured verbose-name claim. Accepted native calibrated selector, raw actual history and native summary jointly identify singleton."
+  },
+  "receipts": {
+    "count": 176,
+    "contiguous": true,
+    "sha256": "2e4c1832b7dfd95f2d07f48129b3542c403b94d810117fb17cbd53dfd849257f",
+    "reconstructedReachSequences": {
+      "nonempty-prior": [
+        86
+      ],
+      "held-provider-read": [
+        133
+      ],
+      "completed-enqueue": [
+        151
+      ],
+      "answer-executed": [
+        152
+      ],
+      "root-change": [
+        157
+      ],
+      "downstream-change": [
+        158
+      ],
+      "final-publication": [
+        159
+      ],
+      "worker-cleaned": [
+        176
+      ]
+    },
+    "reloadStartSequence": 87,
+    "cleanupStartSequence": 160
+  },
+  "publicPayloadAudit": {
+    "modelDerivedPrior": [
+      {
+        "id": 4,
+        "rank": 40,
+        "markers": []
+      }
+    ],
+    "modelDerivedFinal": [
+      {
+        "id": 3,
+        "rank": 30,
+        "markers": []
+      }
+    ],
+    "rootAndDownstreamEventBatches": [
+      {
+        "sequence": 157,
+        "lane": "root",
+        "eventsInRawOrder": [
+          {
+            "type": "insert",
+            "payload": {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            }
+          },
+          {
+            "type": "delete",
+            "payload": {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            }
+          }
+        ],
+        "completeCallbackPayload": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          }
+        ]
+      },
+      {
+        "sequence": 158,
+        "lane": "downstream",
+        "eventsInRawOrder": [
+          {
+            "type": "delete",
+            "payload": {
+              "id": 4,
+              "rank": 40,
+              "markers": []
+            }
+          },
+          {
+            "type": "insert",
+            "payload": {
+              "id": 3,
+              "rank": 30,
+              "markers": []
+            }
+          }
+        ],
+        "completeCallbackPayload": [
+          {
+            "id": 3,
+            "rank": 30,
+            "markers": []
+          }
+        ]
+      }
+    ],
+    "rawRowAndChangeValuesWithAllVirtualFields": 17,
+    "sharedComparisonReconstructionPassed": true,
+    "limits": "Payload law only; raw metadata preserved, no exact generated-key or temporal metadata coherence claim"
+  },
+  "binding": {
+    "status": "bound",
+    "bindings": 648,
+    "perInventory": {
+      "evaluated-after-all.json": 162,
+      "evaluated-driver-start.json": 162,
+      "evaluated-final-publication.json": 162,
+      "evaluated-pre-history.json": 162
+    },
+    "sealedModules": 162,
+    "allEvaluatedSourceHashesMatchAcceptedFreeze": true,
+    "allEvaluatedCodeHashesAndV8BodiesMatchSeal": true,
+    "limits": "Startup V8 compiled inventory can include unused scripts. The inspector disconnects before the receiving history; no precise runtime coverage is collected. Evaluated registry cuts and positive callback stacks supply separate path evidence. Later observed modules must match the sealed startup binding. Child oracle-module evaluation does not prove parent checker invocation."
+  },
+  "operational": {
+    "reason": "exited",
+    "childExitCode": 0,
+    "signal": null,
+    "killAttempted": false,
+    "heapDetected": false,
+    "cleanupErrors": [],
+    "primaryObservationError": null,
+    "remainingGroupRows": [],
+    "elapsedMs": 2319,
+    "maxSampledGroupRssBytes": 443777024,
+    "rootAbsenceReceiptSha256": "7e3c91b1c4aa47f6a7ca7afd1e89c614573cedae0d28d17eab7113a41f610f09",
+    "independentProcessRecheckPerformed": false
+  },
+  "postRunSourceIdentityReceipt": {
+    "sourceMapEntries": 563,
+    "namedPackagePayloadFiles": 2544,
+    "allMatched": true,
+    "nodeLocksAndReuseLinksMatched": true,
+    "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+    "sharedJudgmentSha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "limits": "Disk identity after run; actual compiled/evaluated/V8 source binding records are separately retained with their limits."
+  },
+  "limits": [
+    "One finite scope-key nonempty history only",
+    "Prior V3 instrument failure remains immutable with no retrospective GREEN",
+    "No conflicting-subscription progress result, generated closure, temporal metadata coherence, exact key encoding or candidate reach",
+    "No receiving/runtime/test/build/verifier/process/source operations performed by this review",
+    "No next invocation, retry, production edit, candidate activation or publication admitted"
+  ]
+}

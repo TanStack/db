@@ -1,0 +1,35 @@
+{
+  "sourceFiles": {
+    "scripts/h02-progress/verify-bindings.mjs": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+    "scripts/h02-progress/bindings-calibration.test.mjs": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a",
+    "scripts/h02-progress/completion-parent.mjs": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70"
+  },
+  "sourceCopies": {
+    "sources/scripts/h02-progress/verify-bindings.mjs.txt": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+    "sources/scripts/h02-progress/bindings-calibration.test.mjs.txt": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd",
+    "sources/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts.txt": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a",
+    "sources/scripts/h02-progress/completion-parent.mjs.txt": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70"
+  },
+  "records": {
+    "eslint-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "feedback-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "finding-ledger-v1.jsonl": "27612f92494c1049a292e575d0caec7bcdcf53eec6dac8ff9348d92fbb0dfa18",
+    "green-v1.log": "d2f67466d26d726be63162225032497261c0275aba5dab7e2f159e0adb488438",
+    "green-v2.log": "65ecf3734d2d0b6862fcfac352e2977498e13647ea912f70b0f4e9bd9bcc331b",
+    "lint-changed-v1.log": "bcbf47898641dc53ffb91b574cea572181f5527bcaacade85c01266e3bf8bd71",
+    "plan-v1.md": "e9ef2c62cdba5fbe922fd0121ef3f8a2d421ce886d6fbe0a427cfabc3a50d97d",
+    "post-wrapper-identity-v1.json": "14ca26f89e595fbc4114b67aa68874760fd0cdb529efb4d16ddda48b0dbf9211",
+    "red-v1.log": "90aab95dc90e7daaad9cd361b5c91bd9b486eb0375b2a0887e28d16d94fd5371",
+    "red-v2.log": "f866f420a8f46d66ded96a43a6ec88cae8b07d6b7efbbff6d2bbe3aca5e72bba",
+    "red-v3.log": "276a519622983ba8be75026493448a535a09a22a75ce1f2b897f4004edab7511",
+    "report-v1.md": "00ae26b7e10ea4e665a55c84d230acc232df413d2eca38e99277e7174d3e26d9",
+    "sources/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts.txt": "6065b4caf0f0be6fd10af38a66882611815363c334cd4bcb83bda201386be42a",
+    "sources/scripts/h02-progress/bindings-calibration.test.mjs.txt": "ca00609c96745af495b65e462971375dc872ab2ffcda0de53b9753657f1502cd",
+    "sources/scripts/h02-progress/completion-parent.mjs.txt": "0cdf152d213acf0dc6cab70dc0a11f61fcdd4f7a8db5eef7df119422ce350b70",
+    "sources/scripts/h02-progress/verify-bindings.mjs.txt": "c021431fd4eb9615f9dae1095158478f19c28407b9b282b6044ed7cc5fd9918a",
+    "tsc-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unchanged-verifier-v1.mjs.txt": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe",
+    "verifier-source-diff-v1.patch": "5de9bf4a330d8e99b2c0b6d4a78f3b4248b0b9dd79a16d868d2e14bb4ac327bb"
+  }
+}

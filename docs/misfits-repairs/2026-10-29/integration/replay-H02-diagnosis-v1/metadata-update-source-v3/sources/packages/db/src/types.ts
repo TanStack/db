@@ -1,0 +1,1447 @@
+import type { IStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from './collection/index.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Transaction } from './transactions'
+import type { BasicExpression, OrderBy } from './query/ir.js'
+import type { EventEmitter } from './event-emitter.js'
+import type { IndexConstructor } from './indexes/base-index.js'
+import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
+import type { WithVirtualProps } from './virtual-props.js'
+
+/**
+ * Interface for a collection-like object that provides the necessary methods
+ * for the change events system to work
+ */
+export interface CollectionLike<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> extends Pick<
+  Collection<T, TKey>,
+  `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+> {}
+
+/**
+ * StringCollationConfig - Options for string sorting behavior
+ *
+ * This discriminated union allows for three types of string sorting:
+ * - **Lexical**: Simple character-by-character comparison
+ * - **Locale**: Locale-aware sorting with optional customization
+ * - **Custom**: Local comparison by a stable user-provided function reference
+ *
+ * Custom comparators must remain deterministic and immutable for their lifetime.
+ * Runtime query and index identity uses the exact function reference.
+ */
+export type StringCollationConfig =
+  | {
+      stringSort?: `lexical`
+    }
+  | {
+      stringSort?: `locale`
+      locale?: string
+      localeOptions?: object
+    }
+  | {
+      stringSort: `custom`
+      compare: (a: string, b: string) => number
+    }
+
+/**
+ * Helper type to extract the output type from a standard schema
+ *
+ * @internal This is used by the type resolution system
+ */
+export type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * Helper type to extract the input type from a standard schema
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type InferSchemaInput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends object
+    ? StandardSchemaV1.InferInput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+export type TransactionState = `pending` | `persisting` | `completed` | `failed`
+
+/**
+ * Represents a utility function that can be attached to a collection
+ */
+export type Fn = (...args: Array<any>) => any
+
+/**
+ * A record of utilities (functions or getters) that can be attached to a collection
+ */
+export type UtilsRecord = Record<string, any>
+
+/**
+ *
+ * @remarks `update` and `insert` are both represented as `Partial<T>`, but changes for `insert` could me made more precise by inferring the schema input type. In practice, this has almost 0 real world impact so it's not worth the added type complexity.
+ *
+ * @see  https://github.com/TanStack/db/pull/209#issuecomment-3053001206
+ */
+export type ResolveTransactionChanges<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> = TOperation extends `delete` ? T : Partial<T>
+
+/**
+ * Represents a pending mutation within a transaction
+ * Contains information about the original and modified data, as well as metadata
+ */
+export interface PendingMutation<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
+> {
+  mutationId: string
+  // The state of the object before the mutation.
+  original: TOperation extends `insert` ? {} : T
+  // The result state of the object after all mutations.
+  modified: T
+  // Only the actual changes to the object by the mutation.
+  changes: ResolveTransactionChanges<T, TOperation>
+  globalKey: string
+
+  key: TCollection extends Collection<any, infer TKey, any, any, any>
+    ? TKey
+    : never
+  type: TOperation
+  metadata: unknown
+  syncMetadata: Record<string, unknown>
+  /** Whether this mutation should be applied optimistically (defaults to true) */
+  optimistic: boolean
+  createdAt: Date
+  updatedAt: Date
+  collection: TCollection
+}
+
+/**
+ * Configuration options for creating a new transaction
+ */
+export type MutationFnParams<T extends object = Record<string, unknown>> = {
+  transaction: TransactionWithMutations<T>
+}
+
+/**
+ * Persists an optimistic transaction. Do not start or await collection or
+ * live-query preloads here. Sync commits queue behind this function, so waiting
+ * for preload work that needs one of those commits can deadlock the mutation.
+ * Use the collection adapter's mutation acknowledgement helper instead.
+ */
+export type MutationFn<T extends object = Record<string, unknown>> = (
+  params: MutationFnParams<T>,
+) => Promise<any>
+
+/**
+ * Represents a non-empty array (at least one element)
+ */
+export type NonEmptyArray<T> = [T, ...Array<T>]
+
+/**
+ * Utility type for a Transaction with at least one mutation
+ * This is used internally by the Transaction.commit method
+ */
+export type TransactionWithMutations<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
+> = Omit<Transaction<T>, `mutations`> & {
+  /**
+   * We must omit the `mutations` property from `Transaction<T>` before intersecting
+   * because TypeScript intersects property types when the same property appears on
+   * both sides of an intersection.
+   *
+   * Without `Omit`:
+   * - `Transaction<T>` has `mutations: Array<PendingMutation<T>>`
+   * - The intersection would create: `Array<PendingMutation<T>> & NonEmptyArray<PendingMutation<T, TOperation>>`
+   * - When mapping over this array, TypeScript widens `TOperation` from the specific literal
+   *   (e.g., `"delete"`) to the union `OperationType` (`"insert" | "update" | "delete"`)
+   * - This causes `PendingMutation<T, OperationType>` to evaluate the conditional type
+   *   `original: TOperation extends 'insert' ? {} : T` as `{} | T` instead of just `T`
+   *
+   * With `Omit`:
+   * - We remove `mutations` from `Transaction<T>` first
+   * - Then add back `mutations: NonEmptyArray<PendingMutation<T, TOperation>>`
+   * - TypeScript can properly narrow `TOperation` to the specific literal type
+   * - This ensures `mutation.original` is correctly typed as `T` (not `{} | T`) when mapping
+   */
+  mutations: NonEmptyArray<PendingMutation<T, TOperation, TCollection>>
+}
+
+export interface TransactionConfig<T extends object = Record<string, unknown>> {
+  /** Unique identifier for the transaction */
+  id?: string
+  /* If the transaction should autocommit after a mutate call or should commit be called explicitly */
+  autoCommit?: boolean
+  mutationFn: MutationFn<T>
+  /** Custom metadata to associate with the transaction */
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Options for the createOptimisticAction helper
+ */
+export interface CreateOptimisticActionsOptions<
+  TVars = unknown,
+  T extends object = Record<string, unknown>,
+> extends Omit<TransactionConfig<T>, `mutationFn`> {
+  /** Function to apply optimistic updates locally before the mutation completes */
+  onMutate: (vars: TVars) => void
+  /** Function to execute the mutation on the server */
+  mutationFn: (vars: TVars, params: MutationFnParams<T>) => Promise<any>
+}
+
+export type { Transaction }
+
+type Value<TExtensions = never> =
+  | string
+  | number
+  | boolean
+  | bigint
+  | null
+  | TExtensions
+  | Array<Value<TExtensions>>
+  | { [key: string | number | symbol]: Value<TExtensions> }
+
+export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
+
+export type OperationType = `insert` | `update` | `delete`
+
+/**
+ * Subscription status values
+ */
+export type SubscriptionStatus = `ready` | `loadingSubset`
+
+/**
+ * Event emitted when subscription status changes
+ */
+export interface SubscriptionStatusChangeEvent {
+  type: `status:change`
+  subscription: Subscription
+  previousStatus: SubscriptionStatus
+  status: SubscriptionStatus
+}
+
+/**
+ * Event emitted when subscription status changes to a specific status
+ */
+export interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
+  type: `status:${T}`
+  subscription: Subscription
+  previousStatus: SubscriptionStatus
+  status: T
+}
+
+/** Event emitted when a subset requested by this subscription fails to load. */
+export interface SubscriptionLoadSubsetErrorEvent {
+  type: `loadSubset:error`
+  subscription: Subscription
+  options: LoadSubsetOptions
+  error: unknown
+}
+
+/**
+ * Event emitted when subscription is unsubscribed
+ */
+export interface SubscriptionUnsubscribedEvent {
+  type: `unsubscribed`
+  subscription: Subscription
+}
+
+/**
+ * All subscription events
+ */
+export type SubscriptionEvents = {
+  'status:change': SubscriptionStatusChangeEvent
+  'status:ready': SubscriptionStatusEvent<`ready`>
+  'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
+  'loadSubset:error': SubscriptionLoadSubsetErrorEvent
+  unsubscribed: SubscriptionUnsubscribedEvent
+}
+
+/**
+ * Public interface for a collection subscription
+ * Used by sync implementations to track subscription lifecycle
+ */
+export interface Subscription extends EventEmitter<SubscriptionEvents> {
+  /** Current status of the subscription */
+  readonly status: SubscriptionStatus
+  /** Most recent subset-load failure observed by this subscription. */
+  readonly lastError: unknown | undefined
+}
+
+/**
+ * Cursor expressions for pagination, passed separately from the main `where` clause.
+ * The sync layer can choose to use cursor-based pagination (combining these with the where)
+ * or offset-based pagination (ignoring these and using the `offset` parameter).
+ *
+ * Neither expression includes the main `where` clause - they are cursor-specific only.
+ */
+export type CursorExpressions = {
+  /**
+   * Expression for rows greater than (after) the cursor value.
+   * Core emits this predicate from the leading order column. Multi-column
+   * queries load the complete leading-value tie separately instead of
+   * constructing a composite cursor.
+   */
+  whereFrom: BasicExpression<boolean>
+  /**
+   * Expression for rows equal to the current cursor value (first orderBy column only).
+   * Used to handle tie-breaking/duplicates at the boundary.
+   * Example: eq(col1, v1) or for Dates: and(gte(col1, v1), lt(col1, v1+1ms))
+   */
+  whereCurrent: BasicExpression<boolean>
+  /**
+   * Optional key of a provider-established continuation boundary. External
+   * loadSubset callers may supply it after establishing provider coverage.
+   * A local snapshot selection does not establish that coverage, so
+   * CollectionSubscription never sets it. Adapters must also handle requests
+   * without it.
+   */
+  lastKey?: string | number
+}
+
+/**
+ * Immutable request data. From submission onward, callers and adapters must
+ * not mutate these options, their expression trees, comparison options, or
+ * constant payloads (including Dates, byte arrays, and membership arrays).
+ * Create new request data to change a demand; core does not clone or freeze it.
+ * Use stable data properties, not stateful getters, for request data.
+ * Signal and subscription references stay fixed, but their lifecycle remains
+ * live: aborting the signal or releasing the subscription is supported.
+ *
+ * An ordered request with `orderBy` serves a prefix: every matching row from
+ * the start of the order through its boundary, the leading order value of the
+ * last row the request returned, ties included. A request that returned no
+ * rows served no prefix. The ordered loader treats every row in a served
+ * prefix as loaded. See `LoadSubsetFn` for what a sync adapter owes after it
+ * refetches.
+ */
+export type LoadSubsetOptions = {
+  /**
+   * Revalidate this exact semantic demand even when an adapter has already
+   * completed or cached it. This controls the acquisition attempt; it does
+   * not change demand identity or the matching unload operation.
+   */
+  refetch?: boolean
+  /** The where expression to filter the data (does NOT include cursor expressions) */
+  where?: BasicExpression<boolean>
+  /** The order by clause to sort the data */
+  orderBy?: OrderBy
+  /** The limit of the data to load */
+  limit?: number
+  /**
+   * Cursor expressions for cursor-based pagination.
+   * These are separate from `where` - the sync layer should combine them if using cursor-based pagination.
+   * Neither expression includes the main `where` clause.
+   */
+  cursor?: CursorExpressions
+  /**
+   * Row offset for offset-based pagination.
+   * The sync layer can use this instead of `cursor` if it prefers offset-based pagination.
+   */
+  offset?: number
+  /**
+   * Aborted when this exact subset request is no longer current. Cancellation
+   * is cooperative: async adapters should stop before installing more
+   * request-scoped rows. If an in-flight baseline cannot be canceled, the
+   * returned load promise must settle after those writes become visible so
+   * core can keep overlapping replay private until then.
+   */
+  signal?: AbortSignal
+  /**
+   * The subscription that triggered the load.
+   * Advanced sync implementations can use this for:
+   * - LRU caching keyed by subscription
+   * - Reference counting to track active subscriptions
+   * - Subscribing to subscription events (e.g., finalization/unsubscribe)
+   * @optional Available when called from CollectionSubscription, may be undefined for direct calls
+   */
+  subscription?: Subscription
+}
+
+/** @internal Result returned by the collection's normalized subset boundary. */
+export type LoadSubsetRequestResult = true | Promise<void>
+
+/**
+ * Loads one subset. A Collection subscription installs its logical owner
+ * before calling this function. A synchronous throw fails the load but keeps
+ * that owner; releasing the owner still calls `unloadSubset`, if provided,
+ * for the failed load. Make that handler safe after partial setup. A successful
+ * implementation must await or return every receipt from the sync
+ * `commit()` calls that establish the loaded subset. A result describes only
+ * the exact `options` passed to this call.
+ *
+ * When a sync adapter refetches loaded subsets without a new `loadSubset`
+ * call, it either keeps each served ordered prefix whole (see
+ * `LoadSubsetOptions`), or calls `invalidateLoadedSubsets()` once the
+ * refetched rows apply. Refetching each ordered page alone keeps neither
+ * promise: a row that now sorts between two served pages is in neither
+ * result, and the loader receives no change that would request it.
+ */
+export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
+
+/**
+ * Confirms that a committed sync transaction is visible, or resolves when it
+ * becomes visible. An accepted transaction always applies in commit order. A
+ * receipt rejects with an error named `AbortError` only if its signal aborted
+ * before acceptance, or if cleanup abandons the transaction.
+ */
+export type SyncAppliedReceipt = true | Promise<void>
+
+/**
+ * Releases the exact acquisition created for `options`.
+ *
+ * Implementations must be idempotent and must not throw. An adapter owns any
+ * remote unsubscribe retry needed to make release reliable. Core attempts
+ * each acquisition's release once, reports failures, and continues retiring
+ * other acquisitions. It does not retry a failed subset release.
+ */
+export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
+
+/**
+ * Ends one sync run and releases its adapter-owned resources.
+ *
+ * Collection cleanup waits for a returned promise before publishing the
+ * `cleaned-up` status or admitting a replacement sync run.
+ * TypeScript permits Promise-returning functions where `() => void` is
+ * expected, so the Promise branch must be explicit here to preserve and await
+ * it. Keeping the callable types separate also preserves contextual-void
+ * callbacks that return an incidental value.
+ */
+export type CleanupFn = (() => void) | (() => Promise<void>)
+
+export type SyncConfigRes = {
+  cleanup?: CleanupFn
+  loadSubset?: LoadSubsetFn
+  unloadSubset?: UnloadSubsetFn
+  /**
+   * Optional provider-controlled restart for a lost managed cache claim.
+   * Retire old provider callbacks synchronously and start the replacement only
+   * after `cacheRotated` fulfills; it rejects if scoped recovery fails. When
+   * absent, the persistence wrapper cleans up and reenters `sync` itself.
+   */
+  restartAfterScopedRecovery?: (
+    cacheRotated: Promise<void>,
+  ) => void | Promise<void>
+}
+export interface SyncConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
+  sync: (params: {
+    collection: Collection<T, TKey, any, any, any>
+    /**
+     * Begin a new sync transaction. Its writes apply on the rows the
+     * Collection holds, also during a reload. `snapshot: true` declares that
+     * the transaction carries every row: its commit replaces every synced
+     * row, as `truncate({ markReady: false })` at its start does. A reload's
+     * new run replaces the kept rows only with a snapshot or `truncate()`.
+     */
+    begin: (options?: { snapshot?: boolean }) => void
+    write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
+    /**
+     * Commit the active sync transaction in FIFO order. Core accepts it at
+     * once, and an accepted transaction always applies. Returns `true` when
+     * its writes are visible, or a receipt that resolves when they become
+     * visible. While an optimistic transaction is persisting, it becomes
+     * visible when that transaction settles, together with the drop of its
+     * optimistic state. A signal that is already aborted abandons the
+     * transaction before acceptance, and the receipt rejects with an error
+     * named `AbortError`. Aborting after acceptance has no effect.
+     */
+    commit: (signal?: AbortSignal) => SyncAppliedReceipt
+    /**
+     * Signal that the sync run's initial data is available. During a reload
+     * it completes the reload and keeps the rows unless a snapshot replaced
+     * them. A second call in the run, or one after `fail()`, does nothing.
+     */
+    markReady: () => void
+    /**
+     * Report a problem after the first ready while the sync adapter keeps
+     * trying. It shows as the node's `failureReason` and adds a failure to its
+     * `errors`; the status and rows do not change. One error value is one
+     * failure: reporting a value already listed changes nothing, and that
+     * failure keeps its place and its `at`. Throws before the first ready and
+     * after `fail()`.
+     */
+    reportError: (error: unknown) => void
+    /**
+     * The sync adapter stopped. Before the first ready the status becomes
+     * `error` and `preload()` rejects with `error`. After it, the rows stay, the
+     * status stays `ready`, and the node's `error` holds the cause until a
+     * reload. A second `fail()` in the same sync run does nothing.
+     * While the sync adapter retries, call nothing or `reportError()`.
+     */
+    fail: (error: unknown) => void
+    /**
+     * Sync works again. With no `error`, clears the `failureReason`. With an
+     * `error`, removes only the failure whose cause is that value, for
+     * example one of several requests that recovered; the `failureReason`
+     * then shows the newest failure left, and clears once none is left. With
+     * nothing to clear or remove it does nothing, so it can follow every
+     * commit. Throws before the first ready and after `fail()`.
+     */
+    reportHealthy: (error?: unknown) => void
+    /**
+     * Replace the synced rows. By default the replacement also marks the
+     * Collection ready. Set markReady:false to publish without changing status,
+     * for example when confirming a committed write from a closed source.
+     * The last truncate in a transaction supplies its readiness intent.
+     */
+    truncate: (options?: { markReady?: boolean }) => void
+    /**
+     * Report that rows this adapter serves for loaded subsets may have shifted
+     * between served pages, after a refetch that the adapter started on its
+     * own has applied. Each ordered live query then re-establishes its window
+     * with a bounded repair from the start of its order. Calls in one turn are
+     * coalesced. Do not call it for results that answer a `loadSubset` call.
+     */
+    invalidateLoadedSubsets: () => void
+    metadata?: SyncMetadataApi<TKey>
+  }) => void | CleanupFn | SyncConfigRes
+
+  /**
+   * Get the sync metadata for insert operations
+   * @returns Record containing relation information
+   */
+  getSyncMetadata?: () => Record<string, unknown>
+
+  /**
+   * Export adapter-specific metadata that lets hydration/persistence resume sync.
+   * The payload shape is owned by the adapter.
+   */
+  exportSyncMeta?: () => unknown
+
+  /**
+   * Import adapter-specific metadata produced by exportSyncMeta.
+   */
+  importSyncMeta?: (meta: unknown) => void
+
+  /**
+   * Merge two adapter-specific metadata payloads during hydration.
+   */
+  mergeSyncMeta?: (current: unknown, incoming: unknown) => unknown
+
+  /**
+   * The row update mode used to sync to the collection.
+   * @default `partial`
+   * @description
+   * - `partial`: Updates contain only the changes to the row.
+   * - `full`: Updates contain the entire row.
+   */
+  rowUpdateMode?: `partial` | `full`
+}
+
+export interface SyncMetadataApi<
+  TKey extends string | number = string | number,
+> {
+  row: {
+    get: (key: TKey) => unknown | undefined
+    set: (key: TKey, metadata: unknown) => void
+    delete: (key: TKey) => void
+  }
+  collection: {
+    get: (key: string) => unknown | undefined
+    set: (key: string, value: unknown) => void
+    delete: (key: string) => void
+    list: (prefix?: string) => ReadonlyArray<{
+      key: string
+      value: unknown
+    }>
+  }
+  /**
+   * Unstable, versioned bridge between persistence-aware collection adapters
+   * and sync adapters. Application code should not construct this capability.
+   * Custom adapter wrappers must forward it unchanged. `null` explicitly means
+   * that the collection has no persistence capability; a missing property is
+   * invalid.
+   *
+   * @internal Adapter infrastructure; not an application-facing API.
+   */
+  persistence: SyncPersistenceCapabilityV1<TKey> | null
+}
+
+export type SyncPersistenceKeySetEvidence = {
+  status: `unknown` | `consistent` | `incompatible`
+}
+
+export type SyncPersistenceScanOptions = {
+  metadataOnly?: boolean
+}
+
+export type SyncPersistenceScannedRow<
+  TKey extends string | number = string | number,
+> = {
+  key: TKey
+  value: object
+  metadata?: unknown
+}
+
+/**
+ * @internal Unstable cross-package protocol for persistence-aware adapters.
+ */
+export type SyncPersistenceCapabilityV1<
+  TKey extends string | number = string | number,
+> = {
+  readonly protocol: `@tanstack/db/sync-persistence`
+  readonly version: 1
+  /** This run owns a claimed on-demand cache generation. */
+  readonly managedCacheGeneration?: boolean
+  /** The on-demand cache generation rotated before the source sync run entered. */
+  readonly startupCacheGenerationRotated?: boolean
+  readonly hydrateBaseline: () => Promise<void>
+  /** Retire untrusted on-demand rows and retain the provider's reset metadata. */
+  readonly startScopedRecovery?: (resetMetadata?: {
+    key: string
+    value: unknown
+  }) => Promise<void>
+  /**
+   * Reserve the open sync transaction's FIFO turn. Every persisted hydration
+   * that would start before it commits waits for that commit: a subset load,
+   * a reload or reset from a peer notice, and sequence-gap recovery. A subset
+   * load admitted while the turn is reserved also runs after the commit's
+   * durable write. The source must end the transaction: commit it, or abandon
+   * it by committing with an aborted signal. An abandon releases the waiting
+   * hydrations as a commit does, so they run. A peer reset abandons a
+   * reserved transaction that began before the reset: its commit rejects
+   * with `SyncTransactionAbortedError`, and the reset does not wait.
+   * Sequence-gap recovery counts as a hydration only from the point where it
+   * changes rows. A source that stops for good
+   * abandons it, or every later hydration keeps waiting. The source must not
+   * await a `hydrateBaseline` that it started before reserving while the
+   * reservation is open: that baseline waits for the commit. Calling
+   * `hydrateBaseline` while the reservation is open rejects.
+   */
+  readonly reserveCommitTurn: () => void
+  readonly scanPersistedRows: (
+    options?: SyncPersistenceScanOptions,
+  ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>
+  readonly resumeSnapshot: {
+    readonly certify: () => Promise<void>
+    readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
+    readonly expectCurrentCommit: () => void
+    /**
+     * Atomically compare the durable source token with this transaction's
+     * predecessor. The source stages its next opaque string token in collection
+     * metadata at `key`. A discontinuity invalidates source progress evidence
+     * until an authoritative truncate; rows and receipts still apply normally.
+     * Re-delivering the same complete source position must be idempotent; it
+     * preserves existing evidence, including an earlier incompatibility.
+     * Only adapters that implement the durable comparison expose this method.
+     */
+    readonly expectSourceProgress?: (progress: {
+      key: string
+      previous: string | undefined
+    }) => void
+    /** Source progress evidence from the atomic persisted resume snapshot. */
+    readonly getSourceProgressCompatible?: () => boolean | undefined
+  }
+}
+
+export interface ChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
+  key: TKey
+  value: T
+  previousValue?: T
+  type: OperationType
+  metadata?: Record<string, unknown>
+}
+
+export type DeleteKeyMessage<TKey extends string | number = string | number> =
+  Omit<ChangeMessage<any, TKey>, `value` | `previousValue` | `type`> & {
+    type: `delete`
+  }
+
+export type ChangeMessageOrDeleteKeyMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Omit<ChangeMessage<T>, `key`> | DeleteKeyMessage<TKey>
+
+export type OptimisticChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> =
+  | (ChangeMessage<T> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
+  | (DeleteKeyMessage<TKey> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
+
+/**
+ * The Standard Schema interface.
+ * This follows the standard-schema specification: https://github.com/standard-schema/standard-schema
+ */
+export type StandardSchema<T> = StandardSchemaV1 & {
+  '~standard': {
+    types?: {
+      input: T
+      output: T
+    }
+  }
+}
+
+/**
+ * Type alias for StandardSchema
+ */
+export type StandardSchemaAlias<T = unknown> = StandardSchema<T>
+
+export interface OperationConfig {
+  metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
+}
+
+export interface InsertConfig {
+  metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
+}
+
+export type UpdateMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = {
+  transaction: TransactionWithMutations<
+    T,
+    `update`,
+    Collection<T, TKey, TUtils>
+  >
+  collection: Collection<T, TKey, TUtils>
+}
+
+export type InsertMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = {
+  transaction: TransactionWithMutations<
+    T,
+    `insert`,
+    Collection<T, TKey, TUtils>
+  >
+  collection: Collection<T, TKey, TUtils>
+}
+export type DeleteMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = {
+  transaction: TransactionWithMutations<
+    T,
+    `delete`,
+    Collection<T, TKey, TUtils>
+  >
+  collection: Collection<T, TKey, TUtils>
+}
+
+export type InsertMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<void>
+
+export type UpdateMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<void>
+
+export type DeleteMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<void>
+
+/**
+ * Collection status values for lifecycle management
+ * @example
+ * // Check collection status
+ * if (collection.status === "loading") {
+ *   console.log("Collection is loading initial data")
+ * } else if (collection.status === "ready") {
+ *   console.log("Collection is ready for use")
+ * }
+ *
+ * @example
+ * // Status transitions
+ * // idle → loading → ready (when markReady() is called)
+ * // loading → error when the sync adapter calls fail() before the first ready
+ * // any active status → crashed when local storage or an invariant breaks
+ * // After the first ready, sync problems appear in `health`, not in `status`.
+ */
+export type CollectionStatus =
+  /** Collection is created but sync hasn't started yet (when startSync config is false) */
+  | `idle`
+  /** Sync has started and is loading data */
+  | `loading`
+  /** Collection has been explicitly marked ready via markReady() */
+  | `ready`
+  /** The first load of the sync run failed: there is nothing to show. */
+  | `error`
+  /**
+   * Local storage or an internal invariant broke. The Collection cannot serve
+   * reads or accept writes, and `reload()` rejects. Only cleanup leaves it; a
+   * later start is a fresh start.
+   */
+  | `crashed`
+  /** Collection has been cleaned up and resources freed */
+  | `cleaned-up`
+
+export type SyncMode = `eager` | `on-demand`
+
+/**
+ * Detail about a Collection problem. Every field except `cause` is plain data,
+ * so the value can be logged or sent as JSON; `cause` keeps the original value
+ * and is omitted from JSON.
+ */
+export interface CollectionErrorInfo {
+  readonly name: string
+  readonly message: string
+  readonly code?: string
+  /** Epoch milliseconds when the problem was reported. */
+  readonly at: number
+  readonly cause: unknown
+}
+
+/**
+ * A problem on a health node. Its own fields are its newest failure's, and
+ * `errors` lists every failure of its frame that is still open, oldest
+ * first; the last entry is the newest. A source's `failureReason` lists each
+ * `reportError()` of the sync run since the problem began, once per error
+ * value; `reportHealthy(error)` removes that value's failure, and
+ * `reportHealthy()` ends it. An `error` from `fail()`, a failed first load, or a crash is one
+ * failure. A query's request error lists every request failure still open
+ * on its node, once per error value, and a failed replay adds each load it
+ * failed for.
+ */
+export interface HealthProblem extends CollectionErrorInfo {
+  readonly errors: ReadonlyArray<CollectionErrorInfo>
+}
+
+/**
+ * One node of a health tree. A Collection's tree is one node; a live query's
+ * has one node for itself and one for each source alias in query order. The
+ * shape is fixed by the query, and nodes without a problem are present too.
+ *
+ * A node shows at most one problem. `failureReason`: something went wrong and
+ * the sync adapter is still trying, so the problem clears by itself.
+ * `error`: the first load failed, the sync adapter stopped, the Collection
+ * crashed, or, on a live query's own node, a request for more data failed.
+ */
+export interface HealthNode {
+  /** The query alias, or `root` for the Collection the tree was read from. */
+  readonly alias: string
+  readonly collectionId: string
+  /** `include` is an include's source; its rows feed per-row child Collections. */
+  readonly kind: `source` | `live-query` | `include`
+  readonly status: CollectionStatus
+  /** This node or any node below it has a `failureReason` or an `error`. */
+  readonly hasErrors: boolean
+  readonly failureReason: HealthProblem | null
+  readonly error: HealthProblem | null
+  /**
+   * A reload's new sync run is in flight: the rows, status, and problem shown
+   * are the previous run's until it commits or fails.
+   */
+  readonly reloading: boolean
+  readonly sources: ReadonlyArray<HealthNode>
+}
+
+export interface BaseCollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  // Let TSchema default to `never` such that if a user provides T explicitly and no schema
+  // then TSchema will be `never` otherwise if it would default to StandardSchemaV1
+  // then it would conflict with the overloads of createCollection which
+  // requires either T to be provided or a schema to be provided but not both!
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = UtilsRecord,
+> {
+  // If an id isn't passed in, a UUID will be
+  // generated for it.
+  id?: string
+  schema?: TSchema
+  /**
+   * Function to extract the ID from an object
+   * This is required for update/delete operations which now only accept IDs
+   * @param item The item to extract the ID from
+   * @returns The ID string for the item
+   * @example
+   * // For a collection with a 'uuid' field as the primary key
+   * getKey: (item) => item.uuid
+   */
+  getKey: (item: T) => TKey
+  /**
+   * Time in milliseconds after which the collection will be garbage collected
+   * when it has no active subscribers. Defaults to 5 minutes (300000ms).
+   * Sync started without subscribers gets a minimum 50ms handoff grace period
+   * until a subscriber attaches. After the last subscriber leaves, gcTime
+   * applies without that startup minimum.
+   * Pending preloads retain the collection until they settle. Preloading ready
+   * data refreshes the retention period. A persisting transaction that touches
+   * the collection also retains it, and the period starts again when the last
+   * one completes or fails, preserving any remaining startup grace. Pending
+   * manual transactions do not retain it; keep a subscription for draft
+   * visibility until commit or rollback. Rolling
+   * back a manual transaction that stayed pending preserves the existing GC
+   * deadline. Cleanup runs at a host idle opportunity after the delay.
+   * A non-positive or non-finite value
+   * disables automatic garbage collection.
+   */
+  gcTime?: number
+  /**
+   * Whether to eagerly start syncing on collection creation.
+   * When true, syncing begins immediately. When false, syncing starts when the first subscriber attaches.
+   *
+   * Note: Even with startSync=true, collections will pause syncing when there are no active
+   * subscribers (typically when components querying the collection unmount), resuming when new
+   * subscribers attach. This preserves normal staleTime/gcTime behavior.
+   *
+   * @default false
+   */
+  startSync?: boolean
+  /**
+   * Auto-indexing mode for the collection.
+   * When enabled, indexes will be automatically created for simple where expressions.
+   * @default "off"
+   * @description
+   * - "off": No automatic indexing (default). Use explicit indexes for better bundle size.
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges.
+   *            Requires setting defaultIndexType.
+   */
+  autoIndex?: `off` | `eager`
+  /**
+   * Default index type to use when creating indexes without an explicit type.
+   * Required for auto-indexing. Import from '@tanstack/db'.
+   * @example
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db'
+   * const collection = createCollection({
+   *   defaultIndexType: BasicIndex,
+   *   autoIndex: 'eager',
+   *   // ...
+   * })
+   * ```
+   */
+  defaultIndexType?: IndexConstructor<TKey>
+  /**
+   * Optional function to compare two items.
+   * This is used to order the items in the collection.
+   * @param x The first item to compare
+   * @param y The second item to compare
+   * @returns A number indicating the order of the items
+   * @example
+   * // For a collection with a 'createdAt' field
+   * compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
+   */
+  compare?: (x: T, y: T) => number
+  /**
+   * The mode of sync to use for the collection.
+   * @default `eager`
+   * @description
+   * - `eager`: syncs all data immediately on preload
+   * - `on-demand`: syncs data in incremental snapshots when the collection is queried
+   * The exact implementation of the sync mode is up to the sync implementation.
+   */
+  syncMode?: SyncMode
+  /**
+   * Optional asynchronous handler function called before an insert operation
+   *
+   * @example
+   * // Basic insert handler
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   * }
+   *
+   * @example
+   * // Insert handler with refetch (Query Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
+   * // Insert handler with sync wait (Electric Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.createTodo(newItem)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   await api.createTodos(items)
+   *   // Refetch to get updated data from server
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
+   * // Insert handler with error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   try {
+   *     const newItem = transaction.mutations[0].modified
+   *     await api.createTodo(newItem)
+   *   } catch (error) {
+   *     console.error('Insert failed:', error)
+   *     throw error // This will cause the transaction to rollback
+   *   }
+   * }
+   */
+  onInsert?: InsertMutationFn<T, TKey, TUtils>
+
+  /**
+   * Optional asynchronous handler function called before an update operation
+   *
+   * @example
+   * // Basic update handler
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const updatedItem = transaction.mutations[0].modified
+   *   await api.updateTodo(updatedItem.id, updatedItem)
+   * }
+   *
+   * @example
+   * // Update handler with refetch (Query Collection)
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const changes = mutation.changes // Only the changed fields
+   *   await api.updateTodo(mutation.original.id, changes)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
+   * // Update handler with sync wait (Electric Collection)
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.updateTodo(mutation.original.id, mutation.changes)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Update handler with multiple items
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const updates = transaction.mutations.map(m => ({
+   *     id: m.key,
+   *     changes: m.changes
+   *   }))
+   *   await api.updateTodos(updates)
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
+   * // Update handler with optimistic rollback
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     await api.updateTodo(mutation.original.id, mutation.changes)
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Update failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
+   */
+  onUpdate?: UpdateMutationFn<T, TKey, TUtils>
+  /**
+   * Optional asynchronous handler function called before a delete operation
+   *
+   * @example
+   * // Basic delete handler
+   * onDelete: async ({ transaction, collection }) => {
+   *   const deletedKey = transaction.mutations[0].key
+   *   await api.deleteTodo(deletedKey)
+   * }
+   *
+   * @example
+   * // Delete handler with refetch (Query Collection)
+   * onDelete: async ({ transaction, collection }) => {
+   *   const keysToDelete = transaction.mutations.map(m => m.key)
+   *   await api.deleteTodos(keysToDelete)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
+   * // Delete handler with sync wait (Electric Collection)
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.deleteTodo(mutation.original.id)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
+   * // Delete handler with confirmation
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const shouldDelete = await confirmDeletion(mutation.original)
+   *   if (!shouldDelete) {
+   *     throw new Error('Delete cancelled by user')
+   *   }
+   *   await api.deleteTodo(mutation.original.id)
+   * }
+   *
+   * @example
+   * // Delete handler with optimistic rollback
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     await api.deleteTodo(mutation.original.id)
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Delete failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
+   */
+  onDelete?: DeleteMutationFn<T, TKey, TUtils>
+
+  /**
+   * Specifies how to compare data in the collection.
+   * This should be configured to match data ordering on the backend.
+   * E.g., when using the Electric DB collection these options
+   *       should match the database's collation settings.
+   */
+  defaultStringCollation?: StringCollationConfig
+
+  utils?: TUtils
+}
+
+export interface CollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = UtilsRecord,
+> extends BaseCollectionConfig<T, TKey, TSchema, TUtils> {
+  sync: SyncConfig<T, TKey>
+}
+
+export type SingleResult = {
+  singleResult: true
+}
+
+export type NonSingleResult = {
+  singleResult?: never
+}
+
+export type MaybeSingleResult = {
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  singleResult?: true
+}
+
+// Only used for live query collections
+export type CollectionConfigSingleRowOption<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = {},
+> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult
+
+export type ChangesPayload<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>
+
+/**
+ * An input row from a collection
+ */
+export type InputRow = [unknown, Record<string, unknown>]
+
+/**
+ * A keyed stream is a stream of rows
+ * This is used as the inputs from a collection to a query
+ */
+export type KeyedStream = IStreamBuilder<InputRow>
+
+/**
+ * Result stream type representing the output of compiled queries
+ * Always returns [key, [result, orderByIndex]] where orderByIndex is undefined for unordered queries
+ */
+export type ResultStream = IStreamBuilder<[unknown, [any, string | undefined]]>
+
+/**
+ * A namespaced row is a row withing a pipeline that had each table wrapped in its alias
+ */
+export type NamespacedRow = Record<string, Record<string, unknown>>
+
+/**
+ * A keyed namespaced row is a row with a key and a namespaced row
+ * This is the main representation of a row in a query pipeline
+ */
+export type KeyedNamespacedRow = [unknown, NamespacedRow]
+
+/**
+ * A namespaced and keyed stream is a stream of rows
+ * This is used throughout a query pipeline and as the output from a query without
+ * a `select` clause.
+ */
+export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
+
+/**
+ * Something that reads a Collection, as listed by `collection.subscribers`:
+ * a live query, an Effect, or a direct subscription.
+ */
+export interface CollectionDependent {
+  readonly kind: `live-query` | `effect` | `subscription`
+  /** A live query's Collection; a pooled live query has none. */
+  readonly collection?: Collection<any, any, any, any, any>
+  /**
+   * Whether something still reads through this dependent: an Effect or a
+   * subscription always does; a live query does while it has a subscriber.
+   * `cleanup()` refuses only while an active live query or Effect remains.
+   */
+  readonly active: boolean
+  /**
+   * End this dependent: clean up the live query with its own dependents,
+   * dispose the Effect, or end the subscription.
+   */
+  end: () => Promise<void>
+}
+
+/**
+ * Options for subscribing to collection changes
+ */
+export interface SubscribeChangesOptions<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
+  /** Whether to include the current state as initial changes */
+  includeInitialState?: boolean
+  /**
+   * Callback function for filtering changes using a row proxy.
+   * The callback receives a proxy object that records property access,
+   * allowing you to use query builder functions like `eq`, `gt`, etc.
+   *
+   * @example
+   * ```ts
+   * import { eq } from "@tanstack/db"
+   *
+   * collection.subscribeChanges(callback, {
+   *   where: (row) => eq(row.status, "active")
+   * })
+   * ```
+   */
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>, TKey, true>) => any
+  /** Pre-compiled expression for filtering changes */
+  whereExpression?: BasicExpression<boolean>
+  /**
+   * Whether this subscription defers provider work. It keeps the Collection
+   * alive and reads its local rows, but starts no idle source sync run and no
+   * acquisition attempt until `subscription.resumeDeferredAcquisition()`. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
+   * @internal
+   */
+  deferAcquisition?: boolean
+  /**
+   * The live query or Effect this subscription reads for, so
+   * `collection.subscribers` can name it.
+   * @internal
+   */
+  owner?: CollectionDependent
+  /**
+   * Listener for subscription status changes.
+   * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
+   * @internal
+   */
+  onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
+  /**
+   * Optional orderBy to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  orderBy?: OrderBy
+  /**
+   * Optional limit to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  limit?: number
+  /**
+   * Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+   * Allows the caller to directly track the loading promise for isReady status.
+   * @internal
+   */
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  /** Receives subset-load failures scoped to this subscription. @internal */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Lets a live-query graph retain its last publication during replay. @internal */
+  truncateReplayPublication?: {
+    /** `retired`: a reload retired the sync run, and no truncate came. */
+    readonly start: (retired: boolean) => void
+    readonly succeed: () => void
+    /** The replay could not load every active demand again: its failures, in failure order. */
+    readonly fail?: (errors: Array<Error>) => void
+    /**
+     * The replays of the graph's other subscriptions to this collection that
+     * still load. They share one barrier, so this replay waits for them.
+     */
+    readonly siblingReplays: () => Promise<unknown> | undefined
+  }
+}
+
+export interface SubscribeChangesSnapshotOptions<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> extends Omit<SubscribeChangesOptions<T, TKey>, `includeInitialState`> {
+  orderBy?: OrderBy
+  limit?: number
+}
+
+/**
+ * Options for getting current state as changes
+ */
+export interface CurrentStateAsChangesOptions {
+  /** Pre-compiled expression for filtering the current state */
+  where?: BasicExpression<boolean>
+  orderBy?: OrderBy
+  limit?: number
+  optimizedOnly?: boolean
+}
+
+/**
+ * Function type for listening to collection changes
+ * Changes to the same key retain their causal order within a callback.
+ * Changes to different keys have no promised order within a callback.
+ * @param changes - Array of change messages describing what happened
+ * @example
+ * // Basic change listener
+ * const listener: ChangeListener = (changes) => {
+ *   changes.forEach(change => {
+ *     console.log(`${change.type}: ${change.key}`, change.value)
+ *   })
+ * }
+ *
+ * collection.subscribeChanges(listener)
+ *
+ * @example
+ * // Handle different change types
+ * const listener: ChangeListener<Todo> = (changes) => {
+ *   for (const change of changes) {
+ *     switch (change.type) {
+ *       case 'insert':
+ *         addToUI(change.value)
+ *         break
+ *       case 'update':
+ *         updateInUI(change.key, change.value, change.previousValue)
+ *         break
+ *       case 'delete':
+ *         removeFromUI(change.key)
+ *         break
+ *     }
+ *   }
+ * }
+ */
+export type ChangeListener<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = (changes: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>) => void
+
+// Adapted from https://github.com/sindresorhus/type-fest
+// MIT License Copyright (c) Sindre Sorhus
+
+type BuiltIns =
+  | null
+  | undefined
+  | string
+  | number
+  | boolean
+  | symbol
+  | bigint
+  | void
+  | Date
+  | RegExp
+
+type HasMultipleCallSignatures<
+  T extends (...arguments_: Array<any>) => unknown,
+> = T extends {
+  (...arguments_: infer A): unknown
+  (...arguments_: infer B): unknown
+}
+  ? B extends A
+    ? A extends B
+      ? false
+      : true
+    : true
+  : false
+
+type WritableMapDeep<MapType extends ReadonlyMap<unknown, unknown>> =
+  MapType extends ReadonlyMap<infer KeyType, infer ValueType>
+    ? Map<WritableDeep<KeyType>, WritableDeep<ValueType>>
+    : MapType
+
+type WritableSetDeep<SetType extends ReadonlySet<unknown>> =
+  SetType extends ReadonlySet<infer ItemType>
+    ? Set<WritableDeep<ItemType>>
+    : SetType
+
+type WritableObjectDeep<ObjectType extends object> = {
+  -readonly [KeyType in keyof ObjectType]: WritableDeep<ObjectType[KeyType]>
+}
+
+type WritableArrayDeep<ArrayType extends ReadonlyArray<unknown>> =
+  ArrayType extends readonly []
+    ? []
+    : ArrayType extends readonly [...infer U, infer V]
+      ? [...WritableArrayDeep<U>, WritableDeep<V>]
+      : ArrayType extends readonly [infer U, ...infer V]
+        ? [WritableDeep<U>, ...WritableArrayDeep<V>]
+        : ArrayType extends ReadonlyArray<infer U>
+          ? Array<WritableDeep<U>>
+          : ArrayType extends Array<infer U>
+            ? Array<WritableDeep<U>>
+            : ArrayType
+
+export type WritableDeep<T> = T extends BuiltIns
+  ? T
+  : T extends (...arguments_: Array<any>) => unknown
+    ? {} extends WritableObjectDeep<T>
+      ? T
+      : HasMultipleCallSignatures<T> extends true
+        ? T
+        : ((...arguments_: Parameters<T>) => ReturnType<T>) &
+            WritableObjectDeep<T>
+    : T extends ReadonlyMap<unknown, unknown>
+      ? WritableMapDeep<T>
+      : T extends ReadonlySet<unknown>
+        ? WritableSetDeep<T>
+        : T extends ReadonlyArray<unknown>
+          ? WritableArrayDeep<T>
+          : T extends object
+            ? WritableObjectDeep<T>
+            : unknown
+
+export type MakeOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>

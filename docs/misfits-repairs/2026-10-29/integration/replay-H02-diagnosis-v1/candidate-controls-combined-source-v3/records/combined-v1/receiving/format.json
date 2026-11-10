@@ -1,0 +1,27 @@
+{
+  "gate": "format",
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "node_modules/prettier/bin/prettier.cjs",
+    "--write",
+    "packages/query-db-collection/tests/queued-answer-completion-attachments.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-fixture.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-driver.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-supervisor.ts",
+    "packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts",
+    "packages/query-db-collection/tests/queued-answer-completion.receiving.test.ts",
+    "scripts/h02-progress/completion-tsconfig.json",
+    "scripts/h02-progress/completion-eslint.config.mjs",
+    "scripts/h02-progress/completion-receiving.config.ts",
+    "scripts/h02-progress/completion-parent.config.ts",
+    "scripts/h02-progress/completion-parent.mjs"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "slot": 2,
+  "workers": 1,
+  "exitCode": 0,
+  "elapsedSeconds": 0.2130936670000665,
+  "at": "2026-10-30T08:14:49.013317+00:00",
+  "runtime": "format only; no receiving/testCollection/production imports"
+}

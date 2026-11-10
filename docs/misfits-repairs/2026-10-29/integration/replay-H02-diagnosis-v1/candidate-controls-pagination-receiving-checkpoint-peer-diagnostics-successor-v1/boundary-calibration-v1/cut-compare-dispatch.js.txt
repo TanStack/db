@@ -1,0 +1,4 @@
+        compare(`public cut ${observation.boundary}`, () =>
+          checkCompletionBaselineObservation(model, observation),
+        )
+        cuts++

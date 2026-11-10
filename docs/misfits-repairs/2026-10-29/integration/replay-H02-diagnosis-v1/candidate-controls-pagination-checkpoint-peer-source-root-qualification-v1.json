@@ -1,0 +1,44 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "bounded source acceptance for normal bound keys with a working receipt sink; explicit diagnostic-fault qualification required",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/packet-manifest-v1.json",
+      "sha256": "a56541c3188c6a8348aa1187575e0192410dc3e8d86d1a9697628dc4a9312d25"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-receiving-checkpoint-peer-diagnostics-successor-v1/source-freeze-v1.json",
+      "sha256": "1bb89680e1cf69142d2edec1d5936a8e8a2a58ae12eff39f524d3422205ca4d8"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-source-independent-review-v1.md",
+      "sha256": "a774320684e68b4bdb04b572a66a6a877ad327711f428ee8f386aa69ee767ccd"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-diagnostic-fault-source-witness-v1.json",
+      "sha256": "d3abf201d4f6fb44b50328058658b2a0a1b61939bf608aeee5e847555bfa3956"
+    }
+  ],
+  "rootVerification": "Read full independent source report; rehashed exact manifest/source-freeze/review/fault-witness. Independent static audit supplies 120 members, exact diff and preservation; no root execution.",
+  "acceptedComponent": "Local checkpoint phase correction and original-peer diagnostics with every original guard predicate and same error retained. Saved 12 pure boundary controls calibrate transport routing only.",
+  "qualification": {
+    "id": "H02-D-DIAGNOSTIC-FAULT-CLAIM",
+    "disposition": "confirmed-open reporting/evidence issue; broad claim receives no credit",
+    "replacementClaim": "The helper suppresses direct diagnostic capture exceptions and best-effort logs them separately. Receipt-sink failures remain operational faults under unchanged transport/teardown; this packet claims no unconditional preservation of the original terminal error.",
+    "sourceSupportedLimit": "A failed diagnostic write can latch the sink, after which unchanged cleanup or worker-cleaned emission can mask the saved guard error. This is unexecuted source evidence, not runtime or product RED.",
+    "requiredBeforeOperationalComponent": "Correct the helper comment and reporting in an additive derivative; retain S and all failed audits unchanged. No global writer or teardown redesign."
+  },
+  "sourceOperationalPreparationAuthorized": true,
+  "sourceScope": "Prepare only an additive qualified-comment derivative and inert fresh operational materialization/binding/typecheck/runtime proposals; preserve all active/frozen sources and product judgments. No actual typecheck, native run or dynamic import yet.",
+  "nativeProgressionAuthorized": false,
+  "productionEditAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "bugClassClosureCredit": false,
+  "limits": [
+    "Diagnostics remain unexecuted and untypechecked; original-peer cause/disposition remains unestablished.",
+    "Real failure/success receiving pair, later settlement/retry, candidate and actual-helper reach remain open.",
+    "No product judgment ran in the 12 pure routing controls.",
+    "Failed static audit hash-domain mistake remains preserved; later artifact lint pending ROOT."
+  ]
+}

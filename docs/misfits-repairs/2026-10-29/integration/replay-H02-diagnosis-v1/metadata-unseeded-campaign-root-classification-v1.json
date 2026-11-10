@@ -1,0 +1,65 @@
+{
+  "classifiedBy": "/root",
+  "disposition": "qualified exact unseeded stable-output-metadata scope/default campaign GREEN",
+  "evidence": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-unseeded-campaign-result-freeze-v1.json",
+      "sha256": "954704f4509f4519152957251e141ed26f4c5eb0015a3d00a84c4cc6e7b9ed4e"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-review-v1.md",
+      "sha256": "c3504c4548e8d3e4b4fc3b9350785ee0ae9396ee6f7b072ef07dc43767f56db4"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-independent-qualification-freeze-v1.json",
+      "sha256": "051c68b4605ee548caf1ddce28fdf68726a1f5bbb5121a8e1c48e261fe65a04f"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-unseeded-campaign-actual-independent-audit-v2.json",
+      "sha256": "f32bc20c7a8150aea7193ef6d08f6ea2cb8a69a42011de74638c0dc85c63f2e9"
+    }
+  ],
+  "rootVerification": "Read full independent actual report; rehashed exact result/review/qualification/audit pins. Independent raw reconstruction supplies15587original+copied files/eight histories/31states. No root runtime.",
+  "actualOuter": {
+    "initial": "6e3e50",
+    "session": 94881,
+    "final": "59a0d2",
+    "exit": 0
+  },
+  "nativePass": 1,
+  "nativeSkip": 19,
+  "distinctChildren": 8,
+  "childExitCodes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "all31ReachCounts": 8,
+  "rawFiles": 15587,
+  "rawBytes": 251024553,
+  "successfulSeed": null,
+  "qualifiedFacts": [
+    "Complete root/downstream events/current/previousvalues at heldreload/completedreload/directeagerfollowup.",
+    "All31cumulative states1..8 backed by individual rawpaths with serial sourceorder/finalizer assumption.",
+    "Actual postlaunch outer99756getpgid and parent99770PPID/PGID observation; captured20PIDs/ninegroups absent."
+  ],
+  "limits": [
+    "Successful internal seed unavailable; no direct replay or newseed promise.",
+    "No dedicated finish/assert or UUID-console receipt/newparentcheckerV8proof; initial inner getpgid remains absent.",
+    "Stable output metadata/direct eager source-sync only; authoredkeys/noop/subscriptionprogress/changingmetadata/framework/mutants remain open.",
+    "Native coverage/typecheck=false and scoped dependency/provenance/resource limits preserved.",
+    "Prior failed v2 raw/observer and independent audit successors remain intact."
+  ],
+  "bugClassClosureCredit": false,
+  "productionEditAuthorized": false,
+  "nativeProgressionAuthorized": false,
+  "canonicalImport": false,
+  "publishing": false,
+  "wholePrReadiness": "not assessed",
+  "next": "Source-only plan for remaining authoredkey/noop lanes and root/downstream previousValue/full-current-row hostile mutants; separate source review/admission before runtime."
+}

@@ -1,0 +1,24 @@
+import { filter, join as joinOperator, map } from "@tanstack/db-ivm";
+const PARENT_ROUTE_CROSS_KEY = `__tanstack_parent_route_cross__`;
+export function crossJoinParentRoutes(input, parentKeyStream, assemble) {
+  const rows = input.pipe(
+    map(([rowKey, row]) => [PARENT_ROUTE_CROSS_KEY, [rowKey, row]])
+  );
+  const routes = parentKeyStream.pipe(
+    map(([correlationKey, parentContext]) => [
+      PARENT_ROUTE_CROSS_KEY,
+      [correlationKey, parentContext]
+    ])
+  );
+  return rows.pipe(
+    joinOperator(routes, `inner`),
+    filter(
+      ([, [rowSide, routeSide]]) => Boolean(rowSide != null && routeSide != null)
+    ),
+    map(([, [rowSide, routeSide]]) => {
+      const [rowKey, row] = rowSide;
+      const [correlationKey, parentContext] = routeSide;
+      return assemble(rowKey, row, correlationKey, parentContext);
+    })
+  );
+}

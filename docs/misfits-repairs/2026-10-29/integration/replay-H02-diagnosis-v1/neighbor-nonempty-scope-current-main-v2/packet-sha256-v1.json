@@ -1,0 +1,35 @@
+{
+  "format": "relative-path bytes SHA256; excludes this manifest only",
+  "members": 7,
+  "bytes": 404200,
+  "files": {
+    "handoff-v1.md": {
+      "bytes": 632,
+      "sha256": "de12108bbc1031e81694a9480d79848bbaa02b370d1b178ea03caddb7c352c56"
+    },
+    "launcher-process.txt": {
+      "bytes": 241,
+      "sha256": "593e0a96c285c7a97f05664ade88ae778cfda626d68a115319c3808436ecc3b3"
+    },
+    "neighbor-nonempty-scope-current-main-v2-root-admission-v1.json": {
+      "bytes": 2013,
+      "sha256": "6d70e6a490a430ddc41c3759e76bee3488c823e9d61127a532bd4c0f02af975a"
+    },
+    "neighbor-nonempty-scope-current-main-v2-root-process-absence-v1.json": {
+      "bytes": 371,
+      "sha256": "30000bfe00f15bc00b7eb6a56bbbc21ae23a1e7caf6e41f41aa221f1fdf7eb75"
+    },
+    "outer-vitest.log": {
+      "bytes": 272,
+      "sha256": "7a246b948035ec183288df7479e291c61c62e1e953708a6a041c9356783457df"
+    },
+    "result-qualification-v1.json": {
+      "bytes": 1025,
+      "sha256": "fd3e11ddcace0165d4254e181a1d99d88ae8ade36631365f75b7c9b8983f62f1"
+    },
+    "source-freeze-v2.json": {
+      "bytes": 399646,
+      "sha256": "1d018efca6f91a9a5f7a92c98102cf081008f8f75fa44492ddccc6fbd917be51"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Append-only reviewer diagnostic correction; no subject failure",
+  "originalAudit": "metadata-root-omission-preparation-v1-independent-audit.json",
+  "originalAuditSha256": "1e640e517b0068a3cd773ad61dc9c37dd18f01903f2ad3ae3de22b876d2bf516",
+  "originalCheck": "assigned preparation freeze",
+  "cause": "Reviewer copied the assignment hash without the 193c segment in the expected value. Preserve that failed diagnostic unchanged.",
+  "correctAssignedSha256": "71c1a266b201df6d3498973c193c464c36cbc31794db922526ed625a9785fcf3",
+  "actualSha256": "71c1a266b201df6d3498973c193c464c36cbc31794db922526ed625a9785fcf3",
+  "passes": true,
+  "effect": "No subject finding from this diagnostic. Two outer invocation findings remain. No code was executed."
+}

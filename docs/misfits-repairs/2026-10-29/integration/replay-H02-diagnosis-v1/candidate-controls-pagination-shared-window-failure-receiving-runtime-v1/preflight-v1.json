@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-30T11:54:29.286192+00:00",
+  "admission": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/root-exact-one-failure-receiving-admission-v1.json",
+  "admissionSha256": "61d6c5fee04057a468647bc392127d43f5f092708e287aa3b43cd932be439769",
+  "fivePins": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "b392686f0a401be65ca4c364efe54310e4ec454204f59f18859b7883cd0d6403"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+      "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/shared-receiving-operational-preparation-independent-review-v1.md",
+      "sha256": "80dbfac42d70033ff958ad60d6bc8dbf9e19f3a3a8da859b39eb9253809ee940"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-followups-v1/validation-account-v1.json",
+      "sha256": "ea0627d641fe84ccb1aa1e9683ffd09715812cca11bba7f8e8fd5d0b6b8d1874"
+    }
+  ],
+  "allFivePinsMatched": true,
+  "sourceBindingsMatched": 596,
+  "sourceCopiesMatched": 85,
+  "productionUnchanged": 511,
+  "uniquePackageRootsMatched": 255,
+  "ownPayloadsMatched": 11974,
+  "resolutionEdgesMatched": 405,
+  "absentOptionalPeersMatched": 112,
+  "nodeLocksLinksMatched": true,
+  "command": {
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+    ],
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+  },
+  "actualToolRequirement": {
+    "sandbox_permissions": "require_escalated",
+    "yield_time_ms": 1000,
+    "maxInvocations": 1
+  },
+  "streamPaths": {
+    "outerStdout": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stdout.log",
+    "outerStderr": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/outer.stderr.log",
+    "parentAndInner": "unchanged exact recipe outputDirectory and registered inner directory; not merged with outer streams"
+  },
+  "launched": false,
+  "processProbes": 0,
+  "imports": 0,
+  "successAdmitted": false
+}

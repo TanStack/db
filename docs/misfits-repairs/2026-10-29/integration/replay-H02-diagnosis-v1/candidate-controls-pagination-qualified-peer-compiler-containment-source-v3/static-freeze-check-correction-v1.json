@@ -1,0 +1,24 @@
+{
+  "status": "PASS corrected lightweight source freeze check",
+  "failedAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/static-freeze-check-failure-v1.json",
+    "sha256": "34a5f84f93ec12474d3eb94c47fa58453461d3c08d0c637b0244852830091d4f",
+    "actualChunkId": "008860",
+    "exitCode": 1
+  },
+  "diagnosis": "Author audit incorrectly expected two newline-prefixed minus lines. The first --- header starts at byte0, so only the one removed executable line has a preceding newline. This was an audit assertion mistake, not a candidate/source/binding failure.",
+  "directByteReversalRestoresV2": true,
+  "SavedDiffExactlyMatchesIndependentRegeneration": true,
+  "strictJsonAndAllSmallRefsMatched": true,
+  "all653AccountedFor650Plus3": true,
+  "fixedSixAddedFilesAndResolutionsMatched": true,
+  "VArgvConfigLimitsUnchanged": true,
+  "originalTwelveRuntimeAdmissionApiFilesUnchanged": true,
+  "originalSixSourceV2MembersUnchanged": true,
+  "freshOutputAbsent": true,
+  "wrapperExecution": 0,
+  "compilerExecutions": 0,
+  "processProbes": 0,
+  "broadCensus": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

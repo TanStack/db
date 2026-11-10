@@ -1,0 +1,62 @@
+{
+  "kind": "source-only failure-order witness; not executed",
+  "claim": "Diagnostic failures cannot replace the existing guard error",
+  "scope": "new failing-guard diagnostic event plus unchanged receipt writer and baseline teardown",
+  "premises": [
+    "the original peer-binding guard condition is true",
+    "receipt writer is functioning before the new diagnostic event",
+    "writing that diagnostic receipt fails",
+    "no independent out-of-band terminal record preserves the saved guard error"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "source": "queued-answer-completion-baseline-driver.ts:939",
+      "fact": "The guard records baseline-original-peer-binding-mismatch before constructing/throwing its original error."
+    },
+    {
+      "order": 2,
+      "source": "queued-answer-completion-attachments.ts:96",
+      "fact": "recorder.event pushes the record and synchronously calls its sink."
+    },
+    {
+      "order": 3,
+      "source": "receipt-transport.mjs:45-61,94",
+      "fact": "A sink write failure latches failed=true and firstError=transportFault; future emits throw firstError."
+    },
+    {
+      "order": 4,
+      "source": "queued-answer-completion-baseline-driver.ts:523-541",
+      "fact": "recordPeerDiagnostic catches this direct sink exception and best-effort logs the diagnostic fault; then returns."
+    },
+    {
+      "order": 5,
+      "source": "queued-answer-completion-baseline-driver.ts:1063,1439",
+      "fact": "The same original guard error is thrown and captured as failure by the surrounding main catch."
+    },
+    {
+      "order": 6,
+      "source": "queued-answer-completion-baseline-driver.ts:1457-1462",
+      "fact": "If fixture.cleanup emits, its failed sink throws; cleanup catch attempts completion-secondary-cleanup-error through the same failed writer and escapes with transportFault."
+    },
+    {
+      "order": 7,
+      "source": "queued-answer-completion-baseline-driver.ts:1464-1470",
+      "fact": "Even if cleanup emits nothing and returns, unconditional worker-cleaned emission throws the latched transportFault before the saved guard is rethrown."
+    },
+    {
+      "order": 8,
+      "source": "receipt-transport.mjs:303-326",
+      "fact": "recordWorkerError preserves its incoming error, which can now be transportFault; it cannot recover a saved guard that never reaches it."
+    }
+  ],
+  "inference": "Local capture exceptions are suppressed. Unconditional end-to-end original-error preservation is unsupported; a source-supported masking path exists.",
+  "observedRuntimeCounterexample": false,
+  "normalBoundKeySourceSuitabilityBlocked": false,
+  "requiredNarrowCorrection": "Qualify report, freeze and comment to state the local helper guarantee only; receipt-sink failures remain operational faults under unchanged transport/teardown, with no unconditional primary-error preservation credit.",
+  "localHelperOnlyRepairSufficient": false,
+  "reason": "The local helper cannot control later unconditional or secondary-cleanup emissions. Logging original context may retain an extra fact but does not establish terminal error ordering or release.",
+  "nextEnforcementWitness": "If end-to-end failure preservation is later claimed, separately bind/admit a controlled writer failure at this diagnostic event, retain guard and transport/cleanup faults distinctly, and verify teardown. No such run is admitted here.",
+  "globalWriterOrTeardownRedesignAuthorized": false,
+  "runtimeAdmission": false
+}

@@ -1,0 +1,64 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: baseline receiving instrumentation failed; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-83272-c0cdd454-fca2-425a-b697-c1bec00134b2/receipts.jsonl; reason=exited; signal=null; binding=bound; bindingError=undefined; observer=Error: public cut preceded its complete callback interval
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:425:17
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:400:7
+    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:171:9)
+    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/receipt-transport.mjs:239:19)
+    at receiveCompletionProgram (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:480:14)
+    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:137:19
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20; cleanup=[]
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:425:17
+    423|       } else if (receipt.phase === `completion-baseline-cut`) {
+    424|         if (activeEpoch !== undefined)
+    425|           throw new Error(`public cut preceded its complete callback i…
+       |                 ^
+    426|         const expected = orderedSteps[orderedIndex++]
+    427|         if (
+ ❯ packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:400:7
+ ❯ Object.push scripts/h02-progress/receipt-transport.mjs:171:9
+ ❯ Object.drain scripts/h02-progress/receipt-transport.mjs:239:19
+ ❯ receiveCompletionProgram packages/query-db-collection/tests/queued-answer-completion-supervisor.ts:480:14
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:137:19
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:502:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: baseline receiving had an unexpected host/worker exception; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-83272-c0cdd454-fca2-425a-b697-c1bec00134b2/receipts.jsonl
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:525:7
+    523|   )
+    524|     diagnostics.push(
+    525|       new Error(
+       |       ^
+    526|         `baseline receiving had an unexpected host/worker exception; i…
+    527|       ),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: unexpected baseline child exit 1; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-83272-c0cdd454-fca2-425a-b697-c1bec00134b2/receipts.jsonl
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:535:7
+    533|   )
+    534|     diagnostics.push(
+    535|       new Error(
+       |       ^
+    536|         `unexpected baseline child exit ${outcome.exitCode}; inspect $…
+    537|       ),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts > checks a selected baseline constituent through the shared judgment
+Error: baseline receiving omitted its authored actions or observations; inspect /var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/h02-completion-83272-c0cdd454-fca2-425a-b697-c1bec00134b2/receipts.jsonl
+ ❯ packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts:554:7
+    552|   )
+    553|     diagnostics.push(
+    554|       new Error(
+       |       ^
+    555|         `baseline receiving omitted its authored actions or observatio…
+    556|       ),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+

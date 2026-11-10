@@ -1,0 +1,50 @@
+{
+  "status": "PASS: frozen stopped-result account verified",
+  "stoppedFreezeSha256": "1c47fe8e1526411ac238b86d91ba844aea5ec9237af39b64a55886a08e0872d8",
+  "assets": 10,
+  "exactRuntimeFileSet": true,
+  "activeSourceFilesUnchanged": 573,
+  "rawNativeDisplayNameCount": 4,
+  "completedNativeListCommands": 1,
+  "unexecutedNativeListCommands": 5,
+  "childExitCode": 0,
+  "outerToolExitCode": 1,
+  "primaryFailure": {
+    "error": "wrong native list names",
+    "phase": "native-list"
+  },
+  "secondaryFailures": [],
+  "killAttempts": [],
+  "samples": 7,
+  "maxSampledGroupRssBytes": 296828928,
+  "rootRecordedOriginalPidPgidAbsence": [
+    {
+      "participant": "outer",
+      "kind": "pid",
+      "identity": 42883,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "outer",
+      "kind": "pgid",
+      "identity": 42883,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "child",
+      "kind": "pid",
+      "identity": 42939,
+      "status": "empty-ESRCH"
+    },
+    {
+      "participant": "child",
+      "kind": "pgid",
+      "identity": 42939,
+      "status": "empty-ESRCH"
+    }
+  ],
+  "reviewerNativeCommands": 0,
+  "reviewerProcessProbes": 0,
+  "receivingRuns": 0,
+  "failures": []
+}

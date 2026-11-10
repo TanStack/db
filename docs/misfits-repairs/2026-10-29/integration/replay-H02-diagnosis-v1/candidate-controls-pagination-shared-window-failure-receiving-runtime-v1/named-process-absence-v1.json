@@ -1,0 +1,34 @@
+{
+  "schema": "h02-named-process-absence-v1",
+  "at": "2026-10-30T11:57:34.465209+00:00",
+  "actualTool": {
+    "cmd": "/bin/ps -p 83258,83269,83272,83275 -o pid=,ppid=,pgid=,stat=,command=",
+    "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+    "sandbox_permissions": "require_escalated",
+    "yield_time_ms": 1000,
+    "chunkId": "8a89fe",
+    "exitCode": 1,
+    "output": "",
+    "wallTimeSeconds": 0.177294667
+  },
+  "namedIdentities": {
+    "outerParentPid": 83258,
+    "originalParentWorkerPidAndPgid": 83269,
+    "parentTestWorkerPid": 83272,
+    "registeredReceivingPidAndPgid": 83275
+  },
+  "allNamedPidsAbsent": true,
+  "ownedGroupInventory": {
+    "beforeCleanup": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/parent-raw/final-group-before-cleanup.json",
+      "sha256": "dfe56281db2381b8d7ada76e3711d5da3808737a479da1ecc86f40296b9cb8ac",
+      "rows": []
+    },
+    "final": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-failure-receiving-runtime-v1/parent-raw/final-group.json",
+      "sha256": "dfe56281db2381b8d7ada76e3711d5da3808737a479da1ecc86f40296b9cb8ac",
+      "rows": []
+    }
+  },
+  "limits": "Named PID absence at this check and the original recorded owned-group inventories only. No unregistered, escaped or unrelated process claim."
+}

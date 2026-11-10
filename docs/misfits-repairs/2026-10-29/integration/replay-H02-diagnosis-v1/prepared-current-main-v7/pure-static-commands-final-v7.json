@@ -1,0 +1,99 @@
+{
+  "envSet": {
+    "H02_PROGRESS_V6_STDERR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v6/raw/worker.stderr.log",
+    "H02_PROGRESS_V5_STDERR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/canonical-current-main-v5/raw/worker.stderr.log",
+    "H02_PROGRESS_SOURCE_FREEZE": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source-freeze-v6.json",
+    "H02_ROOT_SETUP_CALIBRATION_DIR": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v7/root-setup-calibration"
+  },
+  "envUnset": [
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_CALIBRATION",
+    "H02_PROGRESS_WORKER_HISTORY",
+    "H02_PROGRESS_SELECTED_ROOT",
+    "H02_PROGRESS_RECEIPTS",
+    "H02_PROGRESS_BINDING_DIR"
+  ],
+  "outcomes": [
+    {
+      "name": "format-checked-v7",
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+        "--write",
+        "scripts/h02-progress/receiving-monitor.mjs",
+        "scripts/h02-progress/receiving-monitor.test.mjs",
+        "scripts/h02-progress/checker-calibration.test.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "typescript-final-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+        "-p",
+        "scripts/h02-progress/tsconfig.json"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "pure-node-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "--test",
+        "--test-concurrency=1",
+        "scripts/h02-progress/receipt-transport.test.mjs",
+        "scripts/h02-progress/bindings-calibration.test.mjs",
+        "scripts/h02-progress/startup-inspector.test.mjs",
+        "scripts/h02-progress/receiving-monitor.test.mjs"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "witness-calibration-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/witness-calibration.config.ts",
+        "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "checker-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/calibration.config.ts",
+        "scripts/h02-progress/checker-calibration.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "root-setup-v7",
+      "args": [
+        "--max-old-space-size=384",
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "scripts/h02-progress/root-setup-calibration.config.ts",
+        "scripts/h02-progress/root-setup-calibration.test.ts"
+      ],
+      "exitCode": 0,
+      "signal": null
+    }
+  ]
+}

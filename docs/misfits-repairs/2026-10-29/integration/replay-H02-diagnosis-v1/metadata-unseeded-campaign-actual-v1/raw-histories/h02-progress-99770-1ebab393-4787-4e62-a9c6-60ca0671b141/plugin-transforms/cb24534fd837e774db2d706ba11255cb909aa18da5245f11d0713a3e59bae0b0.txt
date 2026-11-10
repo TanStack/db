@@ -1,0 +1,112 @@
+import {
+  CollectionRef,
+  ConditionalSelect,
+  DescriptorRef,
+  IncludesSubquery,
+  QueryRef,
+  UnionAll,
+  UnionFrom,
+  isExpressionLike
+} from "../ir.js";
+import { isRefProxy } from "./ref-proxy-identity.js";
+export function cloneQueryForPlacement(query, resolveCollection) {
+  return cloneQuery(query, {
+    clones: /* @__PURE__ */ new WeakMap(),
+    resolveDescriptor: resolveCollection
+  });
+}
+function cloneQuery(query, context) {
+  const { clones } = context;
+  const existing = clones.get(query);
+  if (existing) return existing;
+  const cloned = {
+    ...query
+  };
+  clones.set(query, cloned);
+  cloned.from = cloneFromForPlacement(query.from, context);
+  cloned.join = query.join?.map((join) => ({
+    ...join,
+    from: cloneSourceForPlacement(join.from, context)
+  }));
+  cloned.select = query.select === void 0 || isExpressionLike(query.select) ? query.select : cloneSelectForPlacement(query.select, context);
+  return cloned;
+}
+function cloneFromForPlacement(from, context) {
+  if (from.type === `unionFrom`) {
+    return new UnionFrom(
+      from.sources.map((source) => cloneSourceForPlacement(source, context))
+    );
+  }
+  if (from.type === `unionAll`) {
+    return new UnionAll(from.queries.map((query) => cloneQuery(query, context)));
+  }
+  return cloneSourceForPlacement(from, context);
+}
+function cloneSourceForPlacement(source, context) {
+  if (source.type === `collectionRef`) {
+    return new CollectionRef(source.collection, source.alias, source.bindingId);
+  }
+  if (source.type === `descriptorRef`) {
+    return context.resolveDescriptor ? new CollectionRef(
+      context.resolveDescriptor(source.descriptor),
+      source.alias,
+      source.bindingId
+    ) : new DescriptorRef(source.descriptor, source.alias, source.bindingId);
+  }
+  return new QueryRef(
+    cloneQuery(source.query, context),
+    source.alias,
+    source.bindingId
+  );
+}
+function cloneSelectForPlacement(select, context) {
+  const { clones } = context;
+  const existing = clones.get(select);
+  if (existing) return existing;
+  const cloned = {};
+  clones.set(select, cloned);
+  for (const [field, value] of Object.entries(select)) {
+    cloned[field] = cloneSelectValueForPlacement(value, context);
+  }
+  return cloned;
+}
+function cloneSelectValueForPlacement(value, context) {
+  const { clones } = context;
+  if (value instanceof IncludesSubquery) {
+    const existing = clones.get(value);
+    if (existing) return existing;
+    const cloned = new IncludesSubquery(
+      cloneQuery(value.query, context),
+      value.correlationField,
+      value.childCorrelationField,
+      value.fieldName,
+      value.runtime,
+      value.parentFilters,
+      value.parentProjection,
+      value.materialization,
+      value.scalarField
+    );
+    clones.set(value, cloned);
+    return cloned;
+  }
+  if (value instanceof ConditionalSelect) {
+    const existing = clones.get(value);
+    if (existing) return existing;
+    const cloned = new ConditionalSelect(
+      value.branches.map((branch) => ({
+        ...branch,
+        value: cloneSelectValueForPlacement(branch.value, context)
+      })),
+      value.defaultValue !== void 0 ? cloneSelectValueForPlacement(value.defaultValue, context) : void 0
+    );
+    clones.set(value, cloned);
+    return cloned;
+  }
+  if (value === null || typeof value !== `object` || Array.isArray(value)) {
+    return value;
+  }
+  if (isRefProxy(value)) {
+    return value;
+  }
+  return isExpressionLike(value) ? value : cloneSelectForPlacement(value, context);
+}

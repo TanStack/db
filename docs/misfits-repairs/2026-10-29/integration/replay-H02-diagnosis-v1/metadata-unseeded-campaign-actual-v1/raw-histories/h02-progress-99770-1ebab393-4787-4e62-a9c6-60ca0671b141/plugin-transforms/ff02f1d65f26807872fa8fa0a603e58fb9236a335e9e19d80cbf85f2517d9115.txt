@@ -1,0 +1,565 @@
+import { deepEquals } from "../utils.js";
+import { CannotCombineEmptyExpressionListError } from "../errors.js";
+import { findAggregate } from "./compiler/find-aggregate.js";
+import {
+  Func,
+  PropRef,
+  QueryRef as QueryRefClass,
+  UnionAll as UnionAllClass,
+  UnionFrom as UnionFromClass,
+  collectPropRefs,
+  createResidualWhere,
+  getFromSources,
+  getWhereExpression,
+  isResidualWhere
+} from "./ir.js";
+export function optimizeQuery(query) {
+  if (query.from.type === `unionAll`) {
+    return {
+      optimizedQuery: {
+        ...query,
+        from: new UnionAllClass(
+          query.from.queries.map(
+            (branch) => optimizeQuery(branch).optimizedQuery
+          )
+        )
+      },
+      sourceWhereClauses: /* @__PURE__ */ new Map()
+    };
+  }
+  const sourceWhereClauses = extractSourceWhereClauses(query);
+  let optimized = query;
+  let previousOptimized;
+  let iterations = 0;
+  const maxIterations = 10;
+  while (iterations < maxIterations && !deepEquals(optimized, previousOptimized)) {
+    previousOptimized = optimized;
+    optimized = applyRecursiveOptimization(optimized);
+    iterations++;
+  }
+  const cleaned = removeRedundantSubqueries(optimized);
+  return {
+    optimizedQuery: cleaned,
+    sourceWhereClauses
+  };
+}
+function extractSourceWhereClauses(query) {
+  const sourceWhereClauses = /* @__PURE__ */ new Map();
+  if (!query.where || query.where.length === 0) {
+    return sourceWhereClauses;
+  }
+  const splitWhereClauses = splitAndClauses(query.where);
+  const localBindings = getLocalBindingIds(query);
+  const analyzedClauses = splitWhereClauses.map(
+    (clause) => analyzeWhereClause(clause, localBindings)
+  );
+  const groupedClauses = groupWhereClauses(analyzedClauses);
+  const nullableSources = getNullableJoinSources(query);
+  for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
+    if (isCollectionReference(query, sourceAlias) && !nullableSources.has(sourceAlias)) {
+      sourceWhereClauses.set(sourceAlias, whereClause);
+    }
+  }
+  return sourceWhereClauses;
+}
+function isCollectionReference(query, sourceAlias) {
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === sourceAlias) {
+      return source.type === `collectionRef` || source.type === `descriptorRef`;
+    }
+  }
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.alias === sourceAlias) {
+        return joinClause.from.type === `collectionRef` || joinClause.from.type === `descriptorRef`;
+      }
+    }
+  }
+  return false;
+}
+function getNullableJoinSources(query) {
+  const nullable = /* @__PURE__ */ new Set();
+  if (query.join) {
+    const leftAliases = new Set(
+      getFromSources(query.from).map((source) => source.alias)
+    );
+    for (const join of query.join) {
+      const joinedAlias = join.from.alias;
+      if (join.type === `left` || join.type === `full`) {
+        nullable.add(joinedAlias);
+      }
+      if (join.type === `right` || join.type === `full`) {
+        for (const leftAlias of leftAliases) {
+          nullable.add(leftAlias);
+        }
+      }
+      leftAliases.add(joinedAlias);
+    }
+  }
+  return nullable;
+}
+function applyRecursiveOptimization(query) {
+  const subqueriesOptimized = {
+    ...query,
+    from: optimizeNestedFrom(query.from),
+    join: query.join?.map((joinClause) => ({
+      ...joinClause,
+      from: joinClause.from.type === `queryRef` ? new QueryRefClass(
+        applyRecursiveOptimization(joinClause.from.query),
+        joinClause.from.alias,
+        joinClause.from.bindingId
+      ) : joinClause.from
+    }))
+  };
+  return applySingleLevelOptimization(subqueriesOptimized);
+}
+function applySingleLevelOptimization(query) {
+  if (!query.where || query.where.length === 0) {
+    return query;
+  }
+  if (query.from.type === `unionFrom`) {
+    return query;
+  }
+  if (!query.join || query.join.length === 0) {
+    if (query.where.length > 1) {
+      const splitWhereClauses2 = splitAndClauses(query.where);
+      const combinedWhere = combineWithAnd(splitWhereClauses2);
+      return {
+        ...query,
+        where: [combinedWhere]
+      };
+    }
+    return query;
+  }
+  const nonResidualWhereClauses = query.where.filter(
+    (where) => !isResidualWhere(where)
+  );
+  const splitWhereClauses = splitAndClauses(nonResidualWhereClauses);
+  const localBindings = getLocalBindingIds(query);
+  const analyzedClauses = splitWhereClauses.map(
+    (clause) => analyzeWhereClause(clause, localBindings)
+  );
+  const groupedClauses = groupWhereClauses(analyzedClauses);
+  return applyOptimizations(query, groupedClauses);
+}
+function removeRedundantSubqueries(query) {
+  return {
+    ...query,
+    from: removeRedundantFromClause(query.from),
+    join: query.join?.map((joinClause) => ({
+      ...joinClause,
+      from: removeRedundantJoinFromClause(joinClause.from)
+    }))
+  };
+}
+function removeRedundantFromClause(from) {
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map((source) => removeRedundantFromClause(source))
+    );
+  }
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => removeRedundantSubqueries(branch))
+    );
+  }
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
+    return from;
+  }
+  const processedQuery = removeRedundantSubqueries(from.query);
+  if (isRedundantSubquery(processedQuery) && from.alias === getFirstFromAlias(processedQuery)) {
+    const innerFrom = removeRedundantFromClause(processedQuery.from);
+    if (innerFrom.type === `collectionRef` || innerFrom.type === `descriptorRef`) {
+      return innerFrom.bindingId === from.bindingId ? innerFrom : new QueryRefClass(processedQuery, from.alias, from.bindingId);
+    } else if (innerFrom.type === `queryRef`) {
+      return new QueryRefClass(innerFrom.query, from.alias, from.bindingId);
+    }
+  }
+  return new QueryRefClass(processedQuery, from.alias, from.bindingId);
+}
+function removeRedundantJoinFromClause(from) {
+  return removeRedundantFromClause(from);
+}
+function isRedundantSubquery(query) {
+  return (!query.where || query.where.length === 0) && !query.select && (!query.groupBy || query.groupBy.length === 0) && (!query.having || query.having.length === 0) && (!query.orderBy || query.orderBy.length === 0) && (!query.join || query.join.length === 0) && query.limit === void 0 && query.offset === void 0 && !query.fnSelect && (!query.fnWhere || query.fnWhere.length === 0) && (!query.fnHaving || query.fnHaving.length === 0) && !query.distinct && !query.singleResult;
+}
+function splitAndClauses(whereClauses) {
+  const result = [];
+  for (const whereClause of whereClauses) {
+    const clause = getWhereExpression(whereClause);
+    result.push(...splitAndClausesRecursive(clause));
+  }
+  return result;
+}
+function splitAndClausesRecursive(clause) {
+  if (clause.type === `func` && clause.name === `and`) {
+    const result = [];
+    for (const arg of clause.args) {
+      result.push(...splitAndClausesRecursive(arg));
+    }
+    return result;
+  } else {
+    return [clause];
+  }
+}
+function getLocalBindingIds(query) {
+  return /* @__PURE__ */ new Set([
+    ...getFromSources(query.from).map((source) => source.bindingId),
+    ...query.join?.map(({ from }) => from.bindingId) ?? []
+  ]);
+}
+function analyzeWhereClause(clause, localBindings) {
+  const touchedSources = /* @__PURE__ */ new Set();
+  let hasNamespaceOnlyRef = false;
+  let hasExternalBinding = false;
+  function collectSources(expr) {
+    switch (expr.type) {
+      case `ref`:
+        if (expr.bindingId !== void 0 && !localBindings.has(expr.bindingId)) {
+          hasExternalBinding = true;
+        }
+        if (expr.path && expr.path.length > 0) {
+          const firstElement = expr.path[0];
+          if (firstElement) {
+            touchedSources.add(firstElement);
+            if (expr.path.length === 1) {
+              hasNamespaceOnlyRef = true;
+            }
+          }
+        }
+        break;
+      case `func`:
+        if (expr.args) {
+          expr.args.forEach(collectSources);
+        }
+        break;
+      case `val`:
+        break;
+      case `agg`:
+        if (expr.args) {
+          expr.args.forEach(collectSources);
+        }
+        break;
+    }
+  }
+  collectSources(clause);
+  return {
+    expression: clause,
+    touchedSources,
+    hasNamespaceOnlyRef,
+    hasExternalBinding
+  };
+}
+function groupWhereClauses(analyzedClauses) {
+  const singleSource = /* @__PURE__ */ new Map();
+  const multiSource = [];
+  for (const clause of analyzedClauses) {
+    if (clause.touchedSources.size === 1 && !clause.hasNamespaceOnlyRef && !clause.hasExternalBinding) {
+      const source = Array.from(clause.touchedSources)[0];
+      if (!singleSource.has(source)) {
+        singleSource.set(source, []);
+      }
+      singleSource.get(source).push(clause.expression);
+    } else {
+      multiSource.push(clause.expression);
+    }
+  }
+  const combinedSingleSource = /* @__PURE__ */ new Map();
+  for (const [source, clauses] of singleSource) {
+    combinedSingleSource.set(source, combineWithAnd(clauses));
+  }
+  const combinedMultiSource = multiSource.length > 0 ? combineWithAnd(multiSource) : void 0;
+  return {
+    singleSource: combinedSingleSource,
+    multiSource: combinedMultiSource
+  };
+}
+function applyOptimizations(query, groupedClauses) {
+  const actuallyOptimized = /* @__PURE__ */ new Set();
+  const nullableSources = getNullableJoinSources(query);
+  const pushableSingleSource = /* @__PURE__ */ new Map();
+  for (const [source, clause] of groupedClauses.singleSource) {
+    if (!nullableSources.has(source)) {
+      pushableSingleSource.set(source, clause);
+    }
+  }
+  const optimizedFrom = optimizeFromWithTracking(
+    query.from,
+    pushableSingleSource,
+    actuallyOptimized
+  );
+  const optimizedJoins = query.join ? query.join.map((joinClause) => ({
+    ...joinClause,
+    from: optimizeFromWithTracking(
+      joinClause.from,
+      pushableSingleSource,
+      actuallyOptimized
+    )
+  })) : void 0;
+  const remainingWhereClauses = [];
+  const residualWhereClauses = query.where?.filter(isResidualWhere) ?? [];
+  if (groupedClauses.multiSource) {
+    remainingWhereClauses.push(groupedClauses.multiSource);
+  }
+  const hasOuterJoins = nullableSources.size > 0;
+  for (const [source, clause] of groupedClauses.singleSource) {
+    if (!actuallyOptimized.has(source)) {
+      remainingWhereClauses.push(clause);
+    } else if (hasOuterJoins) {
+      residualWhereClauses.push(createResidualWhere(clause));
+    }
+  }
+  const combineRemaining = (clauses) => clauses.length > 1 ? combineWithAnd(
+    clauses.flatMap(
+      (clause) => splitAndClausesRecursive(getWhereExpression(clause))
+    )
+  ) : clauses[0];
+  const regularWhere = combineRemaining(remainingWhereClauses);
+  const residualWhere = combineRemaining(residualWhereClauses);
+  const finalWhere = [
+    ...regularWhere ? [regularWhere] : [],
+    ...residualWhere ? [createResidualWhere(getWhereExpression(residualWhere))] : []
+  ];
+  const optimizedQuery = {
+    ...copyClauseArrays(query),
+    from: optimizedFrom,
+    join: optimizedJoins,
+    where: finalWhere.length > 0 ? finalWhere : []
+  };
+  return optimizedQuery;
+}
+function deepCopyQuery(query) {
+  return {
+    ...copyClauseArrays(query),
+    from: deepCopyFrom(query.from),
+    join: query.join ? query.join.map((joinClause) => ({
+      type: joinClause.type,
+      on: joinClause.on,
+      from: deepCopyFrom(joinClause.from)
+    })) : void 0,
+    where: query.where ? [...query.where] : void 0
+  };
+}
+function copyClauseArrays(query) {
+  return {
+    ...query,
+    groupBy: query.groupBy ? [...query.groupBy] : void 0,
+    having: query.having ? [...query.having] : void 0,
+    orderBy: query.orderBy ? [...query.orderBy] : void 0,
+    fnWhere: query.fnWhere ? [...query.fnWhere] : void 0,
+    fnHaving: query.fnHaving ? [...query.fnHaving] : void 0
+  };
+}
+function deepCopyFrom(from) {
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
+    return from;
+  }
+  if (from.type === `queryRef`) {
+    return new QueryRefClass(
+      deepCopyQuery(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch))
+    );
+  }
+  return new UnionFromClass(
+    from.sources.map(
+      (source) => deepCopyFrom(source)
+    )
+  );
+}
+function optimizeNestedFrom(from) {
+  if (from.type === `queryRef`) {
+    return new QueryRefClass(
+      applyRecursiveOptimization(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map((source) => optimizeNestedFrom(source))
+    );
+  }
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => applyRecursiveOptimization(branch))
+    );
+  }
+  return from;
+}
+function getFirstFromAlias(query) {
+  return getFromSources(query.from)[0]?.alias;
+}
+function optimizeFromWithTracking(from, singleSourceClauses, actuallyOptimized) {
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map(
+        (source) => optimizeFromWithTracking(
+          source,
+          singleSourceClauses,
+          actuallyOptimized
+        )
+      )
+    );
+  }
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch))
+    );
+  }
+  const whereClause = singleSourceClauses.get(from.alias);
+  if (!whereClause) {
+    if (from.type === `collectionRef` || from.type === `descriptorRef`) {
+      return from;
+    }
+    return new QueryRefClass(
+      deepCopyQuery(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
+    const subQuery = {
+      from,
+      where: [whereClause]
+    };
+    actuallyOptimized.add(from.alias);
+    return new QueryRefClass(subQuery, from.alias, from.bindingId);
+  }
+  if (!isSafeToPushIntoExistingSubquery(from.query, whereClause, from.alias)) {
+    return new QueryRefClass(
+      deepCopyQuery(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  if (referencesAliasWithRemappedSelect(from.query, whereClause, from.alias)) {
+    return new QueryRefClass(
+      deepCopyQuery(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  const existingWhere = from.query.where || [];
+  const remappedWhere = remapWhereForSubquery(
+    from.query,
+    whereClause,
+    from.alias
+  );
+  if (remappedWhere === void 0) {
+    return new QueryRefClass(
+      deepCopyQuery(from.query),
+      from.alias,
+      from.bindingId
+    );
+  }
+  const optimizedSubQuery = {
+    ...deepCopyQuery(from.query),
+    where: [...existingWhere, remappedWhere]
+  };
+  actuallyOptimized.add(from.alias);
+  return new QueryRefClass(optimizedSubQuery, from.alias, from.bindingId);
+}
+function remapWhereForSubquery(subquery, whereClause, outerAlias) {
+  const firstFromAlias = getFirstFromAlias(subquery);
+  if (firstFromAlias === void 0) return void 0;
+  const remapExpression = (expression) => {
+    if (expression instanceof PropRef) {
+      if (expression.path[0] !== outerAlias) return expression;
+      const field = expression.path[1];
+      const projected = field ? subquery.select?.[field] : void 0;
+      const hasNamespacedResult = subquery.join !== void 0 || subquery.from.type === `unionFrom`;
+      const innerPath = projected instanceof PropRef ? [...projected.path, ...expression.path.slice(2)] : hasNamespacedResult ? expression.path.slice(1) : [firstFromAlias, ...expression.path.slice(1)];
+      return new PropRef(innerPath);
+    }
+    if (expression instanceof Func) {
+      return new Func(expression.name, expression.args.map(remapExpression));
+    }
+    return expression;
+  };
+  return remapExpression(whereClause);
+}
+function isSafeToPushIntoExistingSubquery(query, whereClause, outerAlias) {
+  return !(query.distinct || query.select && (findAggregate(query.select) !== void 0 || whereReferencesComputedSelectFields(
+    query.select,
+    whereClause,
+    outerAlias
+  )) || query.groupBy?.length || query.having?.length || query.orderBy?.length && (query.limit !== void 0 || query.offset !== void 0) || query.fnSelect || query.fnWhere?.length || query.fnHaving?.length);
+}
+function whereReferencesComputedSelectFields(select, whereClause, outerAlias) {
+  const computed = /* @__PURE__ */ new Set();
+  for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue;
+    if (value instanceof PropRef) continue;
+    computed.add(key);
+  }
+  const refs = collectPropRefs(whereClause);
+  for (const ref of refs) {
+    const path = ref.path;
+    if (!Array.isArray(path) || path.length < 2) continue;
+    const alias = path[0];
+    const field = path[1];
+    if (alias !== outerAlias) continue;
+    if (computed.has(field)) return true;
+  }
+  return false;
+}
+function referencesAliasWithRemappedSelect(subquery, whereClause, outerAlias) {
+  const refs = collectPropRefs(whereClause);
+  if (refs.every((ref) => ref.path[0] !== outerAlias)) {
+    return false;
+  }
+  if (subquery.fnSelect) {
+    return true;
+  }
+  const select = subquery.select;
+  if (!select) {
+    return false;
+  }
+  const hasSpreadProjection = Object.keys(select).some(
+    (key) => key.startsWith(`__SPREAD_SENTINEL__`)
+  );
+  const localBindings = getLocalBindingIds(subquery);
+  for (const ref of refs) {
+    const path = ref.path;
+    if (path.length < 2) continue;
+    if (path[0] !== outerAlias) continue;
+    const projected = select[path[1]];
+    if (!projected) {
+      if (hasSpreadProjection) return true;
+      continue;
+    }
+    if (!(projected instanceof PropRef)) {
+      return true;
+    }
+    if (projected.bindingId !== void 0 && !localBindings.has(projected.bindingId)) {
+      return true;
+    }
+    if (projected.path.length < 2) {
+      return true;
+    }
+    const [innerAlias, innerField] = projected.path;
+    const firstFromAlias = getFirstFromAlias(subquery);
+    if (innerAlias !== outerAlias && innerAlias !== firstFromAlias) {
+      return true;
+    }
+    if (innerField !== path[1]) {
+      return true;
+    }
+  }
+  return false;
+}
+function combineWithAnd(expressions) {
+  if (expressions.length === 0) {
+    throw new CannotCombineEmptyExpressionListError();
+  }
+  if (expressions.length === 1) {
+    return expressions[0];
+  }
+  return new Func(`and`, expressions);
+}

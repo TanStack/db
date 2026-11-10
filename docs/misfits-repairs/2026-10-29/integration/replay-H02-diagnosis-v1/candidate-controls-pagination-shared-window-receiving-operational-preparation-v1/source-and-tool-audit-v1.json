@@ -1,0 +1,188 @@
+{
+  "at": "2026-10-30T11:41:09.628934+00:00",
+  "allChecksPassed": true,
+  "sourcePreparationFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/source-freeze-v1.json",
+    "sha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193"
+  },
+  "operationalFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+    "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b"
+  },
+  "QsourceMapsUnchanged": 596,
+  "QcopiedSourcesUnchanged": 85,
+  "QproductionUnchanged": 511,
+  "completionMetadataSubset": 18,
+  "receivingProductionMetadataSubset": 161,
+  "newSourceIdentities": 0,
+  "originalReceivingFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/source-freeze-v1.json",
+    "sha256": "0a1978c5a8856da7aab49379462dd5f258f75b7ba910454eed320f3018f13779"
+  },
+  "archives": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-v1.json",
+      "sha256": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+      "entries": 126,
+      "exactMappedEntries": 1
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/packet-sha256-with-snapshot-relocation-v2.json",
+      "sha256": "e36b9780ca9891cbc25233618117e121619bca1c2b0aa29974fb9ffcc80d7462",
+      "entries": 133,
+      "exactMappedEntries": 0
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-source-failed-peer-checkpoint-successor-v1/packet-sha256-v1.json",
+      "sha256": "60a45f03547a64b44341b72b2a9cebe2f9c2f662efc014b613d0e840978427fd",
+      "entries": 88,
+      "exactMappedEntries": 0
+    }
+  ],
+  "materialPackages": 9,
+  "materialPayloads": 2544,
+  "supplemental": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/supplemental-tool-inputs.json",
+    "sha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+    "packages": 253,
+    "payloadsRehashed": 11241,
+    "scope": "Metadata-declared installed dependency/optional/peer closure from exact named primary/config/setup/coverage roots; excludes devDependencies, absent optional/peer packages, arbitrary undeclared dynamic imports, Python stdlib, OS/shared libraries and runtime evaluated-source binding."
+  },
+  "acceptedRecovery": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/root-shared-toolchain-recovery-qualification-v1.json",
+    "sha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+    "scope": "ROOT accepted recovery for unaffected exact-binding work; no generic runtime authority"
+  },
+  "recoveryProofsRehashed": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/shim-prefix-repair-actual-result-v1.json",
+      "sha256": "dd821599c0c4b8207996994eb3e9367ee2a518dca64fd756ddfdb2103faf5d3c"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/post-shim-prefix-repair-bound-audit-v2.json",
+      "sha256": "8d899539982aa17e2206e1ca306150b9b199b8f86a4a85b940b4ce53c35227fc"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/shim-prefix-repair-closeout-v1.json",
+      "sha256": "06f353516ac6f947a34514f65d8b2af029eec0d95eea721365e4ecf232f4bb3d"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/formatter-account-closeout-v1.json",
+      "sha256": "ddf12e230c6fb33a3b77678816039a1df837d3945fabc839dd232e8609748109"
+    }
+  ],
+  "recoveryInputHashesRehashed": 9,
+  "recoveryScope": "accepted historical recovery qualification and unchanged input-record hashes; no claim of a new full777wrapper audit",
+  "historicalPostAuditAllChecksPassed": false,
+  "historicalPostAuditErrorsPreserved": [
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-support.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-oracle.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/db/tests/query/retired-load-receiving-oracle.test.ts",
+      "detail": "hash mismatch"
+    },
+    {
+      "scope": "A38Source3411",
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/applied-base-pinned-main-receiving-A38/source/packages/query-db-collection/tests/retired-load-receiving-oracle.test.ts",
+      "detail": "hash mismatch"
+    }
+  ],
+  "rootRecoveryQualification": "Exit1/allChecksPassedfalse remains; exactly4newA38projectedtestsupport mismatches versus preformatmanifest. Pureformattingaccount reproduces all8files/currentbytes from preservedinputs; no sourceedit or silentrebind.",
+  "nodeLocksAndLinks": "bound expected identities matched",
+  "requiredExactReportWorktreeLint": {
+    "account": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/validation-account-v1.json",
+    "sha256": "f9b32bf4d346b6778c94284cfae13ebf235a140bb666fb05a7868d6117d76c76",
+    "actual": {
+      "initial": "d5af1a",
+      "session": 90690,
+      "final": "74ba81",
+      "exit": 0,
+      "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+      "after": "Artifact-only backup .ts to.ts.txt move; exactbytes preserved via explicitold126entrypathmap. No lintconfigscope/rule/testlaw/sourcebytes changed."
+    }
+  },
+  "primaryReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-review-v1.md",
+    "sha256": "1a995f97683d8240b53260748a25bd16b92f6206c271a649dd72ddf185475923"
+  },
+  "registrationBinding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/registration-and-config-bindings-v1.json",
+    "sha256": "34607c5c280f83525b0c7093e8fa32045a5bd1333fa2992f7af94630a1e308c7"
+  },
+  "recipes": [
+    {
+      "schedule": "failure-first",
+      "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "recipeSha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+      "sourceFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+      "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/programs/inline-window-failure-first.json",
+      "programSha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937",
+      "programCopiedByteForByteFromQ": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-failure-first.json",
+      "programCopiesEqual": true,
+      "recipeFieldChangesOnly": [
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "command": {
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-failure-first.json"
+        ],
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+      },
+      "admission": "SEPARATE ROOT ADMISSION REQUIRED; no automatic next stage",
+      "prerequisites": "accepted primary RED review plus sealed operational map/config review and explicit exact failure admission",
+      "observationScope": "first exact handled-failure/pre-peer-release barrier then real cleanup; original error/receipt and measured pending or AbortError-retired peer; full root/downstream raw changes and previousValue; no later retry/settlement credit",
+      "budgetsUnchanged": true,
+      "runtime": 0
+    },
+    {
+      "schedule": "success",
+      "recipe": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json",
+      "recipeSha256": "abc901dc7bc376988a463d44d42f9c3d851370abe3fdfdfa9b17140bdeeeafd0",
+      "sourceFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/source-freeze-receiving-v1.json",
+      "sourceFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+      "programFile": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/programs/inline-window-success.json",
+      "programSha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f",
+      "programCopiedByteForByteFromQ": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-shared-receiving-successor-v1/frozen-inputs-v1/programs/inline-window-success.json",
+      "programCopiesEqual": true,
+      "recipeFieldChangesOnly": [
+        "outputDirectory",
+        "programFile",
+        "sourceFreeze",
+        "sourceFreezeSha256"
+      ],
+      "command": {
+        "executable": "/Users/kyle.mathews/.n/bin/node",
+        "args": [
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/scripts/h02-progress/completion-parent.mjs",
+          "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-shared-window-receiving-operational-preparation-v1/frozen-inputs-v1/recipes/inline-window-success.json"
+        ],
+        "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1"
+      },
+      "admission": "SEPARATE ROOT ADMISSION REQUIRED; no automatic next stage",
+      "prerequisites": "failure runtime frozen/reviewed, source identity unchanged, plus separate exact success admission",
+      "observationScope": "same frozen recorder/comparison real successful held-marker/child neighbor with complete child contents; calibration belongs only to this exact source epoch",
+      "budgetsUnchanged": true,
+      "runtime": 0
+    }
+  ],
+  "executedImports": 0,
+  "testDiscovery": 0,
+  "nativeProbes": 0,
+  "runtime": 0,
+  "productionEdits": 0
+}

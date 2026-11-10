@@ -1,0 +1,82 @@
+{
+  "files": {
+    "actual-final-exec-return.json": {
+      "bytes": 255,
+      "sha256": "c2ba53c7d95b2517e33cf8b37784a84129cf1db3ed1d137e2b476d387e7abb31"
+    },
+    "actual-initial-exec-return.json": {
+      "bytes": 233,
+      "sha256": "faf0fde64bd0986e4e9ed7c6d64dbb794d8640b756c54722e7f89499e1eeba6b"
+    },
+    "actual-root-admission.json": {
+      "bytes": 5117,
+      "sha256": "0e7f43163d12719003185ba86e3ba654801bb9282457ec59ba476acc7edb27e4"
+    },
+    "author-audit-diagnostics.json": {
+      "bytes": 1131,
+      "sha256": "7b948a0a7929773665363b16a7fc1832e46f167a64fb37ea57fb210367a3c5bb"
+    },
+    "candidate-selection.json": {
+      "bytes": 7497,
+      "sha256": "8cb0224fb7231fa372ebba528faff3224739e1bff7660f583a94450e5689f030"
+    },
+    "capture-audit-actual-tool-returns.json": {
+      "bytes": 702,
+      "sha256": "54eb67e9d2b8d901061a82d591778b7cb204194422fa58fc293642f3b64b3e49"
+    },
+    "capture-audit-v2.py": {
+      "bytes": 16840,
+      "sha256": "223cc1f81f116589b13512f190745f5bae25b70b7a596cc903821796004dce1d"
+    },
+    "capture-audit.py": {
+      "bytes": 16768,
+      "sha256": "cd6b6244c4f780779be3ebec72efcd2d9682594e4755c1c59759ec8567ae64d7"
+    },
+    "observation-summary.json": {
+      "bytes": 3497,
+      "sha256": "a67c3e0d7a49033af08c7d7890094d1c90f1926a18455b6d1ca9b5f16393c3ba"
+    },
+    "original-process-identities.json": {
+      "bytes": 1440,
+      "sha256": "66c09994c275dcca9ae9c3032887afdc74af7989e61a4f4f400f0aa91351bc8e"
+    },
+    "proposed-original-absence.json": {
+      "bytes": 2488,
+      "sha256": "c5ab1883f6047a022bca5903048ff45a345b2e81bd54d3c8b0e216686f42bcb9"
+    },
+    "proposed-original-absence.py": {
+      "bytes": 3891,
+      "sha256": "8f6682920c60c0ed8cf5ddf052f02216eb0896b0bd35c36aab8b553bf4042491"
+    },
+    "publication-reconstruction.json": {
+      "bytes": 40653,
+      "sha256": "3b6f1f58d45d17fe5662950fe2985041d8184184bf172d1fbf6d966cb0d6215f"
+    },
+    "raw-manifest.json": {
+      "bytes": 928060,
+      "sha256": "f665deab9129653f917989234ebff891b1907460f99b4ac26bfc317880693e1f"
+    },
+    "report.md": {
+      "bytes": 6855,
+      "sha256": "b79c198abdab7d7a7fb7080239254b424ebf36838cc194706356d30db7383f9e"
+    },
+    "source-tool-postcheck.json": {
+      "bytes": 722,
+      "sha256": "221e41ca26baef6f55b858ebd0bdbb9cdbf26b2222be2aa4e814f1cd73868c66"
+    }
+  },
+  "kind": "Actual authored-q2 singleton additive evidence freeze; no process absence result",
+  "noClosureClaim": true,
+  "processProbesExecuted": false,
+  "productRun": {
+    "childExitCode": 0,
+    "finalChunk": "12ec83",
+    "initialChunk": "e143cb",
+    "outerExitCode": 0,
+    "session": 35271
+  },
+  "rawCaptureBytes": 31401025,
+  "rawCaptureCount": 1954,
+  "rawFilesPinnedVia": "raw-manifest.json",
+  "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd"
+}

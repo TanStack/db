@@ -1,0 +1,9 @@
+{
+  "sourceEntries": 563,
+  "packagePayloads": 2544,
+  "nodeLocksLinksMatched": true,
+  "admissionSha256": "544fdb0a9f57820313b13fd9faa2ffd0f81f24c40e4b7c153071af1627df906c",
+  "launcherSha256": "770f1dc51af09e40044ab57b3c764c1759ef9bc90d1f085e83d03f09975444d1",
+  "allMatched": true,
+  "requiredSandboxPermissions": "require_escalated"
+}

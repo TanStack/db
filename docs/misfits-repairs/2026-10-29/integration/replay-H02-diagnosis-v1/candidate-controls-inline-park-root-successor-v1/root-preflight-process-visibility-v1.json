@@ -1,0 +1,15 @@
+{
+  "defaultSandboxPreflight": {
+    "actualToolChunk": "5ad752",
+    "actualExitCode": 1,
+    "reason": "ps EPERM; no admission written or runtime started"
+  },
+  "permittedProcessVisibility": {
+    "actualToolChunk": "78af0e",
+    "actualExitCode": 0,
+    "selfVisible": true,
+    "rowCount": 1452,
+    "fields": "pid,pgid,stat only"
+  },
+  "nativeNeedsSameHostProcessVisibility": true
+}

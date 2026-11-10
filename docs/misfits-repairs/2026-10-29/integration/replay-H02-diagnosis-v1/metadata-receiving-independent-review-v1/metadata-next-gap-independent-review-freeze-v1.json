@@ -1,0 +1,14 @@
+{
+  "kind": "Independent source-only review artifact freeze",
+  "subjectPlanFreezeSha256": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc",
+  "members": {
+    "metadata-next-gap-independent-claim-ledger-v1.json": "f63d9fa428dbb1513c71c836623543aaa2d2d01ac0bb596c6dbe8f6fadfbb6e6",
+    "metadata-next-gap-independent-static-audit-v1.py": "25318da5baf4ab4c230c51894f379d77d6aa58288e8ac714428cc3948ffe97fe",
+    "metadata-next-gap-independent-static-audit-v1.json": "0602f56ade93dd3a92cbd21cb63ef8c62669362b3ea1d72c6bc965d7182a5392",
+    "metadata-next-gap-independent-review-v1.md": "3c553b4b95871e18d8f7117eae1c82a2087f9c25fc1130c2beb70609be479c5d"
+  },
+  "runtimeAdmission": false,
+  "actualMutants": 0,
+  "rootOwnsLint": true,
+  "slot4Returned": "idle"
+}

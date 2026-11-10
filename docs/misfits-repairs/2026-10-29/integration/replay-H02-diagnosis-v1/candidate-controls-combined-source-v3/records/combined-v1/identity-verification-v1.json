@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-30T08:24:07.453616+00:00",
+  "kind": "file-only verification; no module evaluation",
+  "productionFiles": 511,
+  "instrumentFiles": 50,
+  "sharedFiles": 18,
+  "completionSubset": 17,
+  "payloadFiles": 2544,
+  "packages": 9,
+  "nodeLocksLinksMatched": true,
+  "productionStatusDelta": [],
+  "staticRelativeImportMissing": [],
+  "runtimeReceiving": 0
+}

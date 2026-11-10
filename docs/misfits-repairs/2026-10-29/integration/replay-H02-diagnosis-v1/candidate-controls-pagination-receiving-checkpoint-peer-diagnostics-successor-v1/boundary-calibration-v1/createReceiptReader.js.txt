@@ -1,0 +1,64 @@
+export function createReceiptReader(path, accept, io = {}) {
+  const decoder = createReceiptDecoder(accept)
+  const read = io.read ?? readSync
+  /** @type {number | undefined} */
+  let fd
+  let offset = 0
+  let failed = false
+  /** @type {unknown} */
+  let firstError
+  return {
+    drain(final = false) {
+      if (failed) throw firstError
+      try {
+        if (fd === undefined) {
+          try {
+            fd = openSync(path, `r`)
+          } catch (error) {
+            if (
+              !final &&
+              error instanceof Error &&
+              `code` in error &&
+              error.code === `ENOENT`
+            )
+              return
+            throw error
+          }
+        }
+        const stat = fstatSync(fd)
+        const named = lstatSync(path)
+        if (
+          !stat.isFile() ||
+          !named.isFile() ||
+          named.dev !== stat.dev ||
+          named.ino !== stat.ino
+        )
+          throw new Error(`receipt file changed identity or is not regular`)
+        const end = stat.size
+        if (end < offset) throw new Error(`receipt file shrank`)
+        const bytes = Buffer.alloc(64 * 1024)
+        while (offset < end) {
+          const length = Math.min(bytes.length, end - offset)
+          const count = read(fd, bytes, 0, length, offset)
+          if (!Number.isInteger(count) || count <= 0 || count > length)
+            throw new Error(`invalid receipt read count: ${count}`)
+          offset += count
+          decoder.push(bytes.subarray(0, count))
+        }
+        if (final) return decoder.finish()
+        return undefined
+      } catch (error) {
+        failed = true
+        firstError = error
+        throw error
+      }
+    },
+    close() {
+      if (fd !== undefined) {
+        const closing = fd
+        fd = undefined
+        closeSync(closing)
+      }
+    },
+  }
+}

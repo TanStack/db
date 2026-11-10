@@ -1,0 +1,87 @@
+{
+  "groupLimit": "Receiving leader target group equals recorded detached childPid by original supervisor convention; no persisted initial actual getpgid claim is added; writer PID absence does not establish an initial writer group identity",
+  "probes": [
+    {
+      "identity": 52259,
+      "kind": "pid",
+      "participant": "outer",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 52259,
+      "kind": "pgid",
+      "participant": "outer",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 52323,
+      "kind": "pid",
+      "participant": "receiving-parent",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 52405,
+      "kind": "pid",
+      "participant": "receiving-leader",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 52405,
+      "kind": "pgid",
+      "participant": "receiving-leader-target-group",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    },
+    {
+      "identity": 52441,
+      "kind": "pid",
+      "participant": "receipt-writer",
+      "psMatches": [],
+      "signalZeroError": {
+        "class": "ProcessLookupError",
+        "errno": 3,
+        "text": "[Errno 3] No such process"
+      },
+      "status": "empty-ESRCH"
+    }
+  ],
+  "psArgv": [
+    "/bin/ps",
+    "-A",
+    "-o",
+    "pid=,pgid=,rss=,stat="
+  ],
+  "psReturnCode": 0,
+  "psStderr": "",
+  "recordedBy": "/root/evaluate_metadata_external",
+  "scope": "Actual original outer/receiving-parent/leader/receipt-writer identities after actual outer tool exit1; signal zero only, no rediscovered targets"
+}

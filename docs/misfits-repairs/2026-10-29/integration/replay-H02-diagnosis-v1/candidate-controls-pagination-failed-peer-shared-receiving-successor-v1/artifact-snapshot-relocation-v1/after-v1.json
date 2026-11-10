@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-30T11:21:47.952585+00:00",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "sourceFreezeUnchanged": true,
+  "historicalPacketSha256": "f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef",
+  "historicalPacketUnchanged": true,
+  "historicalEntriesRehashedWithExactPathMap": 126,
+  "mappedEntries": 1,
+  "literalEntries": 125,
+  "sourceBindingsRehashedUnchanged": 596,
+  "productionBindingsRehashedUnchanged": 511,
+  "oldPathAbsent": true,
+  "newPath": "before/packages/db/tests/query/pagination-oracle.property.test.ts.txt",
+  "newPathSha256": "6f26a439c6bcf949364e6c32c238a72b98d1d29d929c355622e32232c56e4f32",
+  "newPathBytes": 230217,
+  "bytesUnchanged": true,
+  "activeSourceMutation": false,
+  "lintRuleOrScopeMutation": false,
+  "nextGate": "required exact report-worktree lint remains FAILED until a new root run; this relocation has no passing lint claim"
+}

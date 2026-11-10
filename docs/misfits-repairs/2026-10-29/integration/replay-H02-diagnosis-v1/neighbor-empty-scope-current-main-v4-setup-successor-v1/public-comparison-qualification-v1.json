@@ -1,0 +1,174 @@
+{
+  "status": "Live unchanged shared publication judgment/model and V4 validating authored-payload projection passed all reached original cuts",
+  "observations": [
+    {
+      "h02": true,
+      "sequence": 107,
+      "phase": "downstream-change",
+      "changes": [],
+      "rows": []
+    },
+    {
+      "h02": true,
+      "sequence": 108,
+      "phase": "public-change",
+      "changes": [],
+      "rows": []
+    },
+    {
+      "h02": true,
+      "sequence": 109,
+      "phase": "initial-publication",
+      "rows": [],
+      "ready": true
+    },
+    {
+      "h02": true,
+      "sequence": 165,
+      "phase": "retained-publication",
+      "reason": "provider-hold-before-release",
+      "rows": [],
+      "downstream": [],
+      "pendingProviderAnswers": 4
+    },
+    {
+      "h02": true,
+      "sequence": 190,
+      "phase": "public-change",
+      "changes": [
+        {
+          "key": "[3,null]",
+          "type": "insert",
+          "value": {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-1"
+          }
+        }
+      ],
+      "rows": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-1"
+        }
+      ]
+    },
+    {
+      "h02": true,
+      "sequence": 191,
+      "phase": "downstream-change",
+      "changes": [
+        {
+          "key": "[3,null]",
+          "type": "insert",
+          "value": {
+            "id": 3,
+            "rank": 30,
+            "markers": [],
+            "$hasPendingWrites": false,
+            "$origin": "remote",
+            "$key": "[3,null]",
+            "$collectionId": "live-query-2"
+          }
+        }
+      ],
+      "rows": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-2"
+        }
+      ]
+    },
+    {
+      "h02": true,
+      "sequence": 192,
+      "phase": "final-publication",
+      "rows": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-1"
+        }
+      ],
+      "downstream": [
+        {
+          "id": 3,
+          "rank": 30,
+          "markers": [],
+          "$hasPendingWrites": false,
+          "$origin": "remote",
+          "$key": "[3,null]",
+          "$collectionId": "live-query-2"
+        }
+      ],
+      "ready": true,
+      "syncError": false,
+      "health": {
+        "alias": "root",
+        "collectionId": "live-query-1",
+        "kind": "live-query",
+        "status": "ready",
+        "failureReason": null,
+        "error": null,
+        "reloading": false,
+        "sources": [
+          {
+            "alias": "row",
+            "collectionId": "ab68de63-7dd4-45a2-aba1-d3d879ad8c20",
+            "kind": "source",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          },
+          {
+            "alias": "marker",
+            "collectionId": "h02-progress-markers",
+            "kind": "source",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          },
+          {
+            "alias": "child",
+            "collectionId": "h02-progress-markers",
+            "kind": "include",
+            "status": "ready",
+            "failureReason": null,
+            "error": null,
+            "reloading": false,
+            "sources": [],
+            "hasErrors": false
+          }
+        ],
+        "hasErrors": false
+      }
+    }
+  ],
+  "liveEvidence": "Native exact finite test passed; no primary observation error; all expected finite reaches measured; normal worker exit0.",
+  "rawMetadata": "All raw public metadata and change payloads preserved in the complete receipt stream; expected values remain in the unchanged shared model.",
+  "limits": "One finite path. No temporal virtual-metadata coherence, generated closure, candidate control or conflicting-cache progress claim."
+}

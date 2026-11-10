@@ -1,0 +1,357 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts
+@@ -2,6 +2,10 @@
+ import { readFileSync } from 'node:fs'
+ import { isDeepStrictEqual } from 'node:util'
+ import { it } from 'vitest'
++import {
++  checkRetainedWindowSnapshot,
++  referenceJoinedWindowRows,
++} from '../../db/tests/query/pagination-window-publication-oracle.js'
+ import {
+   checkCompletionBaselineObservation,
+   checkCompletionBaselineView,
+@@ -21,7 +25,27 @@
+   CompletionBaselineObservation,
+   CompletionDelivery,
+   CompletionPublicView,
++  CompletionWindow,
+ } from './queued-answer-completion-oracle.js'
++
++type HeldPeerProof = {
++  request: number
++  source: string
++  queryKey: ReadonlyArray<unknown>
++  loads: Array<{
++    source: string
++    load: number
++    generation: number
++    enteredAt: number
++    receipt: number
++    options: number
++    signal?: number
++    settledAt?: number
++    outcome?: { state: string; error?: string }
++    aborted?: boolean
++    cancellationErrorName?: string
++  }>
++}
+ 
+ // A single exact selected constituent runs in the native child. This runner
+ // registers no random campaign and changes none of the original eight budgets.
+@@ -80,6 +104,25 @@
+   ).length
+   let actionIndex = 0
+   let cuts = 0
++  const semanticErrors: Array<Error> = []
++  const compare = (context: string, check: () => void) => {
++    try {
++      check()
++    } catch (error) {
++      semanticErrors.push(new Error(context, { cause: error }))
++    }
++  }
++  const retainedSnapshot = {
++    rows: referenceJoinedWindowRows(
++      program.setup.facts,
++      `asc`,
++      program.setup.window,
++    ),
++    window: program.setup.window,
++  }
++  let childSemanticFailure: string | undefined
++  let heldPeerProof: HeldPeerProof | undefined
++  const secondaryChildErrors: Array<Error> = []
+   const observed = { established: false, unexpectedHostError: false }
+   let hostErrors = 0
+   const selectedHostError =
+@@ -96,7 +139,16 @@
+     (receipt) => {
+       if (receipt.phase === `completion-boundary`) {
+         const event = receipt.boundaryEvent as CompletionBoundaryEvent
+-        if (event.boundary === `source-load-applied-settled`) {
++        if (event.boundary === `baseline-window-peer-held`) {
++          if (heldPeerProof !== undefined)
++            throw new Error(`duplicate original held-peer proof`)
++          heldPeerProof = event.detail as HeldPeerProof
++          if (
++            heldPeerProof.source !== program.answerScopes.peer.source ||
++            heldPeerProof.loads.length === 0
++          )
++            throw new Error(`held peer lacks its authored original loads`)
++        } else if (event.boundary === `source-load-applied-settled`) {
+           const detail = event.detail as {
+             source: string
+             load: number
+@@ -115,6 +167,71 @@
+             loads: Array<{ source: string; load: number; settledAt: number }>
+           }
+           const failed = event.boundary === `baseline-source-failure-applied`
++          if (failed) {
++            const peer = (
++              event.detail as {
++                peer: HeldPeerProof & {
++                  disposition: string
++                  requestAnswered: boolean
++                  requestCancelled: boolean
++                }
++              }
++            ).peer
++            const stable = (proof: HeldPeerProof) => ({
++              request: proof.request,
++              source: proof.source,
++              queryKey: proof.queryKey,
++              loads: proof.loads.map(
++                ({
++                  source,
++                  load,
++                  generation,
++                  enteredAt,
++                  receipt,
++                  options,
++                  signal,
++                }) => ({
++                  source,
++                  load,
++                  generation,
++                  enteredAt,
++                  receipt,
++                  options,
++                  signal,
++                }),
++              ),
++            })
++            if (
++              !heldPeerProof ||
++              !isDeepStrictEqual(stable(peer), stable(heldPeerProof)) ||
++              peer.requestAnswered !== false ||
++              ![`pending`, `retired`].includes(peer.disposition) ||
++              peer.requestCancelled !== (peer.disposition === `retired`) ||
++              peer.loads.some((load) => {
++                if (peer.disposition === `pending`)
++                  return (
++                    load.aborted !== false ||
++                    load.outcome !== undefined ||
++                    load.settledAt !== undefined
++                  )
++                const settled = sourceSettlements.get(
++                  sourceKey(load.source, load.load),
++                )
++                return (
++                  load.aborted !== true ||
++                  load.outcome?.state !== `rejected` ||
++                  load.cancellationErrorName !== `AbortError` ||
++                  !settled ||
++                  settled.state !== `rejected` ||
++                  settled.sequence !== load.settledAt ||
++                  settled.sequence >= event.sequence
++                )
++              })
++            )
++              throw new Error(
++                `completion instrument: failure barrier lost its exact pending or retired original peer`,
++              )
++          }
+           if (
+             detail.loads.length === 0 ||
+             detail.loads.some((load) => {
+@@ -219,7 +336,10 @@
+           throw new Error(
+             `public facade exposure lacks its actual observer installation`,
+           )
+-        if (expected.kind !== `cleanup`) deliveryCheck.checkpoint(expectedModel)
++        if (expected.kind !== `cleanup`)
++          compare(`callback replicas at ${expected.id}`, () =>
++            deliveryCheck.checkpoint(expectedModel),
++          )
+         activeEpoch = undefined
+         epochIndex++
+       } else if (receipt.phase === `completion-baseline-action`) {
+@@ -259,9 +379,11 @@
+           throw new Error(
+             `initial view preceded its complete callback interval`,
+           )
+-        checkCompletionBaselineView(
+-          program.setup,
+-          receipt.view as CompletionPublicView,
++        compare(`initial public view`, () =>
++          checkCompletionBaselineView(
++            program.setup,
++            receipt.view as CompletionPublicView,
++          ),
+         )
+         observed.established = true
+       } else if (receipt.phase === `completion-baseline-delivery`) {
+@@ -277,7 +399,27 @@
+           throw new Error(
+             `public callback has no exact armed authored interval`,
+           )
+-        deliveryCheck(expectedModel, receipt.delivery as CompletionDelivery)
++        const delivery = receipt.delivery as CompletionDelivery
++        if (
++          program.gate === `source-failed-peer` &&
++          expected.kind === `publication` &&
++          delivery.layer !== `facade`
++        )
++          compare(
++            `atomic window callback at ${String(receipt.capturedAt)}`,
++            () =>
++              checkRetainedWindowSnapshot(
++                retainedSnapshot,
++                {
++                  rows: delivery.read,
++                  window: receipt.window as CompletionWindow | undefined,
++                },
++                `receiving ${delivery.layer} callback ${String(receipt.capturedAt)}`,
++              ),
++          )
++        compare(`callback delivery at ${String(receipt.capturedAt)}`, () =>
++          deliveryCheck(expectedModel, delivery),
++        )
+       } else if (receipt.phase === `completion-baseline-cut`) {
+         if (activeEpoch !== undefined)
+           throw new Error(`public cut preceded its complete callback interval`)
+@@ -289,11 +431,50 @@
+           throw new Error(
+             `receiving observation does not match its authored recipe order`,
+           )
+-        checkCompletionBaselineObservation(
+-          model,
+-          receipt as unknown as CompletionBaselineObservation,
++        const observation = receipt as unknown as CompletionBaselineObservation
++        if (observation.boundary === `source-failed-peer`) {
++          if (
++            observation.firstFailureBarrier !==
++            (program.windowReceivingSchedule === `failure-first`
++              ? true
++              : undefined)
++          )
++            throw new Error(
++              `failure cut changes its authored operation observation scope`,
++            )
++          compare(`atomic window root read at failure barrier`, () =>
++            checkRetainedWindowSnapshot(
++              retainedSnapshot,
++              { rows: observation.view.roots, window: observation.view.window },
++              `receiving root failure checkpoint`,
++            ),
++          )
++          compare(`atomic window downstream read at failure barrier`, () =>
++            checkRetainedWindowSnapshot(
++              retainedSnapshot,
++              {
++                rows: observation.view.downstream,
++                window: observation.view.window,
++              },
++              `receiving downstream failure checkpoint`,
++            ),
++          )
++        }
++        compare(`public cut ${observation.boundary}`, () =>
++          checkCompletionBaselineObservation(model, observation),
+         )
+         cuts++
++      } else if (receipt.phase === `completion-baseline-semantic-failure`) {
++        if (
++          childSemanticFailure !== undefined ||
++          typeof receipt.message !== `string`
++        )
++          throw new Error(`invalid or duplicate child semantic failure marker`)
++        childSemanticFailure = receipt.message
++      } else if (receipt.phase === `completion-secondary-cleanup-error`) {
++        secondaryChildErrors.push(
++          new Error(`child secondary cleanup: ${String(receipt.error)}`),
++        )
+       } else if (receipt.phase === `completion-host-error`) {
+         hostErrors++
+         if (
+@@ -305,6 +486,10 @@
+     },
+     `baseline-constituent`,
+   )
++  // Semantic comparisons cannot interrupt the supervisor's raw receipt drain.
++  // Preserve their first mismatch while independently collecting finalizer,
++  // transport, binding, process-exit, and secondary cleanup diagnostics.
++  const diagnostics: Array<Error> = [...secondaryChildErrors]
+   if (
+     outcome.reason !== `exited` ||
+     outcome.signal !== null ||
+@@ -313,26 +498,49 @@
+     outcome.bindingStatus !== `bound` ||
+     outcome.bindingError !== undefined
+   )
+-    throw new Error(
+-      `baseline receiving instrumentation failed; inspect ${outcome.logPath}`,
+-    )
++    diagnostics.push(
++      new Error(
++        `baseline receiving instrumentation failed; inspect ${outcome.logPath}; reason=${outcome.reason}; signal=${outcome.signal}; binding=${outcome.bindingStatus}; bindingError=${outcome.bindingError}; observer=${outcome.primaryObservationError}; cleanup=${JSON.stringify(outcome.cleanupErrors)}`,
++      ),
++    )
++  const workerErrors = outcome.receipts.filter(
++    (receipt) => receipt.phase === `worker-error`,
++  )
++  const expectedSemanticFailure =
++    semanticErrors.length > 0 &&
++    childSemanticFailure !== undefined &&
++    workerErrors.length === 1 &&
++    workerErrors[0]!.message === childSemanticFailure
+   if (
+     observed.unexpectedHostError ||
+     outcome.receipts.some(
+       (receipt) =>
+-        receipt.phase === `worker-error` ||
++        (receipt.phase === `worker-error` && !expectedSemanticFailure) ||
+         receipt.phase === `completion-worker-cleanup-failed`,
+     ) ||
+     outcome.receipts.filter((receipt) => receipt.phase === `worker-cleaned`)
+       .length !== 1
+   )
+-    throw new Error(
+-      `baseline receiving had an unexpected host/worker exception; inspect ${outcome.logPath}`,
++    diagnostics.push(
++      new Error(
++        `baseline receiving had an unexpected host/worker exception; inspect ${outcome.logPath}`,
++      ),
+     )
+   const expectedUncaught = selectedHostError !== undefined && hostErrors > 0
+-  if (outcome.exitCode !== 0 && !(outcome.exitCode === 1 && expectedUncaught))
+-    throw new Error(
+-      `unexpected baseline child exit ${outcome.exitCode}; inspect ${outcome.logPath}`,
++  if (
++    outcome.exitCode !== 0 &&
++    !(outcome.exitCode === 1 && (expectedUncaught || expectedSemanticFailure))
++  )
++    diagnostics.push(
++      new Error(
++        `unexpected baseline child exit ${outcome.exitCode}; inspect ${outcome.logPath}`,
++      ),
++    )
++  if (childSemanticFailure !== undefined && !expectedSemanticFailure)
++    diagnostics.push(
++      new Error(
++        `child semantic failure lacks the independent parent mismatch and exact worker-error; inspect ${outcome.logPath}`,
++      ),
+     )
+   if (
+     actionIndex !== actions.length ||
+@@ -342,7 +550,17 @@
+     epochIndex !== publicationEpochs.length ||
+     (program.setup.ready && !observed.established)
+   )
+-    throw new Error(
+-      `baseline receiving omitted its authored actions or observations; inspect ${outcome.logPath}`,
++    diagnostics.push(
++      new Error(
++        `baseline receiving omitted its authored actions or observations; inspect ${outcome.logPath}`,
++      ),
++    )
++  const errors = [...semanticErrors, ...diagnostics]
++  if (errors.length === 1) throw errors[0]
++  if (errors.length > 1)
++    throw new AggregateError(
++      errors,
++      `baseline receiving failed; inspect ${outcome.logPath}`,
++      { cause: errors[0] },
+     )
+ }, 60_000)

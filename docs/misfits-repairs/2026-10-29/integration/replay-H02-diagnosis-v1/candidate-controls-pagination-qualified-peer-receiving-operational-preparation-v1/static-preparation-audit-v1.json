@@ -1,0 +1,55 @@
+{
+  "at": "2026-10-30T12:32:05.687732+00:00",
+  "allChecksPassed": true,
+  "scope": "Filesystem/static-text only; proposals not materialized or executed",
+  "sealedMembersUnchanged": {
+    "S": 120,
+    "U": 90,
+    "D": 21,
+    "E": 1996
+  },
+  "activeWSourceBindingsUnchanged": 596,
+  "QsourceCopiesUnchanged": 85,
+  "productionUnchanged": 511,
+  "proposedSourceBindings": 596,
+  "proposedCompletionSubset": 18,
+  "proposedReceivingProductionSubset": 161,
+  "proposedRegularCodeAndLockFiles": 597,
+  "proposedControlFiles": 6,
+  "proposedReuseLinks": 4,
+  "exactPlanSourceAndControlHashesMatched": true,
+  "sourceBindingUnionExact": true,
+  "minimumCompileEntries": 7,
+  "noEmitAndIncrementalFalse": true,
+  "strictCurrentToolClosure": {
+    "uniquePackageRoots": 255,
+    "exactOwnPayloads": 11974,
+    "resolutionEdges": 405,
+    "absentOptionalPeers": 112,
+    "nodeLocksLinksMatched": true
+  },
+  "qualificationRefs": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-checkpoint-peer-source-root-qualification-v1.json",
+      "sha256": "5df0168077090121aa8889ad2147bd19bac76249bcba461a9778db15dfbc5288"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-source-independent-review-v1.md",
+      "sha256": "a774320684e68b4bdb04b572a66a6a877ad327711f428ee8f386aa69ee767ccd"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/checkpoint-peer-successor-diagnostic-fault-source-witness-v1.json",
+      "sha256": "d3abf201d4f6fb44b50328058658b2a0a1b61939bf608aeee5e847555bfa3956"
+    }
+  ],
+  "qualificationClaimExact": true,
+  "runtimeAndControlAbsent": true,
+  "materialization": 0,
+  "compile": 0,
+  "dynamicImports": 0,
+  "discovery": 0,
+  "nativeInvocations": 0,
+  "probes": 0,
+  "laterArtifactLint": "PENDING ROOT",
+  "limits": "No actual TypeScript resolution/diagnostics, evaluated runtime sources or host behavior established. Compiler containment still requires exact compile-admission selection; no receiving authority transfers."
+}

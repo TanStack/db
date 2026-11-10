@@ -1,0 +1,8 @@
+{
+  "sourceFilesMatched": 584,
+  "payloadFilesMatched": 2544,
+  "nodeTwoLocksFourLinksMatched": true,
+  "inputPacketMatched": true,
+  "proofBoundary": "on-disk identity only; no parent V8 attestation",
+  "failuresAtIdentityCheckpoint": []
+}

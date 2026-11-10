@@ -1,0 +1,1087 @@
+{
+  "kind": "Independent F01 correction and authored-q2 outer preparation claim inventory",
+  "reviewer": "/root/replay_covering_authority",
+  "claims": [
+    {
+      "id": "C01",
+      "claim": "Only four full-current intended checkpoints change to the actual target ordinary previousValue assertion.",
+      "verdict": "Source-correct; exact allowed diff to be independently audited.",
+      "action": "Accept F01 as plan correction only if pinned diff checks pass; no mutant outcome."
+    },
+    {
+      "id": "C02",
+      "claim": "Four omission checkpoints retain shared delta source predictions; first valid divergence remains final.",
+      "verdict": "Source-correct and no runtime credit.",
+      "action": "Keep every comparison strict and no forced later invocation."
+    },
+    {
+      "id": "C03",
+      "claim": "All eight guards/control/bindings/budgets/one-trace limits persist.",
+      "verdict": "Exact unchanged fields to be independently audited.",
+      "action": "No driver, production or oracle edits."
+    },
+    {
+      "id": "A01",
+      "claim": "One exact existing-v3 authored q2 recipe and selected title/argv.",
+      "verdict": "Matches prior reviewed intended singleton by source read.",
+      "action": "Verify tokens and preserved-name selection without native execution."
+    },
+    {
+      "id": "A02",
+      "claim": "Parent container may be created/reused, target output is created exclusively before any redirect/preflight.",
+      "verdict": "Leaf mkdir has no -p and set -e stops on existing leaf; exact paths/order to be audited.",
+      "action": "Retain one-shot behavior and no retry or overwrite."
+    },
+    {
+      "id": "A03",
+      "claim": "All own/external binding inputs checked before previous-gate import; accepted chained read/hash/source/tool/recovery gate retained.",
+      "verdict": "Chained source reads support; independently hash named maps/pins without importing gates.",
+      "action": "Actual preflight remains part of later exact root admission."
+    },
+    {
+      "id": "A04",
+      "claim": "One selected pass,19 skips,one distinct raw history,31 states at1, complete current/prior rows/deltas and current-run authored IDs/keys required.",
+      "verdict": "Correct qualification requirements; no actual result.",
+      "action": "Do not infer GREEN from exit0, source, zero selections or an ambiguous directory."
+    },
+    {
+      "id": "A05",
+      "claim": "Actual outer final completion is separate from child result; cleanup/resources/identity must be observed under admitted procedure.",
+      "verdict": "Correct; timeout is no hard outer watchdog and no absent launch receipt may be reconstructed.",
+      "action": "Preserve actual invocation/session/completion and original target PID/group absence."
+    },
+    {
+      "id": "A06",
+      "claim": "Initial whole-text .pnpm false positive is retained and corrected lexer audit changes no launcher/source bytes.",
+      "verdict": "Credible source classifier correction; independent token audit will verify actual command positions.",
+      "action": "Keep initial failure immutable; no source-change inference from it."
+    },
+    {
+      "id": "A07",
+      "claim": "No M01 IDs, new grammar, mutation, generated/noop closure, subscription progress or broad integration credit.",
+      "verdict": "Limits accurately keep this healthy singleton bounded.",
+      "action": "Root alone admits actual command and owns lint."
+    }
+  ],
+  "originals": {
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/correction.md": "# F01: preserve the first complete-prior-row rejection\n\nThis immutable additive successor corrects the next-gap source plan. The\noriginal plan, seven members, source/result freezes and independent review\nremain unchanged. No oracle, driver, production, configuration or runtime\nchange occurs here. Root owns lint and later admission.\n\nThe independent review correctly found that four full-current previousValue\nspecifications named a comparator that would not receive their target callback.\nThe receiver invokes ordinary payload judgments before metadata(receipt).\nFor an update with a defined previousValue, createProgressReceiptCheck calls\ncheckReplayPublication with the label\n`event update carries the preceding public value`.\nA complete current rank35 row supplied as previousValue disagrees with the\npreceding event-derived rank30 row at that actual callback.\n\nThe four full-current specifications therefore target that ordinary assertion:\ndefault/root, default/downstream, authored/root, authored/downstream.\nThis is valid complete-prior-public-row-law sensitivity if an exact later run\nshows the actual targeted malformed callback and the intended first rejection.\nIt supplies no invocation or sensitivity credit for checkMetadataPublications.\nThe downstream receipt is relabeled public-change for its separate ordinary\nchecker; a root rejection supplies no downstream credit.\n\nThe four omission specifications retain the shared metadata delta comparison\nat followup-publication as a source prediction. Undefined previousValue bypasses\nthe ordinary previous-value branch. Runtime must still distinguish this\npredicted rejection from earlier setup, binding, current-row or peer failures.\nNo omission mutant has run.\n\nKeep every current-row, key, entry, complete-delta, metadata and cleanup check\nstrict and in its existing order. Preserve complete actual callback observations.\nA check after the first valid divergence receives no invocation credit.\nThe unchanged supervisor records the first observation error and terminates the\nreceiver; do not continue a failed history to reach a later comparator.\nPreserve secondary cleanup errors and actual resource-absence evidence.\nA failed mutant history need not finish normally to manufacture its later cut.\n\nAll deterministic role-ID/control proposals, same-run key/rank guards, source\nbindings, budgets, exact single-trace scope and unexercised generated neighbors\nremain. No new metadata-field mutant is proposed or implemented by this fix.\nCopying current virtual metadata onto an otherwise correct prior ordinary row\nremains equivalent within the stable-metadata profile.\n\n`mutant-classifier.json` carries all eight full specifications. Each\nfull-current entry retains its former intended-comparison account as historical\nevidence and records its corrected account separately. Omission entries state\ntheir different source prediction. These are inert classifications with no\nactual mutant kill, new GREEN, bug-class closure or PR-readiness credit.\n",
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/mutant-classifier.json": {
+      "status": "INERT ADDITIVE F01 CLASSIFIER SUCCESSOR. No source mutation, checker change or runtime.",
+      "law": "Complete prior and current public rows belong to the same coherent publication; existing independent judgment unchanged.",
+      "unmutatedDriverSuccessor": {
+        "proposal": "proposed-source-edits.md M01",
+        "exists": false,
+        "controlCount": 2,
+        "controls": [
+          {
+            "id": "role-control-scope-default-q2",
+            "existingTest": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+            "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/role-control-scope-default-q2",
+            "production": "Unchanged v3 production.",
+            "expectedStates": 31,
+            "expectedHistoryCount": 1,
+            "requiredResult": "Separately root-qualified complete current/previous rows, same-key update, explicit current-run role IDs, actual normal cleanup."
+          },
+          {
+            "id": "role-control-scope-authored-q2",
+            "existingTest": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+            "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/role-control-scope-authored-q2",
+            "production": "Unchanged v3 production.",
+            "expectedStates": 31,
+            "expectedHistoryCount": 1,
+            "requiredResult": "Separately root-qualified complete current/previous rows, same-key update, explicit current-run role IDs, actual normal cleanup."
+          }
+        ]
+      },
+      "matrix": [
+        {
+          "id": "scope-default-root-omit-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-default-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "default",
+          "targetRole": "root",
+          "targetCollectionId": "metadata-receiving:scope:default:root",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "default",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-root-omit-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "default",
+            "rootId": "metadata-receiving:scope:default:root",
+            "downstreamId": "metadata-receiving:scope:default:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:default:root\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:default:root\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:default:root\""
+            ],
+            "defaultKeyTreatment": "The actual enriched before/current keys identify the same change.key. No literal encoding or serialization; independently checked current-run baseline entries must bind the retained key."
+          },
+          "fault": {
+            "previousValueWhenTargeted": "undefined",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "public-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Complete target/peer synchronous rows and entries remain checked; no assertion is removed.",
+            "malformedPreviousValue": "The target actual update lacks the complete previousValue owed by the model.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit.",
+            "sourcePredictionOnly": true,
+            "omissionDistinction": "Undefined previousValue bypasses the conditional ordinary previous-value assertion; the shared metadata delta comparison remains the predicted intended checkpoint, with no assertion or reach credit before actual runtime.",
+            "firstDivergencePolicy": "If an earlier valid mismatch occurs, preserve it and stop; do not continue to force the later delta comparison. Classify whether it is the intended target law or an earlier collateral/setup/current-row failure."
+          },
+          "resultClassification": [
+            "intended target comparison assertion failure",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "runtime/collateral failure outside intended comparison (no intended kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ]
+        },
+        {
+          "id": "scope-default-root-full-current-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-default-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "default",
+          "targetRole": "root",
+          "targetCollectionId": "metadata-receiving:scope:default:root",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "default",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-root-full-current-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "default",
+            "rootId": "metadata-receiving:scope:default:root",
+            "downstreamId": "metadata-receiving:scope:default:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:default:root\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:default:root\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:default:root\""
+            ],
+            "defaultKeyTreatment": "The actual enriched before/current keys identify the same change.key. No literal encoding or serialization; independently checked current-run baseline entries must bind the retained key."
+          },
+          "fault": {
+            "previousValueWhenTargeted": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "public-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Preserve complete actual target/peer synchronous rows and entries. All existing checks stay strict; do not claim a later target metadata comparison ran after this earlier valid ordinary divergence.",
+            "malformedPreviousValue": "The target actual update previousValue is the full current row, including rank 35 instead of the model's prior rank 30.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkReplayPublication inside createProgressReceiptCheck",
+            "owner": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+            "callSite": "Actual target callback, defined update.previousValue branch: 'event update carries the preceding public value'.",
+            "receivingOrder": "run() invokes rootPayload(receipt) before metadata(receipt).",
+            "rejection": "projectProgressRow(change.previousValue) has rank35 while eventRows.get(id3) is the preceding checked ordinary rank30 row.",
+            "priorValueSource": "Independent preceding event-derived ordinary row in createProgressReceiptCheck, already compared through reload baseline before followup-start.",
+            "lawCredit": "Intended rejection of complete-prior-public-row law at the actual target callback; source prediction until an exact mutant run is separately qualified.",
+            "metadataComparatorInvocationCredit": false,
+            "metadataComparatorSensitivityCredit": false,
+            "currentValueCheck": "All current-row/entry and metadata comparisons remain enabled in their original source order. Comparisons after the first valid divergence are unexecuted and receive no invocation credit; preserve complete actual target current rows/entries in raw observations for independent qualification.",
+            "peerRequirement": "Only the actual root-target ordinary previous-value rejection earns this mutant's intended kill. An earlier peer/collateral failure earns no intended target credit.",
+            "firstDivergencePolicy": "Preserve the first observation error and stop using the unchanged supervisor. Do not relax ordinary checks, overwrite the failure or continue the failed history to seek followup-publication."
+          },
+          "resultClassification": [
+            "intended target ordinary previous-value assertion failure (complete-prior-row law; no metadata comparator invocation/sensitivity credit)",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "earlier current-row, peer/collateral or other runtime failure (no intended target kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ],
+          "predecessorIntendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+          },
+          "firstFailureAndCleanup": "The unchanged supervisor preserves the first observation error and may kill the receiver after that divergence. No normal followup-publication/worker-cleaned completion is required to manufacture this kill; preserve all cleanup diagnostics and prove actual original recorded process/group absence by the later admitted procedure."
+        },
+        {
+          "id": "scope-default-downstream-omit-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-default-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "default",
+          "targetRole": "downstream",
+          "targetCollectionId": "metadata-receiving:scope:default:downstream",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "default",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-downstream-omit-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "default",
+            "rootId": "metadata-receiving:scope:default:root",
+            "downstreamId": "metadata-receiving:scope:default:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:default:downstream\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:default:downstream\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:default:downstream\""
+            ],
+            "defaultKeyTreatment": "The actual enriched before/current keys identify the same change.key. No literal encoding or serialization; independently checked current-run baseline entries must bind the retained key."
+          },
+          "fault": {
+            "previousValueWhenTargeted": "undefined",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "downstream-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Complete target/peer synchronous rows and entries remain checked; no assertion is removed.",
+            "malformedPreviousValue": "The target actual update lacks the complete previousValue owed by the model.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited.",
+            "sourcePredictionOnly": true,
+            "omissionDistinction": "Undefined previousValue bypasses the conditional ordinary previous-value assertion; the shared metadata delta comparison remains the predicted intended checkpoint, with no assertion or reach credit before actual runtime.",
+            "firstDivergencePolicy": "If an earlier valid mismatch occurs, preserve it and stop; do not continue to force the later delta comparison. Classify whether it is the intended target law or an earlier collateral/setup/current-row failure."
+          },
+          "resultClassification": [
+            "intended target comparison assertion failure",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "runtime/collateral failure outside intended comparison (no intended kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ]
+        },
+        {
+          "id": "scope-default-downstream-full-current-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-default-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "default",
+          "targetRole": "downstream",
+          "targetCollectionId": "metadata-receiving:scope:default:downstream",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "default",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-downstream-full-current-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "default",
+            "rootId": "metadata-receiving:scope:default:root",
+            "downstreamId": "metadata-receiving:scope:default:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:default:downstream\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:default:downstream\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:default:downstream\""
+            ],
+            "defaultKeyTreatment": "The actual enriched before/current keys identify the same change.key. No literal encoding or serialization; independently checked current-run baseline entries must bind the retained key."
+          },
+          "fault": {
+            "previousValueWhenTargeted": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "downstream-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Preserve complete actual target/peer synchronous rows and entries. All existing checks stay strict; do not claim a later target metadata comparison ran after this earlier valid ordinary divergence.",
+            "malformedPreviousValue": "The target actual update previousValue is the full current row, including rank 35 instead of the model's prior rank 30.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkReplayPublication inside createProgressReceiptCheck",
+            "owner": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+            "callSite": "Actual target callback, defined update.previousValue branch: 'event update carries the preceding public value'.",
+            "receivingOrder": "run() invokes the downstream payload checker on {...receipt, phase:'public-change'} before metadata(receipt).",
+            "rejection": "projectProgressRow(change.previousValue) has rank35 while eventRows.get(id3) is the preceding checked ordinary rank30 row.",
+            "priorValueSource": "Independent preceding event-derived ordinary row in createProgressReceiptCheck, already compared through reload baseline before followup-start.",
+            "lawCredit": "Intended rejection of complete-prior-public-row law at the actual target callback; source prediction until an exact mutant run is separately qualified.",
+            "metadataComparatorInvocationCredit": false,
+            "metadataComparatorSensitivityCredit": false,
+            "currentValueCheck": "All current-row/entry and metadata comparisons remain enabled in their original source order. Comparisons after the first valid divergence are unexecuted and receive no invocation credit; preserve complete actual target current rows/entries in raw observations for independent qualification.",
+            "peerRequirement": "Root baseline/current/prior observations must be healthy before the actual downstream-target ordinary assertion fails.",
+            "firstDivergencePolicy": "Preserve the first observation error and stop using the unchanged supervisor. Do not relax ordinary checks, overwrite the failure or continue the failed history to seek followup-publication."
+          },
+          "resultClassification": [
+            "intended target ordinary previous-value assertion failure (complete-prior-row law; no metadata comparator invocation/sensitivity credit)",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "earlier current-row, peer/collateral or other runtime failure (no intended target kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ],
+          "predecessorIntendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+          },
+          "firstFailureAndCleanup": "The unchanged supervisor preserves the first observation error and may kill the receiver after that divergence. No normal followup-publication/worker-cleaned completion is required to manufacture this kill; preserve all cleanup diagnostics and prove actual original recorded process/group absence by the later admitted procedure."
+        },
+        {
+          "id": "scope-authored-root-omit-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-authored-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "authored",
+          "targetRole": "root",
+          "targetCollectionId": "metadata-receiving:scope:authored:root",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "authored",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-root-omit-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "authored",
+            "rootId": "metadata-receiving:scope:authored:root",
+            "downstreamId": "metadata-receiving:scope:authored:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:authored:root\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:authored:root\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:authored:root\"",
+              "change.key === \"metadata-root-3\""
+            ],
+            "defaultKeyTreatment": null
+          },
+          "fault": {
+            "previousValueWhenTargeted": "undefined",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "public-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Complete target/peer synchronous rows and entries remain checked; no assertion is removed.",
+            "malformedPreviousValue": "The target actual update lacks the complete previousValue owed by the model.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit.",
+            "sourcePredictionOnly": true,
+            "omissionDistinction": "Undefined previousValue bypasses the conditional ordinary previous-value assertion; the shared metadata delta comparison remains the predicted intended checkpoint, with no assertion or reach credit before actual runtime.",
+            "firstDivergencePolicy": "If an earlier valid mismatch occurs, preserve it and stop; do not continue to force the later delta comparison. Classify whether it is the intended target law or an earlier collateral/setup/current-row failure."
+          },
+          "resultClassification": [
+            "intended target comparison assertion failure",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "runtime/collateral failure outside intended comparison (no intended kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ]
+        },
+        {
+          "id": "scope-authored-root-full-current-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-authored-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "authored",
+          "targetRole": "root",
+          "targetCollectionId": "metadata-receiving:scope:authored:root",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "authored",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-root-full-current-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "authored",
+            "rootId": "metadata-receiving:scope:authored:root",
+            "downstreamId": "metadata-receiving:scope:authored:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:authored:root\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:authored:root\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:authored:root\"",
+              "change.key === \"metadata-root-3\""
+            ],
+            "defaultKeyTreatment": null
+          },
+          "fault": {
+            "previousValueWhenTargeted": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "public-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Preserve complete actual target/peer synchronous rows and entries. All existing checks stay strict; do not claim a later target metadata comparison ran after this earlier valid ordinary divergence.",
+            "malformedPreviousValue": "The target actual update previousValue is the full current row, including rank 35 instead of the model's prior rank 30.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkReplayPublication inside createProgressReceiptCheck",
+            "owner": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+            "callSite": "Actual target callback, defined update.previousValue branch: 'event update carries the preceding public value'.",
+            "receivingOrder": "run() invokes rootPayload(receipt) before metadata(receipt).",
+            "rejection": "projectProgressRow(change.previousValue) has rank35 while eventRows.get(id3) is the preceding checked ordinary rank30 row.",
+            "priorValueSource": "Independent preceding event-derived ordinary row in createProgressReceiptCheck, already compared through reload baseline before followup-start.",
+            "lawCredit": "Intended rejection of complete-prior-public-row law at the actual target callback; source prediction until an exact mutant run is separately qualified.",
+            "metadataComparatorInvocationCredit": false,
+            "metadataComparatorSensitivityCredit": false,
+            "currentValueCheck": "All current-row/entry and metadata comparisons remain enabled in their original source order. Comparisons after the first valid divergence are unexecuted and receive no invocation credit; preserve complete actual target current rows/entries in raw observations for independent qualification.",
+            "peerRequirement": "Only the actual root-target ordinary previous-value rejection earns this mutant's intended kill. An earlier peer/collateral failure earns no intended target credit.",
+            "firstDivergencePolicy": "Preserve the first observation error and stop using the unchanged supervisor. Do not relax ordinary checks, overwrite the failure or continue the failed history to seek followup-publication."
+          },
+          "resultClassification": [
+            "intended target ordinary previous-value assertion failure (complete-prior-row law; no metadata comparator invocation/sensitivity credit)",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "earlier current-row, peer/collateral or other runtime failure (no intended target kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ],
+          "predecessorIntendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+          },
+          "firstFailureAndCleanup": "The unchanged supervisor preserves the first observation error and may kill the receiver after that divergence. No normal followup-publication/worker-cleaned completion is required to manufacture this kill; preserve all cleanup diagnostics and prove actual original recorded process/group absence by the later admitted procedure."
+        },
+        {
+          "id": "scope-authored-downstream-omit-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-authored-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "authored",
+          "targetRole": "downstream",
+          "targetCollectionId": "metadata-receiving:scope:authored:downstream",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "authored",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-downstream-omit-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "authored",
+            "rootId": "metadata-receiving:scope:authored:root",
+            "downstreamId": "metadata-receiving:scope:authored:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:authored:downstream\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:authored:downstream\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:authored:downstream\"",
+              "change.key === \"metadata-downstream-3\""
+            ],
+            "defaultKeyTreatment": null
+          },
+          "fault": {
+            "previousValueWhenTargeted": "undefined",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "downstream-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Complete target/peer synchronous rows and entries remain checked; no assertion is removed.",
+            "malformedPreviousValue": "The target actual update lacks the complete previousValue owed by the model.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited.",
+            "sourcePredictionOnly": true,
+            "omissionDistinction": "Undefined previousValue bypasses the conditional ordinary previous-value assertion; the shared metadata delta comparison remains the predicted intended checkpoint, with no assertion or reach credit before actual runtime.",
+            "firstDivergencePolicy": "If an earlier valid mismatch occurs, preserve it and stop; do not continue to force the later delta comparison. Classify whether it is the intended target law or an earlier collateral/setup/current-row failure."
+          },
+          "resultClassification": [
+            "intended target comparison assertion failure",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "runtime/collateral failure outside intended comparison (no intended kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ]
+        },
+        {
+          "id": "scope-authored-downstream-full-current-previous-value",
+          "status": "SPECIFICATION ONLY. No mutated source or runtime admission.",
+          "predecessorControl": "role-control-scope-authored-q2",
+          "cacheIdentity": "scope",
+          "keyLane": "authored",
+          "targetRole": "downstream",
+          "targetCollectionId": "metadata-receiving:scope:authored:downstream",
+          "targetHistory": {
+            "kind": "query",
+            "scheduler": "microtask",
+            "cacheIdentity": "scope",
+            "metadataKeys": "authored",
+            "includes": true,
+            "window": true,
+            "nonemptyPrior": true,
+            "keyShift": 0,
+            "rankScale": 10,
+            "metadataFollowupQuarter": 2
+          },
+          "selectedExistingTest": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+          "proposedFreshOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-downstream-full-current-previous-value",
+          "mutationSite": {
+            "relativePath": "packages/db/src/collection/state.ts",
+            "method": "CollectionStateManager.enrichChangeMessage",
+            "unchangedFileSha256": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+            "operation": "Change only the returned previousValue after both unchanged enrichment calls, with a pure predicate. No edit performed."
+          },
+          "requiredCurrentRunIdentity": {
+            "phase": "metadata-identities",
+            "keyLane": "authored",
+            "rootId": "metadata-receiving:scope:authored:root",
+            "downstreamId": "metadata-receiving:scope:authored:downstream",
+            "sourceId": "Actual recorded source ID must be distinct; no hard-coded source ID or prior incidental UUID."
+          },
+          "targetPredicate": {
+            "all": [
+              "this.collection.id === \"metadata-receiving:scope:authored:downstream\"",
+              "change.type === 'update'",
+              "enrichedPreviousValue exists and has ordinary id === 3 and rank === 30",
+              "enrichedValue has ordinary id === 3 and rank === 35",
+              "enrichedPreviousValue.$key === change.key",
+              "enrichedValue.$key === change.key",
+              "enrichedPreviousValue.$collectionId === \"metadata-receiving:scope:authored:downstream\"",
+              "enrichedValue.$collectionId === \"metadata-receiving:scope:authored:downstream\"",
+              "change.key === \"metadata-downstream-3\""
+            ],
+            "defaultKeyTreatment": null
+          },
+          "fault": {
+            "previousValueWhenTargeted": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+            "previousValueOtherwise": "enrichedPreviousValue",
+            "otherReturnFields": "Unchanged key, type, enriched current value and metadata."
+          },
+          "requiredObservation": {
+            "phase": "downstream-change",
+            "stage": "After the already compared settled reload baseline and followup-start, before followup-publication.",
+            "sameActualKey": "The target callback's key equals the retained key bound in this same run's baseline entries.",
+            "currentRows": "Preserve complete actual target/peer synchronous rows and entries. All existing checks stay strict; do not claim a later target metadata comparison ran after this earlier valid ordinary divergence.",
+            "malformedPreviousValue": "The target actual update previousValue is the full current row, including rank 35 instead of the model's prior rank 30.",
+            "baseline": "Complete prior/current rows and exact reload delta must already have passed before followup-start.",
+            "noCreditSubstitute": "A guard hit, phase label, artificial recorder mutation, setup error or other role's failure does not establish target public observation."
+          },
+          "intendedComparison": {
+            "function": "checkReplayPublication inside createProgressReceiptCheck",
+            "owner": "packages/query-db-collection/tests/queued-answer-progress-oracle.ts",
+            "callSite": "Actual target callback, defined update.previousValue branch: 'event update carries the preceding public value'.",
+            "receivingOrder": "run() invokes the downstream payload checker on {...receipt, phase:'public-change'} before metadata(receipt).",
+            "rejection": "projectProgressRow(change.previousValue) has rank35 while eventRows.get(id3) is the preceding checked ordinary rank30 row.",
+            "priorValueSource": "Independent preceding event-derived ordinary row in createProgressReceiptCheck, already compared through reload baseline before followup-start.",
+            "lawCredit": "Intended rejection of complete-prior-public-row law at the actual target callback; source prediction until an exact mutant run is separately qualified.",
+            "metadataComparatorInvocationCredit": false,
+            "metadataComparatorSensitivityCredit": false,
+            "currentValueCheck": "All current-row/entry and metadata comparisons remain enabled in their original source order. Comparisons after the first valid divergence are unexecuted and receive no invocation credit; preserve complete actual target current rows/entries in raw observations for independent qualification.",
+            "peerRequirement": "Root baseline/current/prior observations must be healthy before the actual downstream-target ordinary assertion fails.",
+            "firstDivergencePolicy": "Preserve the first observation error and stop using the unchanged supervisor. Do not relax ordinary checks, overwrite the failure or continue the failed history to seek followup-publication."
+          },
+          "resultClassification": [
+            "intended target ordinary previous-value assertion failure (complete-prior-row law; no metadata comparator invocation/sensitivity credit)",
+            "timeout (no intended kill)",
+            "setup/binding failure (no intended kill)",
+            "earlier current-row, peer/collateral or other runtime failure (no intended target kill)",
+            "unreached target (no intended kill)",
+            "survival",
+            "equivalence within tested domain"
+          ],
+          "boundedCredit": "One source-derived canonical receiving witness only; no bug-class closure or generated-neighbor mutant credit.",
+          "futurePrerequisites": [
+            "Exact proposed M01 driver successor independently reviewed and frozen.",
+            "Both lane-specific unmutated q2 role-control results separately qualified on unchanged production.",
+            "This one production mutation independently reviewed, frozen and bound to every source/dependency map.",
+            "Exact unused-output one-shot outer packet independently reviewed and separately admitted by root.",
+            "Actual raw observation, selected title, source binding, inner/outer completion and cleanup evidence preserved."
+          ],
+          "predecessorIntendedComparison": {
+            "function": "checkMetadataPublications",
+            "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+            "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+            "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+            "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+            "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+            "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+          },
+          "firstFailureAndCleanup": "The unchanged supervisor preserves the first observation error and may kill the receiver after that divergence. No normal followup-publication/worker-cleaned completion is required to manufacture this kill; preserve all cleanup diagnostics and prove actual original recorded process/group absence by the later admitted procedure."
+        }
+      ],
+      "unexercisedGeneratedNeighbors": {
+        "keyShift": "1 through 20",
+        "rankScale": "1 through 9 and 11 through 20",
+        "metadataFollowupQuarter": [
+          1,
+          3
+        ],
+        "other": "Zero-quarter production no-op mutants, subscription/conflicting-cache progress, changing metadata, fetched marker changes, held-reload follow-up, framework receiving, alternate schedules and longer histories."
+      },
+      "sourceAndRuntimeAdmission": "No exact future mutant executable recipe can be sealed before its proposed source edits, control evidence, full source freeze and independent review. This plan supplies no placeholder executable or transform script.",
+      "corrects": {
+        "finding": "F01",
+        "predecessorPlanFreezeSha256": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc",
+        "independentReviewSha256": "3c553b4b95871e18d8f7117eae1c82a2087f9c25fc1130c2beb70609be479c5d",
+        "rootClassificationSha256": "304bafc5b0d1c89eae88faf10299db760bd973752db576392ba6d66140a376e3",
+        "scope": "Only the four full-current intended assertion/classification accounts change. All target guards, baseline/control requirements, complete current-row checks, source bindings, budgets and limitations remain."
+      }
+    },
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-correction-v2/finding-ledger.json": {
+      "finding": "F01",
+      "originalClaim": "All eight mutants intend the shared metadata delta comparator at followup-publication.",
+      "technicalVerdict": "Confirmed source-plan error for four full-current mutants; the ordinary target previous-value assertion rejects first.",
+      "action": "Additive plan/classifier correction only; no source/test behavior changed.",
+      "durableValue": "Distinguish law rejection from a specific comparator's invocation. Preserve first divergence and source-order receiving boundaries.",
+      "correctedIds": [
+        "scope-default-root-full-current-previous-value",
+        "scope-default-downstream-full-current-previous-value",
+        "scope-authored-root-full-current-previous-value",
+        "scope-authored-downstream-full-current-previous-value"
+      ],
+      "omissionIds": [
+        "scope-default-root-omit-previous-value",
+        "scope-default-downstream-omit-previous-value",
+        "scope-authored-root-omit-previous-value",
+        "scope-authored-downstream-omit-previous-value"
+      ],
+      "runtimeEvidence": "None; corrected source prediction only.",
+      "originalPlanUnmodified": true
+    },
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/first-command.json": {
+      "status": "UNADMITTED AND UNEXECUTED. Exact proposed outer command; independent review and separate root one-shot admission required.",
+      "executable": "/bin/zsh",
+      "argv": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/launcher-scope-authored-q2.zsh",
+        "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c"
+      ],
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+      "bindingSha256": "28f01a4e9f5b04c06f3934ad908b3a1bf9056e8a87667fb95088fbc708cfbd4c",
+      "sourceFreezeSha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+      "maxInvocations": 1,
+      "outerOutputDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q2",
+      "actualExecutionRequirement": "If separately admitted, actual exec_command sandbox_permissions=require_escalated on this exact zsh launch is required for unchanged supervisor ps; preflight permission alone is insufficient. Root owns actual outer lifecycle/completion. No hard outer watchdog is claimed.",
+      "selection": {
+        "displayName": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+        "filterName": "queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2",
+        "expectedPassedTests": 1,
+        "expectedSkippedTests": 19,
+        "historyCount": 1,
+        "declaredStateCount": 31,
+        "generatedCampaign": false,
+        "property": null,
+        "runMultiplier": 1,
+        "seedSuffix": null,
+        "suppliedSeed": null,
+        "history": {
+          "kind": "query",
+          "scheduler": "microtask",
+          "cacheIdentity": "scope",
+          "metadataKeys": "authored",
+          "includes": true,
+          "window": true,
+          "nonemptyPrior": true,
+          "keyShift": 0,
+          "rankScale": 10,
+          "metadataFollowupQuarter": 2
+        }
+      },
+      "actualEvidenceRequired": "All evidence-requirements.json obligations: exactly one fully attributable successful raw authored q2 history, all31 states at1, complete root/downstream callback reads/current/previous rows and deltas at all promised cuts, exact current-run identities/keys, normal cleanup/no kills or observer errors, actual outer final completion distinct from child outcome, original recorded PID/group absence and complete original artifacts. No count or result inferred from source.",
+      "after": "Stop after one actual invocation on any outcome. No retry/replay/next lane, M01 ID edit, no-op grammar edit, mutant, production/oracle/driver/config/budget change, imports/compiler/discovery/probes/install/Git/PR/canonical action follows.",
+      "limits": [
+        "Stable output metadata/direct eager source-sync through a real QueryClient graph only; this authored q2 singleton remains unexecuted.",
+        "No deterministic M01 driver ID change or source successor; current-run actual root/downstream/source IDs must be recorded and distinct, not inferred from allocation order.",
+        "Default fixed/unseeded campaigns are separate qualified evidence. This singleton supplies no authored generated/no-op/subscription/conflicting-cache progress/changing-fetched-metadata/framework evidence.",
+        "No dedicated UUID-console ordinal or finish/assert receipt; parent invocation/finalizer source-order assumption remains.",
+        "No new parent-checker V8 proof or initial inner getpgid proof; retain actual current-run parent/outer identity evidence and qualify missing observations.",
+        "Native coverage/typecheck disabled; separate prior exact-byte standalone noEmit evidence only.",
+        "No actual hostile production mutant, production repair, progress repair, bug-class closure or PR-readiness credit.",
+        "Nine named own-package maps/2544 own payloads do not prove full transitive host/native/dist equivalence.",
+        "Prior v2 observer failure, raw predecessor diagnostics and independent lexical-path audit correction remain preserved."
+      ]
+    },
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/evidence-requirements.json": {
+      "scope": "One existing-v3 followup-scope-authored-q2 fixed receiving singleton only. No generated campaign, retries, replay or next recipe.",
+      "successfulHistoryCount": 1,
+      "history": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "parentSelection": {
+        "filter": "^queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2$",
+        "title": "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2",
+        "selectedPassedTests": 1,
+        "expectedSkippedTests": 19,
+        "reporter": "Unchanged verbose and silent=false; preserve complete outer-vitest.log. No zero-test or unexpected-title GREEN.",
+        "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources"
+      },
+      "artifactAttribution": {
+        "passiveBaseline": "Use the inherited prelaunch candidate inventory. Never select by mtime or first new directory.",
+        "selection": "Exactly one raw receiving UUID directory must agree with actual recorded parent PID, frozen source, canonical selected history, prepared.json historyPath/directory, worker-start.history, supervisor target identity, receipt writer identity and logPath. Preserve all attributable original attempts, including failures; stop if extra, missing or ambiguous.",
+        "failure": "Keep actual first error, every raw artifact and separate cleanup/observer diagnostics. No automatic retry or substitute path."
+      },
+      "reach": {
+        "states": [
+          "initial-root",
+          "initial-downstream",
+          "nonempty-prior",
+          "reload-started",
+          "positive-held-provider-read",
+          "held-root",
+          "held-downstream",
+          "completed-enqueue",
+          "answer-executed",
+          "callback-root",
+          "callback-downstream",
+          "selected-upstream-metadata",
+          "messages-root",
+          "messages-downstream",
+          "final-root",
+          "final-downstream",
+          "worker-cleaned",
+          "reload-baseline-compared",
+          "followup-started",
+          "source-applied",
+          "followup-acquisitions-settled",
+          "followup-retained-key-root",
+          "followup-messages-root",
+          "followup-final-root",
+          "followup-update-root",
+          "followup-previous-value-root",
+          "followup-retained-key-downstream",
+          "followup-messages-downstream",
+          "followup-final-downstream",
+          "followup-update-downstream",
+          "followup-previous-value-downstream"
+        ],
+        "perHistory": "All 31 states at exactly 1 in the one authored-key q2 history; back console counts with the unique raw trace. Source count is not actual reach.",
+        "perHistoryFinish": "Exact unchanged run() calls checkQueuedAnswerProgress then metadata.finish(); the selected pass and source order supply the existing invocation assumption. No dedicated runtime finish/assert receipt is invented.",
+        "publicCheckpoints": "Initial publication; positive provider-held reload; completed reload baseline with exact root/downstream current rows/entries and deltas; source applied receipt; every actual follow-up acquisition settlement; actual root/downstream same-key rank30-to35 callback reads/complete value/previousValue; final followup-publication, ready outputs and normal worker-cleaned."
+      },
+      "sourceBinding": "Each original artifact needs bindingStatus bound, exact frozen source/tools/maps and actual evaluated/V8/callback-path evidence with inherited limits. Evaluation/compilation alone is not execution. No source was copied or refrozen.",
+      "currentRunIdentity": "Record actual sourceId/rootId/downstreamId with keyLane authored; require uniqueness and actual root/downstream authored metadata keys. Do not assume incidental output IDs. This is unchanged pre-M01 driver evidence.",
+      "identityAndCleanup": [
+        "Reuse unchanged inner20s/1GiB sampled group RSS/384MiB heap/post-enqueue1000ms supervisor. No guardian or timeout redesign.",
+        "Keep actual initial exec/session/final completion separately from the single receiving child's original result. Capture outer PID/PGID and receiving-parent PPID/PGID while live when available; do not reconstruct absent launch receipts.",
+        "Record detached leader and receipt-writer identities from original raw artifacts. Root owns actual outer lifecycle/containment/completion; 60000ms Vitest timeout is not a hard outer watchdog.",
+        "After actual completion, check original recorded PIDs and target groups absent through the separately admitted existing ps/signal-zero procedure; preserve current-run limits. No quiet-log cleanup inference.",
+        "Normal successful singleton requires worker-cleaned and no kill/observer/cleanup error; an observer failure is not product RED or GREEN."
+      ],
+      "rawPreservation": [
+        "Actual outer invocation/session/chunks/final completion with exact exit, separately from actual receiving-child exit.",
+        "Complete outer log, exclusive output directory, launcher-process and source-prelaunch records.",
+        "All original attributable history/prepared/receipt/stdout/stderr/supervisor/source-binding/evaluated/V8/loader/verification artifacts, including failed attempts.",
+        "Immutable originals/capture inventory with lengths and hashes; no overwritten or recreated primary evidence."
+      ],
+      "inheritedEvidenceLimits": [
+        "Stable output metadata/direct eager source-sync through a real QueryClient graph only; this authored q2 singleton remains unexecuted.",
+        "No deterministic M01 driver ID change or source successor; current-run actual root/downstream/source IDs must be recorded and distinct, not inferred from allocation order.",
+        "Default fixed/unseeded campaigns are separate qualified evidence. This singleton supplies no authored generated/no-op/subscription/conflicting-cache progress/changing-fetched-metadata/framework evidence.",
+        "No dedicated UUID-console ordinal or finish/assert receipt; parent invocation/finalizer source-order assumption remains.",
+        "No new parent-checker V8 proof or initial inner getpgid proof; retain actual current-run parent/outer identity evidence and qualify missing observations.",
+        "Native coverage/typecheck disabled; separate prior exact-byte standalone noEmit evidence only.",
+        "No actual hostile production mutant, production repair, progress repair, bug-class closure or PR-readiness credit.",
+        "Nine named own-package maps/2544 own payloads do not prove full transitive host/native/dist equivalence.",
+        "Prior v2 observer failure, raw predecessor diagnostics and independent lexical-path audit correction remain preserved."
+      ],
+      "actualEvidenceNow": "None. Source-only packet requires independent review and separate exact root admission."
+    },
+    "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-authored-q2-preparation-v1/static-audit-initial-failure.json": {
+      "kind": "Preserved initial source-only author-audit failure",
+      "failedCheck": "noSourceMutationCommands",
+      "observed": "Whole-launcher regex reported false because it matched the literal pnpm segment in the immutable node_modules/.pnpm/vitest path.",
+      "technicalVerdict": "Audit-classifier false positive; no source mutation command was present or executed.",
+      "action": "Replace the whole-text package-manager word search with an explicit command-position/token audit. Keep the failing audit fact here; no source or launcher bytes changed.",
+      "actualNativeRuns": 0,
+      "actualMutants": 0,
+      "applicationSourceEdits": 0,
+      "earlierCompletedChecks": "All other 28 checks true in the failed source-only pass. No static-results.json was written by that failed pass."
+    }
+  },
+  "sourceOnly": true,
+  "runtimeAdmission": false,
+  "actualMutants": 0,
+  "rootOwnsLint": true
+}

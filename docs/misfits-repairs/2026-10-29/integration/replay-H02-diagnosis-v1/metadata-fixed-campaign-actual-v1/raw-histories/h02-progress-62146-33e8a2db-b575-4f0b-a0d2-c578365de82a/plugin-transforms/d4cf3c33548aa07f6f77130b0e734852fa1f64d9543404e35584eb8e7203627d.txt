@@ -1,0 +1,262 @@
+import {
+  DuplicateKeySyncError,
+  SyncTransactionAbortedError,
+  whenSyncAccepted
+} from "@tanstack/db";
+import {
+  DeleteOperationItemNotFoundError,
+  DuplicateKeyInBatchError,
+  SyncNotInitializedError,
+  UpdateOperationItemNotFoundError
+} from "./errors";
+const activeBatchContexts = /* @__PURE__ */ new WeakMap();
+const writeCompletionPromises = /* @__PURE__ */ new WeakSet();
+function normalizeOperations(ops, ctx) {
+  const operations = Array.isArray(ops) ? ops : [ops];
+  const normalized = [];
+  for (const op of operations) {
+    if (op.type === `delete`) {
+      const keys = Array.isArray(op.key) ? op.key : [op.key];
+      for (const key of keys) {
+        normalized.push({ type: `delete`, key });
+      }
+    } else {
+      const items = Array.isArray(op.data) ? op.data : [op.data];
+      for (const item of items) {
+        let key;
+        if (op.type === `update`) {
+          key = ctx.getKey(item);
+        } else {
+          const resolved = ctx.collection.validateData(
+            item,
+            op.type === `upsert` ? `insert` : op.type
+          );
+          key = ctx.getKey(resolved);
+        }
+        normalized.push({ type: op.type, key, data: item });
+      }
+    }
+  }
+  return normalized;
+}
+function validateOperations(operations, ctx) {
+  const seenKeys = /* @__PURE__ */ new Set();
+  for (const op of operations) {
+    if (seenKeys.has(op.key)) {
+      throw new DuplicateKeyInBatchError(op.key);
+    }
+    seenKeys.add(op.key);
+    if (op.type === `insert`) {
+      if (ctx.collection._state.getAcceptedSyncedRow(op.key)) {
+        throw new DuplicateKeySyncError(op.key, ctx.collection.id);
+      }
+    } else if (op.type === `update`) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
+        throw new UpdateOperationItemNotFoundError(op.key);
+      }
+    } else if (op.type === `delete`) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
+        throw new DeleteOperationItemNotFoundError(op.key);
+      }
+    }
+  }
+}
+export function performWriteOperations(operations, ctx, isCurrent) {
+  let normalized;
+  try {
+    normalized = normalizeOperations(operations, ctx);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const position = ctx.reserveDirectWrite?.() ?? 0;
+  const earlier = ctx.earlierCommits?.();
+  if (!earlier) {
+    try {
+      return applyWriteOperations(normalized, ctx, position);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  const written = earlier.then(() => {
+    if (!isCurrent()) throw new SyncTransactionAbortedError();
+    return applyWriteOperations(normalized, ctx, position);
+  });
+  ctx.noteWaitingDirectWrite?.(
+    written.then(
+      () => void 0,
+      () => void 0
+    )
+  );
+  return written;
+}
+function applyWriteOperations(normalized, ctx, position) {
+  validateOperations(normalized, ctx);
+  ctx.claimDirectWriteKeys?.(
+    normalized.map((op) => op.key),
+    position
+  );
+  ctx.begin();
+  for (const op of normalized) {
+    switch (op.type) {
+      case `insert`: {
+        const resolved = ctx.collection.validateData(op.data, `insert`);
+        ctx.write({
+          type: `insert`,
+          value: resolved
+        });
+        break;
+      }
+      case `update`: {
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key);
+        const updatedItem = {
+          ...currentItem,
+          ...op.data
+        };
+        const resolved = ctx.collection.validateData(
+          updatedItem,
+          `update`,
+          op.key
+        );
+        ctx.write({
+          type: `update`,
+          value: resolved
+        });
+        break;
+      }
+      case `delete`: {
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key);
+        ctx.write({
+          type: `delete`,
+          value: currentItem
+        });
+        break;
+      }
+      case `upsert`: {
+        const existsInSyncedStore = ctx.collection._state.getAcceptedSyncedRow(op.key) !== void 0;
+        const resolved = ctx.collection.validateData(
+          op.data,
+          existsInSyncedStore ? `update` : `insert`,
+          op.key
+        );
+        if (existsInSyncedStore) {
+          ctx.write({
+            type: `update`,
+            value: resolved
+          });
+        } else {
+          ctx.write({
+            type: `insert`,
+            value: resolved
+          });
+        }
+        break;
+      }
+    }
+  }
+  const applied = ctx.commit();
+  const accepted = whenSyncAccepted(applied);
+  const updateCache = () => {
+    const getItems = (keys) => keys ? keys.map((key) => ctx.collection._state.getAcceptedSyncedRow(key)).filter((row) => row !== void 0) : Array.from(
+      ctx.collection._state.acceptedSyncedEntries(),
+      ([, row]) => row
+    );
+    if (ctx.updateCacheData)
+      ctx.updateCacheData(
+        getItems,
+        normalized.map((op) => op.key),
+        position
+      );
+    else ctx.queryClient.setQueryData(ctx.queryKey, getItems());
+  };
+  if (accepted === true) updateCache();
+  const completion = Promise.resolve(accepted).then(() => {
+    if (accepted !== true) updateCache();
+  });
+  void completion.catch(() => void 0);
+  return completion;
+}
+export function createWriteUtils(getContext) {
+  function ensureContext() {
+    const context = getContext();
+    if (!context) {
+      throw new SyncNotInitializedError();
+    }
+    return context;
+  }
+  function write(operation) {
+    const ctx = ensureContext();
+    const batchContext = activeBatchContexts.get(ctx);
+    if (batchContext) {
+      batchContext.operations.push(operation);
+      return batchContext.completion;
+    }
+    const completion = performWriteOperations(
+      operation,
+      ctx,
+      () => getContext() === ctx
+    );
+    writeCompletionPromises.add(completion);
+    return completion;
+  }
+  return {
+    writeInsert(data) {
+      return write({ type: `insert`, data });
+    },
+    writeUpdate(data) {
+      return write({ type: `update`, data });
+    },
+    writeDelete(key) {
+      return write({ type: `delete`, key });
+    },
+    writeUpsert(data) {
+      return write({ type: `upsert`, data });
+    },
+    writeBatch(callback) {
+      const ctx = ensureContext();
+      const existingBatch = activeBatchContexts.get(ctx);
+      if (existingBatch) {
+        throw new Error(
+          `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`
+        );
+      }
+      let resolveBatch;
+      let rejectBatch;
+      const completion = new Promise((resolve, reject) => {
+        resolveBatch = resolve;
+        rejectBatch = reject;
+      });
+      writeCompletionPromises.add(completion);
+      void completion.catch(() => void 0);
+      const batchContext = {
+        operations: [],
+        completion
+      };
+      activeBatchContexts.set(ctx, batchContext);
+      try {
+        const result = callback();
+        if (result !== null && typeof result === `object` && `then` in result && typeof result.then === `function` && !writeCompletionPromises.has(result)) {
+          void Promise.resolve(result).catch(() => void 0);
+          throw new Error(
+            `writeBatch does not support async callbacks. The callback must be synchronous.`
+          );
+        }
+        activeBatchContexts.delete(ctx);
+        resolveBatch(
+          batchContext.operations.length > 0 ? performWriteOperations(
+            batchContext.operations,
+            ctx,
+            () => getContext() === ctx
+          ) : Promise.resolve()
+        );
+        return completion;
+      } catch (error) {
+        rejectBatch(error);
+        throw error;
+      } finally {
+        if (activeBatchContexts.get(ctx) === batchContext) {
+          activeBatchContexts.delete(ctx);
+        }
+      }
+    }
+  };
+}

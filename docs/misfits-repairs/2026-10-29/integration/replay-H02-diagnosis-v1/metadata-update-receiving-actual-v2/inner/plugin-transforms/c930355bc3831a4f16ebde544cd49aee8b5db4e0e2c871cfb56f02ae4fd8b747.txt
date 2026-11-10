@@ -1,0 +1,171 @@
+import {
+  PropRef,
+  collectCollectionSources,
+  followRef,
+  getFromSources,
+  requireCollectionSource
+} from "../ir.js";
+export function getLazyLoadTargets(rawQuery, lazyFrom, lazyAlias, lazySourceExpr, lazySource, aliasRemapping) {
+  if (lazyFrom.type === `unionFrom`) {
+    return getTargetsFromExpression(rawQuery, lazySourceExpr);
+  }
+  if (lazyFrom.type === `queryRef` && containsUnionFrom(lazyFrom.query.from)) {
+    const targets = getTargetsFromQueryRef(
+      lazyFrom.query,
+      lazyAlias,
+      lazySourceExpr
+    );
+    return dedupeLazyLoadTargets(targets);
+  }
+  if (!lazySource) {
+    return [];
+  }
+  const lazySourceRef = toPropRef(lazySourceExpr);
+  if (!lazySourceRef) {
+    return [];
+  }
+  const followRefResult = followRef(rawQuery, lazySourceRef, lazySource);
+  if (!followRefResult) {
+    return [];
+  }
+  const alias = followRefResult.alias || aliasRemapping[lazyAlias] || lazyAlias;
+  const source = resolveLazySource(rawQuery, lazyFrom, {
+    alias,
+    collection: followRefResult.collection,
+    sourceId: followRefResult.sourceId
+  });
+  if (!source) {
+    return [];
+  }
+  return [
+    {
+      sourceId: source.sourceId,
+      alias,
+      collection: followRefResult.collection,
+      path: followRefResult.path
+    }
+  ];
+}
+export function containsUnionFrom(from) {
+  if (from.type === `unionFrom`) {
+    return true;
+  }
+  if (from.type === `queryRef`) {
+    return containsUnionFrom(from.query.from);
+  }
+  if (from.type === `unionAll`) {
+    return from.queries.some((query) => containsUnionFrom(query.from));
+  }
+  return false;
+}
+function getTargetsFromQueryRef(query, outerAlias, expr) {
+  if (!expr || typeof expr !== `object` || !(`type` in expr)) {
+    return [];
+  }
+  const expression = expr;
+  if (expression.type === `func` && expression.name === `coalesce`) {
+    return dedupeLazyLoadTargets(
+      expression.args.flatMap(
+        (arg) => getTargetsFromQueryRef(query, outerAlias, arg)
+      )
+    );
+  }
+  const ref = toPropRef(expression);
+  if (!ref || ref.path[0] !== outerAlias) {
+    return [];
+  }
+  return getTargetsFromPropRef(query, new PropRef(ref.path.slice(1)));
+}
+function getTargetsFromExpression(query, expr) {
+  if (!expr || typeof expr !== `object` || !(`type` in expr)) {
+    return [];
+  }
+  const expression = expr;
+  if (expression.type === `ref`) {
+    return getTargetsFromPropRef(query, expression);
+  }
+  if (expression.type === `func` && expression.name === `coalesce`) {
+    return dedupeLazyLoadTargets(
+      expression.args.flatMap((arg) => getTargetsFromExpression(query, arg))
+    );
+  }
+  return [];
+}
+function getTargetsFromPropRef(query, ref) {
+  if (ref.path.length === 0) {
+    return [];
+  }
+  if (ref.path.length === 1) {
+    const field = ref.path[0];
+    const selectedField = query.select?.[field];
+    if (selectedField) {
+      return getTargetsFromExpression(query, selectedField);
+    }
+    return [];
+  }
+  const [alias, ...path] = ref.path;
+  const source = getSourceFromAlias(query, alias, ref.bindingId);
+  if (!source) {
+    return [];
+  }
+  if (source.type === `collectionRef`) {
+    return [
+      {
+        sourceId: source.sourceId,
+        alias: source.alias,
+        collection: source.collection,
+        path
+      }
+    ];
+  }
+  if (source.type === `descriptorRef`) return requireCollectionSource(source);
+  if (source.query.limit !== void 0 || source.query.offset !== void 0 || source.query.singleResult) {
+    return [];
+  }
+  return getTargetsFromQueryRef(source.query, source.alias, ref);
+}
+function getSourceFromAlias(query, alias, bindingId) {
+  if (query.join) {
+    for (const join of query.join) {
+      if (join.from.alias === alias && (bindingId === void 0 || join.from.bindingId === bindingId)) {
+        return join.from;
+      }
+    }
+  }
+  return getFromSources(query.from).find(
+    (source) => source.alias === alias && (bindingId === void 0 || source.bindingId === bindingId)
+  );
+}
+function resolveLazySource(query, lazyFrom, target) {
+  if (target.sourceId !== void 0) {
+    return collectCollectionSources(query).find(
+      (source) => source.sourceId === target.sourceId && source.collection === target.collection
+    );
+  }
+  if (lazyFrom.type === `collectionRef` && lazyFrom.collection === target.collection && lazyFrom.alias === target.alias) {
+    return lazyFrom;
+  }
+  return void 0;
+}
+function dedupeLazyLoadTargets(targets) {
+  const seen = /* @__PURE__ */ new Set();
+  const deduped = [];
+  for (const target of targets) {
+    const key = `${target.sourceId}:${JSON.stringify(target.path)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(target);
+    }
+  }
+  return deduped;
+}
+function toPropRef(expr) {
+  if (expr instanceof PropRef) {
+    return expr;
+  }
+  if (expr && typeof expr === `object` && `type` in expr && expr.type === `ref` && Array.isArray(expr.path)) {
+    const ref = expr;
+    return new PropRef(ref.path, ref.sourceAlias);
+  }
+  return void 0;
+}

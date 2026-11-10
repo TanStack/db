@@ -1,0 +1,261 @@
+--- v3/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
++++ v4/packages/query-db-collection/tests/queued-answer-progress-oracle.ts
+@@ -36,6 +36,11 @@
+ }
+ 
+ export type ProgressHistory = QueryProgressHistory | SynchronousProgressHistory
++// This model observes the authored query payload. Published Collection rows
++// also expose the four public VirtualRowProps fields (live-queries.md, Virtual
++// properties); raw receipts preserve those fields. Their classification and
++// attribution law belongs to virtual-row-fields-oracle.test.ts. This payload
++// judgment does not establish temporal metadata coherence across Query reloads.
+ export type ProgressRow = { id: number; rank: number; markers: Array<number> }
+ 
+ export const queuedAnswerExample: QueryProgressHistory = {
+@@ -165,6 +170,31 @@
+   bindingError?: string
+ }
+ 
++// Use the same observation abstraction for snapshots and event values. It
++// preserves payload order, multiplicity and every selected marker; it changes
++// no raw receipt or expected model value. Public metadata remains recorded, not
++// compared as absent or required to match between distinct output Collections.
++function projectProgressRow(value: unknown): ProgressRow {
++  if (
++    typeof value !== `object` ||
++    value === null ||
++    !(`id` in value) ||
++    typeof value.id !== `number` ||
++    !(`rank` in value) ||
++    typeof value.rank !== `number` ||
++    !(`markers` in value) ||
++    !Array.isArray(value.markers) ||
++    !value.markers.every((marker: unknown) => typeof marker === `number`)
++  )
++    throw new Error(`public row has an invalid id/rank/markers payload`)
++  return { id: value.id, rank: value.rank, markers: [...value.markers] }
++}
++
++export function projectProgressRows(value: unknown): Array<ProgressRow> {
++  if (!Array.isArray(value)) throw new Error(`public snapshot is not an array`)
++  return value.map(projectProgressRow)
++}
++
+ export function checkProgressValue(
+   history: ProgressHistory,
+   receipt: ProgressReceipt,
+@@ -174,7 +204,7 @@
+     receipt.phase === `initial-publication`
+   ) {
+     checkReplayPublication(
+-      receipt.rows,
++      projectProgressRows(receipt.rows),
+       modelProgressValue(history, false),
+       `pending answer retains complete publication`,
+     )
+@@ -193,7 +223,7 @@
+         `initial synchronous observation precedes a second public call`,
+       )
+     checkReplayPublication(
+-      receipt.rows,
++      projectProgressRows(receipt.rows),
+       modelProgressValue(history, true),
+       receipt.phase,
+     )
+@@ -204,7 +234,7 @@
+     )
+     if (history.kind === `query`) {
+       checkReplayPublication(
+-        receipt.downstream,
++        projectProgressRows(receipt.downstream),
+         modelProgressValue(history, true),
+         `downstream observes the same complete publication`,
+       )
+@@ -236,21 +266,6 @@
+   const eventRows = new Map(prior.map((row) => [row.id, row]))
+   let reloading = false
+   let finalPublished = false
+-  const project = (value: unknown): ProgressRow => {
+-    if (
+-      typeof value !== `object` ||
+-      value === null ||
+-      !(`id` in value) ||
+-      typeof value.id !== `number` ||
+-      !(`rank` in value) ||
+-      typeof value.rank !== `number` ||
+-      !(`markers` in value) ||
+-      !Array.isArray(value.markers) ||
+-      !value.markers.every((marker: unknown) => typeof marker === `number`)
+-    )
+-      throw new Error(`public-change has an invalid id/rank/markers value`)
+-    return { id: value.id, rank: value.rank, markers: [...value.markers] }
+-  }
+   return (receipt: ProgressReceipt) => {
+     checkProgressValue(history, receipt)
+     if (history.kind !== `query`) return
+@@ -264,14 +279,15 @@
+       )
+       checkReplayPublication(
+         [...eventRows.values()].sort((left, right) => left.rank - right.rank),
+-        receipt.rows,
++        projectProgressRows(receipt.rows),
+         `final checkpoint includes every event-derived public row`,
+       )
+     }
+     if (!reloading || receipt.phase !== `public-change`) return
+-    const isFinal = isDeepStrictEqual(receipt.rows, final)
+-    checkReplayPublication(
+-      receipt.rows,
++    const rows = projectProgressRows(receipt.rows)
++    const isFinal = isDeepStrictEqual(rows, final)
++    checkReplayPublication(
++      rows,
+       finalPublished || isFinal ? final : prior,
+       `every reload callback publishes one complete snapshot without regression`,
+     )
+@@ -282,7 +298,7 @@
+     for (const change of receipt.changes) {
+       if (typeof change !== `object` || change === null)
+         throw new Error(`public-change operation is invalid`)
+-      const value = project(change.value)
++      const value = projectProgressRow(change.value)
+       // Public-key reduction emits at most one replacement/removal per key.
+       checkReplayPublication(
+         changedIds.has(value.id),
+@@ -306,7 +322,7 @@
+         } else {
+           if (change.previousValue !== undefined)
+             checkReplayPublication(
+-              project(change.previousValue),
++              projectProgressRow(change.previousValue),
+               eventRows.get(value.id),
+               `event update carries the preceding public value`,
+             )
+@@ -316,7 +332,7 @@
+     }
+     checkReplayPublication(
+       [...eventRows.values()].sort((left, right) => left.rank - right.rank),
+-      receipt.rows,
++      rows,
+       `public-change payload and callback read expose the same complete value`,
+     )
+   }
+--- v3/scripts/h02-progress/checker-calibration.test.ts
++++ v4/scripts/h02-progress/checker-calibration.test.ts
+@@ -60,6 +60,37 @@
+   for (const receipt of receipts) observe(receipt)
+ }
+ 
++// Published row roots legitimately include these public metadata fields. The
++// payload law still compares every selected id/rank/markers value, occurrence
++// and position; this calibration does not judge metadata attribution/timing.
++const enrich = (row: ProgressRow, collectionId = `authored-root`) => ({
++  ...row,
++  markers: [...row.markers],
++  $hasPendingWrites: false,
++  $origin: `remote`,
++  $key: `authored-key-${row.id}`,
++  $collectionId: collectionId,
++})
++const virtualLawful = (): Array<ProgressReceipt> =>
++  lawful.map((receipt) => ({
++    ...receipt,
++    ...(receipt.rows ? { rows: receipt.rows.map((row) => enrich(row)) } : {}),
++    ...(Array.isArray(receipt.downstream)
++      ? {
++          downstream: (receipt.downstream as Array<ProgressRow>).map((row) =>
++            enrich(row, `authored-downstream`),
++          ),
++        }
++      : {}),
++    ...(Array.isArray(receipt.changes)
++      ? {
++          changes: (
++            receipt.changes as Array<{ type: string; value: ProgressRow }>
++          ).map((change) => ({ ...change, value: enrich(change.value) })),
++        }
++      : {}),
++  }))
++
+ // These authored supervisor results calibrate the unchanged judgment's failure
+ // categories. A contained prefix is not a current-main execution witness.
+ const containedOutcome = (
+@@ -116,6 +147,41 @@
+ })
+ 
+ describe(`pure progress receipt comparison calibration`, () => {
++  it(`accepts virtual-enriched public rows at every payload checkpoint`, () => {
++    expect(() => check(virtualLawful())).not.toThrow()
++  })
++  it(`rejects selected payload corruption inside virtual-enriched rows`, () => {
++    for (const corrupt of [
++      (row: ProgressRow) => ({ ...row, id: row.id + 1 }),
++      (row: ProgressRow) => ({ ...row, rank: row.rank + 1 }),
++      (row: ProgressRow) => ({ ...row, markers: [900] }),
++    ]) {
++      const receipts = virtualLawful()
++      receipts[0]!.rows = receipts[0]!.rows!.map(corrupt)
++      expect(() => check(receipts)).toThrow(
++        `pending answer retains complete publication`,
++      )
++    }
++    const duplicate = virtualLawful()
++    duplicate[0]!.rows!.push(duplicate[0]!.rows![0]!)
++    expect(() => check(duplicate)).toThrow(
++      `pending answer retains complete publication`,
++    )
++  })
++  it(`preserves ordered row positions when public rows carry virtual fields`, () => {
++    const input = { kind: `sync-initial` as const, keyShift: 0, rankScale: 10 }
++    const rows = modelProgressValue(input, true).map((row) => enrich(row))
++    const receipt = {
++      phase: `immediate-publication`,
++      cut: `subscriber-return-before-preload`,
++      rows,
++      ready: true,
++    }
++    expect(() => check([receipt], input)).not.toThrow()
++    expect(() =>
++      check([{ ...receipt, rows: [...rows].reverse() }], input),
++    ).toThrow(`immediate-publication`)
++  })
+   it(`accepts complete prior-to-final publication after provider releases`, () => {
+     expect(() => check(lawful)).not.toThrow()
+   })
+--- v3/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
++++ v4/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts
+@@ -5,6 +5,7 @@
+   checkQueuedAnswerProgress,
+   createProgressReceiptCheck,
+   modelProgressValue,
++  projectProgressRows,
+   queuedAnswerExample,
+ } from './queued-answer-progress-oracle.js'
+ import { receiveProgressHistory } from './queued-answer-progress-supervisor.js'
+@@ -141,7 +142,7 @@
+               receipt.pendingProviderAnswers > 0
+             ) {
+               checkReplayPublication(
+-                receipt.downstream,
++                projectProgressRows(receipt.downstream),
+                 modelProgressValue(history, false),
+                 'held downstream retains the same complete prior snapshot',
+               )
+--- v3/docs/contributing/oracle-coverage.md
++++ v4/docs/contributing/oracle-coverage.md
+@@ -738,7 +738,14 @@
+ The virtual-row-fields owner
+ (`packages/db/tests/query/virtual-row-fields-oracle.test.ts`) checks all four
+ public fields on row roots and keeps inline values in their selected shape.
+-Its finite 1,056-history attribution grammar crosses single/joined sources,
++The H02 queued-answer receiving instrument observes authored `id`, `rank` and
++`markers` payloads through one explicit row projection. Its raw snapshots and
++change payloads retain all four public virtual fields. The maintainer-directed
++observation correction on 2026-10-30 aligns that payload comparison with
++`VirtualRowProps`; it does not retire the metadata law. Temporal metadata
++coherence through the real QueryClient reload and event path remains a receiving
++gap for this virtual-row-fields owner; the H02 payload checks do not close it.
++That owner's finite 1,056-history attribution grammar crosses single/joined sources,
+ structured projections/spreads and functional projections/spreads/direct
+ source returns, and none/each/all reserved-field collisions. Each form crosses
+ direct output, QueryRef depths one/two, joined and functional QueryRef

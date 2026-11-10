@@ -1,0 +1,307 @@
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 29)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 30)
+      at async BasicMinimalPluginContext.configResolved (file:///private/tmp/replay-h02-diagnostic-mo8pxcv_/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/private/tmp/replay-h02-diagnostic-mo8pxcv_/examples/react-native/shopping-list/tsconfig.json'
+}
+
+ RUN  v4.1.12 /private/tmp/replay-h02-diagnostic-mo8pxcv_/packages/query-db-collection
+
+{"event":1,"phase":"test-start","heapUsed":58682064}
+{"event":2,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":58733848}
+{"event":3,"phase":"markers-created","heapUsed":58861544}
+{"event":4,"phase":"source-created","heapUsed":58888704}
+{"event":5,"phase":"live-created","heapUsed":59569920}
+{"event":6,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":59948952}
+{"event":7,"phase":"acquisition","acquisitionCount":1,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":60067200}
+{"event":8,"phase":"key","owner":0,"ownerCount":1,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":0,"heapUsed":60087816}
+{"event":9,"phase":"fetch","keys":[1,2],"requestCount":1,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":60614928}
+{"event":10,"phase":"acquisition-return","acquisitionCount":1,"promise":true,"heapUsed":60629896}
+{"event":11,"phase":"acquisition","acquisitionCount":2,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":60569584}
+{"event":12,"phase":"key","owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":1,"heapUsed":60440568}
+{"event":13,"phase":"fetch","keys":[2],"requestCount":2,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":60604040}
+{"event":14,"phase":"acquisition-return","acquisitionCount":2,"promise":true,"heapUsed":60607976}
+{"event":15,"phase":"subscribed","heapUsed":60643152}
+{"event":16,"phase":"preload-start","heapUsed":60648960}
+{"event":17,"phase":"key","owner":1,"ownerCount":2,"keys":[2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":60818840}
+{"event":18,"phase":"acquisition","acquisitionCount":3,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":61199008}
+{"event":19,"phase":"key","owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":2,"heapUsed":61203464}
+{"event":20,"phase":"fetch","keys":[3],"requestCount":3,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":61492456}
+{"event":21,"phase":"acquisition-return","acquisitionCount":3,"promise":true,"heapUsed":61252880}
+{"event":22,"phase":"acquisition","acquisitionCount":4,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":61314160}
+{"event":23,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":3,"heapUsed":61318496}
+{"event":24,"phase":"fetch","keys":[3],"requestCount":4,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":61581688}
+{"event":25,"phase":"acquisition-return","acquisitionCount":4,"promise":true,"heapUsed":61585816}
+{"event":26,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":61849104}
+{"event":27,"phase":"acquisition","acquisitionCount":5,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":61876008}
+{"event":28,"phase":"key","owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":61880760}
+{"event":29,"phase":"fetch","keys":[4],"requestCount":5,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":62410368}
+{"event":30,"phase":"acquisition-return","acquisitionCount":5,"promise":true,"heapUsed":61936992}
+{"event":31,"phase":"acquisition","acquisitionCount":6,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":62475272}
+{"event":32,"phase":"key","owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":62007736}
+{"event":33,"phase":"fetch","keys":[4],"requestCount":6,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":62041264}
+{"event":34,"phase":"acquisition-return","acquisitionCount":6,"promise":true,"heapUsed":62045416}
+{"event":35,"phase":"key","owner":1,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":62667448}
+{"event":36,"phase":"acquisition","acquisitionCount":7,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":62878488}
+{"event":37,"phase":"key","owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":62883072}
+{"event":38,"phase":"fetch","keys":[5],"requestCount":7,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":62627128}
+{"event":39,"phase":"acquisition-return","acquisitionCount":7,"promise":true,"heapUsed":62631368}
+{"event":40,"phase":"acquisition","acquisitionCount":8,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":62691448}
+{"event":41,"phase":"key","owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":62695864}
+{"event":42,"phase":"fetch","keys":[5],"requestCount":8,"holding":false,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62734728}
+{"event":43,"phase":"acquisition-return","acquisitionCount":8,"promise":true,"heapUsed":62738848}
+{"event":44,"phase":"key","owner":1,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63173304}
+{"event":45,"phase":"preload-settled","acquisitionCount":8,"requestCount":8,"owners":2,"cacheCount":8,"heapUsed":63288808}
+{"event":46,"phase":"key-prefix","subscriptionPresent":false,"signalPresent":false,"wherePresent":false,"orderPresent":false,"heapUsed":63386072}
+{"event":47,"phase":"acquisition","acquisitionCount":9,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63841600}
+{"event":48,"phase":"key","owner":0,"ownerCount":2,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":4,"heapUsed":63846280}
+{"event":49,"phase":"fetch","keys":[1,2],"requestCount":9,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":63882504}
+{"event":50,"phase":"acquisition-return","acquisitionCount":9,"promise":true,"heapUsed":63893208}
+{"event":51,"phase":"acquisition","acquisitionCount":10,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63906008}
+{"event":52,"phase":"key","owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":5,"heapUsed":63910408}
+{"event":53,"phase":"fetch","keys":[3],"requestCount":10,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":63944256}
+{"event":54,"phase":"acquisition-return","acquisitionCount":10,"promise":true,"heapUsed":63948608}
+{"event":55,"phase":"acquisition","acquisitionCount":11,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63955504}
+{"event":56,"phase":"key","owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":6,"heapUsed":63959912}
+{"event":57,"phase":"fetch","keys":[4],"requestCount":11,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":63655512}
+{"event":58,"phase":"acquisition-return","acquisitionCount":11,"promise":true,"heapUsed":63659520}
+{"event":59,"phase":"acquisition","acquisitionCount":12,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63665904}
+{"event":60,"phase":"key","owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":7,"heapUsed":63670320}
+{"event":61,"phase":"fetch","keys":[5],"requestCount":12,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63705024}
+{"event":62,"phase":"acquisition-return","acquisitionCount":12,"promise":true,"heapUsed":63708944}
+{"event":63,"phase":"acquisition","acquisitionCount":13,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":57412728}
+{"event":64,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":57423296}
+{"event":65,"phase":"fetch","keys":[3],"requestCount":13,"holding":true,"subscriptionPresent":false,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":57500120}
+{"event":66,"phase":"acquisition-return","acquisitionCount":13,"promise":true,"heapUsed":57505000}
+{"event":67,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":57786760}
+{"event":68,"phase":"acquisition","acquisitionCount":14,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":58111728}
+{"event":69,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":58116152}
+{"event":70,"phase":"acquisition-return","acquisitionCount":14,"promise":true,"heapUsed":58141600}
+{"event":71,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":58334984}
+{"event":72,"phase":"acquisition","acquisitionCount":15,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":58753616}
+{"event":73,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":58641728}
+{"event":74,"phase":"acquisition-return","acquisitionCount":15,"promise":true,"heapUsed":58796632}
+{"event":75,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":58906984}
+{"event":76,"phase":"acquisition","acquisitionCount":16,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":59184792}
+{"event":77,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":59189216}
+{"event":78,"phase":"acquisition-return","acquisitionCount":16,"promise":true,"heapUsed":59297568}
+{"event":79,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":59424592}
+{"event":80,"phase":"acquisition","acquisitionCount":17,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":60033048}
+{"event":81,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":60037664}
+{"event":82,"phase":"acquisition-return","acquisitionCount":17,"promise":true,"heapUsed":59744600}
+{"event":83,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":59950696}
+{"event":84,"phase":"acquisition","acquisitionCount":18,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":60273272}
+{"event":85,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":60277696}
+{"event":86,"phase":"acquisition-return","acquisitionCount":18,"promise":true,"heapUsed":60303288}
+{"event":87,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":60504248}
+{"event":88,"phase":"acquisition","acquisitionCount":19,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":60784712}
+{"event":89,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":60789136}
+{"event":90,"phase":"acquisition-return","acquisitionCount":19,"promise":true,"heapUsed":60814064}
+{"event":91,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":61006112}
+{"event":92,"phase":"acquisition","acquisitionCount":20,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":61559680}
+{"event":93,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":61290464}
+{"event":94,"phase":"acquisition-return","acquisitionCount":20,"promise":true,"heapUsed":61315256}
+{"event":95,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":61507552}
+{"event":96,"phase":"acquisition","acquisitionCount":21,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":61796128}
+{"event":97,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":61800552}
+{"event":98,"phase":"acquisition-return","acquisitionCount":21,"promise":true,"heapUsed":61826712}
+{"event":99,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62035896}
+{"event":100,"phase":"acquisition","acquisitionCount":22,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":62245376}
+{"event":101,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62249800}
+{"event":102,"phase":"acquisition-return","acquisitionCount":22,"promise":true,"heapUsed":62274792}
+{"event":103,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62464720}
+{"event":104,"phase":"acquisition","acquisitionCount":23,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":62675336}
+{"event":105,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62682376}
+{"event":106,"phase":"acquisition-return","acquisitionCount":23,"promise":true,"heapUsed":62708296}
+{"event":107,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":62885976}
+{"event":108,"phase":"acquisition","acquisitionCount":24,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63094216}
+{"event":109,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63098640}
+{"event":110,"phase":"acquisition-return","acquisitionCount":24,"promise":true,"heapUsed":63123120}
+{"event":111,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63294816}
+{"event":112,"phase":"acquisition","acquisitionCount":25,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63722720}
+{"event":113,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63727144}
+{"event":114,"phase":"acquisition-return","acquisitionCount":25,"promise":true,"heapUsed":63577904}
+{"event":115,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63750408}
+{"event":116,"phase":"acquisition","acquisitionCount":26,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":63951056}
+{"event":117,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":63955480}
+{"event":118,"phase":"acquisition-return","acquisitionCount":26,"promise":true,"heapUsed":63980640}
+{"event":119,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":64160152}
+{"event":120,"phase":"acquisition","acquisitionCount":27,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":64360880}
+{"event":121,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":64365304}
+{"event":122,"phase":"acquisition-return","acquisitionCount":27,"promise":true,"heapUsed":64389784}
+{"event":123,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":64564552}
+{"event":124,"phase":"acquisition","acquisitionCount":28,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":64767960}
+{"event":125,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":64772384}
+{"event":126,"phase":"acquisition-return","acquisitionCount":28,"promise":true,"heapUsed":64797432}
+{"event":127,"phase":"key","owner":1,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":64975136}
+{"event":128,"phase":"acquisition","acquisitionCount":29,"subscriptionPresent":true,"signalPresent":true,"signalAborted":false,"wherePresent":true,"orderPresent":false,"heapUsed":65176240}
+{"receivingPath":"query-reload","reach":{"late-include-pending":1},"acquisitions":[{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":false,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":false,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":true,"aborted":false,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":true,"aborted":false,"subscriptionPresent":true,"subscriptionHeldBeforeReload":true},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":false,"aborted":true,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false},{"pending":true,"aborted":false,"subscriptionPresent":true,"subscriptionHeldBeforeReload":false}],"requests":[{"keys":[1,2],"pending":false,"aborted":true},{"keys":[2],"pending":false,"aborted":true},{"keys":[3],"pending":false,"aborted":true},{"keys":[3],"pending":false,"aborted":true},{"keys":[4],"pending":false,"aborted":true},{"keys":[4],"pending":false,"aborted":true},{"keys":[5],"pending":false,"aborted":true},{"keys":[5],"pending":false,"aborted":true},{"keys":[1,2],"pending":false,"aborted":false},{"keys":[3],"pending":false,"aborted":false},{"keys":[4],"pending":true,"aborted":false},{"keys":[5],"pending":true,"aborted":false},{"keys":[3],"pending":true,"aborted":true}]}
+{"event":129,"phase":"key","owner":0,"ownerCount":2,"keys":[1,2],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68301128}
+{"event":130,"phase":"key","owner":0,"ownerCount":2,"keys":[3],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68308248}
+{"event":131,"phase":"key","owner":0,"ownerCount":2,"keys":[4],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68314616}
+{"event":132,"phase":"key","owner":0,"ownerCount":2,"keys":[5],"subscriptionPresent":true,"signalPresent":true,"signalAborted":true,"wherePresent":true,"orderPresent":false,"cacheCount":8,"heapUsed":68320984}
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 4 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: process.exit unexpectedly called with "86"
+ ❯ process.exit ../../node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:109:9
+ ❯ emit tests/h02-instrumented.test.ts:36:36
+     34|     eventCount++
+     35|     process.stdout.write(JSON.stringify({ event: eventCount, phase, ..…
+     36|     if (eventCount >= 128) process.exit(86)
+       |                                    ^
+     37|   }
+     38|   const demand = (options: LoadSubsetOptions) => ({
+ ❯ queryKey tests/h02-instrumented.test.ts:90:9
+ ❯ generateQueryKeyFromOptions src/query.ts:1898:16
+ ❯ CollectionSyncManager.unloadSubset [as syncUnloadSubsetFn] src/query.ts:3871:37
+ ❯ CollectionSyncManager.unloadSubset ../db/src/collection/sync.ts:1067:12
+ ❯ CollectionSubscription.releaseAcquisition ../db/src/collection/subscription.ts:1176:31
+ ❯ emitInner.type ../db/src/collection/subscription.ts:1998:16
+ ❯ runAllCallbacks ../db/src/utils/callbacks.ts:6:7
+ ❯ CollectionSubscription.unsubscribe ../db/src/collection/subscription.ts:1978:5
+
+This error originated in "tests/h02-instrumented.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "receives a late include acquisition during a Query Collection reload". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: process.exit unexpectedly called with "86"
+ ❯ process.exit ../../node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:109:9
+ ❯ emit tests/h02-instrumented.test.ts:36:36
+     34|     eventCount++
+     35|     process.stdout.write(JSON.stringify({ event: eventCount, phase, ..…
+     36|     if (eventCount >= 128) process.exit(86)
+       |                                    ^
+     37|   }
+     38|   const demand = (options: LoadSubsetOptions) => ({
+ ❯ queryKey tests/h02-instrumented.test.ts:90:9
+ ❯ generateQueryKeyFromOptions src/query.ts:1898:16
+ ❯ CollectionSyncManager.unloadSubset [as syncUnloadSubsetFn] src/query.ts:3871:37
+ ❯ CollectionSyncManager.unloadSubset ../db/src/collection/sync.ts:1067:12
+ ❯ CollectionSubscription.releaseAcquisition ../db/src/collection/subscription.ts:1176:31
+ ❯ emitInner.type ../db/src/collection/subscription.ts:1998:16
+ ❯ runAllCallbacks ../db/src/utils/callbacks.ts:6:7
+ ❯ CollectionSubscription.unsubscribe ../db/src/collection/subscription.ts:1978:5
+
+This error originated in "tests/h02-instrumented.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "receives a late include acquisition during a Query Collection reload". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: process.exit unexpectedly called with "86"
+ ❯ process.exit ../../node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:109:9
+ ❯ emit tests/h02-instrumented.test.ts:36:36
+     34|     eventCount++
+     35|     process.stdout.write(JSON.stringify({ event: eventCount, phase, ..…
+     36|     if (eventCount >= 128) process.exit(86)
+       |                                    ^
+     37|   }
+     38|   const demand = (options: LoadSubsetOptions) => ({
+ ❯ queryKey tests/h02-instrumented.test.ts:90:9
+ ❯ generateQueryKeyFromOptions src/query.ts:1898:16
+ ❯ CollectionSyncManager.unloadSubset [as syncUnloadSubsetFn] src/query.ts:3871:37
+ ❯ CollectionSyncManager.unloadSubset ../db/src/collection/sync.ts:1067:12
+ ❯ CollectionSubscription.releaseAcquisition ../db/src/collection/subscription.ts:1176:31
+ ❯ emitInner.type ../db/src/collection/subscription.ts:1998:16
+ ❯ runAllCallbacks ../db/src/utils/callbacks.ts:6:7
+ ❯ CollectionSubscription.unsubscribe ../db/src/collection/subscription.ts:1978:5
+
+This error originated in "tests/h02-instrumented.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "receives a late include acquisition during a Query Collection reload". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: process.exit unexpectedly called with "86"
+ ❯ process.exit ../../node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:109:9
+ ❯ emit tests/h02-instrumented.test.ts:36:36
+     34|     eventCount++
+     35|     process.stdout.write(JSON.stringify({ event: eventCount, phase, ..…
+     36|     if (eventCount >= 128) process.exit(86)
+       |                                    ^
+     37|   }
+     38|   const demand = (options: LoadSubsetOptions) => ({
+ ❯ queryKey tests/h02-instrumented.test.ts:90:9
+ ❯ generateQueryKeyFromOptions src/query.ts:1898:16
+ ❯ CollectionSyncManager.unloadSubset [as syncUnloadSubsetFn] src/query.ts:3871:37
+ ❯ CollectionSyncManager.unloadSubset ../db/src/collection/sync.ts:1067:12
+ ❯ CollectionSubscription.releaseAcquisition ../db/src/collection/subscription.ts:1176:31
+ ❯ emitInner.type ../db/src/collection/subscription.ts:1998:16
+ ❯ runAllCallbacks ../db/src/utils/callbacks.ts:6:7
+ ❯ CollectionSubscription.unsubscribe ../db/src/collection/subscription.ts:1978:5
+
+This error originated in "tests/h02-instrumented.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "receives a late include acquisition during a Query Collection reload". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+     Errors  4 errors
+   Start at  16:22:31
+   Duration  1.50s (transform 810ms, setup 0ms, import 989ms, tests 66ms, environment 363ms)
+

@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-30T11:30:05.481977+00:00",
+  "initialChunk": "17e93b",
+  "session": 57715,
+  "finalChunk": "79bc05",
+  "exitCode": 0,
+  "mode": "source/byte/JSON/AST and filesystem-only audit; never imports bound modules",
+  "script": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-2gib-shared-receiving-preparation-v1.py",
+  "scriptSha256": "add24a4ece9c2db65d9f850fee0a9b1bf22c1e31f17f1c977d7e418989b606ca",
+  "facts": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-receiving-preparation-independent-facts-v1.json",
+  "factsSha256": "c62a87e8d0dcbf280b74b191ae64369cdd4954de9da4dd4c75e1c0515a6bd700",
+  "report": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/2gib-shared-receiving-preparation-independent-review-v1.md",
+  "reportSha256": "b7cdd5827d504f604dd30423dd690a8c29de15495ab4b9dbc2b80e39a2ccf9df",
+  "NManifestSha256": "439cdcb6df9125142fece28cf55f834b60d071d57fb8b6498c2d4d1f7feca2f1",
+  "NBindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "sourceOnlyVerdict": "bounded ACCEPT; no blocking source finding",
+  "QHistoricalSnapshotRelocationRequiresNRebind": false,
+  "runtimeAdmitted": false,
+  "newTargetExecutionsOrProbes": 0,
+  "slot2": "remains returned"
+}

@@ -1,0 +1,17 @@
+{
+  "status": "UNADMITTED and UNEXECUTED; requires independent concrete-preparation review and separate root one-shot admission",
+  "kind": "universe discovery only; zero test-body/pass/reach credit",
+  "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "argv": [
+    "-I",
+    "-B",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-native-preparation-v1/launch.py",
+    "--execute-exact-one",
+    "universe",
+    "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1",
+  "bindingSha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65",
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "nextStep": "Stop after the one command. Preserve actual outer tool return, original outer/child IDs and absence, raw outputs and receipts. Root result classification and independent actual-result review precede any selector admission. No retry or next-stage auto-chain."
+}

@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-30T09:50:45.975190+00:00",
+  "inputFreezeSha256": "7a819f08e33cd635c6479ba6f38c7d9471f322f38f60762b121be3e9859aa852",
+  "inputPacketSha256": "0365e49182e79b8f6f7a2592bfacfd0c029699691a20cf5c28f5dc701344d4d9",
+  "all53PacketEntriesMatchAfterLint": true,
+  "all15ProgramsExact": true,
+  "all15OnlyFiveRecipeBindingsChanged": true,
+  "all15OutputLeavesAbsent": true,
+  "sourceFreezeAnd275PacketEntriesUnchanged": true,
+  "historicalArchiveResolution": {
+    "freezeFilesResolved": 45,
+    "packetEntriesResolved": 46,
+    "archiveKeysResolved": 8,
+    "allMatched": true
+  },
+  "firstSuccessorFreezeSha256": "0780b64244c8ee668e5187aa65e4f762d501be12e54405cee216f993e04d6b50",
+  "firstSuccessor1974ResultFilesUnchanged": true,
+  "sourceOnly": true,
+  "compilerConstructorPureTestCollectionReceivingExecutions": 0,
+  "changedLintActualCompletion": {
+    "chunk_id": "2f38d0",
+    "wall_time_seconds": 1.775e-05,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "slot2Returned": true,
+  "runtimeAdmission": false,
+  "admittedCells": 0,
+  "firstBaselineRootClassificationAndIndependentReviewStillRequiredByFrozenGate": true,
+  "candidateRaw20": "all UNREACHED",
+  "state14": "proposed; not adopted"
+}

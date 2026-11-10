@@ -1,0 +1,73 @@
+{
+  "status": "INSTRUMENT/DEPENDENCY/SETUP + STATIC ONLY; no new DB receiving invocation",
+  "typescript": {
+    "exitCode": 0,
+    "log": "typescript-final-v6.log",
+    "heapMiB": 384
+  },
+  "eslint": {
+    "exitCode": 0,
+    "logs": [
+      "eslint-mjs-v6.log",
+      "eslint-driver-final-v6.log",
+      "eslint-ts-support-v6.log",
+      "eslint-model-and-calibration-v6.log"
+    ],
+    "rules": "all repository rules; file partitions at unchanged 1536 MiB",
+    "initialImportOrderFailure": {
+      "exitCode": 1,
+      "log": "eslint-driver-v6.log",
+      "status": "fixed and final full-rule group rerun passed"
+    }
+  },
+  "oracleLint": {
+    "exitCode": 0,
+    "log": "lint-changed-v6.log",
+    "command": "node --max-old-space-size=1536 scripts/agent-lint-feedback.mjs"
+  },
+  "nodeInstrumentChecks": {
+    "exitCode": 0,
+    "log": "pure-node-v6.log",
+    "transportPassed": 30,
+    "verifierPassed": 23,
+    "startupPassed": 6,
+    "fileConcurrency": 1,
+    "heapMiB": 384
+  },
+  "witnessDependencyChecks": {
+    "exitCode": 0,
+    "log": "witness-calibration-v6.log",
+    "passed": 2,
+    "scope": "authored negative controls plus actual Query Core notification ordering; no DB imports"
+  },
+  "sharedChecker": {
+    "exitCode": 0,
+    "passed": 10,
+    "log": "checker-v6.log"
+  },
+  "rootSetup": {
+    "exitCode": 0,
+    "passed": 2,
+    "log": "root-setup-v6.log",
+    "expectedRootInput": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v5/source-freeze-v5.json"
+  },
+  "prettier": {
+    "exitCode": 0,
+    "log": "prettier-v6.log"
+  },
+  "productionEdits": 0,
+  "receivingInvocations": 0,
+  "productModelChanges": 0,
+  "grammarChanges": 0,
+  "budgetChanges": 0,
+  "counts": {
+    "production": 511,
+    "instrument": 24,
+    "shared": 11,
+    "materialPackages": 7
+  },
+  "launcherSyntax": {
+    "exitCode": 0,
+    "log": "launcher-syntax-v6.log"
+  }
+}

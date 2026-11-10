@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react",
+    "paths": {
+      "@tanstack/store": ["../store/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"],
+      "@tanstack/db": ["./src"]
+    }
+  },
+  "include": [
+    "src",
+    "tests",
+    "package-tests",
+    "e2e",
+    "vite.config.ts",
+    "vitest.dist.config.ts",
+    "playwright.indexed-db.config.ts",
+    "playwright.collection-gc.config.ts",
+    "vite.indexed-db.browser.config.ts",
+    "vitest.indexed-db.package.config.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

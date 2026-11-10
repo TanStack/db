@@ -1,0 +1,75 @@
+{
+  "schema": "h02-qualified-copy-only-contract-v1",
+  "status": "INERT SOURCE CANDIDATE; separate ROOT materialization-only admission required",
+  "materializer": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/materialize-qualified-peer-v1.py.txt",
+    "sha256": "c70ae4e91c182afd5a8c1d0cd8597f43ec3e3e0cb1bff916d78b2d06a070bc09"
+  },
+  "python": {
+    "path": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "resolved": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "sha256": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "limits": "Pins interpreter binary/version/isolated flags; no universal OS, native-library or Python installation census is claimed."
+  },
+  "packets": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/packet-manifest-v1.json",
+      "sha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0",
+      "memberCount": 90
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/packet-manifest-v1.json",
+      "sha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5",
+      "memberCount": 14
+    }
+  ],
+  "plan": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-materialization-plan-v1.json",
+    "sha256": "0f81439c660770d62b2a96fdebcf8de70c51258501d29c77fd836db9755a1b26"
+  },
+  "geometry": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-source-v1/explicit-copy-geometry-v1.json",
+    "sha256": "1c738e4ecd4d9677ad4cd1127bca5c8699711d3433cc5d298b318638f164589c"
+  },
+  "binding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/source-freeze-v1.json.txt",
+    "sha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca"
+  },
+  "sourceReviews": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-operational-source-independent-review-v1.md",
+      "sha256": "6c362213c58a9d79f0b2bcf83b2aae46a60567e49449830c8d989906668e65da"
+    }
+  ],
+  "finiteToolInputs": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/supplemental-tool-inputs.json",
+    "sha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50"
+  },
+  "lockInputs": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/pnpm-lock.yaml",
+      "sha256": "554050977c82b1254ccb63fff05dad33b214555c341551ed8a76d74144a22d08"
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/lock.yaml",
+      "sha256": "0ca770f6dfbf410f9e4786c34905309f1e143b6c807fe8b395765b969c57b3fa"
+    }
+  ],
+  "receiptRoot": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-materialization-copy-receipt-v1",
+  "receivingOutputRoots": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-failure-runtime-v1",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-success-runtime-v1"
+  ],
+  "createsOnly": "607 declared code/control/link destinations, their227 directories, and separate fresh receipt directory with stdout.jsonl/stderr.log. No source/config/model/program is evaluated.",
+  "failurePolicy": "Refuse existing receipt/root/targets, changed input hashes and unexpected destination files/links/dirs. Preserve partial destinations and receipts; no retry, deletion, rollback or cleanup. Receipt IO faults remain operational; no unconditional terminal-error/receipt preservation. Actual tool output/completion must be retained separately.",
+  "afterCopy": "Freeze actual receipt and independently review full copy verification. No compile authority follows; separately select exact compiler containment/invocation and review its actual result before any native receiving admission. Failure and success remain separately admitted in that order.",
+  "diagnosticFaultQualification": "The helper suppresses direct diagnostic capture exceptions and best-effort logs them separately. Receipt-sink failures remain operational faults under unchanged transport/teardown; this packet claims no unconditional preservation of the original terminal error.",
+  "executed": false,
+  "laterArtifactLint": "PENDING ROOT"
+}

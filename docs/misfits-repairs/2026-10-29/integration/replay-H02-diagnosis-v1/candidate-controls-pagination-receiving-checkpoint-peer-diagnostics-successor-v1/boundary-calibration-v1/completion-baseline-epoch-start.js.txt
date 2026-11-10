@@ -1,0 +1,12 @@
+
+        const expected = publicationEpochs[epochIndex]
+        if (
+          !expected ||
+          activeEpoch !== undefined ||
+          expected.id !== receipt.epoch
+        )
+          throw new Error(
+            `receiving publication interval starts out of authored order`,
+          )
+        activeEpoch = expected.id
+      

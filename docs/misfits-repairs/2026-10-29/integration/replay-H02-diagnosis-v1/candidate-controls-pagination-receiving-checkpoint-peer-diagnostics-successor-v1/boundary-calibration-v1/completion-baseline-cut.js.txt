@@ -1,0 +1,45 @@
+
+        if (activeEpoch !== undefined)
+          throw new Error(`public cut preceded its complete callback interval`)
+        const expected = orderedSteps[orderedIndex++]
+        if (
+          expected?.kind !== `baseline-observe` ||
+          expected.boundary !== receipt.boundary
+        )
+          throw new Error(
+            `receiving observation does not match its authored recipe order`,
+          )
+        const observation = receipt as unknown as CompletionBaselineObservation
+        if (observation.boundary === `source-failed-peer`) {
+          if (
+            observation.firstFailureBarrier !==
+            (program.windowReceivingSchedule === `failure-first`
+              ? true
+              : undefined)
+          )
+            throw new Error(
+              `failure cut changes its authored operation observation scope`,
+            )
+          compare(`atomic window root read at failure barrier`, () =>
+            checkRetainedWindowSnapshot(
+              retainedSnapshot,
+              { rows: observation.view.roots, window: observation.view.window },
+              `receiving root failure checkpoint`,
+            ),
+          )
+          compare(`atomic window downstream read at failure barrier`, () =>
+            checkRetainedWindowSnapshot(
+              retainedSnapshot,
+              {
+                rows: observation.view.downstream,
+                window: observation.view.window,
+              },
+              `receiving downstream failure checkpoint`,
+            ),
+          )
+        }
+        compare(`public cut ${observation.boundary}`, () =>
+          checkCompletionBaselineObservation(model, observation),
+        )
+        cuts++
+      

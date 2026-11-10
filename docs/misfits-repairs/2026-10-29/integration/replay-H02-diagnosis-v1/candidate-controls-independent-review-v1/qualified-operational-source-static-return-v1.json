@@ -1,0 +1,132 @@
+{
+  "at": "2026-10-30T12:40:01.035064+00:00",
+  "verdict": "bounded ACCEPT of inert U/V source preparation; zero blocking source findings; not run-ready admission",
+  "UManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/packet-manifest-v1.json",
+    "sha256": "bc7c1ad1828d056fcf57aac1fdf6038bbc9a564d622cff75c262b9e8a1d97ca0"
+  },
+  "USourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-diagnostics-source-v1/source-freeze-v1.json",
+    "sha256": "37e2dcffb845cdbb771fd6d67a117b5cc8b988ff998663a26edd24d697d0f187"
+  },
+  "VManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/packet-manifest-v1.json",
+    "sha256": "d9cfd4cf3abbc8b1b41d148067eced85af9c8711907bd051aba1a41aff5e26a5"
+  },
+  "VBinding": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-control-v1/source-freeze-v1.json.txt",
+    "sha256": "54d74f31100cae71aeef5139a6c47dc93c9bc35e5fb10cc7537083b55eb86fca"
+  },
+  "report": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-operational-source-independent-review-v1.md",
+    "sha256": "6c362213c58a9d79f0b2bcf83b2aae46a60567e49449830c8d989906668e65da"
+  },
+  "facts": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-operational-source-independent-facts-v2.json",
+    "sha256": "d0140f8dd0457a799cc639fb0486989b224feba7cc7153b0e4b0d71ae543b43b"
+  },
+  "staticAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-qualified-operational-source-v2.py",
+      "sha256": "aa5fc4b46668b12b73cece3ff6f5b6d4b8c6b3a67ad28e897dbc398bd8bd31e5"
+    },
+    "actual": "eede07",
+    "exit": 0,
+    "errors": []
+  },
+  "initialAudit": {
+    "artifact": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/audit-qualified-operational-source-v1.py",
+      "sha256": "a6e8172627c9befc96f7180af90a6369d9121eb2a84c5e49d3368e285d4f208e"
+    },
+    "facts": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-operational-source-independent-facts-v1.json",
+      "sha256": "25a4e41d4e5d515045de527b7ec04e962fec8cb3af10dab95eb48f267180a5b5"
+    },
+    "actual": "bcfe3c",
+    "exit": 1,
+    "reviewerMistake": "applied pre-run D directory closure to known later spent admission and E-sealed originals",
+    "preserved": true
+  },
+  "sourceQualification": "exact ROOT replacement in U helper comment/report/freeze and V binding; U comment reversal restores entire S driver; no unconditional terminal-error fidelity credit",
+  "nextMinimalComponent": {
+    "stage": "materialization only; actual implementation/tool invocation still to be selected and separately bound by ROOT",
+    "plan": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/inert-materialization-plan-v1.json",
+      "sha256": "0f81439c660770d62b2a96fdebcf8de70c51258501d29c77fd836db9755a1b26"
+    },
+    "proposedRoot": "/private/tmp/h02-qualified-peer-receiving-v1",
+    "sourceMaps": {
+      "full": 596,
+      "production": 511,
+      "instrument": 62,
+      "shared": 23,
+      "completion": 18,
+      "receivingProduction": 161
+    },
+    "copyGeometry": {
+      "codeAndLockRegular": 597,
+      "controlRegular": 6,
+      "reuseLinks": 4,
+      "uniqueFileControlLinkTargets": 607,
+      "derivedAncestorDirectories": 227
+    },
+    "require": "exclusive absent-root/target checks; only bound file copies/derived directories/four links; exact source/control/lock/tool closure before and after; full copy receipt",
+    "noIncludedExecution": [
+      "imports",
+      "config evaluation",
+      "compiler",
+      "test discovery",
+      "native receiving",
+      "process probes",
+      "install",
+      "hooks",
+      "Git",
+      "canonical operation"
+    ],
+    "runtimeAdmission": false
+  },
+  "compilerNextAfterCopy": {
+    "proposal": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/proposed-minimum-compile-gate-v1.json",
+      "sha256": "5804ede864ce3adfd596453fc8bba1b5f7ec03d8d1bb672f30ef1ed7980ac6da"
+    },
+    "entryFiles": 7,
+    "actualContainmentAndResourceStopPolicy": "must be selected in separate exact compile admission",
+    "actualResolutionAndDiagnostics": "unestablished; retain complete --listFiles and actual input identities",
+    "authorityAfterCompilerPass": false
+  },
+  "failureNextAfterAcceptedCompiler": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/proposed-exact-inline-window-failure-first-command-v1.json",
+    "sha256": "156c553a128f7ec9bde4b1c148b3162ec9b63d2aab1939eccbe989179f7cd19f"
+  },
+  "successAfterFailureActualReviewAndSeparateAdmission": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-receiving-operational-preparation-v1/proposed-exact-inline-window-success-command-v1.json",
+    "sha256": "4a11f5cd609f55fd19381abe2b9b4fbf90b90464f0ad0284896668f59d268b77"
+  },
+  "freshRootAndOutputsAbsentAtReview": true,
+  "namedPackageRoots": 255,
+  "ownPayloadFiles": 11974,
+  "resolutionEdges": 405,
+  "absentOptionalPeers": 112,
+  "materialization": 0,
+  "compile": 0,
+  "boundImports": 0,
+  "boundExecutions": 0,
+  "nativeReceiving": 0,
+  "discovery": 0,
+  "processProbes": 0,
+  "runtimeAdmission": false,
+  "productionAuthority": false,
+  "bugClassClosure": false,
+  "sourceHold": "active",
+  "allCandidateStates": "UNREACHED",
+  "state14": "proposed/unadopted",
+  "actualHelperNoActiveOperation": "UNREACHED",
+  "latestArtifactLint": "PENDING ROOT",
+  "slot2": "returned",
+  "ledgerPrefix": {
+    "rows": 123,
+    "sha256": "c245c8e85f6538cf34063eda634cfce1e1bb77fd1a8c71badf564e4fa8a60b75"
+  }
+}

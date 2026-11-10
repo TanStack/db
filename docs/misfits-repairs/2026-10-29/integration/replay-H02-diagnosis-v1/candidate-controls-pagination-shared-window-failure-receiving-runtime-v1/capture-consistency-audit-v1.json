@@ -1,0 +1,11 @@
+{
+  "strictJsonFilesChecked": 35,
+  "duplicateAndNonfiniteKeysRejected": true,
+  "parentCompleteStreamHashesMatched": true,
+  "outerStdoutEqualsRecordedParentOutcome": true,
+  "rawReceiptsCompleteContiguous": 323,
+  "excerptIsOriginalLinesOnly": true,
+  "positiveWorkerCleanedAlsoInSupervisorOutcome": true,
+  "testExecution": false,
+  "productClaim": false
+}

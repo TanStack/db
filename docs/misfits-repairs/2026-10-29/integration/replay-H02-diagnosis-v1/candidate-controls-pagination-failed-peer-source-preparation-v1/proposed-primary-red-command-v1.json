@@ -1,0 +1,30 @@
+{
+  "executable": "/Users/kyle.mathews/.n/bin/node",
+  "args": [
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "vite.config.ts",
+    "tests/query/pagination-oracle.property.test.ts",
+    "-t",
+    "retains complete windows across joined failure histories for a fixed seed",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/db",
+  "environment": {
+    "TANSTACK_DB_ORACLE_RUNS_MULTIPLIER": "1"
+  },
+  "requiredUnsetEnvironment": [
+    "TANSTACK_DB_ORACLE_SEED",
+    "TANSTACK_DB_ORACLE_PATH",
+    "TANSTACK_DB_ORACLE_PROPERTY",
+    "TANSTACK_DB_ORACLE_COMMAND_REPLAY_PATH"
+  ],
+  "campaign": "new fixed-seed generated family only; seed 1665; existing transitionScenarioRuns=8 at multiplier 1; no prior campaign budget changed",
+  "assertionCheckpoint": "original source rejection handled as exact lastSubsetError while original child peer remains pending; compare every nonthrowing captured callback and current read to independently computed prior window before releasing peer or awaiting setWindow",
+  "runtimeAdmission": "NOT ADMITTED; freeze exact outer containment/launcher separately before any run",
+  "scope": "proposal only; package config keeps its ordinary coverage/typecheck setup; no copied native completion launcher is suitable for this primary command",
+  "numericalDeadline": "no product deadline; root must admit operational containment separately",
+  "nativeReceiving": 0
+}

@@ -1,0 +1,17 @@
+{
+  "final": {
+    "chunk_id": "a8c2fc",
+    "exit_code": 0,
+    "original_token_count": 71,
+    "output": "{\"historyArtifacts\": 1, \"rawReceipts\": 206, \"retainedReceipts\": 23, \"all31StatesAt\": 1, \"childExitCode\": 0, \"actualOuterExitCode\": 0, \"rawFiles\": 1954, \"rawBytes\": 31401025, \"originalPids\": [71010, 71040, 71052, 71056], \"targetGroups\": [71010, 71052], \"processProbesExecuted\": false}\n",
+    "wall_time_seconds": 1.5e-05
+  },
+  "initial": {
+    "chunk_id": "de2cb5",
+    "original_token_count": 0,
+    "output": "",
+    "session_id": 95822,
+    "wall_time_seconds": 1.001265959
+  },
+  "kind": "Actual metadata preservation audit tool returns, separate from product run"
+}

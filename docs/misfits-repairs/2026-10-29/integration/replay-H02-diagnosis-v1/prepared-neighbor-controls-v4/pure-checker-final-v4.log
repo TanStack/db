@@ -1,0 +1,27 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure queued-progress failure classification > identifies watchdog noncompletion only after measured premise and enqueue 1ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure queued-progress failure classification > does not classify a callback observed during final drain as noncompletion 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure queued-progress failure classification > preserves resource termination as a separate instrument failure 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure queued-progress failure classification > preserves a recording failure ahead of a watchdog progress judgment 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > accepts virtual-enriched public rows at every payload checkpoint 1ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects selected payload corruption inside virtual-enriched rows 1ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > preserves ordered row positions when public rows carry virtual fields 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > accepts complete prior-to-final publication after provider releases 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a wrong transient before a later valid final publication 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a bad payload even when the callback read is correct 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects an omitted final callback even when final rows are correct 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects an absent reload boundary instead of bypassing event judgment 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a return to prior after final first publishes 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a duplicate insert without normalizing it away 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects a missing delete without normalizing it away 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > rejects duplicate updates even when their final folded value is correct 0ms
+ ✓ scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > compares an initial synchronous snapshot at the initiating subscriber cut 0ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  00:55:10
+   Duration  179ms (transform 28ms, setup 0ms, import 76ms, tests 6ms, environment 0ms)
+
+JSON report written to /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v4/pure-checker-final-v4.report.json

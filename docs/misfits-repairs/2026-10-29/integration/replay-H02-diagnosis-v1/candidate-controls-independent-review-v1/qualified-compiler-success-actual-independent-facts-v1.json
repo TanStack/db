@@ -1,0 +1,234 @@
+{
+  "actualFinal": {
+    "chunk_id": "af83ec",
+    "exit_code": 0,
+    "original_token_count": 365,
+    "wall_time_seconds": 9.542e-06
+  },
+  "actualInitial": {
+    "chunk_id": "a64e48",
+    "original_token_count": 237,
+    "session_id": 78242,
+    "wall_time_seconds": 1.003650791
+  },
+  "admissionSha256": "d19f341e8229f434583817dc17d6f61b56d6f971336aa80e293acffa8f6f68cb",
+  "allAuditChecksPass": true,
+  "apiContainsCompilerStdout": false,
+  "apiFullOuterDisplayMatchesRawStreams": true,
+  "artifactLint": "PENDING ROOT",
+  "at": "2026-10-30T13:18:27.740692+00:00",
+  "boundSourceEdits": 0,
+  "candidateReruns": 0,
+  "checks": 54397,
+  "child": {
+    "command": {
+      "args": [
+        "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js",
+        "--project",
+        "/private/tmp/h02-qualified-peer-receiving-v1/control/typecheck.tsconfig.json",
+        "--noEmit",
+        "--incremental",
+        "false",
+        "--pretty",
+        "false",
+        "--listFiles"
+      ],
+      "cwd": "/private/tmp/h02-qualified-peer-receiving-v1/code",
+      "executable": "/Users/kyle.mathews/.n/bin/node"
+    },
+    "newSession": true,
+    "originalPgid": 30153,
+    "pid": 30153
+  },
+  "classification": "ACCEPT actual compiler-only strict gate: child0, outer0, all653 inputs prebound and matching",
+  "cleanup": {
+    "childReturnCode": 0,
+    "originalPgid": 30153,
+    "rows": [],
+    "stopErrors": [],
+    "trigger": []
+  },
+  "compilerDiagnosticLinesObserved": 0,
+  "compilerInvocationsByReviewer": 0,
+  "compilerStderrBytes": 0,
+  "copiedPhysicalEntries": 834,
+  "copyAcceptanceSha256": "6bdea39118d376aaec1fe82925fbeccd21d63d9f6f223f0d2c105f78bd8b4d30",
+  "errors": [],
+  "existingFiniteInputHashesRechecked": 12580,
+  "existingFinitePackageRoots": 255,
+  "existingNamedAbsences": 112,
+  "existingResolutionEdges": 405,
+  "fixedAdditionalInputHashesRechecked": 6,
+  "identityAfter": {
+    "finiteInputCount": 12586,
+    "matched": true
+  },
+  "identityBefore": {
+    "finiteInputCount": 12586,
+    "matched": true
+  },
+  "inputProvenanceLimit": "ROOT exact admission/dispatch plus pinned source, child command receipt and matching outputs; API responses do not independently echo the outer input arguments.",
+  "lastSampledElapsedMs": 1664.9457500025164,
+  "listedInputClassification": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-listed-inputs-v1.json",
+    "sha256": "df5e255685b64c456cc412dc558fdc6e7ecabcc1a8b2f1c977ef5f5f6e09cfe3"
+  },
+  "mode": "Independent actual compiler evidence audit; named finite reads/hashes only, no process/runtime action or new census.",
+  "nativeAuthority": false,
+  "newCensus": false,
+  "next": "Only the admitted compiler-only static gate is accepted. ROOT separately decides any later failure-receiving admission; no native/product authority follows.",
+  "outcome": {
+    "compilerCode": 0,
+    "nativeAuthority": false,
+    "remainingOwnedRows": [],
+    "staticGatePassed": true,
+    "trigger": []
+  },
+  "postRunInputBindingLimit": "Three declarations and three metadata files were fixed before this separate source-v3 invocation. The prior failed gate remains failed; its post-run hashes never become retroactive prebinding.",
+  "preboundListedFiles": 653,
+  "processProbesByReviewer": 0,
+  "productCredit": false,
+  "rawListedFiles": 653,
+  "receiptFileCount": 10,
+  "receiptFiles": {
+    "child.json": {
+      "bytes": 601,
+      "mode": "0o644",
+      "sha256": "5b793b22bf6dde942b5a716651c2ff7245b0da6c6af3b544195db66ec63a926b"
+    },
+    "cleanup-final.json": {
+      "bytes": 103,
+      "mode": "0o644",
+      "sha256": "9765a499e9b890e20089382097674734683fbace25aab0d70a3608776d6fceca"
+    },
+    "compiler.stderr.log": {
+      "bytes": 0,
+      "mode": "0o644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "compiler.stdout.log": {
+      "bytes": 102039,
+      "mode": "0o644",
+      "sha256": "5d806a9a05ef022124a78b1e32959e67049f6fdf8e47463e48f2fadb0ea93733"
+    },
+    "identity-after.json": {
+      "bytes": 51,
+      "mode": "0o644",
+      "sha256": "1b44ccb8ff04f676f6bd53c85f05e0a7cb39c0e2d67990bbf3e5573cebf4a811"
+    },
+    "identity-before.json": {
+      "bytes": 51,
+      "mode": "0o644",
+      "sha256": "1b44ccb8ff04f676f6bd53c85f05e0a7cb39c0e2d67990bbf3e5573cebf4a811"
+    },
+    "outcome.json": {
+      "bytes": 125,
+      "mode": "0o644",
+      "sha256": "cefaad21cc21b1640a43dc0ba6fc2ff77b56e39885417abc9f84af135782e2d8"
+    },
+    "outer.stderr.log": {
+      "bytes": 0,
+      "mode": "0o644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "outer.stdout.jsonl": {
+      "bytes": 2405,
+      "mode": "0o644",
+      "sha256": "d632bd35c3a56e10d1ecaadcc03907d892ef4b265086bf0a1aea4851cfdb42f4"
+    },
+    "resolved-compiler-inputs.json": {
+      "bytes": 285053,
+      "mode": "0o644",
+      "sha256": "b6b6a846e1018cf3214b86b3214714f3ca022526c876eec753c2d26f9a38aff1"
+    }
+  },
+  "resourceLimit": "Sampled evidence only; no exact child duration, continuous RSS or hard real-time guarantee inferred.",
+  "resourceSamples": 11,
+  "runtimeAdmission": false,
+  "sampledPeakGroupRssBytes": 634732544,
+  "snapshotBindings": [
+    {
+      "bytes": 601,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-child.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/child.json",
+      "sha256": "5b793b22bf6dde942b5a716651c2ff7245b0da6c6af3b544195db66ec63a926b"
+    },
+    {
+      "bytes": 103,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-cleanup-final.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/cleanup-final.json",
+      "sha256": "9765a499e9b890e20089382097674734683fbace25aab0d70a3608776d6fceca"
+    },
+    {
+      "bytes": 0,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-compiler.stderr.log",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/compiler.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 102039,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-compiler.stdout.log",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/compiler.stdout.log",
+      "sha256": "5d806a9a05ef022124a78b1e32959e67049f6fdf8e47463e48f2fadb0ea93733"
+    },
+    {
+      "bytes": 51,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-identity-after.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/identity-after.json",
+      "sha256": "1b44ccb8ff04f676f6bd53c85f05e0a7cb39c0e2d67990bbf3e5573cebf4a811"
+    },
+    {
+      "bytes": 51,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-identity-before.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/identity-before.json",
+      "sha256": "1b44ccb8ff04f676f6bd53c85f05e0a7cb39c0e2d67990bbf3e5573cebf4a811"
+    },
+    {
+      "bytes": 125,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-outcome.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/outcome.json",
+      "sha256": "cefaad21cc21b1640a43dc0ba6fc2ff77b56e39885417abc9f84af135782e2d8"
+    },
+    {
+      "bytes": 0,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-outer.stderr.log",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/outer.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 2405,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-outer.stdout.jsonl",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/outer.stdout.jsonl",
+      "sha256": "d632bd35c3a56e10d1ecaadcc03907d892ef4b265086bf0a1aea4851cfdb42f4"
+    },
+    {
+      "bytes": 285053,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/receipt-resolved-compiler-inputs.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-receipt-v2/resolved-compiler-inputs.json",
+      "sha256": "b6b6a846e1018cf3214b86b3214714f3ca022526c876eec753c2d26f9a38aff1"
+    },
+    {
+      "bytes": 1287,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/root-admission.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/root-independent-delta-and-compiler-admission-v1.json",
+      "sha256": "d19f341e8229f434583817dc17d6f61b56d6f971336aa80e293acffa8f6f68cb"
+    },
+    {
+      "bytes": 1166,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/actual-initial-tool.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/root-actual-compiler-initial-tool-v1.json",
+      "sha256": "2e291046de20e340b90f25d00481d6944b8ec66b4ef85c2dff8cc07276c2b7c7"
+    },
+    {
+      "bytes": 1767,
+      "copy": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-compiler-success-actual-evidence-snapshot-v1/actual-final-tool.json",
+      "origin": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v3/root-actual-compiler-final-tool-v1.json",
+      "sha256": "9c3c3d6a0aa4e70190af6e46f8b8efc52c2c57d0e272882cc1d1eca22ccf92a7"
+    }
+  ],
+  "sourceCorrection": "exact fixed input supplement delta on RLock v2; no runtime reentrancy calibration",
+  "sourceManifestSha256": "e3a83211c047b37e6162a95f7a7b806a9f9dd562253377c5d0cdeb35a58e18a0",
+  "staticGatePassed": true,
+  "unboundInputs": [],
+  "unboundListedFiles": 0
+}

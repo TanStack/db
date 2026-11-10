@@ -1,0 +1,32 @@
+{
+  "kind": "Immutable additive source-only next-gap plan",
+  "planDirectory": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-plan-v1",
+  "subjectCommit": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "sourceFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+    "sha256": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd"
+  },
+  "members": {
+    "plan.md": "4e13eb39849bc55414966f5f2dfe3f3a6b2d623687e00e926146ca5ad5eb89d4",
+    "baseline-recipes.json": "d9405e506650a9de6c2b7ec0f7b24736196d4977c9aa5fb70b4f92c5076554c5",
+    "mutants.json": "9a27ed71b695eb4a523e2520f935714ad1630d29077a90be2f2a650f4d144739",
+    "proposed-source-edits.md": "a064b748d0d6502b7063bc957c547e8911ff1cfd565fb9bb47d1926f4832386f",
+    "selector-static-results.json": "b96851136435f9f2da477743ec9f0c0647b68d02e483271cddd0d94dae8808f5",
+    "source-bindings.json": "bebd7865b1bd6c1e7362ec2b484620b95f2362b1a80e3d728366e2258cdd1ff4",
+    "source-static-audit.json": "8095141f30551b629c4e19ac6aab181685e1def5ec45ecd6c00877a12af43a8b"
+  },
+  "preparedBy": "/root/evaluate_metadata_external",
+  "actualRuntimeRuns": 0,
+  "actualSourceEdits": 0,
+  "actualProductionMutations": 0,
+  "independentReview": "Pending root coordination",
+  "runtimeAdmission": false,
+  "closureCredit": false,
+  "contentSummary": {
+    "existingSourceInertBaselineRecipes": 5,
+    "proposedRoleBindingControls": 2,
+    "separatelyTargetedMutantSpecifications": 8,
+    "zeroQuarterGeneratedProposal": "Separate unperformed grammar/registration proposal; existing positive generation preserved."
+  },
+  "validation": "Bounded source reads/hashes and pure JSON/string/RegExp author audit only. No native import/compiler/discovery/Git/PR/install/canonical action. Root owns coordinated lint."
+}

@@ -1,0 +1,1 @@
+packages/db-sqlite-persistence-core/src/persisted.ts(44,39): error TS2307: Cannot find module '@standard-schema/spec' or its corresponding type declarations.

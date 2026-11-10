@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-30T10:54:55.666291+00:00",
+  "executor": "/root/native_shutdown_receiving",
+  "classification": "OPERATIONAL RSS CONTAINMENT; NO PRODUCT RED OR GREEN",
+  "independentActualReviewRequired": true,
+  "rootClassificationRequired": true,
+  "maxInvocations": 1,
+  "actualInvocations": 1,
+  "actualOuterExitCode": 1,
+  "actualInitialChunk": "46d907",
+  "actualSessionId": 31238,
+  "actualCompletionChunk": "5a6619",
+  "actualLaunchPermission": "require_escalated",
+  "actualChildExitCode": -9,
+  "actualChildSignal": "SIGKILL",
+  "outerPid": 73331,
+  "outerPgid": 73331,
+  "childPid": 73353,
+  "initialActualChildPgid": 73353,
+  "initialPgidVerified": true,
+  "primaryOperationalFailure": {
+    "error": "1 GiB sampled group RSS containment",
+    "phase": "native-list"
+  },
+  "secondaryReportFailure": [
+    {
+      "error": "[Errno 2] No such file or directory: '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-failed-peer-primary-red-runtime-v1/vitest-report.json'",
+      "phase": "report-capture"
+    }
+  ],
+  "elapsedSupervisedMs": 1744,
+  "samples": 13,
+  "maxSampledGroupRssBytes": 1091452928,
+  "rssLimitBytes": 1073741824,
+  "signalAttempts": [
+    {
+      "result": "sent",
+      "signal": "SIGKILL",
+      "targetPgid": 73353
+    }
+  ],
+  "originalGroupFinalRows": [],
+  "postReturnNamedAbsence": true,
+  "vitestReportProduced": false,
+  "stdoutBytes": 157,
+  "stderrBytes": 8529,
+  "stderrDiagnostics": [
+    "vite-tsconfig-paths reports unresolved expo/tsconfig.base for two React Native example tsconfigs",
+    "Vitest typecheck experimental warning"
+  ],
+  "sourceToolBeforeAfterPostEqual": true,
+  "primarySourceFreezeSha256": "cf550f0a80c400acb8a151f58f5692ba3f1442dc5122027b42b2160f76179eec",
+  "initialPreflightTool": {
+    "chunk": "a3dd45",
+    "exitCode": 0,
+    "esbuildControlsAbsent": true
+  },
+  "postAbsenceTool": {
+    "chunk": "cc0cc7",
+    "exitCode": 0
+  },
+  "postSourceTool": {
+    "chunk": "04227c",
+    "exitCode": 0
+  },
+  "reaches": "UNESTABLISHED: no selected-test report, reach diagnostic, or intended comparison evidence retained; cannot infer zero executed body work merely from missing output",
+  "candidateRaw20": "UNREACHED; no credit transferred",
+  "retryPerformed": false,
+  "progressionPerformed": false,
+  "productionGitPRCanonicalChanges": false,
+  "limits": "Sampled resource failure, missing JSON report and setup diagnostics do not reject a product mutant or prove the primary comparison ran. Named process absence does not establish escaped/unregistered census. This outer supervisor result does not validate the separate inner completion-supervisor kill path."
+}

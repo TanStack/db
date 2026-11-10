@@ -1,0 +1,503 @@
+import {
+  SchemaMustBeSynchronousError,
+  SchemaValidationError,
+  SerializationError
+} from "./errors";
+import { safeRandomUUID } from "./utils/uuid";
+import { withCollectionConfigFactory } from "./client.js";
+import {
+  clear,
+  executeTransaction,
+  getAll,
+  getByKey,
+  openDatabase
+} from "./indexed-db-wrapper";
+import { codedMessage, devBuild } from "./error-message.js";
+export class DatabaseRequiredError extends Error {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production` ? `IndexedDB collection requires a "db" configuration option. Create a database instance using createIndexedDB() and pass it to the collection.` : codedMessage(175)
+    );
+    this.name = `DatabaseRequiredError`;
+  }
+}
+export class ObjectStoreNotFoundError extends Error {
+  constructor(storeName, databaseName, availableStores) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production` ? `Object store "${storeName}" not found in database "${databaseName}". Available stores: [${availableStores.join(", ")}]. Add "${storeName}" to the stores array when calling createIndexedDB().` : codedMessage(176, { storeName, databaseName, availableStores })
+    );
+    this.name = "ObjectStoreNotFoundError";
+  }
+}
+export class NameRequiredError extends Error {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production` ? `IndexedDB collection requires a "name" configuration option. This is the name of the object store within the database.` : codedMessage(177)
+    );
+    this.name = `NameRequiredError`;
+  }
+}
+export class GetKeyRequiredError extends Error {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production` ? `IndexedDB collection requires a "getKey" configuration option. This function extracts the unique key from each item.` : codedMessage(178)
+    );
+    this.name = `GetKeyRequiredError`;
+  }
+}
+function isCrossTabMessage(value) {
+  if (!value || typeof value !== "object") return false;
+  const message = value;
+  return (message.type === "data-changed" || message.type === "database-cleared") && typeof message.database === "string" && typeof message.name === "string" && typeof message.tabId === "string" && Array.isArray(message.changedKeys) && message.changedKeys.every(
+    (key) => typeof key === "string" || typeof key === "number" && !Number.isNaN(key)
+  );
+}
+const VERSIONS_STORE_NAME = "_versions";
+const connections = /* @__PURE__ */ new WeakMap();
+export async function createIndexedDB(options) {
+  const { name, version, stores, idbFactory, onBlocked } = options;
+  if (!stores || stores.length === 0) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? "createIndexedDB requires at least one store in the stores array." : codedMessage(193)
+    );
+  }
+  const storeSet = new Set(stores);
+  if (storeSet.size !== stores.length) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? "createIndexedDB stores array contains duplicate store names." : codedMessage(194)
+    );
+  }
+  for (const storeName of stores) {
+    if (storeName === VERSIONS_STORE_NAME) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? 'The "_versions" store is reserved for IndexedDB Collection metadata.' : codedMessage(195)
+      );
+    }
+    if (!storeName || typeof storeName !== "string") {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production` ? "createIndexedDB stores array contains invalid store names. Each store name must be a non-empty string." : codedMessage(196)
+      );
+    }
+  }
+  const db = await openDatabase(
+    name,
+    version,
+    (database) => {
+      if (!database.objectStoreNames.contains(VERSIONS_STORE_NAME)) {
+        database.createObjectStore(VERSIONS_STORE_NAME);
+      }
+      for (const storeName of stores) {
+        if (!database.objectStoreNames.contains(storeName)) {
+          database.createObjectStore(storeName);
+        }
+      }
+    },
+    idbFactory,
+    onBlocked
+  );
+  const connection = {
+    listeners: /* @__PURE__ */ new Set()
+  };
+  connections.set(db, connection);
+  const close = () => {
+    db.close();
+    if (connection.error) return;
+    connection.error = new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? `IndexedDB connection "${name}" closed. Recreate its Collections with a new database instance.` : codedMessage(197, { name })
+    );
+    for (const notify of [...connection.listeners]) notify();
+  };
+  db.addEventListener("versionchange", close);
+  db.addEventListener("close", close);
+  const frozenStores = Object.freeze([...stores]);
+  return Object.freeze({
+    db,
+    name,
+    version: db.version,
+    stores: frozenStores,
+    idbFactory,
+    close
+  });
+}
+function cloneOrReject(operation, clone) {
+  try {
+    return clone();
+  } catch (error) {
+    if (error?.name !== "DataCloneError")
+      throw error;
+    throw new SerializationError(operation, error.message);
+  }
+}
+export function indexedDBCollectionOptions(config) {
+  const {
+    db: dbInstance,
+    name,
+    getKey,
+    onInsert,
+    onUpdate,
+    onDelete,
+    ...baseCollectionConfig
+  } = config;
+  if (!dbInstance) {
+    throw new DatabaseRequiredError();
+  }
+  if (!name) {
+    throw new NameRequiredError();
+  }
+  if (name === VERSIONS_STORE_NAME) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production` ? 'The "_versions" store is reserved for IndexedDB Collection metadata.' : codedMessage(198)
+    );
+  }
+  for (const storeName of [name, VERSIONS_STORE_NAME]) {
+    if (!dbInstance.db.objectStoreNames.contains(storeName)) {
+      throw new ObjectStoreNotFoundError(
+        storeName,
+        dbInstance.name,
+        Array.from(dbInstance.db.objectStoreNames)
+      );
+    }
+  }
+  if (!getKey) {
+    throw new GetKeyRequiredError();
+  }
+  const collectionId = baseCollectionConfig.id ?? `indexed-db-collection:${dbInstance.name}:${name}`;
+  const connection = connections.get(dbInstance.db);
+  const tabId = safeRandomUUID();
+  const versionCache = /* @__PURE__ */ new Map();
+  let collection;
+  let acceptance = Promise.resolve();
+  let activeSync;
+  let broadcastChannel;
+  function broadcastChange(changedKeys, type = "data-changed") {
+    let channel = broadcastChannel;
+    if (!channel) {
+      try {
+        channel = new BroadcastChannel(`tanstack-db:${dbInstance.name}`);
+      } catch {
+        return;
+      }
+    }
+    try {
+      channel.postMessage({
+        type,
+        database: dbInstance.name,
+        name,
+        changedKeys,
+        tabId
+      });
+    } finally {
+      if (channel !== broadcastChannel) channel.close();
+    }
+  }
+  function visitVersions(store, visit) {
+    return new Promise((resolve, reject) => {
+      const request = store.openCursor();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        try {
+          const [storeName] = cursor.key;
+          if (storeName < name) {
+            cursor.continue([name]);
+          } else if (storeName === name) {
+            visit(cursor);
+            cursor.continue();
+          } else {
+            resolve();
+          }
+        } catch (error) {
+          reject(error);
+        }
+      };
+    });
+  }
+  async function persist(mutations, replace = false) {
+    const versions = /* @__PURE__ */ new Map();
+    await executeTransaction(
+      dbInstance.db,
+      [name, VERSIONS_STORE_NAME],
+      "readwrite",
+      async (_, stores) => {
+        if (replace) {
+          await clear(stores[name]);
+          await visitVersions(stores[VERSIONS_STORE_NAME], (cursor) => {
+            cursor.delete();
+          });
+        }
+        for (const mutation of mutations) {
+          const { key } = mutation;
+          if (mutation.type === "delete") {
+            stores[name].delete(key);
+            stores[VERSIONS_STORE_NAME].delete([name, key]);
+          } else {
+            const versionKey = safeRandomUUID();
+            cloneOrReject(
+              mutation.type,
+              () => stores[name].put(mutation.modified, key)
+            );
+            stores[VERSIONS_STORE_NAME].put(
+              {
+                versionKey
+              },
+              [name, key]
+            );
+            versions.set(key, versionKey);
+          }
+        }
+      }
+    );
+    if (replace) versionCache.clear();
+    for (const mutation of mutations) {
+      const version = versions.get(mutation.key);
+      if (version === void 0) versionCache.delete(mutation.key);
+      else versionCache.set(mutation.key, version);
+    }
+  }
+  function confirm(mutations, replace = false) {
+    if (!activeSync) return;
+    activeSync.begin();
+    if (replace) activeSync.truncate({ markReady: !connection?.error });
+    for (const mutation of mutations) {
+      activeSync.write(
+        mutation.type === "delete" ? { type: "delete", key: mutation.key } : { type: "update", value: mutation.modified }
+      );
+    }
+    activeSync.commit();
+  }
+  async function restore(params, replace) {
+    const snapshot = await executeTransaction(
+      dbInstance.db,
+      [name, VERSIONS_STORE_NAME],
+      "readonly",
+      async (_, stores) => {
+        const items = await getAll(stores[name]);
+        const versions = /* @__PURE__ */ new Map();
+        await visitVersions(stores[VERSIONS_STORE_NAME], (cursor) => {
+          const [, key] = cursor.key;
+          versions.set(key, cursor.value.versionKey);
+        });
+        return { items, versions };
+      }
+    );
+    if (activeSync !== params || connection?.error) return;
+    versionCache.clear();
+    for (const [key, version] of snapshot.versions)
+      versionCache.set(key, version);
+    params.begin();
+    if (replace) params.truncate();
+    for (const item of snapshot.items)
+      params.write({ type: "insert", value: item });
+    params.commit();
+    if (!replace) params.markReady();
+  }
+  const internalSync = (params) => {
+    const { begin, write, commit } = params;
+    activeSync = params;
+    collection = params.collection;
+    let channel;
+    const fail = (error) => {
+      if (activeSync !== params) return;
+      channel?.close();
+      params.fail(error);
+    };
+    const retire = () => {
+      channel?.close();
+      if (activeSync === params) {
+        broadcastChannel = void 0;
+        params.collection._lifecycle.crash(connection?.error);
+      }
+    };
+    if (connection?.error) {
+      retire();
+      return;
+    }
+    connection?.listeners.add(retire);
+    try {
+      channel = new BroadcastChannel(`tanstack-db:${dbInstance.name}`);
+      broadcastChannel = channel;
+      channel.onmessage = async (event) => {
+        const message = event.data;
+        if (!isCrossTabMessage(message)) return;
+        if (activeSync !== params || connection?.error || message.tabId === tabId || message.database !== dbInstance.name || message.name !== name)
+          return;
+        try {
+          if (message.type === "database-cleared") {
+            await restore(params, true);
+            return;
+          }
+          if (!message.changedKeys.length) return;
+          const rows = await executeTransaction(
+            dbInstance.db,
+            [name, VERSIONS_STORE_NAME],
+            "readonly",
+            async (_, stores) => {
+              const result = [];
+              for (const key of message.changedKeys) {
+                const [version, value] = await Promise.all([
+                  getByKey(stores[VERSIONS_STORE_NAME], [
+                    name,
+                    key
+                  ]),
+                  getByKey(stores[name], key)
+                ]);
+                result.push({ key, version, value });
+              }
+              return result;
+            }
+          );
+          if (activeSync !== params || connection?.error) return;
+          const changes = [];
+          for (const { key, version, value } of rows) {
+            const cached = versionCache.get(key);
+            if (value) {
+              if (!version || cached !== version.versionKey) {
+                changes.push({
+                  type: "update",
+                  value
+                });
+                if (version) versionCache.set(key, version.versionKey);
+                else versionCache.delete(key);
+              }
+            } else {
+              changes.push({ type: "delete", key });
+              versionCache.delete(key);
+            }
+          }
+          if (changes.length) {
+            begin();
+            for (const change of changes) write(change);
+            commit();
+          }
+        } catch (error) {
+          fail(error);
+        }
+      };
+    } catch {
+    }
+    void restore(params, false).catch(fail);
+    return {
+      cleanup: () => {
+        connection?.listeners.delete(retire);
+        channel?.close();
+        if (activeSync === params) {
+          activeSync = void 0;
+          broadcastChannel = void 0;
+          versionCache.clear();
+        }
+      }
+    };
+  };
+  const acceptMutations = async (transaction) => {
+    const mutations = transaction.mutations.filter((m) => m.collection === collection).map((m) => ({
+      type: m.type,
+      key: getKey(m.modified),
+      modified: m.modified
+    }));
+    if (!mutations.length) return;
+    await persist(mutations);
+    confirm(mutations);
+    broadcastChange(mutations.map((m) => m.key));
+  };
+  function persistInOrder(transaction, handler) {
+    const result = acceptance.then(async () => {
+      const outcome = await decision;
+      if (!outcome.accepted) throw outcome.error;
+      await acceptMutations(transaction);
+    });
+    acceptance = result.then(
+      () => void 0,
+      () => void 0
+    );
+    const decision = new Promise((resolve) => resolve(handler())).then(
+      () => ({ accepted: true }),
+      (error) => ({ accepted: false, error })
+    );
+    return result;
+  }
+  const wrappedOnInsert = (params) => persistInOrder(params.transaction, () => onInsert?.(params));
+  const wrappedOnUpdate = (params) => persistInOrder(params.transaction, () => onUpdate?.(params));
+  const wrappedOnDelete = (params) => persistInOrder(params.transaction, () => onDelete?.(params));
+  const clearObjectStore = async () => {
+    await persist([], true);
+    confirm([], true);
+    broadcastChange([], "database-cleared");
+  };
+  const getDatabaseInfo = async () => {
+    const db = dbInstance.db;
+    const info = {
+      name: db.name,
+      version: db.version,
+      objectStores: Array.from(db.objectStoreNames)
+    };
+    if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
+      try {
+        info.estimatedSize = (await navigator.storage.estimate()).usage;
+      } catch {
+      }
+    }
+    return info;
+  };
+  const exportData = () => executeTransaction(
+    dbInstance.db,
+    name,
+    "readonly",
+    (_, stores) => getAll(stores[name])
+  );
+  const importData = async (items) => {
+    const keys = /* @__PURE__ */ new Set();
+    const mutations = items.map((input) => {
+      let item = input;
+      if (config.schema) {
+        const result = config.schema["~standard"].validate(input);
+        if (result instanceof Promise) throw new SchemaMustBeSynchronousError();
+        if (result.issues) {
+          throw new SchemaValidationError(
+            "insert",
+            result.issues.map((issue) => ({
+              message: issue.message,
+              path: issue.path?.map(String)
+            }))
+          );
+        }
+        item = result.value;
+      }
+      const key = getKey(item);
+      if (keys.has(key))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `Duplicate imported key: ${key}` : codedMessage(199, { key })
+        );
+      keys.add(key);
+      const modified = cloneOrReject("import", () => structuredClone(item));
+      return { type: "insert", key, modified };
+    });
+    await persist(mutations, true);
+    confirm(mutations, true);
+    broadcastChange([], "database-cleared");
+  };
+  const utils = {
+    clearObjectStore,
+    getDatabaseInfo,
+    acceptMutations,
+    exportData,
+    importData
+  };
+  const options = {
+    ...baseCollectionConfig,
+    id: collectionId,
+    getKey,
+    sync: { sync: internalSync, rowUpdateMode: "full" },
+    onInsert: wrappedOnInsert,
+    onUpdate: wrappedOnUpdate,
+    onDelete: wrappedOnDelete,
+    utils
+  };
+  return withCollectionConfigFactory(
+    options,
+    () => indexedDBCollectionOptions({ ...config, id: collectionId })
+  );
+}

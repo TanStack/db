@@ -1,0 +1,11 @@
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-baseline-driver.ts
+  101:7   error    'captureBoundary' is never reassigned. Use 'const' instead              prefer-const
+  254:19  warning  'boundary' is already declared in the upper scope on line 108 column 9  no-shadow
+  778:20  warning  'boundary' is already declared in the upper scope on line 108 column 9  no-shadow
+
+/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1/packages/query-db-collection/tests/queued-answer-completion-fixture.ts
+  111:7  error  'loadAttachment' is never reassigned. Use 'const' instead  prefer-const
+
+✖ 4 problems (2 errors, 2 warnings)
+

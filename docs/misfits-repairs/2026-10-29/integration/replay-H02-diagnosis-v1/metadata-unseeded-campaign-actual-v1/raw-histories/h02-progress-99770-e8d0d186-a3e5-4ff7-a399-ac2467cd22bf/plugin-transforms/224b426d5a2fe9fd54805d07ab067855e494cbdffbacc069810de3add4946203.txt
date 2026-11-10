@@ -1,0 +1,68 @@
+import { SourceCollectionIdReuseError } from "./errors.js";
+import { isCollection } from "./live-query-primitives.js";
+import {
+  getPreparedLiveQueryIdentity,
+  getPreparedLiveQuerySources
+} from "./live-query-options.js";
+export * from "./live-query-primitives.js";
+export * from "./live-query-observer.js";
+export * from "./live-query-window-binding.js";
+export {
+  configPool,
+  getLiveQueryHash,
+  getPreparedLiveQueryIdentity,
+  getPreparedLiveQuerySources,
+  prepareLiveQueryValue,
+  rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
+  resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections
+} from "./live-query-options.js";
+export {
+  createLiveQueryWindowController,
+  fetchNextLiveQueryWindowPage
+} from "./live-query-window-controller.js";
+export function getLiveQueryKey(input) {
+  const queryKey = input && typeof input === `object` && !isCollection(input) ? input.queryKey : void 0;
+  return Array.isArray(queryKey) && queryKey.length > 0 ? queryKey : void 0;
+}
+const sourceObjectTokens = /* @__PURE__ */ new WeakMap();
+let nextSourceObjectToken = 0;
+export function getSourceObjectToken(source) {
+  let token = sourceObjectTokens.get(source);
+  if (token === void 0) {
+    token = ++nextSourceObjectToken;
+    sourceObjectTokens.set(source, token);
+  }
+  return token;
+}
+const unscopedClaims = {};
+export function createLiveQuerySourceIdClaims() {
+  return /* @__PURE__ */ new WeakMap();
+}
+export function claimLiveQuerySourceIds(claims, sources, client, bindingName) {
+  const scope = client ?? unscopedClaims;
+  const prior = claims.get(scope);
+  const seen = /* @__PURE__ */ new Map();
+  for (const source of sources) {
+    const token = getSourceObjectToken(source);
+    const previous = seen.get(source.id) ?? prior?.get(source.id);
+    if (previous !== void 0 && previous !== token) {
+      throw new SourceCollectionIdReuseError(bindingName, source.id);
+    }
+    seen.set(source.id, token);
+  }
+  const claimed = prior ?? /* @__PURE__ */ new Map();
+  for (const [id, token] of seen) claimed.set(id, token);
+  claims.set(scope, claimed);
+}
+export function identifyLiveQuery(preparedValue, scope, identify = getPreparedLiveQueryIdentity) {
+  const identity = identify(preparedValue);
+  claimLiveQuerySourceIds(
+    scope.claims,
+    getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
+    scope.client,
+    scope.bindingName
+  );
+  return identity;
+}

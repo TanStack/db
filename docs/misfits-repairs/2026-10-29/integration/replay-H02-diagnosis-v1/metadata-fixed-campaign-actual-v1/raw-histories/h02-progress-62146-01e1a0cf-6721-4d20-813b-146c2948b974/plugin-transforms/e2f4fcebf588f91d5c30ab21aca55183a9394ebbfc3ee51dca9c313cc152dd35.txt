@@ -1,0 +1,638 @@
+import {
+  CollectionInErrorStateError,
+  CollectionPreloadAbortedError,
+  CollectionStateError,
+  InvalidCollectionStatusTransitionError
+} from "../errors";
+import {
+  safeCancelIdleCallback,
+  safeRequestIdleCallback
+} from "../utils/browser-polyfills";
+import { runAllCallbacks } from "../utils/callbacks";
+import { createDeferred } from "../deferred";
+import { codedMessage, devBuild } from "../error-message";
+import { isFailedStatus } from "../live-query-primitives.js";
+import { CleanupQueue, cleanupNow } from "./cleanup-queue";
+export const UNSUBSCRIBED_GC_FLOOR_MS = 50;
+export const DEFAULT_GC_TIME_MS = 3e5;
+export class CollectionLifecycleManager {
+  /**
+   * Creates a new CollectionLifecycleManager instance
+   */
+  constructor(config, id, cleanupConfig = () => {
+  }) {
+    this.status = `idle`;
+    this.hasBeenReady = false;
+    this.hasReceivedFirstCommit = false;
+    this.onFirstReadyCallbacks = [];
+    this.idleCallbackId = null;
+    // After the first ready, the sync adapter's problem is health tree detail:
+    // `failureReason` while it still tries, `stoppedError` once it called fail().
+    // A live query's request failures are kept apart, so settling a request
+    // cannot clear the sync adapter's problem. The failure reason lists every
+    // reportError() of its sync run since it began.
+    this.failureReason = null;
+    // A reload's new run reported the failure reason, so its completion keeps it.
+    this.failureReasonFromReload = false;
+    this.stoppedError = null;
+    // The cause of status `error` or `crashed`, kept so readers see the same
+    // object until the sync run ends.
+    this.statusError = null;
+    this.requestErrors = new RequestErrors();
+    // A reload's new run reported the request errors, so its completion keeps
+    // them.
+    this.requestErrorsFromReload = false;
+    // fail() ends the sync adapter's reporting for its sync run; a reload or
+    // cleanup starts a new one.
+    this.adapterStopped = false;
+    // A reload is moving the Collection out of `error`.
+    this.recovering = false;
+    this.gcGraceUntil = 0;
+    this.statusRevision = 0;
+    this.cleaningUp = false;
+    this.cleanupPromise = null;
+    this.cleanupStartCallbacks = /* @__PURE__ */ new Set();
+    this.config = config;
+    this.id = id;
+    this.cleanupConfig = cleanupConfig;
+  }
+  setDeps(deps) {
+    this.indexes = deps.indexes;
+    this.events = deps.events;
+    this.changes = deps.changes;
+    this.sync = deps.sync;
+    this.state = deps.state;
+  }
+  /**
+   * Validates state transitions to prevent invalid status changes
+   */
+  validateStatusTransition(from, to) {
+    if (from === to) {
+      return;
+    }
+    const validTransitions = {
+      idle: [`loading`, `error`, `crashed`, `cleaned-up`],
+      loading: [`ready`, `error`, `crashed`, `cleaned-up`],
+      // After the first ready only a crash changes the status; a sync
+      // problem is health tree detail.
+      ready: [`cleaned-up`, `crashed`],
+      // A failed first load is final for its sync run. Only a reload leaves
+      // it for `ready` (see `recovering`).
+      error: [`cleaned-up`, `idle`, `crashed`],
+      // Nothing recovers a crash in place; only cleanup leaves it.
+      crashed: [`cleaned-up`],
+      "cleaned-up": [`loading`, `error`, `crashed`]
+    };
+    if (!validTransitions[from].includes(to) && !(this.recovering && from === `error` && to === `ready`)) {
+      throw new InvalidCollectionStatusTransitionError(from, to, this.id);
+    }
+  }
+  /**
+   * Safely update the collection status with validation
+   * @private
+   */
+  setStatus(newStatus, allowReady = false, beforeEmit) {
+    if (newStatus === `ready` && !allowReady) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `You can't directly call "setStatus('ready'). You must use markReady instead.` : codedMessage(208)
+      );
+    }
+    this.validateStatusTransition(this.status, newStatus);
+    if (newStatus === `loading`) this.cleanupPromise = null;
+    const revision = ++this.statusRevision;
+    const previousStatus = this.status;
+    this.status = newStatus;
+    beforeEmit?.();
+    const isCurrent = () => this.statusRevision === revision;
+    this.events.emitStatusChange(newStatus, previousStatus, isCurrent);
+    if (isCurrent()) this.events.emitHealthChange();
+  }
+  /**
+   * Validates that the collection is in a usable state for data operations
+   * @private
+   */
+  validateCollectionUsable(operation) {
+    switch (this.status) {
+      case `error`:
+      case `crashed`:
+        throw new CollectionInErrorStateError(operation, this.id);
+      case `cleaned-up`:
+        this.sync.startSync();
+        break;
+    }
+  }
+  /**
+   * Mark the collection as ready for use
+   * This is called by sync implementations to explicitly signal that the collection is ready,
+   * providing a more intuitive alternative to using commits for readiness signaling
+   * @private - Should only be called by sync implementations
+   *
+   * `beforeEffects` runs after the status reads `ready` and before status
+   * listeners and ready callbacks, so their writes follow it.
+   */
+  markReady(beforeEffects) {
+    if (this.status === `crashed` || this.adapterStopped) return;
+    if (this.reloadRun) {
+      this.completeReload(beforeEffects);
+      return;
+    }
+    const failure = this.applyReadyTransition(beforeEffects);
+    if (!failure) return;
+    if (this.readyFailureSink) this.readyFailureSink(failure);
+    else throw failure.error;
+  }
+  /**
+   * @internal Hold ready-effect failures while a sync function runs, whether
+   * it calls markReady or commits a truncate. The returned function stops
+   * holding them and returns the first one.
+   */
+  deferReadyFailures() {
+    let first;
+    this.readyFailureSink = (failure) => {
+      first ??= failure;
+    };
+    return () => {
+      this.readyFailureSink = void 0;
+      return first;
+    };
+  }
+  applyReadyTransition(beforeEffects) {
+    this.validateStatusTransition(this.status, `ready`);
+    if (this.status === `loading` || this.status === `error`) {
+      const readyRevision = this.statusRevision + 1;
+      this.setStatus(`ready`, true, beforeEffects);
+      if (this.status !== `ready` || this.statusRevision !== readyRevision) {
+        return void 0;
+      }
+      const readyEffects = [];
+      if (!this.hasBeenReady) {
+        this.hasBeenReady = true;
+        this.hasReceivedFirstCommit = true;
+        readyEffects.push(...this.onFirstReadyCallbacks);
+        this.onFirstReadyCallbacks = [];
+      }
+      readyEffects.push(() => this.changes.emitEmptyReadyEvent());
+      try {
+        runAllCallbacks(readyEffects);
+      } catch (error) {
+        return { error };
+      }
+    }
+    return void 0;
+  }
+  /**
+   * The sync adapter stopped. Before the first ready this fails the sync
+   * run's first load; after it, the rows stay and the error shows until a
+   * reload. A second fail() in the same sync run changes nothing: the adapter
+   * already stopped, and the first error stays.
+   */
+  fail(error) {
+    if (this.status === `crashed` || this.adapterStopped) return;
+    this.adapterStopped = true;
+    const reload = this.reloadRun;
+    this.reloadRun = void 0;
+    if (this.status === `ready`) {
+      this.failureReason = null;
+      this.stoppedError = problemOf([describeProblem(error)]);
+      this.events.emitHealthChange();
+    } else if (reload && this.status === `error`) {
+      this.statusError = problemOf([describeProblem(error)]);
+      this.events.emitHealthChange();
+    } else {
+      this.validateStatusTransition(this.status, `error`);
+      this.statusError = problemOf([describeProblem(error)]);
+      this.setStatus(`error`);
+    }
+    reload?.reject(error);
+  }
+  /** Whether the current sync run's adapter called `fail()`. */
+  get stoppedThisRun() {
+    return this.adapterStopped;
+  }
+  /**
+   * Whether the current sync run is in its first load: `loading`, or a reload
+   * of a failed first load that is not ready yet. A failure now fails that
+   * first load.
+   */
+  get inFirstLoad() {
+    return this.status === `loading` || this.reloading && this.status === `error`;
+  }
+  /** Whether a reload's new sync run is in flight. */
+  get reloading() {
+    return this.reloadRun !== void 0;
+  }
+  /**
+   * A reload starts a new sync run while everything visible stays: the rows,
+   * the status, and the current problem. The node shows `reloading`.
+   */
+  beginReload() {
+    if (this.reloadRun) return this.reloadRun.promise;
+    const run = createDeferred();
+    void run.promise.catch(() => void 0);
+    this.reloadRun = run;
+    this.failureReasonFromReload = false;
+    this.requestErrorsFromReload = false;
+    this.adapterStopped = false;
+    this.events.emitHealthChange();
+    return run.promise;
+  }
+  /**
+   * The reload's new run replaced the rows with a snapshot or a truncate, or
+   * marked ready: the retired run's problems clear, the new run's stay, and a
+   * failed first load becomes ready.
+   */
+  completeReload(beforeEffects) {
+    const run = this.reloadRun;
+    if (!run) return;
+    this.reloadRun = void 0;
+    if (!this.failureReasonFromReload) this.failureReason = null;
+    this.stoppedError = null;
+    if (!this.requestErrorsFromReload) this.requestErrors = new RequestErrors();
+    if (this.status === `ready`) this.events.emitHealthChange();
+    else {
+      this.statusError = null;
+      this.recovering = true;
+      try {
+        this.markReady(beforeEffects);
+      } catch (error) {
+        if (this.status === `ready`) run.resolve();
+        else run.reject(error);
+        throw error;
+      } finally {
+        this.recovering = false;
+      }
+    }
+    run.resolve();
+  }
+  /** A reload retired the sync run; subscriptions detach its demand. */
+  retireSubscriptionDemand() {
+    for (const subscription of [...this.changes.changeSubscriptions])
+      subscription.retireSyncRun();
+  }
+  /** The reload ended without a commit, for example by cleanup. */
+  abandonReload(error) {
+    if (!this.endReload(error)) return;
+    if (this.status !== `cleaned-up`) this.events.emitHealthChange();
+  }
+  endReload(error) {
+    const run = this.reloadRun;
+    if (!run) return false;
+    this.reloadRun = void 0;
+    run.reject(error);
+    return true;
+  }
+  /**
+   * Local storage or an internal invariant broke. The Collection can no
+   * longer serve reads or accept writes, from any active status. Nothing
+   * recovers a crash in place: only cleanup, which discards all state, leaves
+   * it.
+   */
+  crash(error) {
+    if (this.status === `crashed`) return;
+    this.validateStatusTransition(this.status, `crashed`);
+    this.endReload(error);
+    this.statusError = problemOf([describeProblem(error)]);
+    this.setStatus(`crashed`);
+  }
+  /** The Collection's own problems, as health tree detail. */
+  get problems() {
+    const error = isFailedStatus(this.status) ? this.statusError : this.stoppedError ?? this.requestErrors.problem;
+    return { failureReason: error ? null : this.failureReason, error };
+  }
+  /** The cause of status `error` or `crashed`, as health tree detail. */
+  get statusProblem() {
+    return isFailedStatus(this.status) ? this.statusError : null;
+  }
+  /** The sync adapter still tries after a problem. Status and rows do not change. */
+  reportError(error) {
+    if (this.status === `crashed`) return;
+    this.assertAdapterActive(`reportError`);
+    this.assertReady(`reportError`);
+    const kept = this.reloading && !this.failureReasonFromReload ? [] : this.failureReason?.errors ?? [];
+    if (kept.some((failure) => failure.cause === error)) return;
+    this.failureReason = problemOf([...kept, describeProblem(error)]);
+    this.failureReasonFromReload = this.reloading;
+    this.events.emitHealthChange();
+  }
+  /**
+   * The source synced successfully again. With no error it clears the
+   * failure reason; with one it removes the failure whose cause is that
+   * value, and the failure reason clears once none is left. With nothing to
+   * remove it does nothing. `undefined` is no error: it clears every
+   * failure, also one that `reportError(undefined)` listed.
+   */
+  reportHealthy(error) {
+    if (this.status === `crashed`) return;
+    this.assertAdapterActive(`reportHealthy`);
+    this.assertReady(`reportHealthy`);
+    const listed = this.failureReason?.errors ?? [];
+    const open = error === void 0 ? [] : listed.filter((failure) => failure.cause !== error);
+    if (open.length === listed.length) return;
+    this.failureReason = open.length > 0 ? problemOf(open) : null;
+    this.events.emitHealthChange();
+  }
+  /**
+   * @internal A live query's request failed after initial-query readiness,
+   * with each of its failures in failure order.
+   */
+  reportRequestError(key, errors) {
+    if (this.reloading && !this.requestErrorsFromReload) {
+      this.requestErrors = new RequestErrors();
+      this.requestErrorsFromReload = true;
+    }
+    if (this.requestErrors.fail(key, errors)) this.events.emitHealthChange();
+  }
+  /** @internal The failed request settled or was released. */
+  clearRequestError(key) {
+    if (this.requestErrors.settle(key)) this.events.emitHealthChange();
+  }
+  /** fail() ends the sync adapter's reporting for its sync run. */
+  assertAdapterActive(operation) {
+    if (this.adapterStopped) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `${operation}() was called after fail() in the same sync run of Collection "${this.id}". fail() means the sync adapter stopped; a reload starts a new sync run.` : codedMessage(259, { operation, id: this.id })
+      );
+    }
+  }
+  assertReady(operation) {
+    if (this.status !== `ready`) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `${operation}() reports on sync after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.` : codedMessage(257, { operation, id: this.id, status: this.status })
+      );
+    }
+  }
+  /** Return the cause of status `error` or `crashed` in this sync run, if any. */
+  getSyncError() {
+    return this.statusError?.cause;
+  }
+  /** Cleanup discards the current projection until a new sync run starts. */
+  hasStartedCleanup() {
+    return this.cleaningUp || this.status === `cleaned-up`;
+  }
+  assertCanStartSync() {
+    if (this.cleaningUp) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.` : codedMessage(209, { id: this.id })
+      );
+    }
+  }
+  isCleaningUp() {
+    return this.cleaningUp;
+  }
+  /**
+   * Observe the synchronous start of cleanup without treating it as terminal
+   * resource settlement. Internal dependents use this to retire work before
+   * an asynchronous adapter cleanup publishes `cleaned-up`.
+   */
+  onCleanupStart(callback) {
+    this.cleanupStartCallbacks.add(callback);
+    if (this.cleaningUp) {
+      try {
+        callback();
+      } catch (error) {
+        this.cleanupStartCallbacks.delete(callback);
+        throw error;
+      }
+    }
+    return () => this.cleanupStartCallbacks.delete(callback);
+  }
+  /**
+   * Start the garbage collection timer for a collection with no subscribers
+   * Called when sync starts outside a subscription
+   */
+  startGCTimerIfUnsubscribed() {
+    this.gcGraceUntil = cleanupNow() + UNSUBSCRIBED_GC_FLOOR_MS;
+    this.startGCTimer(true);
+  }
+  // A persisting transaction holds the Collection: collecting it would drop
+  // the rows the transaction shows and end the sync run its handler may wait on.
+  canGarbageCollect() {
+    return !this.cleaningUp && this.changes.activeSubscribersCount === 0 && !this.sync.hasPendingPreload && !this.state.hasPersistingTransaction();
+  }
+  /**
+   * Renew inactive retention. Settlement keeps the remaining startup/preload
+   * handoff; a real last unsubscribe clears it and uses gcTime exactly.
+   */
+  startGCTimer(preserveHandoff = false) {
+    if (!preserveHandoff) this.gcGraceUntil = 0;
+    if (this.status === `idle` || this.status === `cleaned-up`) return;
+    this.cancelGCTimer();
+    if (!this.canGarbageCollect()) return;
+    const gcTime = this.config.gcTime ?? DEFAULT_GC_TIME_MS;
+    if (gcTime <= 0 || !Number.isFinite(gcTime)) {
+      return;
+    }
+    CleanupQueue.getInstance().schedule(
+      this,
+      Math.max(gcTime, this.gcGraceUntil - cleanupNow()),
+      () => {
+        if (this.canGarbageCollect()) {
+          this.scheduleIdleCleanup();
+        }
+      }
+    );
+  }
+  /**
+   * Cancel the garbage collection timer
+   * Called when the collection becomes active again
+   */
+  cancelGCTimer() {
+    CleanupQueue.getInstance().cancel(this);
+    if (this.idleCallbackId !== null) {
+      safeCancelIdleCallback(this.idleCallbackId);
+      this.idleCallbackId = null;
+    }
+  }
+  /**
+   * Schedule cleanup to run during browser idle time
+   * This prevents blocking the UI thread during cleanup operations
+   */
+  scheduleIdleCleanup() {
+    if (this.idleCallbackId !== null) {
+      safeCancelIdleCallback(this.idleCallbackId);
+    }
+    this.idleCallbackId = safeRequestIdleCallback(
+      (deadline) => {
+        if (this.canGarbageCollect()) {
+          if (!(deadline.timeRemaining() > 0 || deadline.didTimeout)) {
+            this.scheduleIdleCleanup();
+            return;
+          }
+          void this.beginCleanup().catch(() => void 0);
+        }
+        this.idleCallbackId = null;
+      },
+      { timeout: 1e3 }
+    );
+  }
+  beginCleanup() {
+    if (this.cleanupPromise) return this.cleanupPromise;
+    const completion = createDeferred();
+    this.cleanupPromise = completion.promise;
+    this.cleaningUp = true;
+    const localFailures = [];
+    let synchronousSyncFailure;
+    let syncCleanupComplete = true;
+    const attempt = (callback) => {
+      try {
+        callback();
+      } catch (error) {
+        localFailures.push(error);
+      }
+    };
+    for (const callback of [...this.cleanupStartCallbacks]) {
+      attempt(callback);
+    }
+    const finish = (syncFailure) => {
+      this.cleaningUp = false;
+      this.statusError = null;
+      attempt(() => this.setStatus(`cleaned-up`));
+      if (this.changes.activeSubscribersCount === 0) {
+        attempt(() => this.events.cleanup());
+      }
+      const failures = syncFailure ? [syncFailure.error, ...localFailures] : localFailures;
+      const failure = failures.length === 0 ? void 0 : {
+        error: failures.length === 1 ? failures[0] : new AggregateError(
+          failures,
+          devBuild() && process.env.NODE_ENV !== `production` ? syncFailure ? `Adapter cleanup and local teardown both failed` : `Multiple local teardown steps failed` : codedMessage(173, {
+            syncFailure: syncFailure !== void 0
+          }),
+          { cause: failures[0] }
+        )
+      };
+      void Promise.resolve().then(() => Promise.resolve()).then(() => {
+        if (this.cleanupPromise === completion.promise) {
+          this.cleanupPromise = null;
+        }
+        if (failure) completion.reject(failure.error);
+        else completion.resolve();
+      });
+    };
+    attempt(() => this.cleanupConfig());
+    try {
+      syncCleanupComplete = this.sync.cleanup(finish);
+    } catch (error) {
+      synchronousSyncFailure = { error };
+    }
+    attempt(() => this.state.cleanup());
+    attempt(() => this.changes.cleanup());
+    attempt(() => this.indexes.cleanup());
+    this.hasBeenReady = false;
+    const before = this.problems;
+    const reloading = this.reloading;
+    this.adapterStopped = false;
+    this.failureReason = null;
+    this.stoppedError = null;
+    this.requestErrors = new RequestErrors();
+    this.abandonReload(new CollectionPreloadAbortedError());
+    const after = this.problems;
+    if (!reloading && (before.error !== after.error || before.failureReason !== after.failureReason))
+      this.events.emitHealthChange();
+    this.onFirstReadyCallbacks = [];
+    if (syncCleanupComplete) finish(synchronousSyncFailure);
+    return completion.promise;
+  }
+  /**
+   * Register a callback to be executed when the collection first becomes ready
+   * Useful for preloading collections
+   * @param callback Function to call when the collection first becomes ready
+   */
+  onFirstReady(callback) {
+    if (this.hasBeenReady) {
+      callback();
+      return () => {
+      };
+    }
+    this.onFirstReadyCallbacks.push(callback);
+    return () => {
+      const index = this.onFirstReadyCallbacks.indexOf(callback);
+      if (index !== -1) {
+        this.onFirstReadyCallbacks.splice(index, 1);
+      }
+    };
+  }
+  cleanup() {
+    this.cancelGCTimer();
+    return this.beginCleanup();
+  }
+}
+export class RequestErrors {
+  constructor() {
+    // Each failed request's errors.
+    this.failed = /* @__PURE__ */ new Map();
+    // Each failure still failing, by its error, with how many failed requests
+    // list it. Two requests that failed with one error share one failure, and
+    // it keeps its place among the failures: insertion order is failure order.
+    this.open = /* @__PURE__ */ new Map();
+    this.problem = null;
+  }
+  /** Returns whether the problem changed. */
+  fail(key, errors) {
+    let changed = false;
+    for (const error of errors) {
+      const entry = this.open.get(error);
+      if (entry) entry.requests++;
+      else {
+        this.open.set(error, { failure: describeProblem(error), requests: 1 });
+        changed = true;
+      }
+    }
+    changed = this.release(key) || changed;
+    this.failed.set(key, errors);
+    return changed && this.show();
+  }
+  /** Returns whether the problem changed. */
+  settle(key) {
+    return this.release(key) && this.show();
+  }
+  // Removes a request's failures; returns whether one stopped failing.
+  release(key) {
+    let changed = false;
+    for (const error of this.failed.get(key) ?? []) {
+      const entry = this.open.get(error);
+      if (--entry.requests === 0) changed = this.open.delete(error);
+    }
+    this.failed.delete(key);
+    return changed;
+  }
+  // The newest failure still failing shows, and the problem lists every
+  // failure still failing, oldest first. It is a new object only when that
+  // list changed.
+  show() {
+    const errors = Array.from(this.open.values(), ({ failure }) => failure);
+    this.problem = errors.length > 0 ? problemOf(errors) : null;
+    return true;
+  }
+}
+export function problemOf(errors) {
+  const newest = errors[errors.length - 1];
+  return withCause({ ...newest, errors }, newest.cause);
+}
+function withCause(info, cause) {
+  return Object.defineProperty(info, `cause`, {
+    value: cause,
+    enumerable: false
+  });
+}
+export function describeProblem(error) {
+  let name = `Error`;
+  let message = `Collection is in an error state`;
+  let code;
+  try {
+    if (error instanceof Error) {
+      name = error.name;
+      message = error.message;
+    } else if (error !== void 0) message = String(error);
+    code = error?.code;
+  } catch {
+  }
+  return withCause(
+    {
+      name,
+      message,
+      ...typeof code === `string` ? { code } : {},
+      at: Date.now()
+    },
+    error
+  );
+}

@@ -1,0 +1,2 @@
+scripts/h02-progress/receiving-monitor.mjs(69,16): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+scripts/h02-progress/receiving-monitor.mjs(161,44): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.

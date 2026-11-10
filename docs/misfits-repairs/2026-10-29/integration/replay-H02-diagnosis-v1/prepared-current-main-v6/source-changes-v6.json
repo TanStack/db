@@ -1,0 +1,63 @@
+{
+  "head": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "productionChanged": 0,
+  "sharedChanged": 0,
+  "productModelGrammarBudgetRegistryCoverageChanged": 0,
+  "changes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "previousSha256": "d4c5ac9162a931291bd1ba4692f288c7827d017f21c81c4ab456b78efd58bbb8",
+      "sha256": "e91715a74c2b8e9ff5126b054da9ba2f5d0128e4dc373ed2c459410e463ff006"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress.receiving.test.ts",
+      "previousSha256": "decdca8c04444a441d943aeb1cb05737f9eee149a29c74bdeaee2545fdd02c58",
+      "sha256": "23e7fdb1694366d863bb02c56ff882c2c73b44a0da911e288bc3c4dce3976526"
+    },
+    {
+      "path": "scripts/h02-progress/bindings-calibration.test.mjs",
+      "previousSha256": "a9cf96481a289bd6f32f0a6ec8fe8e10370c15d2e8046f335468d6abdade3167",
+      "sha256": "c49292cb606fd65484aa2cfd7046916f9d1590a10f5395bdeb4ca02567250dc9"
+    },
+    {
+      "path": "scripts/h02-progress/source-binding.setup.ts",
+      "previousSha256": "1cad4346f920be998da96a006f93dfb192e99f7b1da7dc0b233a1a883fe0d52c",
+      "sha256": "31eca7ad585bdade1db6631caf357efde5dd6184aec7bd52cec4a6e119883c13"
+    },
+    {
+      "path": "scripts/h02-progress/verify-bindings.mjs",
+      "previousSha256": "52af8faf846cbb20b53b01cd3f0a67b50adcafcd4bd2e28d369f60ccac54554c",
+      "sha256": "19e80a89a7e6a0be576e829c73b083b0ed9152a9222ade97b6bb3365d7268cfe"
+    },
+    {
+      "path": "scripts/h02-progress/vitest.config.ts",
+      "previousSha256": "d3428cb09831e5ff455f7b43eaa9698de55c776f70643204bb85d7d1778af034",
+      "sha256": "386a07fcf4a573911babe1436d226ca575c90bf98989bf6c92cba0484e0cfee6"
+    },
+    {
+      "path": "scripts/h02-progress/witness-premise.ts",
+      "previousSha256": null,
+      "sha256": "28b1abc8d502b50f96ce4bb18bdeee47955a7bf5ed160b4f38c80e1f8fb1966f"
+    },
+    {
+      "path": "scripts/h02-progress/witness-calibration.config.ts",
+      "previousSha256": null,
+      "sha256": "4eebc8fb8ae696bdfe91738a5b35d700f8b4703de133d718fee6c730fbd9c40b"
+    },
+    {
+      "path": "scripts/h02-progress/startup-inspector.mjs",
+      "previousSha256": null,
+      "sha256": "e3e6748f8c2fb673779e7c1143b2c4afe10d2688bc7ffa226b7bbc01754ad905"
+    },
+    {
+      "path": "scripts/h02-progress/startup-inspector.test.mjs",
+      "previousSha256": null,
+      "sha256": "c83d5564cc600296fea8f6d526410a70506310a1f7e5adf1cc6534b4a5c33590"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-premise-calibration.test.ts",
+      "previousSha256": null,
+      "sha256": "d379c3a27681722693de7b63f3f782630ccb632cedfb3c840061e22d492ba342"
+    }
+  ]
+}

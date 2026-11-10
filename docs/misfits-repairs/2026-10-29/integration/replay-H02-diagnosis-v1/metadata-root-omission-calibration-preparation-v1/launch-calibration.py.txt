@@ -1,0 +1,65 @@
+"""INERT one-shot proposal. Root review and exact admission required.
+
+If admitted, write only the listed fresh calibration workspace and execute one
+pure Vitest test. Never edit or copy the frozen implementation/source tree.
+This launcher has not run. No production driver or receiving supervisor runs.
+"""
+from pathlib import Path
+import hashlib
+import json
+import os
+import sys
+
+HERE = Path(__file__).resolve().parent
+H = HERE.parent
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+if len(sys.argv) != 2 or sha(HERE / 'binding.json') != sys.argv[1]:
+    raise SystemExit('Exact separately admitted binding SHA required; nothing materialized.')
+binding = json.loads((HERE / 'binding.json').read_text())
+for path, expected in binding['files'].items():
+    if sha(path) != expected:
+        raise SystemExit(f'Pinned input changed: {path}; nothing materialized.')
+source = Path(binding['sourceRoot'])
+freeze = json.loads(Path(binding['sourceFreeze']).read_text())
+inventory = json.loads((source.parent / 'source-inventory.json').read_text())
+for name, expected in inventory.items():
+    if sha(source / name) != expected:
+        raise SystemExit(f'Existing frozen source changed: {name}; nothing materialized.')
+payloads = 0
+for package in freeze['packages'].values():
+    for name, expected in package['regularPayloadFilesMap'].items():
+        if sha(Path(package['resolved']) / name) != expected:
+            raise SystemExit(f'Existing named package payload changed: {name}; nothing materialized.')
+        payloads += 1
+run = Path(binding['freshWorkspace'])
+run.mkdir(mode=0o700)
+for target, member in binding['materializedFiles'].items():
+    with (run / target).open('xb') as stream:
+        stream.write((HERE / member).read_bytes())
+(run / 'node_modules').symlink_to(source / 'node_modules', target_is_directory=True)
+env = dict(os.environ)
+for key in binding['removeEnvironment']:
+    env.pop(key, None)
+env['TANSTACK_DB_ORACLE_RUNS_MULTIPLIER'] = '1'
+prelaunch = {
+    'kind': 'Actual pure-calibration prelaunch, if this proposal is separately admitted',
+    'bindingSha256': sys.argv[1], 'sourceFreezeSha256': sha(binding['sourceFreeze']),
+    'launcherPid': os.getpid(), 'parentPid': os.getppid(), 'launcherPgid': os.getpgrp(),
+    'argv': binding['nativeArgv'], 'cwd': str(run),
+    'existingSourceMembersMatched': len(inventory), 'existingNamedOwnPayloadsMatched': payloads,
+    'materializedFiles': {target: sha(run / target) for target in binding['materializedFiles']},
+    'freshNodeModulesLink': str((run / 'node_modules').resolve()),
+    'limits': 'Checker replay only. No precise V8/runtime source proof, complete transitive host equivalence, production driver, provider work, compiler, production mutation, or closure. Test timeout is not a hard outer watchdog; root owns actual lifecycle.',
+}
+with (run / 'source-prelaunch.json').open('x') as stream:
+    stream.write(json.dumps(prelaunch, indent=2, sort_keys=True) + '\n')
+with (run / 'outer-vitest.log').open('xb') as stream:
+    os.dup2(stream.fileno(), 1)
+    os.dup2(stream.fileno(), 2)
+os.chdir(run)
+os.execve(binding['nativeArgv'][0], binding['nativeArgv'], env)

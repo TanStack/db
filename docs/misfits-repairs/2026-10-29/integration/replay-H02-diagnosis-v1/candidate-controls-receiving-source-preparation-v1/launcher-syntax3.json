@@ -1,0 +1,15 @@
+{
+  "gate": "launcher-syntax3",
+  "argv": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--check",
+    "scripts/h02-progress/completion-parent.mjs"
+  ],
+  "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1",
+  "slot": 2,
+  "workers": 1,
+  "exitCode": 0,
+  "elapsedSeconds": 0.05189212498953566,
+  "at": "2026-10-30T08:21:44.280305+00:00",
+  "runtime": "static only; no receiving/testCollection/production imports"
+}

@@ -1,0 +1,22 @@
+__vite_ssr_exportName__("runAllCallbacks", () => { try { return runAllCallbacks } catch {} });
+__vite_ssr_exportName__("reportUncaught", () => { try { return reportUncaught } catch {} });
+function runAllCallbacks(callbacks) {
+  let firstFailure;
+  for (const callback of callbacks) {
+    try {
+      callback();
+    } catch (error) {
+      firstFailure ??= { error };
+    }
+  };
+  if (firstFailure) throw firstFailure.error;
+};
+function reportUncaught(error) {
+  queueMicrotask(() => {
+    throw error;
+  });
+}
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUEsQ0FBQTs7QUFDTyxTQUFTLGdCQUFnQixXQUF1QztBQUNyRSxNQUFJO0FBQ0osYUFBVyxZQUFZLFdBQVc7QUFDaEMsUUFBSTtBQUNGLGVBQVM7QUFBQSxJQUNYLFNBQVMsT0FBTztBQUNkLHVCQUFpQixFQUFFLE1BQU07QUFBQSxJQUMzQjtBQUFBLEVBQ0Y7QUFDQSxNQUFJLGFBQWMsT0FBTSxhQUFhO0FBQ3ZDO0FBTU8sU0FBUyxlQUFlLE9BQXNCO0FBQ25ELGlCQUFlLE1BQU07QUFDbkIsVUFBTTtBQUFBLEVBQ1IsQ0FBQztBQUNIIiwibmFtZXMiOltdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJjYWxsYmFja3MudHMiXSwic291cmNlc0NvbnRlbnQiOlsiLyoqIEF0dGVtcHQgZXZlcnkgY2FsbGJhY2ssIHRoZW4gcmV0aHJvdyB0aGUgZmlyc3QgZXhhY3QgZmFpbHVyZSB2YWx1ZS4gKi9cbmV4cG9ydCBmdW5jdGlvbiBydW5BbGxDYWxsYmFja3MoY2FsbGJhY2tzOiBJdGVyYWJsZTwoKSA9PiB2b2lkPik6IHZvaWQge1xuICBsZXQgZmlyc3RGYWlsdXJlOiB7IGVycm9yOiB1bmtub3duIH0gfCB1bmRlZmluZWRcbiAgZm9yIChjb25zdCBjYWxsYmFjayBvZiBjYWxsYmFja3MpIHtcbiAgICB0cnkge1xuICAgICAgY2FsbGJhY2soKVxuICAgIH0gY2F0Y2ggKGVycm9yKSB7XG4gICAgICBmaXJzdEZhaWx1cmUgPz89IHsgZXJyb3IgfVxuICAgIH1cbiAgfVxuICBpZiAoZmlyc3RGYWlsdXJlKSB0aHJvdyBmaXJzdEZhaWx1cmUuZXJyb3Jcbn1cblxuLyoqXG4gKiBSZXBvcnQgYW4gYWRhcHRlciBjb250cmFjdCBicmVhY2gsIHN1Y2ggYXMgYW4gYHVubG9hZFN1YnNldGAgdGhhdCB0aHJvd3MsXG4gKiB3aXRob3V0IGNoYW5naW5nIHRoZSBjYWxsZXIncyByZXN1bHQuIFRoZSBlcnJvciBzdXJmYWNlcyBhcyB1bmNhdWdodC5cbiAqL1xuZXhwb3J0IGZ1bmN0aW9uIHJlcG9ydFVuY2F1Z2h0KGVycm9yOiB1bmtub3duKTogdm9pZCB7XG4gIHF1ZXVlTWljcm90YXNrKCgpID0+IHtcbiAgICB0aHJvdyBlcnJvclxuICB9KVxufVxuIl0sImZpbGUiOiIvcGFja2FnZXMvZGIvc3JjL3V0aWxzL2NhbGxiYWNrcy50cyJ9
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJ1cmwiOiIyIiwiaW1wb3J0ZWRVcmxzIjoiMyIsIm1hcHBpbmdzIjpmYWxzZX0sIi9Vc2Vycy9reWxlLm1hdGhld3MvcHJvZ3JhbXMvdGFuc3RhY2stZGIvLndvcmt0cmVlcy9jb2RleC1taXNmaXRzLWgwMi1jYW5kaWRhdGUtY29udHJvbHMtdjEvcGFja2FnZXMvZGIvc3JjL3V0aWxzL2NhbGxiYWNrcy50cyIsIi9wYWNrYWdlcy9kYi9zcmMvdXRpbHMvY2FsbGJhY2tzLnRzIixbXV0=

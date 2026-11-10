@@ -1,0 +1,41 @@
+{
+  "at": "2026-10-30T05:16:08.457036+00:00",
+  "status": "ADMITTED: one exact canonical v6 launcher only",
+  "slot": 2,
+  "workerCount": 1,
+  "packet": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/packet-sha256-v6.json",
+    "sha256": "c407e554d22b4fac67981570157ea49dc301ad9deb86c21958ffb53a3ed71733",
+    "rootVerifiedMembers": 51
+  },
+  "sources": {
+    "review": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6-independent-static-acceptance-v1.md",
+      "sha256": "89556a995045fa65c41464a21fc6b8794e6fcc750b740cf28049321ec935234b"
+    },
+    "sourceFreeze": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/source-freeze-v6.json",
+      "sha256": "6bc7849769b15b3f4ad982f16ef55a0db4f5b674b1fedde72ec0ddf3398256a9"
+    },
+    "recipe": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/recipes-v6.json",
+      "sha256": "90a310fad13ebf88512b0d1d7bccb72349f633cf57255d8678bb685425f19503"
+    },
+    "launcher": {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-current-main-v6/launcher-v6.zsh",
+      "sha256": "cd2136cbd1775d092b5328802d5a1c2f440f5be1850c742ea6897190352f7c0c"
+    }
+  },
+  "limits": {
+    "receivingHeapMiB": 384,
+    "sampledGroupRssBytes": 1073741824,
+    "receivingWallMs": 20000,
+    "outerTestMs": 60000,
+    "sequentialVerifierMs": 20000,
+    "verifierHeapMiB": 384
+  },
+  "runCount": 1,
+  "retry": false,
+  "after": "Freeze all raw output and exact outcome; STOP. Send actual outer/receiving PID/PGIDs for root independent group-absence check. No source/production/model/grammar/budget edits, campaign, build, commit or publication.",
+  "interpretation": "Reached measured premise plus watchdog can provide bounded non-completion evidence only; setup/native failure before premise supplies no product RED. No numerical product deadline is created."
+}

@@ -1,0 +1,16 @@
+{
+  "actualGetpgid": null,
+  "actualPsReturncode": 0,
+  "actualPsStderr": "",
+  "atMonotonicNs": 227732433981708,
+  "getpgidError": {
+    "errno": 3,
+    "message": "[Errno 3] No such process"
+  },
+  "kind": "actual outer lifecycle observation after initial exec session return",
+  "limits": "This is the actual observation time, not a reconstructed launch-time group receipt.",
+  "matchingOriginalGroupRows": [],
+  "originalLauncherRecord": "62130 62130   2464 /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-preparation-v1/launcher-scope-default-fixed.zsh 26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1\n",
+  "originalPgid": 62130,
+  "originalPid": 62130
+}

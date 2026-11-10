@@ -1,0 +1,78 @@
+{
+  "status": "FROZEN ACTUAL EXACT-ONE RAW RESULT; product UNCLASSIFIED pending independent review",
+  "admissionSha256": "0182ee6c9441fc3adcba427c221b101575ae7bdc5c162a9f12e51b87857771d7",
+  "preparedManifestSha256": "439cdcb6df9125142fece28cf55f834b60d071d57fb8b6498c2d4d1f7feca2f1",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "actualOuterExitCode": 1,
+  "actualChildExitCode": 1,
+  "members": {
+    "00-failure.receipt.json": {
+      "sha256": "ed6fbb2e947bc58a60b4867d497c20c6bac4fd87d99f5668cc8686c951f4c6ea",
+      "bytes": 2240
+    },
+    "00-final.receipt.json": {
+      "sha256": "5e74670455e07c94123df234f028f231e7e387c9c2f0b2d3a29d70c8e57bdb81",
+      "bytes": 2245
+    },
+    "00-group-verified.receipt.json": {
+      "sha256": "2fdce3a51e548f55cb83431efb90d1f7b1d041e5ef805db99c020e2a0bbc5220",
+      "bytes": 2046
+    },
+    "00-pre-spawn.receipt.json": {
+      "sha256": "84f5058b2294a637e49d49cbec706186a0680d4408090601564af37e57431c81",
+      "bytes": 2040
+    },
+    "00-spawn.receipt.json": {
+      "sha256": "66b1b5c98a61f6cc23ddab57586548374248acaa443dc77e2cb608cf3e20a517",
+      "bytes": 2038
+    },
+    "actual-outcome-v1.json": {
+      "sha256": "835a70d8fa2cb4ac1db0749f91b548a5b7a6cef44ad67aeab29a2df956132f7b",
+      "bytes": 2367
+    },
+    "actual-tool-return-v1.json": {
+      "sha256": "072ec5e177f322218d9bd9219492b405c7d9d1254c4e6b7a4f60a2a390999060",
+      "bytes": 492
+    },
+    "cleanup-tool-return-v1.json": {
+      "sha256": "34670a72f622b420b14e24726e50dace285bdf935a49770e7399a8836ee44f96",
+      "bytes": 308
+    },
+    "original-id-postcheck-v1.json": {
+      "sha256": "24096f6b8da21712933fcc8f3331aab8f360d8776c0d04e3bc20816fda16f1f1",
+      "bytes": 1068
+    },
+    "outer-final.receipt.json": {
+      "sha256": "566a8e726eef2fec29fa7a56ac25b42ec0b677fd69b086911b9818a23d0e154f",
+      "bytes": 8048
+    },
+    "outer-pre.receipt.json": {
+      "sha256": "bb417dc549cf19386af43d12b5d00c9933b1e2c02ea6245d80390661030ff4be",
+      "bytes": 5221
+    },
+    "raw-report-observation-v1.json": {
+      "sha256": "f760c5bb449d1c3a0ffb6e8bc773b77b783bebe8611e0086c57880a4e44fee47",
+      "bytes": 4166
+    },
+    "source-tool-postcheck-v1.json": {
+      "sha256": "3364d3d69acf78215d8a7f8685d5a1b9c8d5331afd83c1d6e8a74613c1f61783",
+      "bytes": 804
+    },
+    "stderr.log": {
+      "sha256": "0ed00cb5d370848808997b757f4aba7be39f0cbe0fe6bd163b5747048d0cad7a",
+      "bytes": 18124
+    },
+    "stdout.log": {
+      "sha256": "4613d09538d5ce02c5d21c46f0464096bfcead4ef864c3b0b2ac2a6752b6d317",
+      "bytes": 34441
+    },
+    "vitest-report.json": {
+      "sha256": "1fc0f3b2588d3a09cb0101f8995a3180bbecf6ba3be44a345780f49a98d65646",
+      "bytes": 3413917
+    }
+  },
+  "manifestExcludesItself": true,
+  "memberCount": 16,
+  "memberBytes": 3499565
+}

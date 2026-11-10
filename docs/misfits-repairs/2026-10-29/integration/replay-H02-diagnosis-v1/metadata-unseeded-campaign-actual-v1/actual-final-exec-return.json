@@ -1,0 +1,12 @@
+{
+  "sessionId": 94881,
+  "continuationIndex": 1,
+  "actualToolReturn": {
+    "chunk_id": "59a0d2",
+    "wall_time_seconds": 0.000007292,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "meaning": "Actual outer completion, separate from receiving-child outcomes."
+}

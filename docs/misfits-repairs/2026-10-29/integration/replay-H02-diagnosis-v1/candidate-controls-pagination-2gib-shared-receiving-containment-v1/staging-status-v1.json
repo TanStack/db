@@ -1,0 +1,21 @@
+{
+  "status": "SOURCE-ONLY PREPARED after ROOT recovery; exact runtime remains unadmitted",
+  "sourceFreeze": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "sourceBindings": 596,
+  "sourceCopies": 85,
+  "newSupervisor": "dbc0406d2118f5ad4ca93908d974b829b6bf3370015d27162c329fae323eb042",
+  "oldFiniteSupplementReusedByteForByte": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+  "toolchainRecoveryBinding": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "runtimeAdmitted": false,
+  "sourceToolsActiveRehashPerformed": true,
+  "supervisorImported": false,
+  "launcherImported": false,
+  "nativeInvocation": false,
+  "dependencyCensusBroadened": false,
+  "externalPendingGates": [
+    "Q independent source review",
+    "required report-worktree lint qualification",
+    "independent operational packet review and ROOT exact-one admission"
+  ]
+}

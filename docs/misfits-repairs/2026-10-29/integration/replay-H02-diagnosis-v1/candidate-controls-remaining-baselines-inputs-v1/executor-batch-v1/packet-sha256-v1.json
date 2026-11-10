@@ -1,0 +1,13 @@
+{
+  "batch-stop-v1.json": "47a8c24270576ae11d7692cefb957d071239389310578bbcd6b6a76b47dae875",
+  "closeout-v1.json": "14e2ef59b51c047bf1105b4b3618feafaf96a4f8fb84c4f923131ed9c81201c9",
+  "collection-tool-returns-v1.json": "4109f2f8d818af9ff9dae04fbc60966fbe83093930dd1a04a2061adaa7497ff7",
+  "collector-v1.py.txt": "32b80c10d02703a1e3cafdf95582517466ad2a9f1e4e26e891d61befc8a9d587",
+  "final-exact-pnpm-lint-v1.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+  "final-lint-tool-returns-v1.json": "166af997fba13c1d4102dbc64930c02b5fc78d7652dfe0f64cb062ede6e47fc2",
+  "final-report-lint-v1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "process-visibility-preflight-v1.log": "2cbeadb15cb46cffc372e078803b24429c222c42fe27943cd41f8d9ff7a9971b",
+  "report-v1.md": "b24a8fff02706d9a4180c419caf779707d1eb5533cf45b22d99469ed23214aef",
+  "root-serial-batch-admission-v1.json": "cdfed5d69ec3a3ec5cc6b105cffb54393d3a7f60a3c56b755c641eef5316c919",
+  "source-preflight-v1.json": "23d4e42222f25fa6d3581a97bc699b5624e2888306354bfef24ae1da812257ae"
+}

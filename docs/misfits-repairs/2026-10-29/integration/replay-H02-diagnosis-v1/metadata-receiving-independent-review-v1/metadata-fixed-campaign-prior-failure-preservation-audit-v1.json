@@ -1,0 +1,11 @@
+{
+  "mainAuditSha256": "c6ad440b7aa68e85556f4c244ae4b56b3ffa3709416b16ac173d73951e161f39",
+  "nativeLaunches": 0,
+  "processProbes": 0,
+  "qualification": "Main audit independently rehashed prior result and exact original/preserved raw files. This supplement rehashes all588 source members and packet members. Prior recorder missing retained followup boundaries remains a failed observation instrument, not a product RED.",
+  "scriptSha256": "784dac44a1cbd1da2cd031eee450f14c15885b38d90ed638b9182b0bb85f6485",
+  "sourceFilesRehashed": 588,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceInventorySha256": "c5cdea6b41d82b331435162ea06b9254be96acff7b7450be79e0c37690cb74b2",
+  "status": "PRIOR FAILED V2 SOURCE PRESERVED"
+}

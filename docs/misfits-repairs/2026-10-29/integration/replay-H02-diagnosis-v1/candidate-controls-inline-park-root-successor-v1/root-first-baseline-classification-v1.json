@@ -1,0 +1,28 @@
+{
+  "classifiedBy": "/root",
+  "verdict": "bounded-baseline-GREEN",
+  "resultFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/inline-park-root-result-freeze-v1.json",
+    "sha256": "0780b64244c8ee668e5187aa65e4f762d501be12e54405cee216f993e04d6b50"
+  },
+  "independentActualReview": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/inline-park-root-actual-independent-review-v1.md",
+    "sha256": "fff79e37fba837244a11410ca5a7ecf219ba62ccd16029e5942aef96d319a797"
+  },
+  "actualOuterExitCode": 0,
+  "actualToolCompletion": "9408a4",
+  "parentTestChildExitCode": 0,
+  "scope": "Exact inline-park-root authored fixed baseline: retained output ownership and coherent atomic root/downstream publication.",
+  "evidenceFilesRehashed": 1974,
+  "parentProofBoundary": "on-disk identity plus exact control-flow inference; no parent V8 attestation",
+  "cleanup": "positive worker-cleaned, no cleanup errors or remaining owned-group rows; saved root post-return absence",
+  "noCredit": [
+    "all20candidateStates",
+    "recoveryProgress",
+    "actual-helper/no-active-operation neighbor",
+    "generated neighbors",
+    "hostile-mutant closure"
+  ],
+  "state14": "proposed, not adopted",
+  "canonicalImport": false
+}

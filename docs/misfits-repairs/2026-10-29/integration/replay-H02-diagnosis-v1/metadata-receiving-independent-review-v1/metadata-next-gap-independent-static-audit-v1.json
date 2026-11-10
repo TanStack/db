@@ -1,0 +1,1792 @@
+{
+  "kind": "Independent bounded source-plan audit; zero native execution",
+  "assignedFreezeSha256": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc",
+  "checks": [
+    {
+      "label": "exact assigned plan freeze",
+      "actual": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc",
+      "expected": "639f8a93c5840b2cb0d464b7236124362dc3556febd35b7dccb7e00f1b5149dc",
+      "pass": true
+    },
+    {
+      "label": "seven frozen members",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "member hash: plan.md",
+      "actual": "4e13eb39849bc55414966f5f2dfe3f3a6b2d623687e00e926146ca5ad5eb89d4",
+      "expected": "4e13eb39849bc55414966f5f2dfe3f3a6b2d623687e00e926146ca5ad5eb89d4",
+      "pass": true
+    },
+    {
+      "label": "member hash: baseline-recipes.json",
+      "actual": "d9405e506650a9de6c2b7ec0f7b24736196d4977c9aa5fb70b4f92c5076554c5",
+      "expected": "d9405e506650a9de6c2b7ec0f7b24736196d4977c9aa5fb70b4f92c5076554c5",
+      "pass": true
+    },
+    {
+      "label": "member hash: mutants.json",
+      "actual": "9a27ed71b695eb4a523e2520f935714ad1630d29077a90be2f2a650f4d144739",
+      "expected": "9a27ed71b695eb4a523e2520f935714ad1630d29077a90be2f2a650f4d144739",
+      "pass": true
+    },
+    {
+      "label": "member hash: proposed-source-edits.md",
+      "actual": "a064b748d0d6502b7063bc957c547e8911ff1cfd565fb9bb47d1926f4832386f",
+      "expected": "a064b748d0d6502b7063bc957c547e8911ff1cfd565fb9bb47d1926f4832386f",
+      "pass": true
+    },
+    {
+      "label": "member hash: selector-static-results.json",
+      "actual": "b96851136435f9f2da477743ec9f0c0647b68d02e483271cddd0d94dae8808f5",
+      "expected": "b96851136435f9f2da477743ec9f0c0647b68d02e483271cddd0d94dae8808f5",
+      "pass": true
+    },
+    {
+      "label": "member hash: source-bindings.json",
+      "actual": "bebd7865b1bd6c1e7362ec2b484620b95f2362b1a80e3d728366e2258cdd1ff4",
+      "expected": "bebd7865b1bd6c1e7362ec2b484620b95f2362b1a80e3d728366e2258cdd1ff4",
+      "pass": true
+    },
+    {
+      "label": "member hash: source-static-audit.json",
+      "actual": "8095141f30551b629c4e19ac6aab181685e1def5ec45ecd6c00877a12af43a8b",
+      "expected": "8095141f30551b629c4e19ac6aab181685e1def5ec45ecd6c00877a12af43a8b",
+      "pass": true
+    },
+    {
+      "label": "source freeze",
+      "actual": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+      "expected": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+      "pass": true
+    },
+    {
+      "label": "named source: packages/db/src/collection/state.ts",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "named source: packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+      "actual": "29ee45b686c0851d1f7eaf73302488cf5759f8e2e9d9b33a8ca0912de365e138",
+      "expected": "29ee45b686c0851d1f7eaf73302488cf5759f8e2e9d9b33a8ca0912de365e138",
+      "pass": true
+    },
+    {
+      "label": "named source: packages/query-db-collection/tests/queued-answer-metadata-oracle.ts",
+      "actual": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+      "expected": "b965769c351c3d4bd563df915ad052ab3ecb0c3cc85559ff38c02916faae2cca",
+      "pass": true
+    },
+    {
+      "label": "named source: packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts",
+      "actual": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "expected": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+      "pass": true
+    },
+    {
+      "label": "named source: packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "actual": "48b095c899883a9afb6362e636c8ac23d998bdde9140870a49ec91bb09dcd954",
+      "expected": "48b095c899883a9afb6362e636c8ac23d998bdde9140870a49ec91bb09dcd954",
+      "pass": true
+    },
+    {
+      "label": "retained evidence: fixed campaign root qualification",
+      "actual": "f865dd3dd1cfba632b2b461ab321f7e7d92c1a7a23f068d241c894363439b1b0",
+      "expected": "f865dd3dd1cfba632b2b461ab321f7e7d92c1a7a23f068d241c894363439b1b0",
+      "pass": true
+    },
+    {
+      "label": "retained evidence: unseeded campaign root qualification",
+      "actual": "c4da116373d9cf517b577294952cbfd4733672d2d4a84621c159895ebf04134d",
+      "expected": "c4da116373d9cf517b577294952cbfd4733672d2d4a84621c159895ebf04134d",
+      "pass": true
+    },
+    {
+      "label": "retained evidence: preserved 20-name discovery; not repeated",
+      "actual": "bf1afb58132bd904e881b053c3129d8be403529cfe35056cb8960ae96c2a2999",
+      "expected": "bf1afb58132bd904e881b053c3129d8be403529cfe35056cb8960ae96c2a2999",
+      "pass": true
+    },
+    {
+      "label": "retained evidence: inert inner recipe mechanics predecessor; no launcher imported",
+      "actual": "db88a1e9a4561a736f1f7d8cb74b00381594290e2494beadbba21c70243dfd7a",
+      "expected": "db88a1e9a4561a736f1f7d8cb74b00381594290e2494beadbba21c70243dfd7a",
+      "pass": true
+    },
+    {
+      "label": "preserved name count",
+      "actual": 20,
+      "expected": 20,
+      "pass": true
+    },
+    {
+      "label": "recipe count",
+      "actual": 5,
+      "expected": 5,
+      "pass": true
+    },
+    {
+      "label": "recipe order",
+      "actual": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "expected": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 exact selected preserved name",
+      "actual": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2"
+      ],
+      "expected": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2"
+      ],
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 anchored",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 rejects suffix",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 source root",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 source binding",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 multiplier",
+      "actual": "1",
+      "expected": "1",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 state count",
+      "actual": 31,
+      "expected": 31,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 history count",
+      "actual": 1,
+      "expected": 1,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 replay controls unset",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q2 unchanged inner budget",
+      "actual": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "expected": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 exact selected preserved name",
+      "actual": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0"
+      ],
+      "expected": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0"
+      ],
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 anchored",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 rejects suffix",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 source root",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 source binding",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 multiplier",
+      "actual": "1",
+      "expected": "1",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 state count",
+      "actual": 29,
+      "expected": 29,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 history count",
+      "actual": 1,
+      "expected": 1,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 replay controls unset",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-default-q0 unchanged inner budget",
+      "actual": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "expected": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 exact selected preserved name",
+      "actual": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0"
+      ],
+      "expected": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0"
+      ],
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 anchored",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 rejects suffix",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 source root",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 source binding",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 multiplier",
+      "actual": "1",
+      "expected": "1",
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 state count",
+      "actual": 29,
+      "expected": 29,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 history count",
+      "actual": 1,
+      "expected": 1,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 replay controls unset",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "followup-scope-authored-q0 unchanged inner budget",
+      "actual": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "expected": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed exact selected preserved name",
+      "actual": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign"
+      ],
+      "expected": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign"
+      ],
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed anchored",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed rejects suffix",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed source root",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed source binding",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed multiplier",
+      "actual": "1",
+      "expected": "1",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed state count",
+      "actual": 31,
+      "expected": 31,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed history count",
+      "actual": 8,
+      "expected": 8,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed replay controls unset",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-fixed unchanged inner budget",
+      "actual": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "expected": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random exact selected preserved name",
+      "actual": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay"
+      ],
+      "expected": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay"
+      ],
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random anchored",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random rejects suffix",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random source root",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/sources",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random source binding",
+      "actual": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "expected": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random multiplier",
+      "actual": "1",
+      "expected": "1",
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random state count",
+      "actual": 31,
+      "expected": 31,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random history count",
+      "actual": 8,
+      "expected": 8,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random replay controls unset",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "generated-scope-authored-random unchanged inner budget",
+      "actual": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "expected": {
+        "groupRssBytes": 1073741824,
+        "nodeHeapMiB": 384,
+        "postEnqueueWindowMs": 1000,
+        "wallMs": 20000
+      },
+      "pass": true
+    },
+    {
+      "label": "role successor not implemented",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    },
+    {
+      "label": "two fresh controls",
+      "actual": 2,
+      "expected": 2,
+      "pass": true
+    },
+    {
+      "label": "control default identity",
+      "actual": "role-control-scope-default-q2",
+      "expected": "role-control-scope-default-q2",
+      "pass": true
+    },
+    {
+      "label": "control default states",
+      "actual": 31,
+      "expected": 31,
+      "pass": true
+    },
+    {
+      "label": "control default histories",
+      "actual": 1,
+      "expected": 1,
+      "pass": true
+    },
+    {
+      "label": "control authored identity",
+      "actual": "role-control-scope-authored-q2",
+      "expected": "role-control-scope-authored-q2",
+      "pass": true
+    },
+    {
+      "label": "control authored states",
+      "actual": 31,
+      "expected": 31,
+      "pass": true
+    },
+    {
+      "label": "control authored histories",
+      "actual": 1,
+      "expected": 1,
+      "pass": true
+    },
+    {
+      "label": "eight independent specs",
+      "actual": 8,
+      "expected": 8,
+      "pass": true
+    },
+    {
+      "label": "complete independent matrix",
+      "actual": [
+        [
+          "authored",
+          "downstream",
+          "full-current"
+        ],
+        [
+          "authored",
+          "downstream",
+          "omit"
+        ],
+        [
+          "authored",
+          "root",
+          "full-current"
+        ],
+        [
+          "authored",
+          "root",
+          "omit"
+        ],
+        [
+          "default",
+          "downstream",
+          "full-current"
+        ],
+        [
+          "default",
+          "downstream",
+          "omit"
+        ],
+        [
+          "default",
+          "root",
+          "full-current"
+        ],
+        [
+          "default",
+          "root",
+          "omit"
+        ]
+      ],
+      "expected": [
+        [
+          "authored",
+          "downstream",
+          "full-current"
+        ],
+        [
+          "authored",
+          "downstream",
+          "omit"
+        ],
+        [
+          "authored",
+          "root",
+          "full-current"
+        ],
+        [
+          "authored",
+          "root",
+          "omit"
+        ],
+        [
+          "default",
+          "downstream",
+          "full-current"
+        ],
+        [
+          "default",
+          "downstream",
+          "omit"
+        ],
+        [
+          "default",
+          "root",
+          "full-current"
+        ],
+        [
+          "default",
+          "root",
+          "omit"
+        ]
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value exact target",
+      "actual": "metadata-receiving:scope:default:root",
+      "expected": "metadata-receiving:scope:default:root",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value lane control",
+      "actual": "role-control-scope-default-q2",
+      "expected": "role-control-scope-default-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value target phase",
+      "actual": "public-change",
+      "expected": "public-change",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value explicit authored guard",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-omit-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value exact target",
+      "actual": "metadata-receiving:scope:default:root",
+      "expected": "metadata-receiving:scope:default:root",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value lane control",
+      "actual": "role-control-scope-default-q2",
+      "expected": "role-control-scope-default-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value target phase",
+      "actual": "public-change",
+      "expected": "public-change",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value explicit authored guard",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-default-root-full-current-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value exact target",
+      "actual": "metadata-receiving:scope:default:downstream",
+      "expected": "metadata-receiving:scope:default:downstream",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value lane control",
+      "actual": "role-control-scope-default-q2",
+      "expected": "role-control-scope-default-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value target phase",
+      "actual": "downstream-change",
+      "expected": "downstream-change",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value explicit authored guard",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-omit-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value exact target",
+      "actual": "metadata-receiving:scope:default:downstream",
+      "expected": "metadata-receiving:scope:default:downstream",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value lane control",
+      "actual": "role-control-scope-default-q2",
+      "expected": "role-control-scope-default-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value target phase",
+      "actual": "downstream-change",
+      "expected": "downstream-change",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "default",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:default:root",
+        "metadata-receiving:scope:default:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value explicit authored guard",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-default-downstream-full-current-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value exact target",
+      "actual": "metadata-receiving:scope:authored:root",
+      "expected": "metadata-receiving:scope:authored:root",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value lane control",
+      "actual": "role-control-scope-authored-q2",
+      "expected": "role-control-scope-authored-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value target phase",
+      "actual": "public-change",
+      "expected": "public-change",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value explicit authored guard",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-omit-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value exact target",
+      "actual": "metadata-receiving:scope:authored:root",
+      "expected": "metadata-receiving:scope:authored:root",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value lane control",
+      "actual": "role-control-scope-authored-q2",
+      "expected": "role-control-scope-authored-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value target phase",
+      "actual": "public-change",
+      "expected": "public-change",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value explicit authored guard",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-root-full-current-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value exact target",
+      "actual": "metadata-receiving:scope:authored:downstream",
+      "expected": "metadata-receiving:scope:authored:downstream",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value lane control",
+      "actual": "role-control-scope-authored-q2",
+      "expected": "role-control-scope-authored-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value target phase",
+      "actual": "downstream-change",
+      "expected": "downstream-change",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value explicit authored guard",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-omit-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value exact target",
+      "actual": "metadata-receiving:scope:authored:downstream",
+      "expected": "metadata-receiving:scope:authored:downstream",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value lane control",
+      "actual": "role-control-scope-authored-q2",
+      "expected": "role-control-scope-authored-q2",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value target phase",
+      "actual": "downstream-change",
+      "expected": "downstream-change",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value target history",
+      "actual": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "expected": {
+        "kind": "query",
+        "scheduler": "microtask",
+        "cacheIdentity": "scope",
+        "metadataKeys": "authored",
+        "includes": true,
+        "window": true,
+        "nonemptyPrior": true,
+        "keyShift": 0,
+        "rankScale": 10,
+        "metadataFollowupQuarter": 2
+      },
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value production binding",
+      "actual": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "expected": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value both role identities",
+      "actual": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "expected": [
+        "metadata-receiving:scope:authored:root",
+        "metadata-receiving:scope:authored:downstream"
+      ],
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value common key guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value role guards",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value explicit authored guard",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value preserved other return fields",
+      "actual": "Unchanged key, type, enriched current value and metadata.",
+      "expected": "Unchanged key, type, enriched current value and metadata.",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value predecessor source value",
+      "actual": "enrichedPreviousValue",
+      "expected": "enrichedPreviousValue",
+      "pass": true
+    },
+    {
+      "label": "scope-authored-downstream-full-current-previous-value seven result classifications",
+      "actual": 7,
+      "expected": 7,
+      "pass": true
+    },
+    {
+      "label": "all proposed output paths unique",
+      "actual": 15,
+      "expected": 15,
+      "pass": true
+    },
+    {
+      "label": "all proposed outputs absent at this read",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "17 base states derived textually",
+      "actual": 17,
+      "expected": 17,
+      "pass": true
+    },
+    {
+      "label": "positive31 textual state construction",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "positive-only generator retained",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "positive fixed budget and seed",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "positive replay budget retained",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "oracle finish retained",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "ordinary first, downstream second, metadata last",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "defined previous value ordinary assertion",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "first observation error retained and killed",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "label": "shared delta full aggregate comparison",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    }
+  ],
+  "allStaticChecksPass": true,
+  "finding": "F01: full-current entries must name earlier ordinary assertion for intended kill; no metadata invocation credit.",
+  "selectorsAgainstPreservedNamesOnly": [
+    {
+      "id": "followup-scope-authored-q2",
+      "selector": "^queued-answer metadata receiving checks source followup 'scope' 'authored' quarter 2$",
+      "matches": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter 2"
+      ]
+    },
+    {
+      "id": "followup-scope-default-q0",
+      "selector": "^queued-answer metadata receiving checks source followup 'scope' 'default' quarter \\+0$",
+      "matches": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'default' quarter +0"
+      ]
+    },
+    {
+      "id": "followup-scope-authored-q0",
+      "selector": "^queued-answer metadata receiving checks source followup 'scope' 'authored' quarter \\+0$",
+      "matches": [
+        "queued-answer metadata receiving > checks source followup 'scope' 'authored' quarter +0"
+      ]
+    },
+    {
+      "id": "generated-scope-authored-fixed",
+      "selector": "^queued-answer metadata receiving generated 'scope' 'authored' checks the fixed generated campaign$",
+      "matches": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the fixed generated campaign"
+      ]
+    },
+    {
+      "id": "generated-scope-authored-random",
+      "selector": "^queued-answer metadata receiving generated 'scope' 'authored' checks the unseeded generated campaign or selected replay$",
+      "matches": [
+        "queued-answer metadata receiving > generated 'scope' 'authored' > checks the unseeded generated campaign or selected replay"
+      ]
+    }
+  ],
+  "matrix": [
+    {
+      "id": "scope-default-root-omit-previous-value",
+      "lane": "default",
+      "role": "root",
+      "fault": "undefined",
+      "phase": "public-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+      },
+      "sourcePrediction": "Omission bypasses optional ordinary previousValue assertion; no executed kill"
+    },
+    {
+      "id": "scope-default-root-full-current-previous-value",
+      "lane": "default",
+      "role": "root",
+      "fault": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+      "phase": "public-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+      },
+      "sourcePrediction": "Earlier ordinary payload rejection; F01"
+    },
+    {
+      "id": "scope-default-downstream-omit-previous-value",
+      "lane": "default",
+      "role": "downstream",
+      "fault": "undefined",
+      "phase": "downstream-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+      },
+      "sourcePrediction": "Omission bypasses optional ordinary previousValue assertion; no executed kill"
+    },
+    {
+      "id": "scope-default-downstream-full-current-previous-value",
+      "lane": "default",
+      "role": "downstream",
+      "fault": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+      "phase": "downstream-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+      },
+      "sourcePrediction": "Earlier ordinary payload rejection; F01"
+    },
+    {
+      "id": "scope-authored-root-omit-previous-value",
+      "lane": "authored",
+      "role": "root",
+      "fault": "undefined",
+      "phase": "public-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+      },
+      "sourcePrediction": "Omission bypasses optional ordinary previousValue assertion; no executed kill"
+    },
+    {
+      "id": "scope-authored-root-full-current-previous-value",
+      "lane": "authored",
+      "role": "root",
+      "fault": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+      "phase": "public-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root-target comparison rejects the malformed root previousValue. Any downstream consequence is separate, with no downstream mutant credit."
+      },
+      "sourcePrediction": "Earlier ordinary payload rejection; F01"
+    },
+    {
+      "id": "scope-authored-downstream-omit-previous-value",
+      "lane": "authored",
+      "role": "downstream",
+      "fault": "undefined",
+      "phase": "downstream-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+      },
+      "sourcePrediction": "Omission bypasses optional ordinary previousValue assertion; no executed kill"
+    },
+    {
+      "id": "scope-authored-downstream-full-current-previous-value",
+      "lane": "authored",
+      "role": "downstream",
+      "fault": "enrichedValue (complete current ordinary row and all four current virtual fields)",
+      "phase": "downstream-change",
+      "intendedComparison": {
+        "function": "checkMetadataPublications",
+        "owner": "packages/db/tests/query/virtual-row-fields-publication-oracle.ts",
+        "callSite": "createMetadataReceiptCheck handling followup-publication, unchanged loop for target role.",
+        "rejection": "Exact aggregate change messages differ from expectedMetadataChanges(prior target baseline, independently modeled after).",
+        "priorValueSource": "Independent complete prior MetadataResult retained from the checked reload baseline.",
+        "currentValueCheck": "checkAttributedRows retains full ordinary and public metadata comparison for every callback, final rows and entries.",
+        "peerRequirement": "Root baseline/current/previous observations pass; only downstream-target previousValue mutation is credited."
+      },
+      "sourcePrediction": "Earlier ordinary payload rejection; F01"
+    }
+  ],
+  "freshOutputsAtReadOnly": [
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q2",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-default-q0",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/followup-scope-authored-q0",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/generated-scope-authored-fixed",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/generated-scope-authored-random",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/role-control-scope-default-q2",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/role-control-scope-authored-q2",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-root-omit-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-root-full-current-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-downstream-omit-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-default-downstream-full-current-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-root-omit-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-root-full-current-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-downstream-omit-previous-value",
+      "existsAtRead": false
+    },
+    {
+      "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-next-gap-runs-v1/scope-authored-downstream-full-current-previous-value",
+      "existsAtRead": false
+    }
+  ],
+  "observerOrderSourceBindings": {
+    "packages/query-db-collection/tests/queued-answer-metadata-oracle.test.ts": "3d47cc699d4ceb04c8d23f0438e4995ea62b9f1ae23c5e6c386cdd47182f669e",
+    "packages/query-db-collection/tests/queued-answer-progress-oracle.ts": "594b2a04511a59e862002b0eb4f93dde7d0d98a6ee0899077246c49ad6ee112b",
+    "packages/query-db-collection/tests/queued-answer-progress-supervisor.ts": "97aa5a63419a33d7d220dde14e81e5227f3e04a010da7a023ecc915777e09efc"
+  },
+  "stateArithmeticSourceOnly": {
+    "positive": "17 + 4 + 2*(3+2) = 31",
+    "noop": "17 + 4 + 2*(3+1) = 29"
+  },
+  "limits": [
+    "No source module imported, compiled or evaluated.",
+    "No native discovery, tests, process probes or actual mutants.",
+    "No production/oracle/driver/configuration or canonical edits.",
+    "Named hashes are not a complete transitive source/dependency audit.",
+    "Preserved discovery names are not native v3 selection evidence.",
+    "First-divergence predictions are not actual mutant outcomes.",
+    "No runtime admission, bug-class closure, PR readiness or reviewer-hire assessment."
+  ],
+  "rootOwnsLint": true
+}

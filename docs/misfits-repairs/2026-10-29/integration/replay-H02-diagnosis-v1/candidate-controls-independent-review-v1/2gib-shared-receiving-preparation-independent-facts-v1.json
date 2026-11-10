@@ -1,0 +1,79 @@
+{
+  "at": "2026-10-30T11:29:00.168948+00:00",
+  "mode": "Independent static source/byte/JSON/AST audit only. No bound script import, process probe, native/test/model execution.",
+  "packetManifestSha256": "439cdcb6df9125142fece28cf55f834b60d071d57fb8b6498c2d4d1f7feca2f1",
+  "bindingSha256": "9c8dfceab5666c6d242002858a852ad4e05e33e6a147598730958025042b8faf",
+  "members": 10,
+  "memberBytes": 1562990,
+  "sourceFreezeSha256": "f85b261b1733c5581c0f8af8fbdff824b189b9b4517fda6b4cf397c1d2c8b193",
+  "sourceBindings": 596,
+  "sourceCopies": 85,
+  "unchangedProduction": 511,
+  "namedPackageRoots": 255,
+  "ownPayloadFiles": 11974,
+  "ownPayloadBytes": 174739946,
+  "declaredEdges": 405,
+  "absentOptionalOrPeer": 112,
+  "locks": 2,
+  "reuseLinks": 4,
+  "oldSupplementSha256": "cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50",
+  "thresholdBoundaryCases": [
+    {
+      "rssBytes": 0,
+      "allowed": true
+    },
+    {
+      "rssBytes": 1073741824,
+      "allowed": true
+    },
+    {
+      "rssBytes": 1073741825,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483647,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483648,
+      "allowed": true
+    },
+    {
+      "rssBytes": 2147483649,
+      "allowed": false
+    },
+    {
+      "rssBytes": 3221225472,
+      "allowed": false
+    }
+  ],
+  "wrapperCompleteDiffSha256": "ca39506d6a2e3b1adce40c81aea10ced60c63f822c5840a028c979fbc4e26428",
+  "recoveryReceiptSha256": "c02badc1d10295180a8cc560c8aa1057af3bede2f5b5dc7df7d35791dbf23406",
+  "QHistoricalRelocationAffectsN": false,
+  "rebindNeeded": false,
+  "runtimeOutputAbsent": true,
+  "sourceFindings": [],
+  "explicitUnvalidatedControls": [
+    "No wrapper/parser mocked execution by reviewer",
+    "No native PGID/signal/reap/containment calibration by reviewer",
+    "No evaluated-source or undeclared dynamic-import binding",
+    "No actual selected-test count/report/reach/assertion from this preparation"
+  ],
+  "preservedLimits": [
+    "Prior cf550f operational RSS stop only; body UNESTABLISHED",
+    "Inner completion-supervisor failed-kill path unvalidated separately",
+    "A38 metadata isolated and historical777 old shim hashes unknown",
+    "Q actual primary/failure+success receiving gates still pending",
+    "all20 candidate states and actual-helper/no-active-operation UNREACHED;state14 unadopted"
+  ],
+  "allAuditChecksPass": true,
+  "errors": [],
+  "productExecutions": 0,
+  "modelExecutions": 0,
+  "testExecutions": 0,
+  "nativeRunInvocations": 0,
+  "boundProgramImports": 0,
+  "processProbes": 0,
+  "runtimeAdmission": false,
+  "slot2": "remains returned"
+}

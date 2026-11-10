@@ -1,0 +1,5 @@
+The exact admitted empty-scope launcher was attempted once and stopped at line5: the sandbox denied /bin/ps (tool exit127). Its process-record redirection created an empty launcher-process.txt; no outer-vitest.log or receiving directory exists. The set-e launcher exits before exec env Node/Vitest, so no native test or receiving child started. The exact tool diagnostic is retained in tool-result-v1.json.
+
+The entire serial batch stopped at this first setup surprise. The literal-true initial and ordinary synchronous mutation controls remain unrun, with no retry or later launcher attempted. All563source entries,2544package payload files, Node, locks and reuse links matched before and after. No source/candidate/model/grammar/budget/dependency edit, commit or publication occurred.
+
+No PID/PGID was captured because the denied ps call was the first recording command. The tool returned command completion exit127 with no live session; this is not independent original-ID absence evidence or direct adapter cleanup. No product verdict or finite receiving reach is available. Root review and any new admission remain separate.

@@ -1,0 +1,315 @@
+{
+  "status": "source-only exact selection; programs/recipes not yet materialized; no runtime admission",
+  "kind": "h02-completion-baseline-selection",
+  "cells": [
+    {
+      "ordinal": 1,
+      "id": "inline-park-root",
+      "profile": "inline",
+      "gate": "park-root",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 2,
+      "id": "inline-held-window",
+      "profile": "inline",
+      "gate": "held-window",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 3,
+      "id": "inline-source-failed-peer",
+      "profile": "inline",
+      "gate": "source-failed-peer",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": false,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 4,
+      "id": "inline-subscriber-tail",
+      "profile": "inline",
+      "gate": "subscriber-tail",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 5,
+      "id": "inline-initial-status-tail",
+      "profile": "inline",
+      "gate": "initial-status-tail",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 6,
+      "id": "inline-graph-failure",
+      "profile": "inline",
+      "gate": "graph-failure",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": false,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 7,
+      "id": "inline-cleanup-abandonment",
+      "profile": "inline",
+      "gate": "cleanup-abandonment",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 2
+    },
+    {
+      "ordinal": 8,
+      "id": "facade-park-root",
+      "profile": "facade",
+      "gate": "park-root",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 9,
+      "id": "facade-park-facade",
+      "profile": "facade",
+      "gate": "park-facade",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 10,
+      "id": "facade-facade-rollback",
+      "profile": "facade",
+      "gate": "facade-rollback",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 11,
+      "id": "facade-held-window",
+      "profile": "facade",
+      "gate": "held-window",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 12,
+      "id": "facade-source-failed-peer",
+      "profile": "facade",
+      "gate": "source-failed-peer",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": false,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 13,
+      "id": "facade-subscriber-tail",
+      "profile": "facade",
+      "gate": "subscriber-tail",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 14,
+      "id": "facade-initial-status-tail",
+      "profile": "facade",
+      "gate": "initial-status-tail",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 15,
+      "id": "facade-graph-failure",
+      "profile": "facade",
+      "gate": "graph-failure",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": false,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 1
+    },
+    {
+      "ordinal": 16,
+      "id": "facade-cleanup-abandonment",
+      "profile": "facade",
+      "gate": "cleanup-abandonment",
+      "parameters": {
+        "keyShift": 0,
+        "rankScale": 10,
+        "nonemptyPrior": true,
+        "partial": "limit",
+        "tie": true,
+        "selectedOutput": "root",
+        "answerScheduler": "microtask"
+      },
+      "fixtureConstructions": 2
+    }
+  ],
+  "singleProgramWorkers": 16,
+  "fixtureConstructions": 18,
+  "sequential": true,
+  "stopOnFirstFailureOrUnreachedPremise": true,
+  "automaticReruns": 0,
+  "resourceIncreases": 0,
+  "limitsPerCell": {
+    "wallMs": 60000,
+    "nodeHeapMiB": 384,
+    "groupRssBytes": 1073741824,
+    "samplingMs": 100
+  },
+  "innerReceivingWallMs": 20000,
+  "omittedGates": {
+    "inline-establish": "every retained ready fixture performs baseline-view and actual initial callback judgment",
+    "facade-establish": "every retained ready fixture performs baseline-view and actual initial callback judgment"
+  },
+  "parameterSemantics": {
+    "keyShift": "identity translation fixed to zero",
+    "rankScale": "positive rank scale fixed10",
+    "nonemptyPrior": "baseline constructor retains prior first two roots independently; explicitly true",
+    "partial": "inactive: baseline window gate explicitly authors limit3",
+    "tie": "false only for exact pivot3 failed-peer/graph cells; true elsewhere",
+    "selectedOutput": "inactive: baseline gate/profile selects target, fixedroot",
+    "answerScheduler": "inactive: baseline driver real held provider release owns scheduling; fixedmicrotask"
+  },
+  "requiredGates": [
+    "corrected own/native source freezes",
+    "exact combined source/dependency freeze",
+    "independent combined source acceptance",
+    "exact constructor-produced program JSON and hashes",
+    "exact singleton launcher recipe JSON and hashes",
+    "root admission before runtime"
+  ],
+  "scope": {
+    "candidateRaw20": "all UNREACHED",
+    "state14": "proposed legal-history clarification; baseline cleanup does not adopt alias",
+    "generalNoActiveOperationNeighbor": "required and UNREACHED",
+    "metadata": "separate owner; raw fields preserved",
+    "productDeadline": "none; wall limits operational containment only"
+  },
+  "containmentLimits": [
+    "spawn to synchronously registered detached-child group handoff interruption",
+    "escaped or unregistered process groups",
+    "PID or PGID reuse"
+  ],
+  "runtime": {
+    "receiving": 0,
+    "generatedHistoryExecution": 0,
+    "campaigns": 0,
+    "productMutants": 0,
+    "testCollection": 0
+  }
+}

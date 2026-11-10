@@ -1,0 +1,132 @@
+{
+  "actualOuterExitCode": 0,
+  "auditKind": "Pinned Python read/hash/JSON and independent captured-event accumulation only",
+  "boundModuleEntries": 815,
+  "bugClassClosureCredit": false,
+  "canonicalImport": false,
+  "dependencyReuseLinksVerified": 4,
+  "evaluatedCuts": {
+    "after-all": 173,
+    "driver-start": 173,
+    "final-publication": 173,
+    "followup-publication": 173,
+    "pre-history": 173
+  },
+  "eventDerivedSnapshotsAndCompletePreviousValuesVerified": true,
+  "inputPins": {
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-source-v3-independent-review.md": "a07ed61feca7172165fb6d2489ce9d255fe160d761464152827f2dd584efd9f2",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-update-receiving-preparation-review-v3.md": "83c10d9fc61522dcd2f2b19bffb63711daffe241fcd0ccb835dd05fc1860866e",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-actual-v2/raw-manifest.json": "091d5b2cec5155f52003ee629758b2ce69e0bd20a6f56ea15eda012d15432803",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-actual-v3/observation-summary.json": "283af678c3c3e7794c98aeeeb6214cd42f682e97ecd3c8c4745b8c9b50aabce5",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-actual-v3/raw-manifest.json": "88c113659f9d77281e93ba9afd3ecb64fdcfea2d2a164f95b2a9399825f33e70",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-inner-identity-v3.json": "b49833c28182869cbc45a522a0187ebfddefa805841cf8b1ab669efb4142a511",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/binding.json": "710cea233b1d57bdf9aeda39ea6fcadc317bfa0dd8d482776af30c6d07c02470",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/first-command.json": "0202923c2af3b89485d744ce789293a522cc1efd2412df4a78a1f42accda5a51",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/packet-manifest.json": "b541cc7f75830a6d9bb12eb8f174a792c31b532b53912f18f8584c111160bd43",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-preparation-v3/root-receiving-admission-v3.json": "0825d82d96afde7e2edd60cf2f86b8a2225e78a1831840ac49236742382f53ce",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-prerun-recheck-v3.json": "a09d61b56e5ea031bd114e2b70b8dbe7f66fbffd70eb0f986bdd58cccb23cb4e",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-result-freeze-v2.json": "e490825ed92a6fa97891d2ab8b0414f65691bc06c214573e7ed119e9d236d9eb",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-result-freeze-v3.json": "19e653540452eaa9df8230f32e7a4de68238a2a059ef26ab180ed9005218fc66",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-root-absence-v3.json": "fd532e5cb52729324ebad7bca6e6e0f019cf4b7ddd68d58fd061eec8630ef1ed",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-root-outer-return-v3.json": "5ebdce936a22d8b9d6aac97689a78bed6921caccc8ea1b3572f1bce2ba16f1a8",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-receiving-source-recheck-v3.json": "7dadb00fe2fd3e5ffd749534dc48ccb904d34707ae7e5f329bd2b7e59d6e01e0",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v2/source-freeze.json": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/packet-manifest.json": "e7574c41407e9e5b7fecfa181abc7f22b7ed4e2dcc48a7ab19860180a49bc00a",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-freeze.json": "d651df85eb08ff46d8e68bd01b6fcc644f18a6a8efbb4b52ef557af0fd6a2fcd",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-update-source-v3/source-inventory.json": "3c8ece36701d450758587bd16dbf691b5e700668bc0be32ae2f20af8bc8bfb84"
+  },
+  "limits": [
+    "No native replay or TypeScript checker execution in this audit",
+    "Child startup V8/evaluated binding does not prove parent checker compiled bytes or invocation",
+    "Original target group convention lacks persisted initial actual getpgid",
+    "Stable output metadata and direct eager source-sync receiver only",
+    "No strict conflicting-cache progress, generated campaign, changing metadata, fetched marker transition, or production-mutant credit",
+    "Own payload maps for nine named packages are not complete transitive host/native/dist equivalence"
+  ],
+  "metadataFinishAndReachAssertionEvidence": "Bound source order plus exact selected fixed-test pass, under existing source-to-parent invocation assumption. No separate finalizer or reach-assert runtime receipt.",
+  "metadataReachCountersObserved": 31,
+  "namedDependencyOwnPayloadsRehashed": 2544,
+  "nativeLaunches": 0,
+  "newRuntimeAdmitted": false,
+  "priorFailedV2RawMembersPreserved": {
+    "inner": {
+      "bytes": 31372571,
+      "files": 1948,
+      "originalAndPreservedExact": true
+    },
+    "outer": {
+      "bytes": 15840,
+      "files": 3,
+      "originalAndPreservedExact": true
+    }
+  },
+  "processProbes": 0,
+  "productRedGreenCredit": false,
+  "productionFilesRehashed": 511,
+  "publishing": false,
+  "rawMembers": {
+    "inner": {
+      "bytes": 31374418,
+      "files": 1948,
+      "originalAndPreservedExact": true
+    },
+    "outer": {
+      "bytes": 13685,
+      "files": 3,
+      "originalAndPreservedExact": true
+    }
+  },
+  "rawReceipts": 206,
+  "receiptPhaseCounts": {
+    "acquisition-accepted": 12,
+    "acquisition-attempt": 12,
+    "acquisition-release": 8,
+    "actual-key-prefix": 97,
+    "answer-executed": 1,
+    "answer-queued": 1,
+    "cache-success": 8,
+    "cleanup-start": 1,
+    "downstream-change": 4,
+    "final-publication": 1,
+    "followup-acquisition-settled": 1,
+    "followup-publication": 1,
+    "followup-settled": 1,
+    "followup-source-accepted": 1,
+    "followup-source-applied": 1,
+    "followup-start": 1,
+    "initial-publication": 1,
+    "metadata-identities": 1,
+    "provider-answer": 8,
+    "provider-request": 8,
+    "public-change": 4,
+    "query-key-callback": 23,
+    "release-scope": 2,
+    "reload-settled": 1,
+    "reload-start": 1,
+    "retained-publication": 1,
+    "source-establishing-receipt": 1,
+    "source-stack": 2,
+    "worker-cleaned": 1,
+    "worker-start": 1
+  },
+  "receivingChildExitCode": 0,
+  "receivingGreenQualification": "Exact scope/default positive-quarter2 fixed stable-metadata source-update case only; root classification remains required.",
+  "retainedFollowupBoundaries": [
+    [
+      162,
+      "followup-start"
+    ],
+    [
+      185,
+      "followup-publication"
+    ]
+  ],
+  "retainedOutcomeReceipts": 23,
+  "scriptSha256": "f2912d163bd1dbd914d6e27a967934747bc8421628d5bf12d6c96c33be3b7897",
+  "selectedTestsPassed": 1,
+  "skippedTests": 19,
+  "sourceEdits": 0,
+  "sourceFilesRehashed": 589,
+  "startupSealedModules": 163,
+  "status": "QUALIFIED ACTUAL OUTER0 / CHILD0; EXACT FIXED RECEIVING CASE PASSED"
+}

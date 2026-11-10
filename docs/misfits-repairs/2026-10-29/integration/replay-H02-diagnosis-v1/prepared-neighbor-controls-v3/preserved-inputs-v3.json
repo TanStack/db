@@ -1,0 +1,51 @@
+{
+  "archives": {
+    "prepared-current-main-v7": {
+      "manifest": "packet-sha256-v7.json",
+      "manifestSha256": "f739646c1211f30b4ec24d7b335d76a3b6e1d023f3c7d2e91212306adef6ab5e",
+      "members": 62,
+      "bytes": 707085,
+      "allMembersRehashed": true
+    },
+    "canonical-current-main-v7": {
+      "manifest": "packet-sha256-v1.json",
+      "manifestSha256": "07bed49a20359747a5071bb14a4dbfdc1b4a9e9ebbd9e18760533f28b8389b49",
+      "members": 1951,
+      "bytes": 43192185,
+      "allMembersRehashed": true
+    },
+    "prepared-neighbor-controls-v2": {
+      "manifest": "packet-sha256-v2.json",
+      "manifestSha256": "189e8351e30c258348f9aefd20ea983ae339b04b572cc6e02519927dae70c133",
+      "members": 89,
+      "bytes": 1089389,
+      "allMembersRehashed": true
+    },
+    "neighbor-ownership-current-main-v2": {
+      "manifest": "packet-sha256-v1.json",
+      "manifestSha256": "122db9bbfa850093ba7271af583c5abbc34fa92d74c1f66263c059996c6b4b99",
+      "members": 17,
+      "bytes": 409843,
+      "allMembersRehashed": true
+    },
+    "neighbor-nonempty-scope-current-main-v2": {
+      "manifest": "packet-sha256-v1.json",
+      "manifestSha256": "fc70002f94b48af89f21438155334074453a6ad403af82e7ada9b1c1b673131a",
+      "members": 7,
+      "bytes": 404200,
+      "allMembersRehashed": true
+    }
+  },
+  "productionIdentity": "39dc1e0516c3ae10ecad9be17befcad1616209572ddd054cddc6823c49459451",
+  "productionFiles": 511,
+  "sharedJudgment": {
+    "path": "packages/db/tests/query/load-subset-retained-publication-oracle.ts",
+    "sha256": "37d8b6e6e6243e86ff1cdc85cf4583c37fe91ba3673be7757bfda90d07c7f81c",
+    "source": "immutable latest-main-standalone-v1 candidate-source snapshot; imported unchanged"
+  },
+  "ownerModelAndGrammarIdentities": {
+    "modelReacquisition": "0ce8bca5de51872277fe55aa0882b0847a879d46215262cd508e25f0f0185d4d",
+    "reacquisitionHistories": "a5057147b67add7132825d7dae83ecb0fa70acff13ba4677f71fa53dbc7c8111"
+  },
+  "modelAndGrammarAndScheduleAndBudgetsUnchanged": true
+}

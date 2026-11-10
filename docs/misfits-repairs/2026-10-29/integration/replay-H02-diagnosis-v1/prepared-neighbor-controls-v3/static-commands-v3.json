@@ -1,0 +1,130 @@
+[
+  {
+    "name": "format-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--write",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 305.758708,
+    "timeoutMs": 55000,
+    "log": "format-v3.log"
+  },
+  {
+    "name": "pure-ownership-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=384",
+      "--test",
+      "scripts/h02-progress/ownership-parent.test.mjs"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 128.85791600000005,
+    "timeoutMs": 55000,
+    "log": "pure-ownership-v3.log"
+  },
+  {
+    "name": "pure-candidate-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 526.378708,
+    "timeoutMs": 55000,
+    "log": "pure-candidate-v3.log"
+  },
+  {
+    "name": "typescript-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/typescript/bin/tsc",
+      "--project",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/prepared-neighbor-controls-v3/static-tsconfig-v3.json"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 2025.3537500000002,
+    "timeoutMs": 55000,
+    "log": "typescript-v3.log"
+  },
+  {
+    "name": "eslint-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=1536",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/eslint/bin/eslint.js",
+      "--config",
+      "scripts/h02-progress/eslint.config.mjs",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 4127.843291000001,
+    "timeoutMs": 55000,
+    "log": "eslint-v3.log"
+  },
+  {
+    "name": "lint-changed-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=1536",
+      "scripts/agent-lint-feedback.mjs"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 13805.924332999999,
+    "timeoutMs": 55000,
+    "log": "lint-changed-v3.log"
+  },
+  {
+    "name": "prettier-v3",
+    "executable": "/Users/kyle.mathews/.n/bin/node",
+    "args": [
+      "--max-old-space-size=384",
+      "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/prettier/bin/prettier.cjs",
+      "--check",
+      "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "scripts/h02-progress/ownership-neighbor.config.ts",
+      "scripts/h02-progress/ownership-parent.mjs",
+      "scripts/h02-progress/ownership-parent.test.mjs",
+      "scripts/h02-progress/candidate-controls.ts",
+      "scripts/h02-progress/candidate-controls.test.ts",
+      "scripts/h02-progress/candidate-controls.config.ts"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "elapsedMs": 302.302208000001,
+    "timeoutMs": 55000,
+    "log": "prettier-v3.log"
+  }
+]

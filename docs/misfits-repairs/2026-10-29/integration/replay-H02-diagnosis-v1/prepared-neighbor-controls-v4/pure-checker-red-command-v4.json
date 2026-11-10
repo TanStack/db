@@ -1,0 +1,14 @@
+{
+  "args": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "--max-old-space-size=384",
+    "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "scripts/h02-progress/calibration.config.ts"
+  ],
+  "exitCode": 1,
+  "elapsedSeconds": 0.35543429100653157,
+  "unchangedJudgmentSourceFreeze": "prepared-neighbor-controls-v3/source-freeze-v3.json",
+  "classification": "pure checker calibration RED only; no DB runtime"
+}

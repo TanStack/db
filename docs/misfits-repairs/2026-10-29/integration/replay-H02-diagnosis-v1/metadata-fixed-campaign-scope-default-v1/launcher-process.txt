@@ -1,0 +1,1 @@
+62130 62130   2464 /bin/zsh /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-fixed-campaign-preparation-v1/launcher-scope-default-fixed.zsh 26be3cc8983e93699c523f374990043ba077433f7103e3078cda98c6fe7aabe1

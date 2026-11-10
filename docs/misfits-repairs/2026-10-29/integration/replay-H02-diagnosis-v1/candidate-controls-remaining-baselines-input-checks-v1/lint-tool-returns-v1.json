@@ -1,0 +1,23 @@
+{
+  "command": "/Users/kyle.mathews/.n/bin/node --import=/tmp/misfits-lint-git-buffer-v1.mjs scripts/agent-lint-feedback.mjs",
+  "worktree": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+  "initial": {
+    "chunk_id": "a903f3",
+    "wall_time_seconds": 1.00285025,
+    "session_id": 39275,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "completion": {
+    "chunk_id": "2f38d0",
+    "wall_time_seconds": 0.00001775,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "authorization": "Root granted one final report-only direct changed-lint run in slot 2",
+  "script": "Exact lint:changed package-script body; pnpm wrapper avoided because its earlier automatic install attempt aborted",
+  "shim": "Existing inspected root shim changes only git output capture maxBuffer to 8 MiB; no lint scope/rule/budget or runtime limit changes",
+  "slot2": "returned after actual exit",
+  "runtimeAdmission": false
+}

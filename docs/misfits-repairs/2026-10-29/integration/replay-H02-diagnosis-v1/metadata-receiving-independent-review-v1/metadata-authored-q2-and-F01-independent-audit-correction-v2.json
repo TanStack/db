@@ -1,0 +1,12 @@
+{
+  "kind": "Independent static-audit false-positive preservation",
+  "originalAudit": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/metadata-receiving-independent-review-v1/metadata-authored-q2-and-F01-independent-audit-v1.json",
+    "sha256": "161cf345837e7279ef55a93da163157ba7059fef73d27dd6d8566db251b10f87"
+  },
+  "initialFailure": "The valid exact literal selector was compared byte-for-byte to Python re.escape output, which additionally escapes hyphens/spaces. Exact reviewed recipe equality, unique preserved name selection and suffix rejection already passed.",
+  "correction": "Additive v2 audit checks anchors directly, retaining exact reviewed recipe equality and unique preserved name/suffix checks; original source and audit remain unchanged.",
+  "subjectPacketOrSourceEdits": 0,
+  "subjectGateExecuted": false,
+  "nativeRuns": 0
+}

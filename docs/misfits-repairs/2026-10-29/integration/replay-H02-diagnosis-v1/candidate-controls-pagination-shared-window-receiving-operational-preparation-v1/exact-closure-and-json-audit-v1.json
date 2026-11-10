@@ -1,0 +1,74 @@
+{
+  "scope": "same finite installed metadata closure and own-payload-set algorithm as the frozen N launcher; no imports or module/discovery execution",
+  "algorithmSource": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-2gib-shared-receiving-containment-v1/launch.py",
+    "sha256": "c0d06cba44016995d26517e0461a1c6acdbcdc9354ec973cf3a67199750702a0",
+    "functions": "payload_names and verify_inputs dependency loops copied as filesystem judgments only"
+  },
+  "uniquePackageRoots": 255,
+  "uniqueOwnRegularPayloadFiles": 11974,
+  "ownPayloadSetsExact": true,
+  "expectedPayloadHashesMatched": true,
+  "declaredResolutionEdgesUnchanged": 405,
+  "previouslyAbsentOptionalOrPeerStillAbsent": 112,
+  "strictJsonDuplicateAndNonfiniteCheck": true,
+  "jsonInputs": [
+    {
+      "path": "source-freeze-receiving-v1.json",
+      "sha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b"
+    },
+    {
+      "path": "launch-path-readiness-v1.json",
+      "sha256": "e86b3654ecc798ebe973a857022352565f3ab1138b1d53b3db9fef6be590f95f"
+    },
+    {
+      "path": "source-and-tool-audit-v1.json",
+      "sha256": "b789ee836db8949d0b55fa525cdb78d5745b76e531bdea4087dcc09623d31372"
+    },
+    {
+      "path": "registration-and-config-bindings-v1.json",
+      "sha256": "34607c5c280f83525b0c7093e8fa32045a5bd1333fa2992f7af94630a1e308c7"
+    },
+    {
+      "path": "proposed-exact-success-command-v1.json",
+      "sha256": "396b3275cda03ba028c92327639ae37d68b34ed6547768434e02a3bcbfface27"
+    },
+    {
+      "path": "proposed-exact-failure-first-command-v1.json",
+      "sha256": "577a6f9f50e96cb286c51fa636b01c5c0e38e2b3404db57972491bd17d652817"
+    },
+    {
+      "path": "seal-helper-v1-failure-v1.json",
+      "sha256": "18bc487dc95f8a48cb74e07925e4d2d9c68ea765646b6965a3f2f10a96a836e1"
+    },
+    {
+      "path": "static-syntax-audit-v1.json",
+      "sha256": "ce5d3dca716a36b1848449ab0203cfcd88ef1a6fd07eee2779b3c985c69b2795"
+    },
+    {
+      "path": "proposed-adaptation-v1.json",
+      "sha256": "d01433dcc29672a04ed137737d7a9fe7df5abff0bc82db073fa4ea978e9e2cef"
+    },
+    {
+      "path": "frozen-inputs-v1/programs/inline-window-failure-first.json",
+      "sha256": "5d1e6034d496af0241ce3f6ab79d90f9a7ba57db903b27849594411243971937"
+    },
+    {
+      "path": "frozen-inputs-v1/programs/inline-window-success.json",
+      "sha256": "fc2e2e733a5877bc4100fc3dc7c0ea7a58c0a45a7918b1c22c9f7fab4babfb4f"
+    },
+    {
+      "path": "frozen-inputs-v1/recipes/inline-window-failure-first.json",
+      "sha256": "290ec57b7533b5ea59a466c5896fb758a864132e61c2b6a16dd3078fc1512f86"
+    },
+    {
+      "path": "frozen-inputs-v1/recipes/inline-window-success.json",
+      "sha256": "abc901dc7bc376988a463d44d42f9c3d851370abe3fdfdfa9b17140bdeeeafd0"
+    }
+  ],
+  "operationalFreezeSha256": "3cb1efc602cac751233bdb51d240d0022acf13397b4844893b05d5e032c4228b",
+  "runtime": 0,
+  "imports": 0,
+  "testDiscovery": 0,
+  "nativeProbes": 0
+}

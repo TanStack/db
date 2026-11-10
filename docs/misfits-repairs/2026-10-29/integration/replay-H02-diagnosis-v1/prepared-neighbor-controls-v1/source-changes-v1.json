@@ -1,0 +1,35 @@
+{
+  "status": "PREPARED OVERLAY ONLY; not applied to live worktree; no receiving invocation",
+  "baseHead": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "changes": [
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-driver.ts",
+      "kind": "instrument-only overlay",
+      "beforeSha256": "e91715a74c2b8e9ff5126b054da9ba2f5d0128e4dc373ed2c459410e463ff006",
+      "proposedSha256": "5fed4d3529f31b8dc5c815171791d66452b9695682250ead29c99401c877be47"
+    },
+    {
+      "path": "packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts",
+      "kind": "instrument-only overlay",
+      "beforeSha256": "e691c2f8ae98bc1c703149807e0d340b9ee4e4bc27017a7aa3d492df339a8a0c",
+      "proposedSha256": "accd61997722ca6a033c724a4633fef7bf0515d0661cee9eafd9e71193c5cc3b"
+    },
+    {
+      "path": "packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts",
+      "kind": "new receiving support",
+      "beforeSha256": null,
+      "proposedSha256": "19b6ae40f7056c8773f1f16753463047ccdd340888f37fa6e723928b0db126dc"
+    },
+    {
+      "path": "scripts/h02-progress/ownership-neighbor.config.ts",
+      "kind": "new receiving support",
+      "beforeSha256": null,
+      "proposedSha256": "78bc70bb394a240181aa680b759d73c760aa973157ee5c6d9e3ee0780b7cc655"
+    }
+  ],
+  "productionChanges": 0,
+  "modelChanges": 0,
+  "grammarChanges": 0,
+  "budgetChanges": 0,
+  "consumedV7SourcesUntouched": true
+}

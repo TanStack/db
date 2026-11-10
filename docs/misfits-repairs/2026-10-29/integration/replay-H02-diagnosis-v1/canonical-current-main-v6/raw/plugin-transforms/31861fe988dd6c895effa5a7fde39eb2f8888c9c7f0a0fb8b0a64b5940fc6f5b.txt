@@ -1,0 +1,562 @@
+import {
+  EmptyReferencePathError,
+  UnknownExpressionTypeError,
+  UnknownFunctionError
+} from "../../errors.js";
+import {
+  areValuesEqual,
+  compareValues,
+  isUint8Array,
+  isUnorderable,
+  normalizeValue
+} from "../../utils/comparison.js";
+import { getPropRefPropertyPath, getPropRefSourceAlias } from "../ir.js";
+import { codedMessage, devBuild } from "../../error-message.js";
+import {
+  PARENT_PROJECTION_NOT_FOUND,
+  getParentContextProjectedValue
+} from "../equality-value-identity.js";
+import { getNamespacedRouteMetadata } from "./route-metadata.js";
+function isUnknown(value) {
+  return value === null || value === void 0;
+}
+function normalizeEqualityOperand(value) {
+  return isUint8Array(value) ? value : normalizeValue(value);
+}
+function valuesEqual(a, b) {
+  if (isUnorderable(a) || isUnorderable(b)) {
+    return isUnorderable(a) && isUnorderable(b);
+  }
+  return areValuesEqual(a, b);
+}
+function toDateValue(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === `string` || typeof value === `number`) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+function evaluateStrftime(format, date) {
+  if (format === `%Y-%m-%d`) {
+    return date.toISOString().slice(0, 10);
+  }
+  if (format === `%Y-%m-%dT%H:%M:%fZ`) {
+    return date.toISOString();
+  }
+  return date.toISOString();
+}
+export function toBooleanPredicate(result) {
+  return result === true;
+}
+export function compileExpression(expr, isSingleRow = false) {
+  const compiledFn = compileExpressionInternal(expr, isSingleRow);
+  return compiledFn;
+}
+export function compileSingleRowExpression(expr) {
+  const compiledFn = compileExpressionInternal(expr, true);
+  return compiledFn;
+}
+function compileExpressionInternal(expr, isSingleRow) {
+  switch (expr.type) {
+    case `val`: {
+      const value = expr.value;
+      return () => value;
+    }
+    case `ref`: {
+      return isSingleRow ? compileSingleRowRef(expr) : compileRef(expr);
+    }
+    case `func`: {
+      return compileFunction(expr, isSingleRow);
+    }
+    default:
+      throw new UnknownExpressionTypeError(expr.type);
+  }
+}
+function compileRef(ref) {
+  const explicitAlias = getPropRefSourceAlias(ref);
+  const [legacyNamespace, ...legacyPropertyPath] = ref.path;
+  const namespace = explicitAlias ?? legacyNamespace;
+  const propertyPath = explicitAlias === void 0 ? legacyPropertyPath : getPropRefPropertyPath(ref);
+  if (!namespace) {
+    throw new EmptyReferencePathError();
+  }
+  const projectedBindingKey = ref.bindingId ? JSON.stringify([ref.bindingId, propertyPath]) : void 0;
+  const projectedParentValue = projectedBindingKey ? (row) => getParentContextProjectedValue(
+    getNamespacedRouteMetadata(row, namespace)?.parentContext,
+    projectedBindingKey
+  ) : void 0;
+  if (namespace === `$selected`) {
+    if (propertyPath.length === 0) {
+      return (namespacedRow) => namespacedRow.$selected;
+    } else if (propertyPath.length === 1) {
+      const prop = propertyPath[0];
+      return (namespacedRow) => {
+        const selectResults = namespacedRow.$selected;
+        return selectResults?.[prop];
+      };
+    } else {
+      return (namespacedRow) => {
+        const selectResults = namespacedRow.$selected;
+        if (selectResults === void 0) {
+          return void 0;
+        }
+        let value = selectResults;
+        for (const prop of propertyPath) {
+          if (value == null) {
+            return value;
+          }
+          value = value[prop];
+        }
+        return value;
+      };
+    }
+  }
+  const tableAlias = namespace;
+  if (propertyPath.length === 0) {
+    return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow);
+      return projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND ? projected : namespacedRow[tableAlias];
+    };
+  } else if (propertyPath.length === 1) {
+    const prop = propertyPath[0];
+    return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow);
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected;
+      const tableData = namespacedRow[tableAlias];
+      return tableData?.[prop];
+    };
+  } else {
+    return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow);
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected;
+      const tableData = namespacedRow[tableAlias];
+      if (tableData === void 0) {
+        return void 0;
+      }
+      let value = tableData;
+      for (const prop of propertyPath) {
+        if (value == null) {
+          return value;
+        }
+        value = value[prop];
+      }
+      return value;
+    };
+  }
+}
+function compileSingleRowRef(ref) {
+  const propertyPath = getPropRefPropertyPath(ref);
+  return (item) => {
+    let value = item;
+    for (const prop of propertyPath) {
+      if (value == null) {
+        return value;
+      }
+      value = value[prop];
+    }
+    return value;
+  };
+}
+function compileFunction(func, isSingleRow) {
+  const compiledArgs = func.args.map(
+    (arg) => compileExpressionInternal(arg, isSingleRow)
+  );
+  switch (func.name) {
+    case `array`:
+      return (data) => compiledArgs.map((evaluate) => evaluate(data));
+    // Comparison operators
+    case `eq`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const rawA = argA(data);
+        const rawB = argB(data);
+        const typeA = typeof rawA;
+        if (typeA === typeof rawB && (typeA === `string` || typeA === `boolean`)) {
+          return rawA === rawB;
+        }
+        const a = normalizeEqualityOperand(rawA);
+        const b = normalizeEqualityOperand(rawB);
+        if (isUnknown(a) || isUnknown(b)) {
+          return null;
+        }
+        return valuesEqual(a, b);
+      };
+    }
+    case `gt`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        if (isUnknown(a) || isUnknown(b)) {
+          return null;
+        }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(a) && !isUnorderable(b);
+        }
+        return compareValues(a, b) > 0;
+      };
+    }
+    case `gte`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        if (isUnknown(a) || isUnknown(b)) {
+          return null;
+        }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(a);
+        }
+        return compareValues(a, b) >= 0;
+      };
+    }
+    case `lt`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        if (isUnknown(a) || isUnknown(b)) {
+          return null;
+        }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(b) && !isUnorderable(a);
+        }
+        return compareValues(a, b) < 0;
+      };
+    }
+    case `lte`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        if (isUnknown(a) || isUnknown(b)) {
+          return null;
+        }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(b);
+        }
+        return compareValues(a, b) <= 0;
+      };
+    }
+    // Boolean operators
+    case `and`:
+      return (data) => {
+        let hasUnknown = false;
+        for (const compiledArg of compiledArgs) {
+          const result = compiledArg(data);
+          if (result === false) {
+            return false;
+          }
+          if (isUnknown(result)) {
+            hasUnknown = true;
+          }
+        }
+        if (hasUnknown) {
+          return null;
+        }
+        return true;
+      };
+    case `or`:
+      return (data) => {
+        let hasUnknown = false;
+        for (const compiledArg of compiledArgs) {
+          const result = compiledArg(data);
+          if (result === true) {
+            return true;
+          }
+          if (isUnknown(result)) {
+            hasUnknown = true;
+          }
+        }
+        if (hasUnknown) {
+          return null;
+        }
+        return false;
+      };
+    case `not`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const result = arg(data);
+        if (isUnknown(result)) {
+          return null;
+        }
+        return !result;
+      };
+    }
+    // Array operators
+    case `in`: {
+      const valueEvaluator = compiledArgs[0];
+      const arrayEvaluator = compiledArgs[1];
+      const list = func.args[1];
+      if (list.type === `val` && Array.isArray(list.value)) {
+        const items = list.value.filter((item) => !isUnknown(item));
+        const bytes = items.filter(isUint8Array);
+        const keys = new Set(
+          items.filter((item) => !isUint8Array(item)).map(normalizeValue)
+        );
+        return (data) => {
+          const value = valueEvaluator(data);
+          if (isUnknown(value)) return null;
+          return isUint8Array(value) ? bytes.some((item) => areValuesEqual(item, value)) : keys.has(normalizeValue(value));
+        };
+      }
+      return (data) => {
+        const value = normalizeEqualityOperand(valueEvaluator(data));
+        const array = arrayEvaluator(data);
+        if (isUnknown(value)) {
+          return null;
+        }
+        if (!Array.isArray(array)) {
+          return false;
+        }
+        return array.some(
+          (item) => valuesEqual(normalizeEqualityOperand(item), value)
+        );
+      };
+    }
+    // String operators
+    case `like`: {
+      const valueEvaluator = compiledArgs[0];
+      const patternEvaluator = compiledArgs[1];
+      return (data) => {
+        const value = valueEvaluator(data);
+        const pattern = patternEvaluator(data);
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null;
+        }
+        return evaluateLike(value, pattern, false);
+      };
+    }
+    case `ilike`: {
+      const valueEvaluator = compiledArgs[0];
+      const patternEvaluator = compiledArgs[1];
+      return (data) => {
+        const value = valueEvaluator(data);
+        const pattern = patternEvaluator(data);
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null;
+        }
+        return evaluateLike(value, pattern, true);
+      };
+    }
+    // String functions
+    case `upper`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        return typeof value === `string` ? value.toUpperCase() : value;
+      };
+    }
+    case `lower`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        return typeof value === `string` ? value.toLowerCase() : value;
+      };
+    }
+    case `length`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        if (typeof value === `string`) {
+          return value.length;
+        }
+        if (Array.isArray(value)) {
+          return value.length;
+        }
+        return 0;
+      };
+    }
+    case `concat`:
+      return (data) => {
+        return compiledArgs.map((evaluator) => {
+          const arg = evaluator(data);
+          try {
+            return String(arg ?? ``);
+          } catch {
+            try {
+              return JSON.stringify(arg) || ``;
+            } catch {
+              return `[object]`;
+            }
+          }
+        }).join(``);
+      };
+    case `coalesce`:
+      return (data) => {
+        for (const evaluator of compiledArgs) {
+          const value = evaluator(data);
+          if (value !== null && value !== void 0) {
+            return value;
+          }
+        }
+        return null;
+      };
+    case `caseWhen`: {
+      const hasDefaultValue = compiledArgs.length % 2 === 1;
+      const pairCount = Math.floor(compiledArgs.length / 2);
+      if (compiledArgs.length < 2) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() requires at least two arguments` : codedMessage(127)
+        );
+      }
+      return (data) => {
+        for (let i = 0; i < pairCount; i++) {
+          const condition = compiledArgs[i * 2];
+          if (isCaseWhenConditionTrue(condition(data))) {
+            const value = compiledArgs[i * 2 + 1];
+            return value(data);
+          }
+        }
+        if (hasDefaultValue) {
+          return compiledArgs[compiledArgs.length - 1](data);
+        }
+        return null;
+      };
+    }
+    // Math functions
+    case `add`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        return (a ?? 0) + (b ?? 0);
+      };
+    }
+    case `subtract`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        return (a ?? 0) - (b ?? 0);
+      };
+    }
+    case `multiply`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        return (a ?? 0) * (b ?? 0);
+      };
+    }
+    case `divide`: {
+      const argA = compiledArgs[0];
+      const argB = compiledArgs[1];
+      return (data) => {
+        const a = argA(data);
+        const b = argB(data);
+        const divisor = b ?? 0;
+        return divisor !== 0 ? (a ?? 0) / divisor : null;
+      };
+    }
+    case `date`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        const dateValue = toDateValue(value);
+        return dateValue ? dateValue.toISOString().slice(0, 10) : null;
+      };
+    }
+    case `datetime`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        const dateValue = toDateValue(value);
+        return dateValue ? dateValue.toISOString() : null;
+      };
+    }
+    case `strftime`: {
+      const formatArg = compiledArgs[0];
+      const sourceArg = compiledArgs[1];
+      return (data) => {
+        const format = formatArg(data);
+        if (typeof format !== `string`) {
+          return null;
+        }
+        const sourceValue = sourceArg(data);
+        const dateValue = toDateValue(sourceValue);
+        if (!dateValue) {
+          return null;
+        }
+        return evaluateStrftime(format, dateValue);
+      };
+    }
+    // Null/undefined checking functions
+    case `isUndefined`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        return value === void 0;
+      };
+    }
+    case `isNull`: {
+      const arg = compiledArgs[0];
+      return (data) => {
+        const value = arg(data);
+        return value === null;
+      };
+    }
+    default:
+      throw new UnknownFunctionError(func.name);
+  }
+}
+export function isCaseWhenConditionTrue(value) {
+  if (value == null || value === false) {
+    return false;
+  }
+  if (value === true) {
+    return true;
+  }
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value);
+  }
+  if (typeof value === `bigint`) {
+    return value !== 0n;
+  }
+  return Boolean(value);
+}
+function evaluateLike(value, pattern, caseInsensitive) {
+  if (typeof value !== `string` || typeof pattern !== `string`) {
+    return false;
+  }
+  const searchValue = caseInsensitive ? value.toLowerCase() : value;
+  const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern;
+  let valueIndex = 0;
+  let patternIndex = 0;
+  let starPatternIndex = -1;
+  let starValueIndex = 0;
+  while (valueIndex < searchValue.length) {
+    const patternChar = patternIndex < searchPattern.length ? searchPattern[patternIndex] : void 0;
+    if (patternChar === `%`) {
+      starPatternIndex = patternIndex;
+      starValueIndex = valueIndex;
+      patternIndex++;
+    } else if (patternChar === `_` || patternChar === searchValue[valueIndex]) {
+      valueIndex++;
+      patternIndex++;
+    } else if (starPatternIndex !== -1) {
+      starValueIndex++;
+      valueIndex = starValueIndex;
+      patternIndex = starPatternIndex + 1;
+    } else {
+      return false;
+    }
+  }
+  while (searchPattern[patternIndex] === `%`) {
+    patternIndex++;
+  }
+  return patternIndex === searchPattern.length;
+}

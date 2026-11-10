@@ -1,0 +1,1 @@
+export const LIVE_QUERY_INTERNAL = /* @__PURE__ */ Symbol(`liveQueryInternal`);

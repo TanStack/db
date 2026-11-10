@@ -1,0 +1,16 @@
+{
+  "kind": "mandatory prerequisite for any remaining cell",
+  "firstBaselineId": "inline-park-root",
+  "firstResultFreeze": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-inline-park-root-successor-v1/inline-park-root-result-freeze-v1.json",
+  "firstResultFreezeSha256": "0780b64244c8ee668e5187aa65e4f762d501be12e54405cee216f993e04d6b50",
+  "classificationStatusAtPreparation": "root reported outer/child pass; independent actual-result review and root classification pending",
+  "independentActualReviewRequired": true,
+  "explicitRootFirstBaselineClassificationRequired": true,
+  "classificationArtifactMustBindExactFirstResultFreeze": true,
+  "newBatchAdmissionMustPinClassificationPathAndSha256": true,
+  "remainingInputsIndependentStaticReviewRequired": true,
+  "separateRootRuntimeBatchAdmissionRequired": true,
+  "unresolvedPrerequisiteBlocksEveryCell": true,
+  "rootOwnsClassificationAndRuntimeAdmission": true,
+  "runtimeAdmission": false
+}

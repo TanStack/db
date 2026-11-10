@@ -1,0 +1,56 @@
+{
+  "status": "pre-freeze source challenge only; no successor acceptance",
+  "liveSourcesReviewed": {
+    "packages/query-db-collection/tests/queued-answer-completion-baseline-history-oracle.ts": "1efc1aa4365e7217e1f05cc7277db5ad0c2f156cdc840a1e57c8f7931f04dfb8",
+    "packages/query-db-collection/tests/queued-answer-completion-oracle.ts": "6130dc6fac5144d32ac1d2f7e9d39a89b8cbe895a1c8ab864327ffdd19f3ceec"
+  },
+  "comparisonBaseFreezeSha256": "1f3d40799d7d0eba6b6c9755bcbde3c1c581ab8a858c5e1aa9a6bbdb6a0d7de2",
+  "review": [
+    "Read exact two-file live diff against frozen combined v1; did not run grammar or controls.",
+    "No selected baseline recipe interval found to require two distinct lawful payload snapshots under its stated holds and acquisition barriers.",
+    "Root optimistic hold parks accepted root output; facade hold covers selected child Collection; subscriber-tail is one authored source write; window/initial fixed-point barrier requires completed window once.",
+    "Forward and restoration queued behind same optimistic hold must publish with its drop; failed flush must emit no intermediate facade event.",
+    "Callable checkpoint compares retained event replicas with authored epoch end, so missing changed/nonempty initialization streams fail even with zero callbacks.",
+    "Each epoch expectation is computed solely from independently authored semantic inputs before physical interval, while applied-outcome model still needs exact physical settlement."
+  ],
+  "authorities": [
+    {
+      "path": "packages/db/src/query/live/ARCHITECTURE.md",
+      "lines": [
+        1366,
+        1390
+      ],
+      "law": "initial/window fixed-point atomic publication once"
+    },
+    {
+      "path": "packages/db/src/query/live/ARCHITECTURE.md",
+      "lines": [
+        1704,
+        1733
+      ],
+      "law": "optimistic drop shares accepted sync publication; failed flush is atomic"
+    },
+    {
+      "path": "packages/db/tests/optimistic-history-oracle.ts",
+      "lines": [
+        24,
+        47
+      ],
+      "law": "accepted queued sync visibility with optimistic drop"
+    }
+  ],
+  "pendingImplementationChecks": [
+    "Arm epoch before physical entry and compare at actual callback capture.",
+    "Private adapter callback and actual publicly exposed facade subscriber are separate lanes; exact object/bucket exposure must precede includeInitialState subscription.",
+    "One persistent public subscription per actual exposed handle; initialization/reset must not seed away a required event.",
+    "Main outcome actions remain post exact receipt/checkpoint; no future model state supplies applied evidence.",
+    "Positive worker cleanup and private invocation snapshots still required."
+  ],
+  "limits": [
+    "No frozen v3 packet reviewed.",
+    "No receiving, generated histories, grammar execution, test collection, production imports or runtime checks.",
+    "Replica checkpoints sort keyed rows; without a callback they alone do not prove layout-only ordering notification. Existing per-callback rows comparisons judge ordering when callbacks arrive.",
+    "Current baseline recipes have no declared layout-only omission closure.",
+    "All candidate twenty states remain UNREACHED; primary no-active-operation real-helper neighbor stays separate."
+  ]
+}

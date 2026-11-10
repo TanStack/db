@@ -1,0 +1,29 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-fixture.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-fixture.ts
+@@ -506,6 +506,10 @@
+           rows: row.children.toArray.map((child) => ({ ...child })),
+         },
+   })
++  const readWindow = () => {
++    const window = live.utils.getWindow()
++    return window && { ...window }
++  }
+   const subscriptions = [
+     live.subscribeChanges((changes) => {
+       // The root's public state now exposes these exact child Collections.
+@@ -522,6 +526,7 @@
+             message.previousValue && rawRoot(message.previousValue),
+         })),
+         read: live.toArray.map(rawRoot),
++        window: readWindow(),
+       })
+       if (publicFailure) {
+         const error = publicFailure.error
+@@ -542,6 +547,7 @@
+             message.previousValue && rawRoot(message.previousValue),
+         })),
+         read: downstream.toArray.map(rawRoot),
++        window: readWindow(),
+       }),
+     ),
+   ]

@@ -1,0 +1,17 @@
+{
+  "scope": "Source-only static preparation audit; candidate/materializer not executed",
+  "initialTool": {
+    "chunk_id": "5b2e6b",
+    "session_id": 44512,
+    "yield_time_ms": 1000,
+    "output": ""
+  },
+  "finalTool": {
+    "chunk_id": "600de7",
+    "exit_code": 0
+  },
+  "staticAuditSha256": "50ec1c7b6d5926ee44da3c899f476977f4b446c3035c63e479513859f22b7470",
+  "all603OriginsFinalComponentsRegular": true,
+  "rootReceiptOutputsStillAbsent": true,
+  "laterArtifactLint": "PENDING ROOT"
+}

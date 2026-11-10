@@ -1,0 +1,63 @@
+{
+  "status": "Observation/assertion instrument failure; no product classification, baseline GREEN or progress RED",
+  "actualSelected": 1,
+  "nativeFailed": 1,
+  "nativeSkipped": 4,
+  "rawReceiptCount": 159,
+  "primaryCause": {
+    "kind": "live observation callback assertion",
+    "diagnostic": "AssertionError: pending answer retains complete publication: expected [ { id: 4, rank: 40, \u2026(5) } ] to deeply equal [ { id: 4, rank: 40, markers: [] } ]\n    at checkReplayPublication (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/db/tests/query/load-subset-retained-publication-oracle.ts:17:25)\n    at checkProgressValue (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts:176:5)\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-oracle.ts:255:5\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-neighbors.test.ts:119:11\n    at /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:246:7\n    at Object.push (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs:171:9)\n    at Object.drain (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/scripts/h02-progress/receipt-transport.mjs:239:19)\n    at Timeout._onTimeout (/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1/packages/query-db-collection/tests/queued-answer-progress-supervisor.ts:283:14)\n    at listOnTimeout (node:internal/timers:635:17)\n    at processTimers (node:internal/timers:571:7)",
+    "lawCheckpoint": "pending answer retains complete publication",
+    "actualNonemptyRowFields": [
+      "id",
+      "rank",
+      "markers",
+      "$hasPendingWrites",
+      "$origin",
+      "$key",
+      "$collectionId"
+    ],
+    "expectedModelRowFields": [
+      "id",
+      "rank",
+      "markers"
+    ],
+    "classification": "Observation representation discrepancy needs independent contract/abstraction diagnosis; do not infer production defect from this assertion."
+  },
+  "containment": {
+    "reason": "observation",
+    "watchdogTrigger": "observation",
+    "killAttempted": true,
+    "childSignal": "SIGKILL",
+    "childExitCode": null,
+    "outerExitCode": 1,
+    "elapsedMs": 2389,
+    "maxSampledGroupRssBytes": 443056128,
+    "heapDiagnosticDetected": false,
+    "remainingOriginalGroupRows": [],
+    "cleanupErrors": [],
+    "originalOuterPid": 49727,
+    "originalOuterPgid": 49727,
+    "childPid": 49741,
+    "childOriginalPgid": 49741,
+    "rootIndependentPidAndPgidAbsenceReceiptSha256": "34ac660bb3466db4a41c9a88bd03cd652abea907701f9c8dadc3588e5c9e640e"
+  },
+  "binding": {
+    "status": "bound",
+    "verificationFile": "receiving/binding-verification.json",
+    "startupSeal": "receiving/binding-seal.json",
+    "limits": "Bound actual receiving sources does not validate oracle row representation or the failed comparison."
+  },
+  "reportedReach": {
+    "nonempty-prior": 0,
+    "held-provider-read": 0,
+    "completed-enqueue": 1,
+    "answer-executed": 1,
+    "root-change": 0,
+    "downstream-change": 0,
+    "final-publication": 0,
+    "worker-cleaned": 0
+  },
+  "rawLaterFacts": "Receipt159 final-publication was durably recorded before observation containment. No cleanup-start or worker-cleaned receipt exists. Raw final rows and metadata remain unchanged in the archive; no retrospective GREEN judgment.",
+  "limits": "This consumed one admitted singleton. No retry, next runtime, source/model/grammar/comparison change, production edit or candidate activation is admitted. Prior ownership/V7/V2 archives retain their separate qualifications."
+}

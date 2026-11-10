@@ -1,0 +1,51 @@
+{
+  "artifacts": {
+    "binding.json": {
+      "bytes": 1361,
+      "sha256": "86ccd3bf644d96f43e726f1e805c4b8850754707b7bb88c48ccd802cd90bd7b9"
+    },
+    "calibrate.py": {
+      "bytes": 5429,
+      "sha256": "0d94d03f12f822b35b0bf2d73f0504344bec4018858bb97be56349ec6d1d3b44"
+    },
+    "first-command.json": {
+      "bytes": 1269,
+      "sha256": "9a5825e0f4d51c27acdec4f1193a5a0b330e3cd06112622019471c43b7b03068"
+    },
+    "pure-results.json": {
+      "bytes": 2986,
+      "sha256": "15f58e925ccfea2d7bf7b4bc95ff4361dbba8f679d20bdc92d554c3233a05960"
+    },
+    "recipes.json": {
+      "bytes": 4996,
+      "sha256": "c9582603691d779f22a10cf60ec16bed95ab49a3efb8ea8a6afaf02a9d2c0714"
+    },
+    "report.md": {
+      "bytes": 5314,
+      "sha256": "3df298f845ad56fcfe63433ed1e8b90162a64e56731623fbecb5bb653b375cf8"
+    },
+    "run.py": {
+      "bytes": 1600,
+      "sha256": "67725f24bb7ed12134b2a39024758bb7b9d7781a6262f85d7ac6c62af7ae6a91"
+    },
+    "static-results.json": {
+      "bytes": 827,
+      "sha256": "968f50479219fdd7bada459b2ea0d569137b8d911f9ee7a23b8b51bf9842131a"
+    },
+    "verify.py": {
+      "bytes": 6492,
+      "sha256": "bb7a78d7810788ff1dd47d3d780afc4edf0da3891326c3794097fb5b57dfc2de"
+    }
+  },
+  "bindingSha256": "86ccd3bf644d96f43e726f1e805c4b8850754707b7bb88c48ccd802cd90bd7b9",
+  "nativeLaunches": 0,
+  "nativeProcessProbes": 0,
+  "newRuntimeAdmitted": false,
+  "newSupervisor": false,
+  "originalStoppedResultPreserved": true,
+  "sourceCopies": 0,
+  "sourceFreezeSha256": "4ae26549a4edc1565ef08ca7f1b096f7b644b32773fa520d688431335aa5bd8a",
+  "sourceRefreezes": 0,
+  "status": "FROZEN SOURCE/PURE fresh-universe preparation; independent review pending; no runtime admission",
+  "stoppedSuccessExemption": false
+}

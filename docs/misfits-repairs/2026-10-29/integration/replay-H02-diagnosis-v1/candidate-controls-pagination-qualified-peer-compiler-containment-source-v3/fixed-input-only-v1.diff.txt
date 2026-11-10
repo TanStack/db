@@ -1,0 +1,24 @@
+--- sealed-v2/contain-compiler-v1.py.txt
++++ inactive-v3/contain-compiler-v1.py.txt
+@@ -67,11 +67,20 @@
+             require(path not in inputs or inputs[path] == expected, "conflicting finite input")
+             inputs[path] = expected
+ 
++    compiler_supplement = load(c["compilerInputSupplement"])
++    extra_inputs = compiler_supplement["files"] + compiler_supplement["packageMetadata"]
++    for item in extra_inputs:
++        path, expected = item["path"], item["sha256"]
++        require(path not in inputs or inputs[path] == expected, "conflicting fixed compiler input")
++        inputs[path] = expected
++
+     def identities():
+         # Hash only the already bound finite inputs, with no new tool census.
+-        for item in [ref, c["wrapper"], c["python"], c["gate"], c["binding"], c["plan"], c["geometry"], c["finiteToolInputs"], *c["copyReceipts"], *c["sourcePacketRefs"]]:
++        for item in [ref, c["wrapper"], c["python"], c["gate"], c["binding"], c["plan"], c["geometry"], c["finiteToolInputs"], c["compilerInputSupplement"], *c["copyReceipts"], *c["sourcePacketRefs"], *compiler_supplement["originEvidence"]]:
+             require(sha(item["path"]) == item["sha256"], "identity: " + item["path"])
+         require(stat.S_ISDIR(os.lstat(root).st_mode) and os.path.realpath(root) == root, "copied root directory identity")
++        for item in extra_inputs:
++            require(os.path.realpath(item["path"]) == item["resolved"], "fixed compiler input resolution")
+         for path, expected in inputs.items():
+             require(sha(path) == expected, "input identity: " + path)
+         actual_files, actual_links, actual_dirs = set(), {}, set()

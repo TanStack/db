@@ -1,0 +1,526 @@
+import { strict as assert } from 'node:assert'
+import {
+  checkCompletionObservation,
+  createCompletionDeliveryCheck,
+  createCompletionModel,
+  modelCompletionView,
+  stepCompletionModel,
+} from '../../packages/query-db-collection/tests/queued-answer-completion-oracle.js'
+import type {
+  CandidateObservation,
+  CompletionAction,
+  CompletionDelivery,
+  CompletionModel,
+  CompletionSetup,
+} from '../../packages/query-db-collection/tests/queued-answer-completion-oracle.js'
+
+/**
+ * Pure calibration supplies wrong recorded observations to the same comparison
+ * as receiving. It imports no production, test runner, config or registering
+ * module, constructs no QueryClient, and runs no generated program/campaign.
+ * These controls establish checker sensitivity only. They supply no receiving
+ * reach, unchanged-production RED, candidate GREEN, or product-mutant credit.
+ */
+const setup: CompletionSetup = {
+  run: `one`,
+  profile: `inline`,
+  ready: true,
+  window: { offset: 0, limit: 2 },
+  facts: {
+    roots: [
+      { id: 1, rank: 10 },
+      { id: 2, rank: 20 },
+    ],
+    marked: [],
+    children: [
+      { id: 101, parent: 1 },
+      { id: 201, parent: 2 },
+    ],
+  },
+}
+const step = (model: CompletionModel, ...actions: Array<CompletionAction>) => {
+  for (const action of actions) stepCompletionModel(model, action)
+}
+const required = (
+  model: CompletionModel,
+  id: string,
+  kind: `source` | `output` | `publication`,
+) => step(model, { type: `require`, requirement: { id, kind } })
+function waiting() {
+  const model = createCompletionModel(setup)
+  required(model, `tail`, `publication`)
+  step(model, {
+    type: `request-window`,
+    operation: `old`,
+    options: {},
+    requires: [`tail`],
+  })
+  return model
+}
+function common(model: CompletionModel) {
+  return {
+    phase: `candidate-cut` as const,
+    run: model.run,
+    view: modelCompletionView(model),
+    operations: model.operations.map((operation) => ({
+      operation: operation.operation,
+      returned: `promise` as const,
+      outcome: structuredClone(operation.outcome),
+    })),
+  }
+}
+function hostGap(model: CompletionModel): CandidateObservation {
+  return {
+    ...common(model),
+    cut: `host-gap`,
+    answerExecuted: true,
+    demandSettled: true,
+    queuedTask: 1,
+    dispatches: 0,
+    existingOperation: `old`,
+  }
+}
+
+export function runCompletionCheckerControls(): Array<{
+  name: string
+  outcome: `accepted` | `rejected`
+}> {
+  const results: Array<{ name: string; outcome: `accepted` | `rejected` }> = []
+  const accepts = (name: string, run: () => void) => {
+    assert.doesNotThrow(run, name)
+    results.push({ name, outcome: `accepted` })
+  }
+  const rejects = (name: string, run: () => void) => {
+    assert.throws(run, /completion (law|instrument):/, name)
+    results.push({ name, outcome: `rejected` })
+  }
+  const model = waiting()
+  accepts(`legitimate held host gap`, () =>
+    checkCompletionObservation(model, hostGap(model)),
+  )
+  const early = hostGap(model)
+  early.operations[0]!.outcome = { state: `fulfilled` }
+  rejects(`answer settlement cannot fulfill gap operation`, () =>
+    checkCompletionObservation(model, early),
+  )
+  step(model, {
+    type: `request-window`,
+    operation: `partial`,
+    options: { limit: 1 },
+    requires: [`tail`],
+  })
+  const partial = { ...hostGap(model), partialOperation: `partial` }
+  accepts(`new partial operation remains pending`, () =>
+    checkCompletionObservation(model, partial),
+  )
+  partial.operations[1]!.returned = `true`
+  rejects(`new gap call cannot return literal true`, () =>
+    checkCompletionObservation(model, partial),
+  )
+  const held: CandidateObservation = {
+    ...common(model),
+    cut: `held-flush`,
+    graphQuiescent: true,
+    realFlushEntered: true,
+    flushHeld: true,
+    queuedTasks: 0,
+    operation: `old`,
+  }
+  accepts(`quiescent held flush retains obligation`, () =>
+    checkCompletionObservation(model, held),
+  )
+  held.operations[0]!.outcome = { state: `fulfilled` }
+  rejects(`no-delta held flush cannot report success`, () =>
+    checkCompletionObservation(model, held),
+  )
+
+  const output = waiting()
+  required(output, `receipt`, `output`)
+  step(
+    output,
+    {
+      type: `stage-output`,
+      requirement: `receipt`,
+      target: `root`,
+      snapshot: `desired`,
+      disposition: `retained`,
+    },
+    {
+      type: `request-window`,
+      operation: `with-output`,
+      options: {},
+      requires: [`receipt`, `tail`],
+    },
+  )
+  const receipt: CandidateObservation = {
+    ...common(output),
+    cut: `receipt-held`,
+    receipts: [
+      {
+        requirement: `receipt`,
+        target: `root`,
+        role: `forward`,
+        returnedPromise: true,
+        pending: true,
+        beforeFirstStop: true,
+      },
+    ],
+  }
+  accepts(`actual held selected receipt keeps operation pending`, () =>
+    checkCompletionObservation(output, receipt),
+  )
+  receipt.operations[1]!.outcome = { state: `fulfilled` }
+  rejects(`omitting selected output obligation is visible`, () =>
+    checkCompletionObservation(output, receipt),
+  )
+  rejects(
+    `successful certificate cannot precede selected output application`,
+    () => step(output, { type: `tail-success`, requirement: `tail` }),
+  )
+
+  const retry = waiting()
+  step(retry, {
+    type: `tail-failure`,
+    requirement: `tail`,
+    error: `first`,
+    affected: [`old`],
+  })
+  required(retry, `retry-tail`, `publication`)
+  step(retry, {
+    type: `request-window`,
+    operation: `retry`,
+    options: {},
+    requires: [`retry-tail`],
+  })
+  const old: CandidateObservation = {
+    ...common(retry),
+    cut: `old-completion-delivered`,
+    oldCompletion: `old`,
+    currentCompletion: `new`,
+    retryAttachedBeforeDelivery: true,
+  }
+  accepts(`old observer cannot poison retry`, () =>
+    checkCompletionObservation(retry, old),
+  )
+  old.operations[1]!.outcome = { state: `rejected`, error: `first` }
+  rejects(`old completion failure poisoning retry is rejected`, () =>
+    checkCompletionObservation(retry, old),
+  )
+  step(
+    retry,
+    { type: `install`, target: `root`, snapshot: `desired` },
+    { type: `tail-success`, requirement: `retry-tail` },
+  )
+  accepts(`successful retry preserves the old rejected operation`, () =>
+    checkCompletionObservation(retry, {
+      ...common(retry),
+      cut: `final`,
+      winningOperation: `retry`,
+      wholeTailReturned: true,
+      graphRunning: false,
+      pendingRequiredReceipts: 0,
+    }),
+  )
+
+  const scoped = waiting()
+  required(scoped, `peer`, `source`)
+  step(
+    scoped,
+    {
+      type: `request-window`,
+      operation: `unrelated`,
+      options: {},
+      requires: [`peer`],
+    },
+    {
+      type: `tail-failure`,
+      requirement: `tail`,
+      error: `subscriber`,
+      affected: [`old`],
+    },
+  )
+  const scope: CandidateObservation = {
+    ...common(scoped),
+    cut: `retryable-scope-failed`,
+    error: `subscriber`,
+    registeredAffected: [`old`],
+    authoredAffected: [`old`],
+    peerPending: true,
+    installedBeforeThrow: true,
+  }
+  accepts(`retryable tail ends only authored attached operation`, () =>
+    checkCompletionObservation(scoped, scope),
+  )
+  scope.operations[1]!.outcome = { state: `rejected`, error: `subscriber` }
+  rejects(`subscriber fail-all is rejected`, () =>
+    checkCompletionObservation(scoped, scope),
+  )
+  scope.operations = common(scoped).operations
+  scope.authoredAffected = [`old`, `unrelated`]
+  scope.registeredAffected = [...scope.authoredAffected]
+  rejects(`production-derived affected-set substitution is rejected`, () =>
+    checkCompletionObservation(scoped, scope),
+  )
+
+  const graph = waiting()
+  required(graph, `peer`, `source`)
+  step(
+    graph,
+    {
+      type: `request-window`,
+      operation: `peer`,
+      options: {},
+      requires: [`peer`],
+      firstError: `earlier`,
+    },
+    { type: `graph-failure`, error: `graph` },
+  )
+  const terminal: CandidateObservation = {
+    ...common(graph),
+    cut: `graph-failed`,
+    error: `graph`,
+    peerPending: true,
+    resumedGraphEntered: true,
+  }
+  accepts(`terminal graph ends unfinished operations before peer`, () =>
+    checkCompletionObservation(graph, terminal),
+  )
+  terminal.operations[1]!.outcome = { state: `pending` }
+  rejects(`terminal graph waiting for unanswered peer is rejected`, () =>
+    checkCompletionObservation(graph, terminal),
+  )
+  terminal.operations = common(graph).operations
+  terminal.operations[1]!.outcome = { state: `rejected`, error: `graph` }
+  rejects(`terminal graph cannot replace an operation's first error`, () =>
+    checkCompletionObservation(graph, terminal),
+  )
+
+  const cleanup = waiting()
+  required(cleanup, `retained`, `output`)
+  step(
+    cleanup,
+    {
+      type: `stage-output`,
+      requirement: `retained`,
+      target: `root`,
+      snapshot: `desired`,
+      disposition: `retained`,
+    },
+    { type: `cleanup` },
+    { type: `restart`, run: `two`, facts: setup.facts },
+  )
+  const abandoned: CandidateObservation = {
+    ...common(cleanup),
+    cut: `retained-cleanup-abandoned`,
+    requirement: `retained`,
+    acceptedAt: 1,
+    cleanupStartedAt: 2,
+    rejectedAt: 3,
+    receiptError: `AbortError`,
+    retainedTarget: true,
+    retiredRun: `one`,
+  }
+  accepts(`state14 legal cleanup abandonment`, () =>
+    checkCompletionObservation(cleanup, abandoned),
+  )
+  abandoned.rejectedAt = 1
+  rejects(
+    `accepted live rejection cannot masquerade as cleanup abandonment`,
+    () => checkCompletionObservation(cleanup, abandoned),
+  )
+  const stale: CandidateObservation = {
+    ...common(cleanup),
+    cut: `stale-task`,
+    retiredRun: `one`,
+    currentTaskBefore: 2,
+    currentTaskAfter: 2,
+    staleDispatches: 1,
+    staleGraphEntries: 0,
+    currentAcceptedResumes: 1,
+  }
+  accepts(`stale dispatch preserves positive current progress`, () =>
+    checkCompletionObservation(cleanup, stale),
+  )
+  stale.currentTaskAfter = 0
+  rejects(`stale callback clearing current task is rejected`, () =>
+    checkCompletionObservation(cleanup, stale),
+  )
+
+  const tail = waiting()
+  step(tail, {
+    type: `tail-failure`,
+    requirement: `tail`,
+    error: `tail`,
+    affected: [`old`],
+  })
+  const throwing: CandidateObservation = {
+    ...common(tail),
+    cut: `tail-failed`,
+    error: `tail`,
+    lastReceiptSettled: true,
+    realTailEntered: true,
+    inputBefore: 7,
+    inputAfter: 7,
+    windowBefore: 2,
+    windowAfter: 2,
+  }
+  accepts(`same-revision throwing recheck rejects`, () =>
+    checkCompletionObservation(tail, throwing),
+  )
+  const missingRevisions = structuredClone(throwing) as unknown as Record<
+    string,
+    unknown
+  >
+  delete missingRevisions.inputBefore
+  delete missingRevisions.inputAfter
+  delete missingRevisions.windowBefore
+  delete missingRevisions.windowAfter
+  rejects(`omitted revision pairs do not establish unchanged revisions`, () =>
+    checkCompletionObservation(
+      tail,
+      missingRevisions as unknown as CandidateObservation,
+    ),
+  )
+  throwing.operations[0]!.outcome = { state: `fulfilled` }
+  rejects(`saved successful checkpoint cannot certify throwing tail`, () =>
+    checkCompletionObservation(tail, throwing),
+  )
+  const torn = hostGap(waiting())
+  torn.view.roots[0]!.children = []
+  rejects(`torn nested public snapshot is rejected`, () =>
+    checkCompletionObservation(waiting(), torn),
+  )
+  const unknown = {
+    ...hostGap(waiting()),
+    cut: `unsupported-future-cut`,
+  } as unknown as CandidateObservation
+  rejects(`unknown candidate cut is rejected`, () =>
+    checkCompletionObservation(waiting(), unknown),
+  )
+  rejects(`invalid enqueue identities cannot establish repeated yield`, () =>
+    checkCompletionObservation(waiting(), {
+      ...common(waiting()),
+      cut: `repeated-yield`,
+      enqueues: [-1, 2],
+      acceptedResumes: 1,
+      operation: `old`,
+    }),
+  )
+  rejects(`invalid facade sequence cannot establish ordered failure`, () =>
+    checkCompletionObservation(waiting(), {
+      ...common(waiting()),
+      cut: `facade-attempt-failed`,
+      facadeACommit: -2,
+      facadeBThrow: -1,
+      aReceiptPending: true,
+      restoringReceiptPending: true,
+    }),
+  )
+
+  const deliveredModel = createCompletionModel(setup)
+  const deliveryCheck = createCompletionDeliveryCheck(setup)
+  step(
+    deliveredModel,
+    {
+      type: `source-write`,
+      facts: {
+        ...setup.facts,
+        roots: [
+          { id: 1, rank: 11 },
+          { id: 2, rank: 20 },
+        ],
+      },
+    },
+    { type: `install`, target: `root`, snapshot: `desired` },
+  )
+  const delivery: CompletionDelivery = {
+    phase: `candidate-delivery`,
+    layer: `root`,
+    rows: modelCompletionView(deliveredModel).roots,
+    read: modelCompletionView(deliveredModel).roots,
+    changes: [
+      {
+        type: `update`,
+        value: { id: 1, rank: 11, children: [101] },
+        previousValue: { id: 1, rank: 10, children: [101] },
+      },
+    ],
+  }
+  accepts(`legitimate coherent callback uses shared event comparison`, () =>
+    deliveryCheck(deliveredModel, delivery),
+  )
+  const duplicate = structuredClone(delivery)
+  duplicate.changes.push(structuredClone(duplicate.changes[0]!))
+  rejects(`duplicate callback payload is rejected`, () =>
+    createCompletionDeliveryCheck(setup)(deliveredModel, duplicate),
+  )
+  const wrongRead = structuredClone(delivery)
+  wrongRead.read = []
+  rejects(`torn callback synchronous read is rejected`, () =>
+    createCompletionDeliveryCheck(setup)(deliveredModel, wrongRead),
+  )
+  const unknownDelivery = {
+    ...delivery,
+    phase: `candidate-unhandled`,
+  } as unknown as CompletionDelivery
+  rejects(`unknown delivery phase is rejected`, () =>
+    createCompletionDeliveryCheck(setup)(deliveredModel, unknownDelivery),
+  )
+  const ordinary = waiting()
+  required(ordinary, `answer`, `source`)
+  required(ordinary, `peer`, `source`)
+  step(
+    ordinary,
+    {
+      type: `request-window`,
+      operation: `aggregate`,
+      options: {},
+      requires: [`answer`, `peer`, `tail`],
+    },
+    { type: `source-failure`, requirement: `answer`, error: `source` },
+  )
+  const source: CandidateObservation = {
+    ...common(ordinary),
+    cut: `source-failed`,
+    error: `source`,
+    peerPending: true,
+    requirement: `answer`,
+  }
+  accepts(`ordinary source failure keeps existing peer aggregation`, () =>
+    checkCompletionObservation(ordinary, source),
+  )
+  source.operations[1]!.outcome = { state: `rejected`, error: `source` }
+  rejects(
+    `ordinary source failure cannot acquire terminal fail-fast policy`,
+    () => checkCompletionObservation(ordinary, source),
+  )
+  const complete = waiting()
+  step(
+    complete,
+    {
+      type: `request-window`,
+      operation: `partial`,
+      options: { limit: 1 },
+      requires: [`tail`],
+    },
+    { type: `install`, target: `root`, snapshot: `desired` },
+    { type: `tail-success`, requirement: `tail` },
+  )
+  const final: CandidateObservation = {
+    ...common(complete),
+    cut: `final`,
+    winningOperation: `partial`,
+    wholeTailReturned: true,
+    graphRunning: false,
+    pendingRequiredReceipts: 0,
+  }
+  accepts(`winning partial window succeeds after its complete tail`, () =>
+    checkCompletionObservation(complete, final),
+  )
+  final.view.window.limit = 2
+  rejects(
+    `partial options cannot report the prior settled window after success`,
+    () => checkCompletionObservation(complete, final),
+  )
+  return results
+}

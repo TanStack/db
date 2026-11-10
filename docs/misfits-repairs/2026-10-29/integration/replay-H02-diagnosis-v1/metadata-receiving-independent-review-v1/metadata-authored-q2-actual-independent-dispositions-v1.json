@@ -1,0 +1,114 @@
+{
+  "kind": "Independent final bounded dispositions for authored-q2 actual claims",
+  "sourceLedgerSha256": "aa4147f112da057fdfa0f8d5df5b13b0ee8b4a79cdcfb9b495659b5638fc29eb",
+  "claims": [
+    {
+      "id": "A01",
+      "claim": "Outer actual initial e143cb/session35271/final12ec83 exit0 is separate from child0.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A02",
+      "claim": "Exactly one selected authored q2 pass and19 skipped, with31 states at1.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A03",
+      "claim": "One unique original raw path is attributable by complete history/source/prepared/supervisor/writer identity.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A04",
+      "claim": "Capture preserves1954 files/31,401,025 bytes equal to original raw/outer/tool inputs.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A05",
+      "claim": "All206 contiguous raw and23 retained receipts remain intact.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A06",
+      "claim": "Actual IDs and authored root/downstream keys are recorded current-run facts, not allocation authority.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A07",
+      "claim": "Initial and held snapshots are complete; reload replacement callbacks/events match the checked baseline.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A08",
+      "claim": "Root/downstream rank30-to35 updates preserve complete previousValue/current rows and selected upstream metadata.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A09",
+      "claim": "Acquisitions/source application/readiness settle and normal worker-cleaned closes the raw trace.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A10",
+      "claim": "Frozen source/evaluated/compiled/callback evidence is bound, with no precise execution/parent-checker claim.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A11",
+      "claim": "Current named source/tool/package/recovery inputs match prior pins; no full transitive or compiler credit.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A12",
+      "claim": "Both author audit errors are preserved and classified as evidence-audit failures, not product failures/retries.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A13",
+      "claim": "Original recorded process absence is unobserved; initial live parent/outer relation and initial inner getpgid remain missing.",
+      "verdict": "Absence remains unobserved; exact source-reviewed proposal only, ROOT decides.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A14",
+      "claim": "Exact minimum proposal is read-only ps/signal0 for original PIDs71010/71040/71052/71056 and target groups71010/71052 only.",
+      "verdict": "Absence remains unobserved; exact source-reviewed proposal only, ROOT decides.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    },
+    {
+      "id": "A15",
+      "claim": "No new lane/native/mutant/source/import/compiler/install/Git/PR/canonical/probe admission follows.",
+      "verdict": "Accepted within the bounded raw-evidence/source-order limits stated in the independent report.",
+      "action": "Record bounded verdict and evidence limit; ROOT alone admits minimum absence proposal.",
+      "durableValue": "Preserve public-law observations separately from invocation, provenance, outer lifecycle and absence evidence."
+    }
+  ],
+  "auditSha256": "df3aeabb9beb24a5d2e004bbb25c9283120370e276da92eae94e0aa915e0c090",
+  "runtimeAdmission": false,
+  "rootOwnsLint": true
+}

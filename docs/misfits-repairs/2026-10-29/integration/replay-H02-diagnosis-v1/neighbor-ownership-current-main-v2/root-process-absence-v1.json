@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T06:23:22.394628+00:00",
+  "by": "/root",
+  "PIDsAndPGIDs": [
+    85463,
+    85477
+  ],
+  "method": "separate escalated read-only ps pid/pgid inventory filtered exact two original groups",
+  "toolChunk": "0380c4",
+  "exitCode": 0,
+  "output": "",
+  "claim": "No original PID/PGID members at observation; no provider transport or direct Collection cleanup claim."
+}

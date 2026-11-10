@@ -1,0 +1,71 @@
+import copy,hashlib,json,shutil
+from datetime import datetime,timezone
+from pathlib import Path
+r=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items')
+w=Path('/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-candidate-controls-v1')
+h=r/'docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1';q=h/'candidate-controls-pagination-failed-peer-shared-receiving-successor-v1';s=h/'candidate-controls-source-failed-peer-checkpoint-successor-v1';d=h/'candidate-controls-pagination-shared-window-receiving-operational-preparation-v1';n=h/'candidate-controls-pagination-2gib-shared-receiving-containment-v1'
+sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+def write(name,data):
+ p=d/name;assert not p.exists(),p;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(data,indent=2)+'\n')
+def bound(path,expected):
+ assert sha(path)==expected,(str(path),expected,sha(path))
+ return {'path':str(path),'sha256':expected}
+plan=json.loads((d/'proposed-adaptation-v1.json').read_text());qfpath=q/'source-freeze-v1.json';qsha=plan['baseSourceFreezeSha256'];bound(qfpath,qsha);qf=json.loads(qfpath.read_text());sfpath=s/'source-freeze-v1.json';bound(sfpath,'0a1978c5a8856da7aab49379462dd5f258f75b7ba910454eed320f3018f13779');sf=json.loads(sfpath.read_text())
+assert len(qf['sourceBindings'])==596 and len(qf['sourceCopies'])==85 and len(qf['productionFiles'])==511
+for key in ['productionFiles','instrumentFiles','sharedInstrumentFiles']:
+ for path,digest in qf[key].items():bound(w/path,digest)
+assert {**qf['productionFiles'],**qf['instrumentFiles'],**qf['sharedInstrumentFiles']}==qf['sourceBindings']
+for path,digest in qf['sourceCopies'].items():bound(q/'sources'/path,digest)
+rel=json.loads((q/'artifact-snapshot-relocation-v1/path-map-v1.json').read_text());assert len(rel['relocations'])==1
+mapping={x['from']:x['to'] for x in rel['relocations']}
+archives=[]
+for packet,expected,map0 in [(q/'packet-sha256-v1.json','f64dae8f38429d6d5f6358fa2295c1b91b48f92a5f0ebdaae29b3153939628ef',mapping),(q/'packet-sha256-with-snapshot-relocation-v2.json','e36b9780ca9891cbc25233618117e121619bca1c2b0aa29974fb9ffcc80d7462',{}),(s/'packet-sha256-v1.json','60a45f03547a64b44341b72b2a9cebe2f9c2f662efc014b613d0e840978427fd',{})]:
+ bound(packet,expected);items=json.loads(packet.read_text())
+ for name,digest in items.items():bound(packet.parent/map0.get(name,name),digest)
+ archives.append({'path':str(packet),'sha256':expected,'entries':len(items),'exactMappedEntries':len(map0)})
+completion={path:qf['instrumentFiles'][path] for path in sf['completionInstrumentFiles']}
+helper='packages/db/tests/query/pagination-window-publication-oracle.ts';assert helper not in completion;completion[helper]=qf['instrumentFiles'][helper]
+assert len(completion)==18 and set(completion).issubset(qf['instrumentFiles'])
+receiving=copy.deepcopy(sf['receivingProductionFiles']);assert len(receiving)==161
+for path,digest in receiving.items():assert qf['productionFiles'][path]==digest;bound(w/path,digest)
+packages=0;payloads=0
+for pkg in qf['packages'].values():
+ root=Path(pkg['resolved']);bound(root/'package.json',pkg['packageJsonSha256']);packages+=1
+ for name,digest in pkg['regularPayloadFilesMap'].items():bound(root/name,digest);payloads+=1
+assert packages==9 and payloads==2544
+bound(qf['node']['executable'],qf['node']['sha256']);bound(w/'pnpm-lock.yaml',qf['lockfiles']['repoPnpmLock']);bound(w/'node_modules/.pnpm/lock.yaml',qf['lockfiles']['installedPnpmLock'])
+for link,fact in qf['dependencyReuseLinks'].items():assert (w/link).is_symlink()==fact['isSymlink'];assert str((w/link).resolve())==fact['resolved']
+nb=json.loads((n/'binding.json').read_text());suppath=n/'supplemental-tool-inputs.json';bound(suppath,'cd7eda6b0e649cb2aa019b83dac04f7821d52e34d0c62de144ac6d280636ba50');sup=json.loads(suppath.read_text());suppayloads=0
+for pkg in sup['packages']:
+ assert str(Path(pkg['logical']).resolve())==pkg['resolved'],pkg['logical']
+ for name,digest in pkg['regularPayloadFilesMap'].items():bound(Path(pkg['resolved'])/name,digest);suppayloads+=1
+assert len(sup['packages'])==253 and suppayloads==11241
+recovery=nb['toolchainRecovery'];bound(recovery['path'],recovery['sha256']);recoverydata=json.loads(Path(recovery['path']).read_text());recoveryproofs=[]
+for key in ['actualRepair','postAudit','closeout','formattingAccount']:
+ ref=recoverydata[key];bound(ref['path'],ref['sha256']);recoveryproofs.append(ref)
+postaudit=json.loads(Path(recoverydata['postAudit']['path']).read_text());assert postaudit['allChecksPassed'] is True
+for path,digest in postaudit['inputHashes'].items():bound(path,digest)
+validation=r/'docs/misfits-repairs/2026-10-29/coordinator-validation-after-shim-recovery-v1/validation-account-v1.json';vd=json.loads(validation.read_text());assert vd['second']['exit']==0;lintlog=validation.parent/'exact-pnpm-lint-changed-v2.log';bound(lintlog,vd['second']['logSha256']);bound(vd['gitCaptureShim']['path'],vd['gitCaptureShim']['sha256'])
+primaryreview=h/'candidate-controls-independent-review-v1/2gib-shared-primary-actual-independent-review-v1.md';bound(primaryreview,'1a995f97683d8240b53260748a25bd16b92f6206c271a649dd72ddf185475923')
+registrations=[]
+for entry in plan['registrationBindings']:
+ bound(w/entry['path'],entry['sourceSha256FromQ']);lines=(w/entry['path']).read_text().splitlines();assert lines[entry['registrationLine']-1].strip()==entry['registrationLiteral'];assert sum(x.strip()==entry['registrationLiteral'] for x in lines)==1
+ assert "import { it } from 'vitest'" in '\n'.join(lines);assert entry['expectedAncestorTitles']==[]
+ registrations.append(entry)
+write('registration-and-config-bindings-v1.json',{'registrations':registrations,'sourceSelection':'one exact parent file/title and one exact included inner plain-it file; no FastCheck-generated title suffix, broad qualifier, test discovery or config import','configs':plan['configs'],'budgets':plan['budgets'],'runtimeTitleEvidence':'UNREACHED; a later actual qualifier must identify these exact plain titles and source files without seed/ancestry fallback','staticOnly':True})
+oper=copy.deepcopy(qf)
+oper.update({'at':datetime.now(timezone.utc).isoformat(),'status':'SOURCE-ONLY receiving operational schema successor; separate exact failure and success admissions required','bindingProfile':'completion-baseline-v1','runtimeAdmission':'NOT ADMITTED; preparation only; independent operational map/config review required','sourcePreparationFreeze':str(qfpath),'sourcePreparationFreezeSha256':qsha,'completionInstrumentFiles':completion,'receivingProductionFiles':receiving,'receivingMetadataDerivation':{'completionSubset':'S17 selected paths, each digest from Q instrumentFiles, plus already-bound shared full-child helper;18 subset entries and no new source identity','productionSubset':'S161 exact map copied unchanged; every entry equals Q productionFiles and current disk','ancestorReceivingFreeze':str(sfpath),'ancestorReceivingFreezeSha256':sha(sfpath),'allQSourceMapsUnchanged':True},'requiredReportWorktreeExactLint':{'account':str(validation),'accountSha256':sha(validation),'log':str(lintlog),'logSha256':sha(lintlog),'actual':vd['second']},'standaloneReceivingConfiguration':{'binding':str(d/'registration-and-config-bindings-v1.json'),'bindingSha256':sha(d/'registration-and-config-bindings-v1.json'),'coverageAndTypecheckFalseInheritedUnchanged':True,'ordinaryCampaignRuntimeTypecheckCredit':False},'operationalQualification':{'sourceMaps':596,'copiedSources':85,'production':511,'materialPackages':9,'materialPayloads':2544,'supplementalToolInputs':{'path':str(suppath),'sha256':sha(suppath),'packages':253,'regularPayloads':11241,'scope':'same finite named primary/config/setup metadata closure reused only as supplemental current tool identity; no runtime evaluated-module claim'},'acceptedRecovery':recovery,'primaryBoundedRedReview':{'path':str(primaryreview),'sha256':sha(primaryreview),'limit':'bounded controlled callback RED only; report qualifier remains open, no receiving/production authority'}},'runtime':0})
+for key in plan['schemaAdaptation']['unchangedMaps']:assert oper[key]==qf[key],key
+freeze=d/'source-freeze-receiving-v1.json';write(freeze.name,oper)
+recipes=[]
+for stage in plan['stages']:
+ schedule=stage['schedule'];oldrecipe=Path(stage['recipeBase']);recipe=json.loads(oldrecipe.read_text());sourceprogram=Path(stage['programFile']);bound(sourceprogram,stage['programSha256FromQRecipe']);program=json.loads(sourceprogram.read_text());assert program['windowReceivingSchedule']==schedule
+ copytarget=d/'frozen-inputs-v1/programs'/sourceprogram.name;assert not copytarget.exists();copytarget.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(sourceprogram,copytarget);bound(copytarget,stage['programSha256FromQRecipe'])
+ recipe.update({'sourceFreeze':str(freeze),'sourceFreezeSha256':sha(freeze),'programFile':str(copytarget),'outputDirectory':stage['outputDirectory']})
+ changed={k for k in recipe if recipe[k]!=json.loads(oldrecipe.read_text()).get(k)};assert changed=={'sourceFreeze','sourceFreezeSha256','programFile','outputDirectory'}
+ assert recipe['limits']=={'wallMs':60000,'nodeHeapMiB':384,'groupRssBytes':1073741824,'samplingMs':100}
+ assert recipe['args']==['--max-old-space-size=384',str(Path(oper['packages']['vitest']['resolved'])/'vitest.mjs'),'run','--config','scripts/h02-progress/completion-parent.config.ts','packages/query-db-collection/tests/queued-answer-completion-baseline.test.ts','-t','checks a selected baseline constituent through the shared judgment']
+ assert not Path(recipe['outputDirectory']).exists();target=Path(stage['proposalRecipeTarget']);write(str(target.relative_to(d)),recipe)
+ record={'schedule':schedule,'recipe':str(target),'recipeSha256':sha(target),'sourceFreeze':str(freeze),'sourceFreezeSha256':sha(freeze),'programFile':str(copytarget),'programSha256':sha(copytarget),'programCopiedByteForByteFromQ':str(sourceprogram),'programCopiesEqual':copytarget.read_bytes()==sourceprogram.read_bytes(),'recipeFieldChangesOnly':sorted(changed),'command':stage['command'],'admission':stage['admission'],'prerequisites':stage['prerequisites'],'observationScope':stage['observationScope'],'budgetsUnchanged':True,'runtime':0};write('proposed-exact-'+schedule+'-command-v1.json',record);recipes.append(record)
+write('source-and-tool-audit-v1.json',{'at':datetime.now(timezone.utc).isoformat(),'allChecksPassed':True,'sourcePreparationFreeze':bound(qfpath,qsha),'operationalFreeze':bound(freeze,sha(freeze)),'QsourceMapsUnchanged':596,'QcopiedSourcesUnchanged':85,'QproductionUnchanged':511,'completionMetadataSubset':18,'receivingProductionMetadataSubset':161,'newSourceIdentities':0,'originalReceivingFreeze':bound(sfpath,sha(sfpath)),'archives':archives,'materialPackages':packages,'materialPayloads':payloads,'supplemental':{'path':str(suppath),'sha256':sha(suppath),'packages':253,'payloadsRehashed':suppayloads,'scope':sup['limits']},'acceptedRecovery':recovery,'recoveryProofsRehashed':recoveryproofs,'recoveryInputHashesRehashed':len(postaudit['inputHashes']),'recoveryScope':'accepted historical recovery qualification and unchanged input-record hashes; no claim of a new full777wrapper audit','nodeLocksAndLinks':'bound expected identities matched','requiredExactReportWorktreeLint':{'account':str(validation),'sha256':sha(validation),'actual':vd['second']},'primaryReview':{'path':str(primaryreview),'sha256':sha(primaryreview)},'registrationBinding':{'path':str(d/'registration-and-config-bindings-v1.json'),'sha256':sha(d/'registration-and-config-bindings-v1.json')},'recipes':recipes,'executedImports':0,'testDiscovery':0,'nativeProbes':0,'runtime':0,'productionEdits':0})
+print(json.dumps({'operationalFreezeSha256':sha(freeze),'auditSha256':sha(d/'source-and-tool-audit-v1.json'),'registrationAndConfigSha256':sha(d/'registration-and-config-bindings-v1.json'),'recipes':[{'schedule':x['schedule'],'recipeSha256':x['recipeSha256'],'programSha256':x['programSha256']} for x in recipes],'boundSourceCount':596,'newSourceIdentities':0,'staticOnly':True},indent=2))

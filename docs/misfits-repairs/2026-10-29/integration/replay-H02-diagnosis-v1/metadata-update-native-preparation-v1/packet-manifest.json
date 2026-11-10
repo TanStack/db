@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "binding.json": {
+      "bytes": 3029,
+      "sha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65"
+    },
+    "calibrate.py": {
+      "bytes": 15483,
+      "sha256": "af907eb837bcf54016ad3c72b073ec1c81bb007d3f601ccc21fb2cc84bf35ead"
+    },
+    "first-command.json": {
+      "bytes": 1242,
+      "sha256": "0e0d0f3595e12b725eea0db0d799dc74b267540c1f7c9b8074d4adb4100f7b32"
+    },
+    "gate-schema.json": {
+      "bytes": 3469,
+      "sha256": "340e3394c8dcb4a3f80663469981822cb4233518f1ee4487ee4e346ed7cc1337"
+    },
+    "launch.py": {
+      "bytes": 3869,
+      "sha256": "a291dcf7db86b35033e9b05aafacf24866537d1b72e0966fd751d7512ecbb9c1"
+    },
+    "launcher-scope-default-q2.zsh": {
+      "bytes": 2714,
+      "sha256": "011a8d27a49df210c295c966acf5cbb413c8138d02d0e6e59ab458a33025a1be"
+    },
+    "program.json": {
+      "bytes": 2681,
+      "sha256": "987b3443ec258b12d24e24969efbf0a201ce851c6e5bf00fdfe5a392f03e2966"
+    },
+    "pure-results.json": {
+      "bytes": 1479,
+      "sha256": "5c1d1dd19b3b264a6bd1c52e2c5133db800f8382ac23b9beaba56077f4e2b464"
+    },
+    "recipes.json": {
+      "bytes": 11011,
+      "sha256": "5347e895f55ebec7c689898bb14072e0015f99c51772ec6d64c2edf5a58ac8b9"
+    },
+    "report.md": {
+      "bytes": 7559,
+      "sha256": "e59aeb804136b571efe7a04b54e7a472094e4537c0eeb434cc0dd3d39b06d8fe"
+    },
+    "source-preflight.json": {
+      "bytes": 1534,
+      "sha256": "e53399927e230aac443f218f850858637786fb5e0983167778bc019aa308e41e"
+    },
+    "static-results.json": {
+      "bytes": 1854,
+      "sha256": "2ac1e2c9553f95df1f64889b54c31766b56d8bd2fa64cac48bb17e40a8547621"
+    },
+    "verify.py": {
+      "bytes": 18935,
+      "sha256": "f4f21f922243a779dbbc2754f550c76c01971aa587f5eba96c22812d36d167a6"
+    },
+    "zsh-syntax.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "bindingSha256": "f76ca819782079460124aa2fba14dc203362e5c3a03a435a5d7d30bbdab4ba65",
+  "immutableSourceV1V2Preserved": true,
+  "nativeListCommands": 0,
+  "nativeProcessProbes": 0,
+  "productionMutants": 0,
+  "receivingRuns": 0,
+  "status": "FROZEN SOURCE/STATIC/PURE PREPARATION; independent review pending; no native command admitted/executed"
+}

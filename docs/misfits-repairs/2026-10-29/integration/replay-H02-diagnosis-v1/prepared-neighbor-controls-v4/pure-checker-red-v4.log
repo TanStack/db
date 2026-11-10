@@ -1,0 +1,53 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-h02-progress-main-v1
+
+ ❯ scripts/h02-progress/checker-calibration.test.ts (17 tests | 2 failed) 7ms
+     × accepts virtual-enriched public rows at every payload checkpoint 2ms
+     × preserves ordered row positions when public rows carry virtual fields 0ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 passed (17)
+   Start at  00:53:55
+   Duration  154ms (transform 24ms, setup 0ms, import 64ms, tests 7ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > accepts virtual-enriched public rows at every payload checkpoint
+AssertionError: expected [Function] to not throw an error but 'AssertionError: pending answer retain…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"AssertionError: pending answer retains complete publication: expected [ { id: 4, rank: 40, …(5) } ] to deeply equal [ { id: 4, rank: 40, markers: [] } ]"
+
+ ❯ scripts/h02-progress/checker-calibration.test.ts:151:46
+    149| describe(`pure progress receipt comparison calibration`, () => {
+    150|   it(`accepts virtual-enriched public rows at every payload checkpoint…
+    151|     expect(() => check(virtualLawful())).not.toThrow()
+       |                                              ^
+    152|   })
+    153|   it(`rejects selected payload corruption inside virtual-enriched rows…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  scripts/h02-progress/checker-calibration.test.ts > pure progress receipt comparison calibration > preserves ordered row positions when public rows carry virtual fields
+AssertionError: expected [Function] to not throw an error but 'AssertionError: immediate-publication…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"AssertionError: immediate-publication: expected [ { id: 1, rank: 10, …(5) }, …(4) ] to deeply equal [ …(5) ]"
+
+ ❯ scripts/h02-progress/checker-calibration.test.ts:180:47
+    178|       ready: true,
+    179|     }
+    180|     expect(() => check([receipt], input)).not.toThrow()
+       |                                               ^
+    181|     expect(() =>
+    182|       check([{ ...receipt, rows: [...rows].reverse() }], input),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

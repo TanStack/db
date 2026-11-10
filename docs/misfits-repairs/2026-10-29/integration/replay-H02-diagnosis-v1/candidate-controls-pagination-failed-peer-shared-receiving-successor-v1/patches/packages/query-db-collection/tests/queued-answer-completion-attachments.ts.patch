@@ -1,0 +1,19 @@
+--- before/packages/query-db-collection/tests/queued-answer-completion-attachments.ts
++++ after/packages/query-db-collection/tests/queued-answer-completion-attachments.ts
+@@ -322,12 +322,13 @@
+               rows: row.children.toArray.map((child) => ({ ...child })),
+             },
+       }))
++    const actualWindow = live.utils.getWindow()
++    const window = actualWindow && { ...actualWindow }
+     recorder.event(`public-read`, {
+       roots: rawRows(roots),
+       downstream: rawRows(downstream.toArray),
+-    })
+-    const window = live.utils.getWindow()
+-    if (!window) throw new Error(`receiving fixture lost its ordered window`)
++      window,
++    })
+     const status = live.status
+     if (
+       status !== `ready` &&

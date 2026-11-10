@@ -1,0 +1,133 @@
+{
+  "status": "All admitted finite bounded-progress RED gate conditions met; independent root acceptance pending",
+  "history": {
+    "kind": "query",
+    "scheduler": "microtask",
+    "cacheIdentity": "subscription",
+    "includes": true,
+    "window": true,
+    "nonemptyPrior": true,
+    "keyShift": 0,
+    "rankScale": 10
+  },
+  "measuredConflict": {
+    "h02": true,
+    "sequence": 182,
+    "phase": "conflicting-cache-premise",
+    "cut": "held-queryFn-registration",
+    "pivot": 3,
+    "pendingAtom": "[\"h02-progress-markers\",2,[3]]",
+    "pendingKey": [
+      "h02-progress-markers",
+      2,
+      [
+        3
+      ]
+    ],
+    "cached": {
+      "version": 4,
+      "backendVersion": 0,
+      "rows": [
+        3
+      ]
+    },
+    "emptySibling": {
+      "atom": "[\"h02-progress-markers\",1,[3]]",
+      "key": [
+        "h02-progress-markers",
+        1,
+        [
+          3
+        ]
+      ],
+      "answer": {
+        "version": 8,
+        "backendVersion": 1,
+        "rows": []
+      }
+    },
+    "observed": {
+      "pending": true,
+      "aborted": false,
+      "pendingScope": [
+        3
+      ],
+      "pendingOwner": 2,
+      "pendingStartCount": 1,
+      "pendingActualCount": 1,
+      "pendingStatus": "success",
+      "pendingFetchStatus": "fetching",
+      "siblingScope": [
+        3
+      ],
+      "siblingOwner": 1,
+      "siblingStartCount": 0,
+      "siblingActualCount": 1,
+      "siblingStatus": "success",
+      "siblingRows": [],
+      "physicalQueriesCurrent": true,
+      "pendingPhysicalQuery": 4,
+      "currentPhysicalQuery": 4,
+      "siblingPhysicalQuery": 8,
+      "siblingAnswerPhysicalQuery": 8
+    }
+  },
+  "exactCompletedResolvingEnqueue": {
+    "h02": true,
+    "sequence": 184,
+    "phase": "answer-queued",
+    "kind": "resolving-conflict",
+    "atom": "[\"h02-progress-markers\",2,[3]]",
+    "key": [
+      "h02-progress-markers",
+      2,
+      [
+        3
+      ]
+    ],
+    "cachedVersion": 4,
+    "emptyVersion": 8,
+    "scheduler": "microtask",
+    "enqueueReturned": true
+  },
+  "ordering": {
+    "conflictSequence": 182,
+    "completedEnqueueSequence": 184,
+    "lastFinalDrainSequence": 70961,
+    "receiptsAfterCompletedEnqueue": 70777
+  },
+  "executionObservation": {
+    "answerExecutedReceipts": 0,
+    "finalDrainCompleteContiguousCount": 70961,
+    "matchingAndOtherExecutionAbsent": true
+  },
+  "firstContainment": {
+    "watchdogTrigger": "post-enqueue-window",
+    "reason": "wall",
+    "configuredWindowMs": 1000,
+    "postEnqueue": {
+      "postEnqueueWindowMs": 1000,
+      "conflictSequence": 182,
+      "queuedSequence": 184,
+      "queuedAtParentMonotonicMs": 2265.692667,
+      "receiptCount": 70961,
+      "acquisitionCount": 7088,
+      "releaseCount": 7080,
+      "lastSequence": 70961,
+      "lastPhase": "actual-key-prefix"
+    },
+    "firstTriggerPersistence": "Frozen supervisor kill() sets watchdogTrigger only before first killAttempted; later calls cannot replace it. Final supervisor preserves that first trigger. No separate transient before-kill snapshot was retained by this supervisor; final scalar/raw evidence and frozen source define this qualification."
+  },
+  "excludedFailureChecks": {
+    "heap": false,
+    "rssExceeded": false,
+    "observationError": null,
+    "bindingError": null,
+    "recordingFailure": false,
+    "stderrBytes": 0,
+    "cleanupErrors": [],
+    "remainingOriginalGroupRows": []
+  },
+  "bindingStatus": "bound",
+  "limits": "Finite observed non-execution during admitted post-enqueue window, not infinite execution or a numerical product deadline. Forced termination does not establish direct adapter cleanup or final publication. No broader contract closure."
+}

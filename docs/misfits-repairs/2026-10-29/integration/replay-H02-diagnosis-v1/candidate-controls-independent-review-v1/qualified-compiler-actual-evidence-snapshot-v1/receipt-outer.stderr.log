@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v2/contain-compiler-v1.py.txt", line 189, in main
+    require(expected is not None and sha(line) == expected, "unbound resolved compiler input: " + line)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v2/contain-compiler-v1.py.txt", line 19, in require
+    raise ValueError(message)
+ValueError: unbound resolved compiler input: /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing/src/index.d.ts

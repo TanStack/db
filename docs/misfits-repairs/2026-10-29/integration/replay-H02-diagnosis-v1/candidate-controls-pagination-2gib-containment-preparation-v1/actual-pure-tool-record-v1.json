@@ -1,0 +1,16 @@
+{
+  "preparationTool": {
+    "actualChunk": "337254",
+    "exitCode": 0,
+    "mode": "exact read/copy/substitution/diff; no import or process control"
+  },
+  "pureBoundaryTool": {
+    "actualChunk": "e12a22",
+    "exitCode": 0,
+    "mode": "AST and integer predicate evaluation only"
+  },
+  "runtimeInvocations": 0,
+  "processProbes": 0,
+  "dependencyCensusBroadened": false,
+  "sourceEpochBinding": "PENDING author shared full-child successor; no cf550f retry"
+}

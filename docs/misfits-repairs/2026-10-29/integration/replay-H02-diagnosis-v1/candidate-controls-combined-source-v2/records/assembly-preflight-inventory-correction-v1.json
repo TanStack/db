@@ -1,0 +1,88 @@
+{
+  "firstAssemblyAttempt": {
+    "exitCode": 1,
+    "checkpoint": "vitest regular-payload set comparison before creating combined output",
+    "cause": "recursive inventory initially included nested node_modules/.bin wrappers outside original pinned package payload map",
+    "originalPinnedPayloadsChanged": false,
+    "newCombinedSnapshotCreated": false
+  },
+  "secondAssemblyAttempt": {
+    "exitCode": 1,
+    "checkpoint": "local import inventory before creating combined output",
+    "cause": "root eslint.config.js static validation dependency omitted from original shared map",
+    "newCombinedSnapshotCreated": false
+  },
+  "fourthAssemblyAttempt": {
+    "exitCode": 1,
+    "checkpoint": "local import inventory before creating combined output",
+    "cause": "recursive static scanner regex was escaped twice; corrected to same scanner as final inventory",
+    "newCombinedSnapshotCreated": false
+  },
+  "thirdAssemblyAttempt": {
+    "exitCode": 1,
+    "checkpoint": "local import inventory before creating combined output",
+    "cause": "root static config imports local oracle lint plugin; recursively capture full static validation import closure",
+    "newCombinedSnapshotCreated": false
+  },
+  "addedStaticValidationFiles": {
+    "eslint.config.js": "76c22c3fb0225bde82d7f14dcd6277985c2ff2092d4b38efc55d218abb03d1fc",
+    "scripts/eslint-plugin-oracle/index.js": "d59b5d3288f17ebc78c2340862a763c67b88f3abbbf20ea0749a5a182c639a6c",
+    "scripts/eslint-plugin-oracle/rules/no-unit-test.js": "3f113fa82bfd39c397073dd32f8b9a991f6175c1ed6b7f1b2d9079f52275ceb0",
+    "scripts/eslint-plugin-oracle/registration.js": "87b868c0791f85d914bf54a1a44cfba67692732388e4375df51bf34983ea665c",
+    "scripts/eslint-plugin-oracle/rules/no-disabled.js": "3d89c5073b0a3eba5847357fdd0b34ae76d3af217aeb095210a79dc85aad10fa"
+  },
+  "correctedInventory": "original package payload map plus explicit root static config dependency",
+  "excludedNestedWrappers": [
+    {
+      "package": "vitest",
+      "path": "node_modules/.bin/vite",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vitest",
+      "path": "node_modules/.bin/why-is-node-running",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/jiti",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/tsx",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/rollup",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/yaml",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/esbuild",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/terser",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "vite",
+      "path": "node_modules/.bin/sass",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    },
+    {
+      "package": "eslint",
+      "path": "node_modules/.bin/jiti",
+      "reason": "nested dependency wrapper outside pinned package payload map"
+    }
+  ],
+  "allOriginal2544PayloadHashesMatched": true
+}

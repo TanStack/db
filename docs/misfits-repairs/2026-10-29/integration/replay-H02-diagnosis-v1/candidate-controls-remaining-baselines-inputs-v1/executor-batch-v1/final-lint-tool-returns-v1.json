@@ -1,0 +1,42 @@
+{
+  "exactRequiredCommand": {
+    "cmd": "NODE_OPTIONS='--import=/tmp/misfits-lint-git-buffer-v1.mjs' pnpm lint:changed",
+    "workdir": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items",
+    "initial": {
+      "chunk_id": "c9255c",
+      "wall_time_seconds": 1.0010495,
+      "session_id": 99837,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualCompletion": {
+      "chunk_id": "ac929d",
+      "wall_time_seconds": 0.000020209,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "log": "final-exact-pnpm-lint-v1.log"
+  },
+  "precedingDirectCommand": {
+    "cmd": "/Users/kyle.mathews/.n/bin/node --import=/tmp/misfits-lint-git-buffer-v1.mjs scripts/agent-lint-feedback.mjs",
+    "initial": {
+      "chunk_id": "f1760c",
+      "wall_time_seconds": 1.001157334,
+      "session_id": 12119,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "actualCompletion": {
+      "chunk_id": "dd8599",
+      "wall_time_seconds": 0.000019375,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "log": "final-report-lint-v1.log"
+  },
+  "scope": "Normal report-worktree changed/untracked source selection after both native result freezes, collector evidence and stopped-batch record; no lint scope, rule or budget change",
+  "slot2Returned": true,
+  "nativeActive": false
+}

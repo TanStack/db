@@ -1,0 +1,111 @@
+export function createReceiptWriter(path, io = {}) {
+  const write = io.write ?? writeSync
+  const close = io.close ?? closeSync
+  const reportFault =
+    io.reportFault ??
+    ((value) =>
+      writeFileSync(`${path}.fault.json`, JSON.stringify(value, null, 2), {
+        flag: `wx`,
+        mode: 0o600,
+      }))
+  let sequence = 0
+  let writtenBytes = 0
+  /** @type {number | undefined} */
+  let fd
+  let closed = false
+  let failed = false
+  /** @type {unknown} */
+  let firstError
+  /** @param {unknown} error @returns {never} */
+  const fail = (error) => {
+    if (!failed) {
+      failed = true
+      firstError = error
+      try {
+        reportFault({
+          path,
+          pid: process.pid,
+          sequence,
+          writtenBytes,
+          message: String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        })
+      } catch {
+        // Failure reporting must not replace the write/open/close failure.
+        // The receiving runner still rejects with the original error.
+      }
+    }
+    throw firstError
+  }
+  try {
+    fd = openSync(path, `wx`, 0o600)
+    if (!fstatSync(fd).isFile()) throw new Error(`receipt sink is not a file`)
+    writeFileSync(
+      `${path}.writer.json`,
+      JSON.stringify({
+        path,
+        pid: process.pid,
+        flags: `wx`,
+        mode: 0o600,
+        regularFile: true,
+      }),
+      { flag: `wx`, mode: 0o600 },
+    )
+  } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        // Preserve the original setup failure.
+      }
+    }
+    fail(error)
+  }
+  if (fd === undefined) throw new Error(`receipt writer did not open`)
+  const writerFd = fd
+  return {
+    /** @param {string} phase @param {Record<string, unknown>} [details] */
+    emit(phase, details = {}) {
+      if (failed) throw firstError
+      if (closed) return fail(new Error(`receipt writer is closed`))
+      try {
+        // Preserve the original envelope and payload encoding. The shared
+        // sequence includes the receiving runner's worker-error receipt.
+        const bytes = Buffer.from(
+          JSON.stringify({
+            h02: true,
+            sequence: ++sequence,
+            phase,
+            ...details,
+          }) + `\n`,
+          `utf8`,
+        )
+        let offset = 0
+        while (offset < bytes.length) {
+          const count = write(writerFd, bytes, offset, bytes.length - offset)
+          if (
+            !Number.isInteger(count) ||
+            count <= 0 ||
+            count > bytes.length - offset
+          )
+            throw new Error(`invalid receipt write count: ${count}`)
+          offset += count
+          writtenBytes += count
+        }
+      } catch (error) {
+        fail(error)
+      }
+    },
+    close() {
+      if (!closed) {
+        closed = true
+        try {
+          close(writerFd)
+        } catch (error) {
+          fail(error)
+        }
+      }
+      if (failed) throw firstError
+    },
+  }
+}

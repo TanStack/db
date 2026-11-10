@@ -1,0 +1,34 @@
+{
+  "actualCopyFreeze": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-independent-review-v1/qualified-copy-actual-review-freeze-v1.json",
+    "sha256": "1b491a76140b0994bd48c2e0b59385602ee016cc2418ff317fcbedbbb0b0f55e"
+  },
+  "artifactLint": "PENDING ROOT",
+  "at": "2026-10-30T13:06:24.831493+00:00",
+  "candidateManifest": {
+    "path": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/candidate-controls-pagination-qualified-peer-compiler-containment-source-v1/packet-manifest-v1.json",
+    "sha256": "77ecb1a906d4712663622962fcf3db3dee522484118c536a308ec6f046ff4ba0"
+  },
+  "files": {
+    "audit-qualified-compiler-source-v1.py": {
+      "bytes": 10742,
+      "sha256": "5be118a6e85511fb5b09d419d8eb35a6aa86687672d2315ee960c77ec9fe512b"
+    },
+    "qualified-compiler-source-independent-facts-v1.json": {
+      "bytes": 2557,
+      "sha256": "f4daf7211a537b29f7897f6d53cb7c09b0181e7d7b66e30c9b760a8445bb6016"
+    },
+    "qualified-compiler-source-independent-review-v1.md": {
+      "bytes": 4119,
+      "sha256": "5bd1c92895b308d912b7560954dc8dd2d7d1f782595863cae38b41808b92a47f"
+    },
+    "qualified-compiler-source-independent-static-return-v1.json": {
+      "bytes": 2331,
+      "sha256": "a1494f41de480918a70019dac88d15d12790fb9fbea426e9d69d614af91c7529"
+    }
+  },
+  "memberCount": 4,
+  "runtimeAdmission": false,
+  "schema": "h02-independent-compiler-source-review-freeze-v1",
+  "verdict": "HOLD exact v1 for one stop-lock/signal-handler reentrancy correction"
+}

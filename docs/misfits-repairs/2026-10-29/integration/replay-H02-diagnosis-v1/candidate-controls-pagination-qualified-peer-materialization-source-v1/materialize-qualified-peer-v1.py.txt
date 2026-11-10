@@ -1,0 +1,283 @@
+"""Inactive, one-shot U/V copy-only candidate; execute only by separate admission.
+
+Only this script and Python standard-library modules execute. Bound JS/TS,
+configs, programs, package scripts and compiler entries are read as bytes only.
+There is no retry, removal, rollback, subprocess or native receiving action.
+"""
+import hashlib
+import json
+import os
+import stat
+import sys
+import traceback
+
+
+def require(value, message):
+    if not value:
+        raise ValueError(message)
+
+
+def regular_bytes(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode), "not regular: " + path)
+        return stream.read()
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def bound_bytes(path, expected):
+    data = regular_bytes(path)
+    require(digest(data) == expected, "hash mismatch: " + path)
+    return data
+
+
+def pairs(items):
+    result = {}
+    for key, value in items:
+        require(key not in result, "duplicate JSON key: " + key)
+        result[key] = value
+    return result
+
+
+def reject_constant(value):
+    raise ValueError("nonfinite JSON constant: " + value)
+
+
+def load(ref):
+    return json.loads(bound_bytes(ref["path"], ref["sha256"]),
+                      object_pairs_hook=pairs, parse_constant=reject_constant)
+
+
+def packet(ref):
+    manifest = load(ref)
+    base = os.path.dirname(ref["path"])
+    expected = set(manifest["files"]) | {os.path.basename(ref["path"])}
+    actual = set()
+    for directory, dirs, files in os.walk(base, followlinks=False):
+        require(all(not os.path.islink(os.path.join(directory, name))
+                    for name in dirs + files), "packet symlink: " + directory)
+        for name in files:
+            actual.add(os.path.relpath(os.path.join(directory, name), base))
+    require(actual == expected, "packet file closure: " + base)
+    require(len(manifest["files"]) == ref["memberCount"], "packet count: " + base)
+    for name, record in manifest["files"].items():
+        data = bound_bytes(os.path.join(base, name), record["sha256"])
+        require(len(data) == record["bytes"], "packet size: " + name)
+
+
+def verify_tools(contract, binding):
+    # Recheck the already accepted finite closure; do not discover new tooling.
+    bound_bytes(binding["node"]["executable"], binding["node"]["sha256"])
+    for record in contract["lockInputs"]:
+        bound_bytes(record["path"], record["sha256"])
+    supplemental = load(contract["finiteToolInputs"])
+    seen = set()
+    payload_count = 0
+    for record in list(binding["packages"].values()) + supplemental["packages"]:
+        base = record["resolved"]
+        if base in seen:
+            continue
+        seen.add(base)
+        actual = set()
+        for directory, dirs, files in os.walk(base, followlinks=False):
+            dirs[:] = [name for name in dirs if name != "node_modules"
+                       and not os.path.islink(os.path.join(directory, name))]
+            for name in files:
+                path = os.path.join(directory, name)
+                if not os.path.islink(path) and stat.S_ISREG(os.lstat(path).st_mode):
+                    actual.add(os.path.relpath(path, base))
+        expected = record["regularPayloadFilesMap"]
+        require(actual == set(expected), "finite own payload closure: " + base)
+        for name, expected_hash in expected.items():
+            bound_bytes(os.path.join(base, name), expected_hash)
+        payload_count += len(expected)
+    require((len(seen), payload_count) == (255, 11974), "finite tool counts")
+    require(len(supplemental["resolutionEdges"]) == 405, "finite edge count")
+    for edge in supplemental["resolutionEdges"]:
+        require(os.path.realpath(edge["logical"]) == edge["resolved"], "finite edge: " + edge["logical"])
+    absent = supplemental["uninstalledDeclaredOptionalOrPeerDependencies"]
+    require(len(absent) == 112, "finite absence count")
+    for record in absent:
+        parent = record["from"]
+        while True:
+            require(not os.path.lexists(os.path.join(parent, "node_modules", record["dependency"])),
+                    "finite optional/peer present: " + record["dependency"])
+            if parent == os.path.dirname(parent):
+                break
+            parent = os.path.dirname(parent)
+
+
+def open_parent(root_fd, relative):
+    parts = relative.split(os.sep)
+    fd = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd, parts[-1]
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def verify_tree(root_fd, expected_files, expected_links, expected_dirs):
+    files, links, dirs = {}, {}, {"."}
+
+    def visit(fd, relative):
+        for name in os.listdir(fd):
+            path = name if relative == "." else relative + os.sep + name
+            mode = os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode
+            if stat.S_ISDIR(mode):
+                dirs.add(path)
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    visit(child, path)
+                finally:
+                    os.close(child)
+            elif stat.S_ISLNK(mode):
+                links[path] = os.readlink(name, dir_fd=fd)
+            elif stat.S_ISREG(mode):
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                with os.fdopen(child, "rb") as stream:
+                    files[path] = digest(stream.read())
+            else:
+                raise ValueError("unexpected destination type: " + path)
+
+    visit(root_fd, ".")
+    require(files == expected_files, "copied regular file/hash closure")
+    require(links == expected_links, "copied exact link closure")
+    require(dirs == expected_dirs, "copied exact directory closure")
+
+
+def main():
+    require(len(sys.argv) == 3, "exact contract path and SHA arguments required")
+    contract_ref = {"path": sys.argv[1], "sha256": sys.argv[2]}
+    contract = load(contract_ref)
+    require(contract["schema"] == "h02-qualified-copy-only-contract-v1", "contract schema")
+    require(os.path.abspath(__file__) == contract["materializer"]["path"], "exact materializer path")
+    bound_bytes(__file__, contract["materializer"]["sha256"])
+    bound_bytes(sys.executable, contract["python"]["sha256"])
+    require(os.path.realpath(sys.executable) == contract["python"]["resolved"], "exact Python path")
+    require(sys.version == contract["python"]["version"], "exact Python version")
+    require(sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode, "isolated no-site no-bytecode flags")
+    # A fresh receipt root is separate from code/control. Refusal or partial copy
+    # stays intact. If receipt IO itself fails, actual tool stderr remains the
+    # fallback; this script claims no unconditional failure-receipt fidelity.
+    receipt = contract["receiptRoot"]
+    os.mkdir(receipt, 0o700)
+    with open(receipt + "/stdout.jsonl", "xb", buffering=0) as out, open(receipt + "/stderr.log", "xb", buffering=0) as err:
+        def emit(event, **details):
+            data = (json.dumps({"event": event, **details}, sort_keys=True) + "\n").encode()
+            out.write(data)
+            os.fsync(out.fileno())
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+
+        root_fd = None
+        try:
+            emit("start", contract=contract_ref, materializer=contract["materializer"])
+            plan = load(contract["plan"])
+            geometry = load(contract["geometry"])
+            binding = load(contract["binding"])
+            root = plan["proposedRoot"]
+            require(root == "/private/tmp/h02-qualified-peer-receiving-v1", "fixed private root")
+            require(not os.path.lexists(root), "private root already exists; preserve and stop")
+            for path in contract["receivingOutputRoots"]:
+                require(not os.path.lexists(path), "receiving output already exists: " + path)
+            regulars = plan["regularCodeAndLockFiles"] + plan["regularControlFiles"]
+            link_records = plan["dependencyReuseSymlinks"]
+            require((len(plan["regularCodeAndLockFiles"]), len(plan["regularControlFiles"]), len(link_records)) == (597, 6, 4), "597/6/4 counts")
+            destinations = [record["runtimePath"] for record in regulars + link_records]
+            require(len(set(destinations)) == 607, "607 unique destinations")
+            require(all(os.path.isabs(path) and os.path.normpath(path) == path and path.startswith(root + "/") for path in destinations), "destination containment")
+            ancestors = {root}
+            for path in destinations:
+                parent = os.path.dirname(path)
+                while parent != root:
+                    ancestors.add(parent)
+                    parent = os.path.dirname(parent)
+            require(set(geometry["directories"]) == ancestors and len(ancestors) == 227, "exact227 directories")
+            require(not ancestors.intersection(destinations), "file/link versus directory collision")
+            require(geometry["destinations"] == sorted(destinations), "explicit607 destination plan")
+            require(all(not other.startswith(link["runtimePath"] + "/") for link in link_records for other in destinations), "destination under proposed link")
+            expected_files = {os.path.relpath(record["runtimePath"], root): record["fromSha256"] for record in regulars}
+            expected_links = {os.path.relpath(record["runtimePath"], root): record["target"] for record in link_records}
+            expected_dirs = {os.path.relpath(path, root) for path in ancestors}
+
+            def verify_inputs():
+                bound_bytes(contract_ref["path"], contract_ref["sha256"])
+                bound_bytes(__file__, contract["materializer"]["sha256"])
+                bound_bytes(sys.executable, contract["python"]["sha256"])
+                for ref in [contract["geometry"], *contract["sourceReviews"]]:
+                    bound_bytes(ref["path"], ref["sha256"])
+                for ref in contract["packets"]:
+                    packet(ref)
+                for record in regulars:
+                    bound_bytes(record["from"], record["fromSha256"])
+                for record in link_records:
+                    require(os.path.isdir(record["target"]) and os.path.realpath(record["target"]) == record["target"], "reuse endpoint: " + record["target"])
+                verify_tools(contract, binding)
+
+            verify_inputs()
+            emit("preflight-passed", codeAndLock=597, controls=6, links=4, directories=227,
+                 sourceBindings=596, finiteToolRoots=255, finiteOwnPayloads=11974)
+            parent_fd = os.open("/private/tmp", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.mkdir(os.path.basename(root), 0o700, dir_fd=parent_fd)
+                root_fd = os.open(os.path.basename(root), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+            finally:
+                os.close(parent_fd)
+            emit("created-directory", path=root)
+            for path in sorted(ancestors - {root}, key=lambda p: (p.count(os.sep), p)):
+                parent, name = open_parent(root_fd, os.path.relpath(path, root))
+                try:
+                    os.mkdir(name, 0o700, dir_fd=parent)
+                finally:
+                    os.close(parent)
+                emit("created-directory", path=path)
+            for record in regulars:
+                data = bound_bytes(record["from"], record["fromSha256"])
+                parent, name = open_parent(root_fd, os.path.relpath(record["runtimePath"], root))
+                try:
+                    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(data)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                finally:
+                    os.close(parent)
+                emit("copied-regular", path=record["runtimePath"], sha256=record["fromSha256"], bytes=len(data))
+            for record in link_records:
+                parent, name = open_parent(root_fd, os.path.relpath(record["runtimePath"], root))
+                try:
+                    os.symlink(record["target"], name, dir_fd=parent)
+                finally:
+                    os.close(parent)
+                emit("created-link", path=record["runtimePath"], target=record["target"])
+            verify_tree(root_fd, expected_files, expected_links, expected_dirs)
+            require(os.path.samestat(os.fstat(root_fd), os.lstat(root)), "root path identity changed")
+            verify_inputs()
+            # Recheck after input verification; do not follow the dependency links.
+            verify_tree(root_fd, expected_files, expected_links, expected_dirs)
+            require(os.path.samestat(os.fstat(root_fd), os.lstat(root)), "root path identity changed")
+            emit("copy-verified", regularCodeAndLock=597, controls=6, links=4, directories=227,
+                 compilerInvocations=0, nativeInvocations=0, executionAuthority=False)
+        except BaseException:
+            failure = traceback.format_exc().encode()
+            err.write(failure)
+            os.fsync(err.fileno())
+            sys.stderr.buffer.write(failure)
+            sys.stderr.buffer.flush()
+            return 1
+        finally:
+            if root_fd is not None:
+                os.close(root_fd)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
