@@ -928,7 +928,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/aggregate-select-oracle.property.test.ts`,
     `aggregate`,
-    `select-shapes`,
+    `select-shapes select-structural select-required`,
   ],
   [
     `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
@@ -1353,6 +1353,8 @@ const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `aggregate.select-shapes`,
+    `aggregate.select-required`,
     `pooled-live-query.bootstrap-ownership`,
     `pooled-live-query.cleanup-peers`,
     `pooled-live-query.late-cleanup`,
