@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { IR, and, inArray, not } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { MAX_URL_LENGTH, supabaseQueryFn } from '../src/functions'
 import { loadSubsetOptionsToSearch } from '../src/postgrest-filters'
 import {
@@ -373,5 +373,92 @@ describe('supabaseQueryFn: chunked fan-out for an oversized IN list', () => {
     for (const rawUrl of getRawUrls(mockFetch)) {
       expect(rawUrl.length).toBeLessThanOrEqual(MAX_URL_LENGTH)
     }
+  })
+
+  describe('abort signal plumbing', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    // Counts the caller's `abort` listeners still attached, so a test can
+    // check that the load removed what it added once it settled.
+    const liveAbortListeners = (signal: AbortSignal) => {
+      const add = vi.spyOn(signal, 'addEventListener')
+      const remove = vi.spyOn(signal, 'removeEventListener')
+      return () => {
+        const removed = new Set(
+          remove.mock.calls
+            .filter(([type]) => type === 'abort')
+            .map(([, listener]) => listener),
+        )
+        return add.mock.calls.filter(
+          ([type, listener]) => type === 'abort' && !removed.has(listener),
+        ).length
+      }
+    }
+
+    test('a split read works where AbortSignal.any is unavailable', async () => {
+      // React Native (Hermes) and Safari before 17.4 have no AbortSignal.any.
+      vi.spyOn(AbortSignal, 'any').mockImplementation(() => {
+        throw new TypeError('AbortSignal.any is not a function')
+      })
+      const ids = idsExceedingLength(MAX_URL_LENGTH * 1.5)
+      const signal = new AbortController().signal
+      const live = liveAbortListeners(signal)
+
+      const rows = await run(
+        makePaginatingFetch(ids.map((id) => ({ id }))),
+        ids,
+        signal,
+      )
+
+      expect(rows).toHaveLength(ids.length)
+      expect(live()).toBe(0)
+    })
+
+    test("a caller abort reaches every chunk request with the caller's reason", async () => {
+      const ids = idsExceedingLength(MAX_URL_LENGTH * 1.5)
+      const caller = new AbortController()
+      const reason = new Error('caller stopped')
+      const requestSignals: Array<AbortSignal> = []
+      const hangingFetch = vi
+        .fn<typeof fetch>()
+        .mockImplementation((_input, init) => {
+          const signal = init!.signal!
+          requestSignals.push(signal)
+          // Like `fetch`, reject at once for a signal that is already aborted
+          // (supabase-js retries an aborted request with the same signal).
+          return new Promise<Response>((_resolve, reject) => {
+            if (signal.aborted) reject(signal.reason)
+            signal.addEventListener('abort', () => reject(signal.reason))
+          })
+        })
+      const live = liveAbortListeners(caller.signal)
+
+      const load = run(hangingFetch, ids, caller.signal)
+      await vi.waitFor(() => expect(requestSignals.length).toBeGreaterThan(1))
+      caller.abort(reason)
+
+      await expect(load).rejects.toThrow(reason.message)
+      for (const signal of requestSignals) {
+        expect(signal.reason).toBe(reason)
+      }
+      expect(live()).toBe(0)
+    })
+
+    test("a failed split read releases the caller's signal", async () => {
+      const ids = idsExceedingLength(MAX_URL_LENGTH * 1.5)
+      const signal = new AbortController().signal
+      const live = liveAbortListeners(signal)
+      const failingFetch = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ message: 'boom' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+
+      await expect(run(failingFetch, ids, signal)).rejects.toBeDefined()
+      expect(live()).toBe(0)
+    })
   })
 })
