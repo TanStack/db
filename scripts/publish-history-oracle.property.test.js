@@ -171,5 +171,7 @@ oracleProperty({
       receiveCommand(plan.history, observe),
     ),
   check: forwardAssertionJudgment,
-  timeout: 20000,
+  // Native determinism runs up to eight cases twice in one Vitest test.
+  // Existing receiving child-process timeouts remain unchanged.
+  timeout: 20_000 * 16,
 })

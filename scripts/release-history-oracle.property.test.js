@@ -345,7 +345,9 @@ oracleProperty({
       receiveVersion(plan.history, observe),
     ),
   check: forwardAssertionJudgment,
-  timeout: 20000,
+  // Native determinism runs up to eight cases twice in one Vitest test.
+  // Existing receiving child-process timeouts remain unchanged.
+  timeout: 20_000 * 16,
 })
 
 // The complete existing independent helper retains every comparison cut. Native
@@ -371,5 +373,7 @@ oracleProperty({
       receiveFailure(plan.history, observe),
     ),
   check: forwardAssertionJudgment,
-  timeout: 20000,
+  // Native determinism runs up to eight cases twice in one Vitest test.
+  // Existing receiving child-process timeouts remain unchanged.
+  timeout: 20_000 * 16,
 })
