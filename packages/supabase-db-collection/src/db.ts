@@ -192,6 +192,9 @@ export const supabaseCollectionOptions = <TSchema extends StandardSchemaV1>({
   return {
     ...config,
     sync: {
+      // Keeps the hooks query-db-collection attaches to its sync config, such
+      // as the factory that lets a direct write start an idle collection.
+      ...config.sync,
       sync: (
         ...args: Parameters<typeof originalSync>
       ): ReturnType<typeof originalSync> => {
