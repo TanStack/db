@@ -97,6 +97,18 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).not.toContain(`unrelated fixed campaign ran`)
   }, 40_000)
 
+  it(`rejects seed/path replay for enumerated cases and names their direct command`, () => {
+    const result = runReplay(
+      [`tests/replay-enumerated-oracle.fixture.test.ts`],
+      undefined,
+      `oracle-replay.enumerated-calibration`,
+    )
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`enumerated-campaign`)
+    expect(result.output).toContain(`Run its enumerated cases with:`)
+    expect(result.output).not.toContain(`oracle replay target never executed`)
+  }, 40_000)
+
   it(`intersects a caller alternation with the named replay campaign`, () => {
     const result = runReplay([
       fixture,
@@ -396,6 +408,53 @@ describe(`oracle replay reporting`, () => {
 })
 
 describe(`named oracle replay manifest`, () => {
+  it(`runs finite cases directly without seed/path replay coordinates`, () => {
+    const entry = oracleReplayManifest.find(
+      ({ property }) => property === `oracle-replay.enumerated-calibration`,
+    )!
+    expect(entry).toMatchObject({
+      status: `enumerated-campaign`,
+      file: `packages/db/tests/replay-enumerated-oracle.fixture.test.ts`,
+      cwd: `packages/db`,
+      environment: [],
+      testNamePattern: `oracle-replay\\.enumerated-calibration > `,
+      command: `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY pnpm exec vitest run -t 'oracle-replay\\.enumerated-calibration > ' tests/replay-enumerated-oracle.fixture.test.ts`,
+    })
+    // Execute the advertised command itself. The neighbor fault proves that
+    // selecting this property's cases does not run a similarly named property.
+    const run = (fault: string) => {
+      const result = spawnSync(
+        `${entry.command!} --maxWorkers=1 --coverage.enabled=false`,
+        {
+          cwd: resolve(repositoryDirectory, entry.cwd!),
+          shell: true,
+          env: {
+            ...process.env,
+            // The advertised command must also work from the shell that
+            // exported these coordinates for the rejected guarded replay.
+            TANSTACK_DB_ORACLE_SEED: `42`,
+            TANSTACK_DB_ORACLE_PATH: `0`,
+            TANSTACK_DB_ORACLE_PROPERTY: entry.property,
+            TANSTACK_DB_ORACLE_ENUMERATED_CALIBRATION: fault,
+          },
+          encoding: `utf8`,
+          timeout: 30_000,
+        },
+      )
+      if (result.error) throw result.error
+      return {
+        status: result.status,
+        output: stripVTControlCharacters(result.stdout + result.stderr),
+      }
+    }
+    const clean = run(`neighbor`)
+    expect(clean.status, clean.output).toBe(0)
+    expect(clean.output).toMatch(/Tests\s+3 passed \| 2 skipped/)
+    const wrong = run(`value`)
+    expect(wrong.status, wrong.output).toBe(1)
+    expect(wrong.output).toContain(`finite value`)
+    expect(wrong.output).not.toContain(`unrelated finite property ran`)
+  }, 70_000)
   // ORC-007 requires the same production path during replay. A shared model
   // does not make different framework schedulers interchangeable. Enumerate
   // the finite driver × history grammar, including React's dependency-list
