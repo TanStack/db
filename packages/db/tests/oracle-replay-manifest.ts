@@ -1755,17 +1755,12 @@ function directReplayTestName(property: string): string | undefined {
       case `result-shape`:
         return `result-shape > random seed`
       case `window-history`:
-        return `(?:direct|nested) window histories \\(fresh\\)`
       case `pending-window-history`:
-        return `pending window histories \\(fresh\\)`
       case `publication-window-history`:
-        return `publication callback window histories \\(fresh\\)`
       case `peer-window-history`:
-        return `peer page histories \\(fresh\\)`
       case `keyed-admission`:
-        return `initial disabled keyed admission \\(fresh\\)`
       case `immutable-key-history`:
-        return `immutable query key histories \\(fresh\\)`
+        return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
     }
   }
   if (

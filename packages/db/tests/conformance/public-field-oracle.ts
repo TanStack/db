@@ -13,7 +13,6 @@
  */
 import { expect } from 'vitest'
 import { declareOracle } from '../oracle-declaration'
-import { createOracleReach } from '../oracle-reach'
 import { expectRowSnapshot } from './row-snapshot-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import type {
@@ -119,13 +118,20 @@ export async function runPublicFieldHistories(
   const cases = publicFieldCells.filter(
     (cell) => cell.destination !== `payload`,
   )
-  const reach = createOracleReach(
-    `framework.${driver.name}.${input}.public-fields`,
-    [input, `toString`, `wrapper.toString`, ...fieldStages.map(String)],
+  // Each cell counts once at each checkpoint, even when a stage rereads it.
+  const historiesByState = new Map(
+    [input, `toString`, `wrapper.toString`, ...fieldStages.map(String)].map(
+      (state) => [state, new Set<PublicFieldCell>()] as const,
+    ),
   )
   const failures: Array<Error> = []
   for (const cell of cases) {
-    reach.beginHistory()
+    const enter = (state: string) => {
+      const histories = historiesByState.get(state)
+      if (!histories)
+        throw new Error(`Undeclared public-field checkpoint: ${state}`)
+      histories.add(cell)
+    }
     const resources = new ScenarioLifetime()
     try {
       await resources.run(async () => {
@@ -151,8 +157,8 @@ export async function runPublicFieldHistories(
               }))
           handle =
             input === `config` ? driver.mountConfig(build) : driver.mount(build)
-          reach.reach(input)
-          reach.reach(cell.destination)
+          enter(input)
+          enter(cell.destination)
           for (const version of fieldStages) {
             if (version > 0)
               await handle.apply(() => source.update(sourceRow(version)))
@@ -162,7 +168,7 @@ export async function runPublicFieldHistories(
               sourceRow(version),
               `source admitted fields`,
             )
-            reach.reach(String(version))
+            enter(String(version))
             try {
               const rows = handle.current().data as ReadonlyArray<unknown>
               expect(rows, `complete framework result`).toHaveLength(1)
@@ -196,8 +202,14 @@ export async function runPublicFieldHistories(
   }
   if (failures.length)
     throw new AggregateError(failures, `Selected source fields were lost`)
-  reach.assertReached()
-  expect(Object.fromEntries(reach.counts())).toEqual({
+  expect(
+    Object.fromEntries(
+      [...historiesByState].map(([state, histories]) => [
+        state,
+        histories.size,
+      ]),
+    ),
+  ).toEqual({
     [input]: 12,
     toString: 6,
     'wrapper.toString': 6,
@@ -491,11 +503,12 @@ export async function runPublicFieldOverlapCell(
     `${stage}:retained`,
     `${stage}:descriptor`,
   ])
-  const reach = createOracleReach(label, states)
-  reach.beginHistory()
+  const observedStates = new Set<string>()
   const failures: Array<Error> = []
   const check = (checkpoint: string, compare: () => void) => {
-    reach.reach(checkpoint)
+    if (!states.includes(checkpoint))
+      throw new Error(`${label}: undeclared checkpoint ${checkpoint}`)
+    observedStates.add(checkpoint)
     try {
       compare()
     } catch (cause) {
@@ -624,14 +637,19 @@ export async function runPublicFieldOverlapCell(
       resources.defer(() => handle?.collection()?.cleanup())
       resources.defer(() => source.collection.cleanup())
     }
-    reach.assertReached()
+    expect(
+      states.filter((state) => !observedStates.has(state)),
+      label,
+    ).toEqual([])
     if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
       console.info(
         JSON.stringify({
           oracle: `public-field-overlap`,
           host: host.name,
           cell,
-          reach: Object.fromEntries(reach.counts()),
+          reach: Object.fromEntries(
+            states.map((state) => [state, Number(observedStates.has(state))]),
+          ),
           runtimeFailures: runtimeFailures.map(({ stage, error }) => ({
             stage,
             name: error instanceof Error ? error.name : typeof error,

@@ -64,26 +64,6 @@ export const oracleLintSettings = {
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/conformance/indexing-config-oracle.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/conformance/infinite-suite-oracle.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/conformance/public-field-oracle.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/conformance/row-snapshot-oracle.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/conformance/window-history-oracle.ts`,
-        reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/declared-reach-oracle.property.test.ts`,
         reason: `campaign helper with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
