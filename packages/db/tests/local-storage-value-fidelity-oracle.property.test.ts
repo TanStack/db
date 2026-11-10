@@ -388,9 +388,10 @@ async function runHistory({ entry, handler, payload }: History) {
       reopened = open(storage)
       await reopened.preload()
       oracleAssertion(`${label}: restore`, () =>
-        expect(reopened!.get(`row`)?.payload, `${label}: restore`).toStrictEqual(
-          payload.restored,
-        ),
+        expect(
+          reopened!.get(`row`)?.payload,
+          `${label}: restore`,
+        ).toStrictEqual(payload.restored),
       )
     },
     () => [
