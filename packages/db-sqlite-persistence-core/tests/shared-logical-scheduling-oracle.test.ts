@@ -112,6 +112,12 @@ function check(
 ): Verdict {
   const held = trace.find((entry) => entry.checkpoint === `held`)?.value as
     { admissions: number; firstQueryAdmissionCount: number } | undefined
+  if (!held)
+    return violation(
+      `held`,
+      `held query observation is missing`,
+      `non-preemptible hydration`,
+    )
   return (
     differs(
       `held`,
