@@ -175,7 +175,19 @@ const fileForms = fc.record({
   ),
   // The second oracle file exists at base, or is new and untracked at head.
   otherNew: fc.boolean(),
+  // What the branch does to the case file: keeps it, renames it, or deletes it.
+  caseChange: fc.oneof(
+    { weight: 2, arbitrary: fc.constant(`none`) },
+    { weight: 1, arbitrary: fc.constant(`rename`) },
+    { weight: 1, arbitrary: fc.constant(`delete`) },
+  ),
+  // Whether the module that a specifier names is deleted at head. The same
+  // specifier then resolves, at head, to an unchanged index module.
+  shift: fc.boolean(),
 })
+
+// The count of the budget that a shifted specifier names at base.
+const SHIFT_RUNS = 30
 
 /** Feature gates: which count sources a campaign may draw. */
 const ALL = [`inline`, `imported`, `reexported`]
@@ -186,17 +198,20 @@ function programArbitrary(sources, supportOnly = false) {
       budgets: fc.array(budgetSkeleton, { minLength: 1, maxLength: 3 }),
       files: fileForms,
     })
-    .map(({ budgets, files }) => ({
-      files: resolveFiles(files),
-      budgets: budgets.map((budget, index) =>
-        resolveBudget(
-          supportOnly ? supportOnlyBudget(budget) : budget,
-          index,
-          sources,
-          files,
+    .map(({ budgets, files }) => {
+      const program = {
+        files: resolveFiles(files),
+        budgets: budgets.map((budget, index) =>
+          resolveBudget(
+            supportOnly ? supportOnlyBudget(budget) : budget,
+            index,
+            sources,
+            files,
+          ),
         ),
-      ),
-    }))
+      }
+      return program
+    })
 }
 
 /**
@@ -220,6 +235,10 @@ function resolveFiles(files) {
     oracle: `tests/case-oracle.test.${files.oracleExtension}`,
     support: `tests/support-a.${files.supportExtension}`,
     reexport: `tests/support-b.ts`,
+    renamed: `tests/renamed-oracle.test.ts`,
+    shiftOracle: `tests/shift-oracle.test.ts`,
+    shiftModule: `tests/support-d.ts`,
+    shiftIndex: `tests/support-d/index.ts`,
   }
 }
 
@@ -285,12 +304,55 @@ function resolveBudget(skeleton, index, sources, files) {
 // That unchanged file is not in the branch's changed set, so a holder found
 // only through it is found only by a check of every oracle file. Each line names the oracle file that used the budget at base.
 
+/**
+ * Whether the other tracked oracle file at head imports the support module A.
+ * It does when it names A, or the support module B that re-exports A, for a
+ * budget that it holds: a count or key that is not written as a literal at its
+ * call. Then A's campaigns stay tracked when the case file is deleted.
+ */
+function otherImportsSupport(program) {
+  return program.budgets.some(
+    (budget) =>
+      budget.fate === `other-oracle` &&
+      (budget.keySource === `imported` || !literalAtHeadCall(budget)),
+  )
+}
+
+/** Whether a budget's count is written at its call at head. */
+function literalAtHeadCall(budget) {
+  return (
+    budget.source === `inline` ||
+    (budget.changed && budget.changedAt === `call`)
+  )
+}
+
+/**
+ * Whether a budget leaves every tracked oracle file at head. It was deleted, or
+ * moved into the ordinary file. Deleting the case file also leaves a campaign
+ * that stays in the support module A, unless another oracle file at head still
+ * imports A: nothing else then reaches the campaign.
+ */
+function leavesTracking(program, budget) {
+  if (budget.fate === `remove` || budget.fate === `ordinary`) return true
+  if (program.files.caseChange !== `delete`) return false
+  const host = campaignFile(program, budget, `head`)
+  return (
+    host === program.files.oracle ||
+    (host === program.files.support && !otherImportsSupport(program))
+  )
+}
+
 /** The reported budgets, as sorted `file|key|before|after-or-removed` strings. */
 function predictReport(program) {
   const lines = []
+  // The shifted specifier's budget is gone at head, and no holder has it.
+  if (program.files.shift) {
+    lines.push(
+      `${program.files.shiftOracle}|property budget.shift|${SHIFT_RUNS}|removed`,
+    )
+  }
   for (const budget of program.budgets) {
-    const leaves = budget.fate === `remove` || budget.fate === `ordinary`
-    if (leaves) {
+    if (leavesTracking(program, budget)) {
       if (!budget.sharedSeed) {
         lines.push(
           `${program.files.oracle}|${budget.key}|${budget.before}|removed`,
@@ -377,6 +439,22 @@ function renderFiles(program, revision) {
   // The case oracle keeps its import of the support module at both revisions,
   // so a campaign removed from the module is a removal from an imported module.
   modules.get(files.oracle).line(`import '${supportSpecifier}'`)
+  // A shifted specifier: the shift oracle imports `./support-d`, which the head
+  // deletes when the program shifts. The index module at `./support-d/index` is
+  // unchanged, so the head reach reaches it while the base reach reaches the
+  // deleted module.
+  modules.set(files.shiftOracle, new ModuleText())
+  modules.set(files.shiftModule, new ModuleText())
+  modules.set(files.shiftIndex, new ModuleText())
+  modules.get(files.shiftOracle).line(`import './support-d'`)
+  modules
+    .get(files.shiftModule)
+    .line(
+      `export const shiftOpts = oraclePropertyOptions(${SHIFT_RUNS}, 'budget.shift')`,
+    )
+  modules
+    .get(files.shiftIndex)
+    .line(`export const indexOpts = oraclePropertyOptions(7, 'budget.index')`)
   const support = modules.get(files.support)
   const reexported = []
 
@@ -480,11 +558,21 @@ function renderFiles(program, revision) {
       text.render(file === files.oracle && files.large ? LARGE_PADDING : 0),
     )
   }
+  if (isHead) {
+    // The case file is gone at head, or is renamed with its text unchanged.
+    if (files.caseChange === `delete`) rendered.delete(files.oracle)
+    if (files.caseChange === `rename`) {
+      rendered.set(files.renamed, rendered.get(files.oracle))
+      rendered.delete(files.oracle)
+    }
+    if (files.shift) rendered.delete(files.shiftModule)
+  }
   return rendered
 }
 
 let work
 let scriptText
+let scannerText
 
 beforeAll(() => {
   // Each run has its own directory, so concurrent runs cannot remove each
@@ -494,6 +582,10 @@ beforeAll(() => {
   scriptText = readFileSync(
     process.env.RUN_BUDGET_SCRIPT ??
       join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`),
+    `utf8`,
+  )
+  scannerText = readFileSync(
+    join(repoRoot, `scripts`, `oracle-specifiers.mjs`),
     `utf8`,
   )
 })
@@ -570,12 +662,23 @@ async function reportOf(program) {
       join(directory, `scripts`, `check-oracle-run-counts.mjs`),
       scriptText,
     )
+    writeFileSync(
+      join(directory, `scripts`, `oracle-specifiers.mjs`),
+      scannerText,
+    )
     write(renderFiles(program, `base`))
     await git(`add`, `-A`)
     await git(`commit`, `-q`, `-m`, `base`)
     // The dependencies are linked after the commit, so they are not tracked.
     symlinkSync(join(repoRoot, `node_modules`), join(directory, `node_modules`))
-    write(renderFiles(program, `head`))
+    const head = renderFiles(program, `head`)
+    // A file that head deletes is removed, and the head is staged as a branch's
+    // usually is, so a rename is one rename in the diff.
+    for (const file of renderFiles(program, `base`).keys()) {
+      if (!head.has(file)) rmSync(join(directory, file), { force: true })
+    }
+    write(head)
+    await git(`add`, `-A`, `scripts`, `tests`)
     const result = await run(
       process.execPath,
       [`scripts/check-oracle-run-counts.mjs`, `--format=text`],
@@ -612,6 +715,9 @@ const STATES = [
   `migrated-to-framework`,
   `seed-migrated-to-framework`,
   `seed-spelled-in-hex-or-exponent`,
+  `case-renamed`,
+  `case-deleted`,
+  `shifted-specifier`,
   `support-only-change`,
   `oracle-and-support-change`,
   `lowered-budget`,
@@ -622,6 +728,7 @@ const STATES = [
   `moved-to-oracle`,
   `moved-to-unchanged-oracle`,
   `removed-from-imported-module`,
+  `support-kept-by-other-oracle`,
   `moved-to-untracked-oracle`,
   `shared-seed-kept`,
   `declared-seed`,
@@ -662,26 +769,33 @@ function recordStates(program) {
     if (budget.callAt === `oracle` && budget.fate === `swap`) {
       states.add(`moved-into-support`)
     }
-    if (budget.fate === `remove`) states.add(`removed-budget`)
+    if (leavesTracking(program, budget)) states.add(`removed-budget`)
     if (budget.fate === `ordinary`) states.add(`moved-to-ordinary`)
     if (budget.fate === `imported-by-unchanged`) {
       states.add(`moved-to-unchanged-oracle`)
     }
-    if (budget.callAt === `support` && budget.fate === `remove`) {
+    if (budget.callAt === `support` && leavesTracking(program, budget)) {
       states.add(`removed-from-imported-module`)
+    }
+    if (
+      files.caseChange === `delete` &&
+      campaignFile(program, budget, `head`) === files.support &&
+      otherImportsSupport(program)
+    ) {
+      states.add(`support-kept-by-other-oracle`)
     }
     if (budget.fate === `other-oracle`) {
       states.add(
         files.otherNew ? `moved-to-untracked-oracle` : `moved-to-oracle`,
       )
     }
-    if (
-      budget.sharedSeed &&
-      (budget.fate === `remove` || budget.fate === `ordinary`)
-    ) {
+    if (budget.sharedSeed && leavesTracking(program, budget)) {
       states.add(`shared-seed-kept`)
     }
   }
+  if (files.caseChange === `rename`) states.add(`case-renamed`)
+  if (files.caseChange === `delete`) states.add(`case-deleted`)
+  if (files.shift) states.add(`shifted-specifier`)
   const atCall = program.budgets.some(
     (budget) => budget.changed && budget.changedAt === `call`,
   )

@@ -46,6 +46,7 @@ import { basename, join, posix } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
+import { relativeSpecifiers } from './oracle-specifiers.mjs'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
 
@@ -474,10 +475,6 @@ function scopeBudgets(file, revision, reader) {
   return budgets
 }
 
-// A string literal that names a relative path. Every relative import, export,
-// and re-export source is one, so the literals contain each module that the
-// AST walk reaches.
-const relativeLiteral = /(['"`])(\.[^'"`\n]*)\1/g
 // A numeric literal in any spelling: a decimal with an optional fraction and
 // exponent, or a hexadecimal, octal, or binary integer. Separators are removed
 // before the value is read. The lookbehind keeps an identifier's digits out.
@@ -485,51 +482,55 @@ const numericLiteral =
   /(?<![\w$.])(?:0[xob][\da-f_]+|\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?\d[\d_]*)?|\.\d[\d_]*(?:e[+-]?\d[\d_]*)?)/gi
 
 /**
- * The files that a file reaches at head through relative literals, transitively.
- * It reads the working tree, and it is a superset of `dependencies`: a literal
- * in a comment can add a file, which the exact scope then computes and finds
- * unchanged. It selects which oracle files are computed, and reports nothing.
+ * The files that a file reaches at one revision through its relative
+ * specifiers, transitively. The specifiers come from the shared scanner, which
+ * reads each string literal exactly, so the reach contains every module that the
+ * AST walk reaches. A literal in a comment can add a file; the exact scope then
+ * computes it and finds nothing to report. The base reach loads base texts one
+ * batch per level, so one `git cat-file` serves a whole level.
  */
-class HeadReach {
+class Reach {
   #reader
+  #revision
   #direct = new Map()
   #closure = new Map()
   #numbers = new Map()
 
-  constructor(reader) {
+  constructor(reader, revision) {
     this.#reader = reader
+    this.#revision = revision
   }
 
-  /**
-   * The values of the numeric literals in a file at head, in any spelling. A
-   * seed written as a literal, in decimal, hexadecimal, octal, binary, or with
-   * an exponent or separators, is one of them. Other tokens only add values.
-   */
-  numbers(file) {
-    if (!this.#numbers.has(file)) {
-      const text = this.#reader.text(file, `head`) ?? ``
-      this.#numbers.set(
-        file,
-        new Set(
-          [...text.matchAll(numericLiteral)].map(([literal]) =>
-            Number(literal.replaceAll(`_`, ``)),
-          ),
-        ),
-      )
+  /** Loads the base texts that the roots reach, a batch per level. */
+  prepare(roots) {
+    if (this.#revision !== `base`) return
+    let frontier = [...roots]
+    const seen = new Set(roots)
+    while (frontier.length > 0) {
+      this.#reader.prefetch(frontier)
+      const next = []
+      for (const file of frontier) {
+        for (const target of this.#targets(file)) {
+          if (!seen.has(target)) {
+            seen.add(target)
+            next.push(target)
+          }
+        }
+      }
+      frontier = next
     }
-    return this.#numbers.get(file)
   }
 
   #targets(file) {
     if (!this.#direct.has(file)) {
-      const text = this.#reader.text(file, `head`)
+      const text = this.#reader.text(file, this.#revision)
       this.#direct.set(
         file,
         text === undefined
           ? []
-          : [...text.matchAll(relativeLiteral)]
-              .map(([, , source]) =>
-                resolveModule(file, source, this.#reader, `head`),
+          : relativeSpecifiers(text)
+              .map((source) =>
+                resolveModule(file, source, this.#reader, this.#revision),
               )
               .filter((target) => target !== undefined),
       )
@@ -537,6 +538,7 @@ class HeadReach {
     return this.#direct.get(file)
   }
 
+  /** The files that a file reaches, transitively. */
   of(file) {
     if (!this.#closure.has(file)) {
       const found = new Set()
@@ -553,6 +555,26 @@ class HeadReach {
     }
     return this.#closure.get(file)
   }
+
+  /**
+   * The values of the numeric literals in a file, in any spelling. A seed
+   * written as a literal, in decimal, hexadecimal, octal, binary, or with an
+   * exponent or separators, is one of them. Other tokens only add values.
+   */
+  numbers(file) {
+    if (!this.#numbers.has(file)) {
+      const text = this.#reader.text(file, this.#revision) ?? ``
+      this.#numbers.set(
+        file,
+        new Set(
+          [...text.matchAll(numericLiteral)].map(([literal]) =>
+            Number(literal.replaceAll(`_`, ``)),
+          ),
+        ),
+      )
+    }
+    return this.#numbers.get(file)
+  }
 }
 
 /**
@@ -562,27 +584,33 @@ class HeadReach {
  */
 export function loweredRunBudgetsBetween(repo, base) {
   const reader = new SourceReader(repo, base)
+  // Renames are off: a renamed file lists its old path, which is deleted, and
+  // its new path, so an old oracle file is a candidate under either name.
   const changed = new Set(
     [
-      git(repo, `diff`, `--name-only`, base),
+      git(repo, `diff`, `--name-only`, `--no-renames`, base),
       git(repo, `ls-files`, `--others`, `--exclude-standard`),
     ]
       .flatMap((output) => output.split(`\n`))
       .filter(Boolean),
   )
-  const reach = new HeadReach(reader)
+  const headReach = new Reach(reader, `head`)
+  const baseReach = new Reach(reader, `base`)
+  const baseOracles = [...reader.baseFiles()].filter((file) =>
+    isOracleFile(file),
+  )
+  baseReach.prepare(baseOracles)
   // An oracle file's budgets can change only when it, or a module that it
-  // reaches at head, changed. Its base budgets are computed for those files
-  // alone. The head reach over-approximates the import graph, so no affected
+  // reaches at base or at head, changed. Its base budgets are computed for those
+  // files alone. Each reach over-approximates the AST imports, so no affected
   // file is missed; an extra file is computed exactly and reports nothing.
-  const candidates = [...reader.baseFiles()]
-    .filter((file) => isOracleFile(file))
-    .filter(
-      (file) =>
-        changed.has(file) ||
-        [...reach.of(file)].some((module) => changed.has(module)),
-    )
-  reader.prefetch(candidates.flatMap((file) => [file, ...reach.of(file)]))
+  const candidates = baseOracles.filter(
+    (file) =>
+      changed.has(file) ||
+      [...headReach.of(file), ...baseReach.of(file)].some((module) =>
+        changed.has(module),
+      ),
+  )
   const scopes = { base: new Map(), head: new Map() }
   const scope = (file, revision) => {
     if (!scopes[revision].has(file))
@@ -601,8 +629,8 @@ export function loweredRunBudgetsBetween(repo, base) {
     const seed = /^fixed seed (.+)$/.exec(key)
     const mayHold = (other) =>
       seed === null ||
-      [other, ...reach.of(other)].some((module) =>
-        reach.numbers(module).has(Number(seed[1])),
+      [other, ...headReach.of(other)].some((module) =>
+        headReach.numbers(module).has(Number(seed[1])),
       )
     return atHead.filter(
       (other) =>
@@ -619,12 +647,14 @@ export function loweredRunBudgetsBetween(repo, base) {
           lowered.push({ file, key, was })
           continue
         }
-        // A key that another file already had at base is that file's own.
+        // A key that another file already had at base is that file's own. The
+        // rest are its new holders, and an imported support module can have
+        // several, all with the same count. The lowest one is the new count.
         const movedTo = holders.filter(
           (other) => !scope(other, `base`).has(key),
         )
-        if (movedTo.length !== 1) continue
-        now = scope(movedTo[0], `head`).get(key)
+        if (movedTo.length === 0) continue
+        now = Math.min(...movedTo.map((other) => scope(other, `head`).get(key)))
       }
       if (now < was) lowered.push({ file, key, was, now })
     }
