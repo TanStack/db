@@ -611,6 +611,9 @@ prep-pr confirmation.
 
 ## Full-source gap ownership
 
+Verified implementation commit: `bcb55a9e7689421d18af460d6ac8606fe11fc0d5`.
+The following release/evidence commit adds no implementation or oracle change.
+
 This entry supersedes every earlier statement that 151 unchanged-line findings
 remain unassessed. The maintainer required ownership of those findings, and the
 full source was evaluated without an age-based exclusion. No production change
