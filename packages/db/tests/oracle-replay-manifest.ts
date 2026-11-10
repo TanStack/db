@@ -420,6 +420,11 @@ const ownerGroups: ReadonlyArray<
   // Owners of properties that a module names and a host file runs carry
   // that module as the fourth element.
   [
+    `query-db-collection/tests/ownership-lifecycle.oracle.test.ts`,
+    `query`,
+    `startup-ownership`,
+  ],
+  [
     `query-db-collection/tests/cursor-pagination.no-peek.test.ts`,
     `cursor-pagination`,
     `no-peek`,
@@ -951,6 +956,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `query.startup-ownership`,
+    `reconciles generated startup histories \\(random\\)`,
+  ],
   [
     `includes-work.projection-payload`,
     `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
