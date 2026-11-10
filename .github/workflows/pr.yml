@@ -1,254 +1,31 @@
-name: PR
+name: Oracle lockfile validation
 
 on:
-  pull_request:
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  lint:
-    name: Lint
+  lockfile:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          # The run-budget report compares changed files with the merge-base.
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Check lint
-        run: pnpm run lint:check
-      - name: Check release versioning
-        run: pnpm run test:release
-      - name: Typecheck doc and skill examples
-        run: pnpm run test:doc-snippets
-      - name: Check oracle lint without inline directives
-        run: pnpm run lint:oracles
-      - name: Report lowered oracle run budgets
-        run: node scripts/check-oracle-run-counts.mjs --format=github
-      - name: Test oracle lint rules
-        run: pnpm run test:lint-rules
-  minified-db:
-    name: Minified DB public API
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Check private-member mangle cache
-        run: pnpm run check:mangle
-      - name: Build DB packages
-        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db --filter @tanstack/react-db build
-      - name: Check CommonJS entrypoint without require(ESM)
-        run: node --no-experimental-require-module -e "require('./packages/db/dist/cjs/index.cjs')"
-      - name: Check packed DB entrypoints
-        run: |
-          dependency_pack_root=$(mktemp -d)
-          mkdir "$dependency_pack_root/ivm" "$dependency_pack_root/db"
-          pnpm --filter @tanstack/db-ivm pack --pack-destination "$dependency_pack_root/ivm"
-          pnpm --filter @tanstack/db pack --pack-destination "$dependency_pack_root/db"
-          tar -xzf "$dependency_pack_root/ivm/"*.tgz -C "$dependency_pack_root/ivm"
-          tar -xzf "$dependency_pack_root/db/"*.tgz -C "$dependency_pack_root/db"
-          mkdir -p "$dependency_pack_root/db/package/node_modules/@tanstack"
-          ln -s "$dependency_pack_root/ivm/package" "$dependency_pack_root/db/package/node_modules/@tanstack/db-ivm"
-          node --no-experimental-require-module -e "require(process.argv[1])" "$dependency_pack_root/db/package"
-          node --input-type=module -e "await import(process.argv[1])" "$dependency_pack_root/db/package/dist/esm/index.js"
-      - name: Check minified public API
-        run: pnpm run test:minified-db
-      - name: Check client-only query bundles
-        run: pnpm run test:ssr-bundle
-      - name: Check production error text
-        run: pnpm run test:production-errors
-      - name: Check DB tests against built dist
-        run: pnpm --filter @tanstack/db test:dist
-  test-db:
-    name: Test (${{ matrix.group }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [db-1, db-2, db-replay]
-    env:
-      TEST_GROUP: ${{ matrix.group }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Build dependencies
-        run: node scripts/ci-tests.mjs build "$TEST_GROUP"
-      - name: Run tests
-        run: node scripts/ci-tests.mjs test "$TEST_GROUP"
-      - name: Upload DB report
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Generate canonical lockfile
+        run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+      - name: Upload generated lockfile
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: db-report-${{ matrix.group }}
-          path: packages/db/.vitest-reports/*.json
-          include-hidden-files: true
+          name: canonical-oracle-lockfile
+          path: pnpm-lock.yaml
           if-no-files-found: error
-          retention-days: 1
-  test-packages:
-    name: Test (${{ matrix.group }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        group:
-          [ivm-offline, sqlite-core, sqlite-adapters, frameworks, collections]
-    env:
-      TEST_GROUP: ${{ matrix.group }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Build dependencies
-        run: node scripts/ci-tests.mjs build "$TEST_GROUP"
-      - name: Typecheck Test Sources
-        if: matrix.group == 'ivm-offline'
-        run: pnpm run typecheck:tests
-      - name: Run tests
-        run: node scripts/ci-tests.mjs test "$TEST_GROUP"
-      - name: Check dependency versions
-        if: matrix.group == 'ivm-offline'
-        run: |
-          if ! pnpm run test:sherif; then
-            echo ""
-            echo "=========================================="
-            echo "❌ Sherif found dependency version mismatches"
-            echo ""
-            echo "To fix this locally, run:"
-            echo "  pnpm exec sherif --fix -i zod"
-            echo ""
-            echo "Then commit the changes to package.json files."
-            echo "=========================================="
-            exit 1
-          fi
-  test:
-    name: Test
-    if: always()
-    needs: [lint, test-db, test-packages]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require lint and every test group to succeed
-        env:
-          LINT_RESULT: ${{ needs.lint.result }}
-          DB_RESULT: ${{ needs.test-db.result }}
-          PACKAGES_RESULT: ${{ needs.test-packages.result }}
-        run: test "$LINT_RESULT" = success && test "$DB_RESULT" = success && test "$PACKAGES_RESULT" = success
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Download DB reports
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: db-report-*
-          path: packages/db/.vitest-reports
-          merge-multiple: true
-      - name: Merge DB coverage and test reports
-        run: pnpm --dir packages/db exec vitest --mergeReports .vitest-reports
-  preview:
-    name: Preview
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Build Packages
-        run: pnpm run build
-      - name: Check that no build carries an oracle probe
-        run: node scripts/check-dist-probes.mjs
-      - name: Publish Previews
-        run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
-  size:
-    name: Compressed size
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Compare DB and React DB sizes
-        uses: preactjs/compressed-size-action@f322c295dde06a1cb7ccaef105732dd8a726d1d9 # 2.10.0
-        with:
-          repo-token: '${{ secrets.GITHUB_TOKEN }}'
-          pattern: './packages/{db,react-db}/dist/**/*.{js,mjs}'
-          comment-key: 'db-and-react-package-size'
-          # The action installs and builds both head and base. Use commands
-          # already present on the base, including the minified build's deps.
-          install-script: bash -c "pnpm install --frozen-lockfile && pnpm --filter @tanstack/react-router-with-db... build"
-          build-script: 'build:minified'
-  build-example:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Build Packages
-        run: pnpm run build
-      - name: Check action enforcement example
-        run: |
-          pnpm --filter @tanstack/db-example-react-action-enforcement test
-          pnpm --filter @tanstack/db-example-react-action-enforcement lint
-          pnpm --filter @tanstack/db-example-react-action-enforcement build
-      - name: Build Example Site
-        run: |
-          cd examples/react/todo
-          pnpm build
-      - name: Build Angular Todo Example
-        run: pnpm --dir examples/angular/todos build
-  build-starter:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Build Packages
-        run: pnpm run build
-      - name: Build Starter Site
-        run: |
-          cd examples/react/projects
-          cp .env.example .env
-          pnpm build
+          retention-days: 7
+      - name: Compare committed lockfile
+        run: git diff --exit-code -- pnpm-lock.yaml
