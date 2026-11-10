@@ -1,237 +1,275 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
-import { hash } from '../src/hashing/hash'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-
 /**
- * Structural hash follows the reachable value graph, not object identity.
- * This is the established structural-value contract recorded in the oracle
- * coverage map: equal acyclic values have equal hashes, reachable cycles
- * reject, and a failed traversal publishes no reusable sibling hashes.
- *
- * A small adjacency list is the model. Kahn's algorithm independently decides
- * whether the root-reachable graph is acyclic. Acyclic sharing is unfolded into
- * equal fresh trees and must hash the same; a reachable cycle must reject on
- * every attempt, while an unreachable cycle is irrelevant. Named witnesses
- * keep rare topology classes present even when random generation misses them.
- * The generated topology claim is limited to plain objects with numeric
- * labels and array edges, at most six nodes and three edges per node. Cycle
- * rejection through other containers is fixed by hash-graph.test.ts, an
- * ordinary test file. This file does not establish collision freedom or
- * complexity limits.
+ * Hash follows the root-reachable structural graph. Cycles reject on each
+ * attempt; acyclic sharing has the same digest as an independently unfolded
+ * tree. The established graph contract covers plain numeric-labeled objects
+ * with array edges, at most six nodes and three edges per node. Other cycle
+ * carriers, collision freedom, and work bounds remain separate owners.
  */
+import fc from 'fast-check'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-property.js'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from '../../db/tests/oracle-property.js'
+import {
+  checkGraph,
+  driveGraph,
+  expectedGraph,
+  graphArbitrary,
+  graphWitnesses,
+  isAcyclic,
+} from './hash-graph-shared-oracle'
+import type { GraphHistory } from './hash-graph-shared-oracle'
 
-const fixedSeed = 1657019
-const graphProperty = `ivm.hash-graph`
-
-// This adjacency list exists only in the model; production receives a rooted
-// JavaScript value. Kahn's algorithm checks reachability without using the
-// hasher's recursive active-path algorithm. Unreachable cycles do not affect
-// the root. The checkpoint is each hash() return or throw.
-function isAcyclic(edges: Array<Array<number>>): boolean {
-  const reachable = new Set([0])
-  for (const node of reachable) {
-    for (const target of edges[node]!) reachable.add(target)
-  }
-  const incoming = new Map([...reachable].map((node) => [node, 0]))
-  for (const node of reachable) {
-    for (const target of edges[node]!) {
-      incoming.set(target, incoming.get(target)! + 1)
-    }
-  }
-  const ready = [...reachable].filter((node) => incoming.get(node) === 0)
-  for (const node of ready) {
-    for (const target of edges[node]!) {
-      const remaining = incoming.get(target)! - 1
-      incoming.set(target, remaining)
-      if (remaining === 0) ready.push(target)
-    }
-  }
-  return ready.length === reachable.size
-}
-
-// Grammar: one root and up to five other nodes; each node has zero to three
-// ordered edges. Target reduction keeps every edge in range while retaining
-// self, backward, duplicate, and disconnected-edge cases. An empty graph or
-// an out-of-range target is outside this grammar. Restricting to one node
-// loses diamonds and disconnected cycles; one edge per node loses branching
-// and duplicates; forward-only targets lose reachable cycles.
-const graphArbitrary = fc
-  .array(fc.array(fc.nat({ max: 5 }), { maxLength: 3 }), {
-    minLength: 1,
-    maxLength: 6,
-  })
-  .map((edges) =>
-    edges.map((targets) => targets.map((target) => target % edges.length)),
-  )
-
-// Model: the tree that an acyclic graph denotes from `node`. Sharing is
-// unfolded into equal but distinct subtrees. Hash identity must depend on
-// values, not whether the graph reused an object reference.
-function unfoldEdges(edges: Array<Array<number>>, node: number): unknown {
-  return {
-    value: node,
-    children: edges[node]!.map((child) => unfoldEdges(edges, child)),
-  }
-}
-
-function expectGraphHash(
-  edges: Array<Array<number>>,
-  hashValue: (value: unknown) => number = hash,
-): void {
-  const nodes = edges.map((_, value) => ({
-    value,
-    children: [] as Array<unknown>,
-  }))
-  edges.forEach((targets, index) => {
-    nodes[index]!.children = targets.map((target) => nodes[target])
-  })
-  if (!isAcyclic(edges)) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      expect(() => hashValue(nodes[0])).toThrow(
-        `Cannot hash cyclic structural values`,
-      )
-    }
-    return
-  }
-  expect(hashValue(nodes[0])).toBe(hashValue(unfoldEdges(edges, 0)))
-}
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/hashing/hash.ts#hash`],
-  check: [expectGraphHash],
-  model: [isAcyclic, unfoldEdges],
+// Retain the old topology grammar. The offset supplies randomized numeric
+// labels even when a construction must force all edges of a small topology.
+const historyArbitrary = fc.record({
+  edges: graphArbitrary,
+  offset: fc.integer({ min: -20, max: 20 }),
 })
-
-// Named semantic cells run on every campaign; random frequency is not evidence
-// that disconnected cycles, repeated references, or duplicate edges were reached.
-const graphWitnesses: Array<{
-  name: string
-  edges: Array<Array<number>>
-  acyclic: boolean
-}> = [
-  { name: `isolated root`, edges: [[]], acyclic: true },
-  { name: `root self-cycle`, edges: [[0]], acyclic: false },
-  { name: `reachable mutual cycle`, edges: [[1], [0]], acyclic: false },
-  { name: `unreachable self-cycle`, edges: [[], [1]], acyclic: true },
-  {
-    name: `shared acyclic diamond`,
-    edges: [[1, 2], [3], [3], []],
-    acyclic: true,
-  },
-  { name: `duplicate acyclic edges`, edges: [[1, 1], []], acyclic: true },
-  { name: `duplicate cyclic edges`, edges: [[1, 1], [0]], acyclic: false },
-  {
-    name: `maximum node and edge bounds`,
-    edges: [[1, 2, 5], [3], [3], [4], [5], []],
-    acyclic: true,
-  },
+const states = [
+  `isolated root`,
+  `root self-cycle`,
+  `reachable mutual cycle`,
+  `unreachable self-cycle`,
+  `shared acyclic diamond`,
+  `duplicate acyclic edges`,
+  `duplicate cyclic edges`,
+  `maximum node and edge bounds`,
+  `repeated cycle rejection`,
 ]
 
-describe(`structural hash graph boundary`, () => {
-  it.each(graphWitnesses)(`matches the $name witness`, ({ edges, acyclic }) => {
-    oracleRoute(`case`)
-    // These expected categories are specified independently of Kahn's result.
-    expect(isAcyclic(edges)).toBe(acyclic)
-    expectGraphHash(edges)
-  })
-
-  oracleReplayTest(it)(
-    `matches reachable graph cycles and shared DAGs (fixed)`,
-    () => {
-      const parameters = oracleFixedSeed(fixedSeed, {
-        numRuns: oracleRuns(300),
-      })
-      oracleRoute(oracleRouteOf(parameters))
-      fc.assert(
-        fc.property(graphArbitrary, (edges) => {
-          expectGraphHash(edges)
-        }),
-        parameters,
-      )
-    },
+function graphStates({ edges }: GraphHistory): Array<string> {
+  const reached: Array<string> = []
+  const reachable = new Set([0])
+  for (const node of reachable)
+    for (const target of edges[node]!) reachable.add(target)
+  const acyclic = isAcyclic(edges)
+  const root = edges[0]!
+  if (root.length === 0) reached.push(`isolated root`)
+  if (root.includes(0)) reached.push(`root self-cycle`)
+  if (root.some((child) => child !== 0 && edges[child]!.includes(0)))
+    reached.push(`reachable mutual cycle`)
+  if (
+    edges.some(
+      (targets, node) => !reachable.has(node) && targets.includes(node),
+    )
   )
-  oracleReplayTest(it, graphProperty)(
-    `matches reachable graph cycles and shared DAGs (random)`,
-    () => {
-      const campaignParameters = oraclePropertyOptions(300, graphProperty)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      fc.assert(
-        fc.property(graphArbitrary, (edges) => {
-          expectGraphHash(edges)
-        }),
-        campaignParameters,
-      )
-    },
+    reached.push(`unreachable self-cycle`)
+  const distinctChildren = [...new Set(root)]
+  if (
+    acyclic &&
+    distinctChildren.some((left, index) =>
+      distinctChildren
+        .slice(index + 1)
+        .some((right) =>
+          edges[left]!.some((child) => edges[right]!.includes(child)),
+        ),
+    )
   )
+    reached.push(`shared acyclic diamond`)
+  if (
+    [...reachable].some(
+      (node) => new Set(edges[node]).size < edges[node]!.length,
+    )
+  )
+    reached.push(acyclic ? `duplicate acyclic edges` : `duplicate cyclic edges`)
+  if (edges.length === 6 && edges.some((targets) => targets.length === 3))
+    reached.push(`maximum node and edge bounds`)
+  if (!acyclic) reached.push(`repeated cycle rejection`)
+  return reached
+}
 
-  it(`rejects cycle acceptance while accepting its acyclic near-neighbor`, () => {
-    oracleRoute(`calibration`)
-    expect(() => expectGraphHash([[1], [0]], () => 0)).toThrow()
-    expectGraphHash([[1], []], () => 0)
-    expectGraphHash([[1], [0]])
-    expectGraphHash([[1], []])
-  })
+// Each construction allocates a fresh history and fresh adjacency arrays. Its
+// prefix forces one topology; generated labels and unaffected suffix edges stay.
+function prefix(
+  history: GraphHistory,
+  forced: Array<Array<number>>,
+): GraphHistory {
+  const length = Math.max(history.edges.length, forced.length)
+  return {
+    offset: history.offset,
+    edges: Array.from({ length }, (_, node) =>
+      node < forced.length
+        ? [...forced[node]!]
+        : [...(history.edges[node] ?? [])],
+    ),
+  }
+}
 
-  it(`replays a cycle-acceptance mismatch at the same checkpoint`, () => {
-    oracleRoute(`calibration`)
-    const property = fc.property(fc.integer({ min: 1, max: 3 }), (length) => {
-      const edges = Array.from({ length: length + 1 }, (_, node) => [
-        node === length ? 0 : node + 1,
-      ])
-      expectGraphHash(edges)
-      expectGraphHash(edges, () => 0)
-    })
-    const failed = fc.check(property, { seed: fixedSeed, numRuns: 1 })
-    expect(failed.failed).toBe(true)
-    expect(failed.errorInstance).toMatchObject({ name: `AssertionError` })
-    if (failed.counterexamplePath === null) {
-      throw new Error(`Missing graph replay path`)
-    }
-    const replay = fc.check(property, {
-      seed: failed.seed,
-      path: failed.counterexamplePath,
-      endOnFailure: true,
-    })
-    expect(replay.counterexample).toEqual(failed.counterexample)
-    expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
-  })
+// e1fb504 associates only the initially seeded constructions with their state
+// claims. Record every fresh result, including generated and shrunk builds, so
+// the shared comparison enforces each builder's declared states independently.
+const constructionStates = new WeakMap<GraphHistory, ReadonlyArray<string>>()
 
-  it(`rejects false cycle rejection for unreachable cycles and shared DAGs`, () => {
-    oracleRoute(`calibration`)
-    const rejectAll = (): number => {
-      throw new TypeError(`Cannot hash cyclic structural values`)
-    }
-    for (const edges of [
-      [[], [1]],
-      [[1, 2], [3], [3], []],
-      [[1, 1], []],
-    ]) {
-      expect(() => expectGraphHash(edges, rejectAll)).toThrow(
-        `Cannot hash cyclic structural values`,
+function enforceConstructed(
+  builders: Array<ConstructedHistory<GraphHistory>>,
+): Array<ConstructedHistory<GraphHistory>> {
+  return builders.map((builder) => ({
+    ...builder,
+    build: (generated) => {
+      const history = builder.build(generated)
+      constructionStates.set(history, builder.enters)
+      return history
+    },
+  }))
+}
+
+function expectedCampaign(history: GraphHistory) {
+  return {
+    graph: expectedGraph(history),
+    requiredStates: constructionStates.get(history) ?? [],
+  }
+}
+
+function checkCampaign(
+  history: GraphHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedCampaign>,
+): Verdict {
+  const result = checkGraph(history, trace, expected.graph)
+  if (result.kind !== `pass`) return result
+  for (const state of expected.requiredStates) {
+    if (
+      !trace.some(
+        (entry) => entry.checkpoint === `reach` && entry.value === state,
       )
-      expectGraphHash(edges)
-    }
-    expectGraphHash([[0]], rejectAll)
-  })
+    )
+      return violation(
+        `constructed states`,
+        `constructed history missed ${state}`,
+        `constructed reach`,
+      )
+  }
+  return pass
+}
 
-  it(`rejects unequal hashes of a shared DAG and its unfolding`, () => {
-    oracleRoute(`calibration`)
-    let calls = 0
-    expect(() =>
-      expectGraphHash([[1, 2], [3], [3], []], () => ++calls),
-    ).toThrow()
-    expect(calls).toBe(2)
-    expectGraphHash([[1, 2], [3], [3], []])
-  })
+declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
+  model: [isAcyclic, expectedGraph, expectedCampaign],
+  check: [checkGraph, checkCampaign],
+  grammar: [graphArbitrary, historyArbitrary],
+})
+
+oracleProperty({
+  id: `ivm.hash-graph`,
+  law: {
+    statement: `Each reachable cycle rejects on both attempts; an acyclic graph agrees with its independently unfolded tree regardless of sharing.`,
+    authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives.`,
+    limits: `Plain numeric-labeled object nodes with array edges, one to six nodes and at most three edges per node. No collision-freedom or work-bound claim, and no other cycle carriers.`,
+    owner: `Structural values and ordered primitives`,
+  },
+  histories: {
+    arbitrary: historyArbitrary,
+    runs: 300,
+    fixedSeeds: [1657019],
+    states,
+    constructed: enforceConstructed([
+      {
+        name: `isolated root with generated labels`,
+        enters: [`isolated root`],
+        build: (history) => prefix(history, [[]]),
+      },
+      {
+        name: `root self-cycle with generated labels`,
+        enters: [`root self-cycle`, `repeated cycle rejection`],
+        build: (history) => prefix(history, [[0]]),
+      },
+      {
+        name: `mutual cycle with generated labels`,
+        enters: [`reachable mutual cycle`, `repeated cycle rejection`],
+        build: (history) => prefix(history, [[1], [0]]),
+      },
+      {
+        name: `disconnected cycle with generated labels`,
+        enters: [`unreachable self-cycle`],
+        build: (history) => prefix(history, [[], [1]]),
+      },
+      {
+        name: `shared diamond with generated labels`,
+        enters: [`shared acyclic diamond`],
+        build: (history) => prefix(history, [[1, 2], [3], [3], []]),
+      },
+      {
+        name: `duplicate acyclic edges with generated labels`,
+        enters: [`duplicate acyclic edges`],
+        build: (history) => prefix(history, [[1, 1], []]),
+      },
+      {
+        name: `duplicate cyclic edges with generated labels`,
+        enters: [`duplicate cyclic edges`, `repeated cycle rejection`],
+        build: (history) => prefix(history, [[1, 1], [0]]),
+      },
+      {
+        name: `maximum bounds with generated labels`,
+        enters: [`maximum node and edge bounds`],
+        build: (history) =>
+          prefix(history, [[1, 2, 5], [3], [3], [4], [5], []]),
+      },
+    ]),
+    fixed: graphWitnesses.map(({ name, edges }) => ({
+      name,
+      history: { edges, offset: 0 },
+    })),
+  },
+  model: expectedCampaign,
+  driver: (history, observe) => {
+    driveGraph(history, observe)
+    for (const state of graphStates(history)) observe(`reach`, state)
+  },
+  check: checkCampaign,
+  calibrations: [
+    {
+      name: `omits a constructed state`,
+      law: `constructed reach`,
+      corrupt: (trace, history) => {
+        const state = constructionStates.get(history)?.[0]
+        return state === undefined
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `reach` || entry.value !== state,
+            )
+      },
+    },
+    {
+      name: `accepts a reachable cycle`,
+      law: `cycle rejection`,
+      corrupt: (trace, history) =>
+        isAcyclic(history.edges)
+          ? undefined
+          : trace.map((entry) =>
+              entry.checkpoint === `cycle rejection attempt 1`
+                ? { ...entry, value: false }
+                : entry,
+            ),
+    },
+    {
+      name: `omits the second rejection`,
+      law: `cycle rejection`,
+      corrupt: (trace, history) =>
+        isAcyclic(history.edges)
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `cycle rejection attempt 2`,
+            ),
+    },
+    {
+      name: `shared graph and unfolding disagree`,
+      law: `graph unfolding`,
+      corrupt: (trace, history) =>
+        isAcyclic(history.edges)
+          ? trace.map((entry) =>
+              entry.checkpoint === `acyclic graph and unfolded tree`
+                ? { ...entry, value: false }
+                : entry,
+            )
+          : undefined,
+    },
+  ],
 })

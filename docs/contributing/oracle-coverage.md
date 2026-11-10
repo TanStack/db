@@ -8082,3 +8082,18 @@ its own same-seed before/after gap comparison; this adoption does not supply
 that evidence. Gaps in changed functions close by a kill or an explicit
 maintainer allowance for their anchored gaps; a coverage-map entry alone does
 not close them.
+
+The structural-hash graph and failed-getter-retry owners are now
+`ivm.hash-graph` and `ivm.hash-failure-retry` properties. Their arithmetic
+read-count and independent graph-topology/unfolding judgments retain the
+existing laws and 100/300-run budgets. Five retry states and nine graph states
+have constructed histories. Every builder invocation records its obligations;
+the shared check compares them with actual reach at a virtual completeness
+checkpoint that preserves interrupted driver errors. The
+[conversion record](oracle-reviews/2026-11-10-hash-property-conversion.md) and
+its companion JSON bind the final source blobs, all reach counts, generated
+failure replays, and late-error controls. A cold explicit-prefix seed-42
+comparison preserves all 144 prior semantic kills among 234 baseline sites,
+checking 148 selected stable keys with zero cache reuse. Production is
+unchanged. The wider baseline's 54 survivors, 22 unowned sites, 12 crashes,
+and 2 unreached sites remain gaps; this refactor claims no closure of them.
