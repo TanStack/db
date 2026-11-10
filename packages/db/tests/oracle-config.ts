@@ -197,6 +197,8 @@ const staticOracleProperties = [
   `replay.keyed-request-failures`,
   `replay.subscription-demand-origin`,
   `oracle-replay.calibration`,
+  `oracle-replay.enumerated-calibration`,
+  `oracle-replay.enumerated-calibration-neighbor`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
   `opfs-worker.diagnostics`,

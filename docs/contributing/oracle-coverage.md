@@ -4409,7 +4409,16 @@ witness.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
-config applies.
+config applies. An enumerated `oracleProperty` has status `enumerated-campaign`
+and a direct Vitest command selecting its finite cases, calibrations and
+determinism check. The command clears inherited replay coordinates because the
+cases have no campaign seed or shrink path. The guarded
+seed/path runner rejects that status before starting a child and supplies the
+direct command. A two-case receiving fixture verifies that the advertised
+command runs the selected property, excludes a similarly named neighbor and
+rejects a wrong value through the finite comparison. This does not add guarded
+execution witnesses or seed/path semantics to enumerated histories. Generated
+properties retain their existing guarded replay contract.
 
 ## Reusable-law backlog
 
