@@ -52,10 +52,6 @@ export const oracleLintSettings = {
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/browser-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -549,10 +545,6 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
