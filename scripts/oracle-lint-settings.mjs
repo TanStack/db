@@ -28,16 +28,8 @@ export const oracleLintSettings = {
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/collection-subscription-lifecycle-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/collection-subscription-replay-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db/tests/comparison-oracle.property.test.ts`,

@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -9,12 +9,17 @@ import { createTransaction } from '../src/transactions.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import {
   oracleFixedSeed,
-  oracleRandomParameters,
   oracleRoute,
-  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { flushPromises } from './utils.js'
 import {
   expectSameSubsetRequest,
@@ -398,7 +403,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
   }
 
   const assertSourceWrites = () => {
-    expect(sourceWrites).toEqual(expectedSourceWrites)
+    oracleAssertion('existing comparison at 401', () =>
+      expect(sourceWrites).toEqual(expectedSourceWrites),
+    )
   }
 
   const applyRows = (
@@ -519,14 +526,18 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
   const assertPublished = (
     expected: ReadonlyMap<string | number, ReplayRow>,
   ) => {
-    expect(sortedRows(visible)).toEqual(sortedRows(expected))
+    oracleAssertion('existing comparison at 522', () =>
+      expect(sortedRows(visible)).toEqual(sortedRows(expected)),
+    )
   }
 
   const assertSource = () => {
     const actual = rowsById(
       collection.toArray.map(({ id, value }) => ({ id, value })),
     )
-    expect(sortedRows(actual)).toEqual(sortedRows(sourceRows))
+    oracleAssertion('existing comparison at 529', () =>
+      expect(sortedRows(actual)).toEqual(sortedRows(sourceRows)),
+    )
   }
 
   const applySourceAction = (action: SourceAction): boolean => {
@@ -617,7 +628,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         pending.signal,
       )
       pending.wroteRows = true
-      expect(installed).toBe(isCurrent)
+      oracleAssertion('existing comparison at 620', () =>
+        expect(installed).toBe(isCurrent),
+      )
       assertSourceWrites()
     }
 
@@ -638,7 +651,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           lastReportedError = pending.error
           replayState.failed = true
         } else {
-          expect(pending.signal?.aborted).toBe(true)
+          oracleAssertion('existing comparison at 641', () =>
+            expect(pending.signal?.aborted).toBe(true),
+          )
         }
         pending.deferred.reject(pending.error)
       }
@@ -647,15 +662,21 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       assertSource()
 
       if (!replayState) {
-        expect(subscription.status).toBe(`ready`)
+        oracleAssertion('existing comparison at 650', () =>
+          expect(subscription.status).toBe(`ready`),
+        )
         assertPublished(expectedPublished)
-        expect(subscription.lastError).toBe(lastReportedError)
+        oracleAssertion('existing comparison at 652', () =>
+          expect(subscription.lastError).toBe(lastReportedError),
+        )
         return
       }
 
       const hasPendingReplay = replayState.pending.size > 0
-      expect(subscription.status).toBe(
-        hasPendingReplay ? `loadingSubset` : `ready`,
+      oracleAssertion('existing comparison at 657', () =>
+        expect(subscription.status).toBe(
+          hasPendingReplay ? `loadingSubset` : `ready`,
+        ),
       )
 
       if (replayState.pending.size === 0) {
@@ -679,26 +700,38 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             previousPublication,
             expectedPublished,
           )
-          expect(publicationCount - replayState.publicationCount).toBe(
-            Number(expectedBatch.length > 0),
+          oracleAssertion('existing comparison at 682', () =>
+            expect(publicationCount - replayState.publicationCount).toBe(
+              Number(expectedBatch.length > 0),
+            ),
           )
           if (expectedBatch.length > 0) {
-            expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-              sortedChanges(expectedBatch),
+            oracleAssertion('existing comparison at 686', () =>
+              expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+                sortedChanges(expectedBatch),
+              ),
             )
           }
           modelReplayState = undefined
         } else {
-          expect(publicationCount).toBe(replayState.publicationCount)
+          oracleAssertion('existing comparison at 692', () =>
+            expect(publicationCount).toBe(replayState.publicationCount),
+          )
         }
         expectedPublicationCount = publicationCount
       } else {
-        expect(publicationCount).toBe(replayState.publicationCount)
+        oracleAssertion('existing comparison at 696', () =>
+          expect(publicationCount).toBe(replayState.publicationCount),
+        )
       }
 
       assertPublished(expectedPublished)
-      expect(subscription.lastError).toBe(lastReportedError)
-      expect(reportedErrors.at(-1)).toBe(lastReportedError)
+      oracleAssertion('existing comparison at 700', () =>
+        expect(subscription.lastError).toBe(lastReportedError),
+      )
+      oracleAssertion('existing comparison at 701', () =>
+        expect(reportedErrors.at(-1)).toBe(lastReportedError),
+      )
     }
 
     for (const [attemptIndex, attempt] of scenario.attempts.entries()) {
@@ -758,12 +791,17 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
               previousPublication,
               expectedPublished,
             )
-            expect(publicationCount - modelReplayState.publicationCount).toBe(
-              Number(expectedBatch.length > 0),
+            const priorPublicationCount = modelReplayState.publicationCount
+            oracleAssertion('existing comparison at 761', () =>
+              expect(publicationCount - priorPublicationCount).toBe(
+                Number(expectedBatch.length > 0),
+              ),
             )
             if (expectedBatch.length > 0) {
-              expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-                sortedChanges(expectedBatch),
+              oracleAssertion('existing comparison at 765', () =>
+                expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+                  sortedChanges(expectedBatch),
+                ),
               )
             }
           }
@@ -773,14 +811,20 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       }
       assertSource()
       assertPublished(expectedPublished)
-      expect(publicationCount).toBe(
-        modelReplayState?.publicationCount ?? expectedPublicationCount,
+      oracleAssertion('existing comparison at 776', () =>
+        expect(publicationCount).toBe(
+          modelReplayState?.publicationCount ?? expectedPublicationCount,
+        ),
       )
-      expect(subscription.lastError).toBe(lastReportedError)
-      expect(subscription.status).toBe(
-        modelReplayState && modelReplayState.pending.size > 0
-          ? `loadingSubset`
-          : `ready`,
+      oracleAssertion('existing comparison at 779', () =>
+        expect(subscription.lastError).toBe(lastReportedError),
+      )
+      oracleAssertion('existing comparison at 780', () =>
+        expect(subscription.status).toBe(
+          modelReplayState && modelReplayState.pending.size > 0
+            ? `loadingSubset`
+            : `ready`,
+        ),
       )
 
       for (const replayIndex of scenario.settlementOrder) {
@@ -795,7 +839,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       }
     }
 
-    expect(modelReplayState?.pending.size ?? 0).toBe(0)
+    oracleAssertion('existing comparison at 798', () =>
+      expect(modelReplayState?.pending.size ?? 0).toBe(0),
+    )
 
     for (const action of scenario.afterSettlement) {
       const countBeforeAction = publicationCount
@@ -831,21 +877,29 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       const expectsPublication =
         !modelReplayState &&
         (action.type === `request` || expectedBatch.length > 0)
-      expect(publicationCount).toBe(
-        countBeforeAction + Number(expectsPublication),
+      oracleAssertion('existing comparison at 834', () =>
+        expect(publicationCount).toBe(
+          countBeforeAction + Number(expectsPublication),
+        ),
       )
       if (expectsPublication) {
-        expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-          sortedChanges(expectedBatch),
+        oracleAssertion('existing comparison at 838', () =>
+          expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+            sortedChanges(expectedBatch),
+          ),
         )
       }
     }
 
     subscription.unsubscribe()
     unsubscribed = true
-    expect(unloadCount).toBe(loadCount)
+    oracleAssertion('existing comparison at 846', () =>
+      expect(unloadCount).toBe(loadCount),
+    )
     for (const counts of acquisitionCounts.values()) {
-      expect(counts).toEqual({ acquisitions: 1, releases: 1 })
+      oracleAssertion('existing comparison at 848', () =>
+        expect(counts).toEqual({ acquisitions: 1, releases: 1 }),
+      )
     }
     assertSourceWrites()
   } finally {
@@ -1005,29 +1059,47 @@ async function runSequentialReplayScenario(
       const expectedBatch = succeeded
         ? publicationDiff(baseline, expectedPublished)
         : []
-      expect(publicationCount - publicationBefore).toBe(
-        Number(expectedBatch.length > 0),
+      oracleAssertion('existing comparison at 1008', () =>
+        expect(publicationCount - publicationBefore).toBe(
+          Number(expectedBatch.length > 0),
+        ),
       )
       if (expectedBatch.length > 0) {
-        expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-          sortedChanges(expectedBatch),
+        oracleAssertion('existing comparison at 1012', () =>
+          expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+            sortedChanges(expectedBatch),
+          ),
         )
       }
-      expect(sortedRows(visible)).toEqual(sortedRows(expectedPublished))
-      expect(
-        sortedRows(
-          rowsById(collection.toArray.map(({ id, value }) => ({ id, value }))),
-        ),
-      ).toEqual(sortedRows(sourceRows))
-      expect(subscription.status).toBe(`ready`)
-      expect(subscription.lastError).toBe(expectedLastError)
-      expect(reportedErrors.at(-1)).toBe(expectedLastError)
+      oracleAssertion('existing comparison at 1016', () =>
+        expect(sortedRows(visible)).toEqual(sortedRows(expectedPublished)),
+      )
+      oracleAssertion('existing comparison at 1017', () =>
+        expect(
+          sortedRows(
+            rowsById(
+              collection.toArray.map(({ id, value }) => ({ id, value })),
+            ),
+          ),
+        ).toEqual(sortedRows(sourceRows)),
+      )
+      oracleAssertion('existing comparison at 1022', () =>
+        expect(subscription.status).toBe(`ready`),
+      )
+      oracleAssertion('existing comparison at 1023', () =>
+        expect(subscription.lastError).toBe(expectedLastError),
+      )
+      oracleAssertion('existing comparison at 1024', () =>
+        expect(reportedErrors.at(-1)).toBe(expectedLastError),
+      )
     }
 
     subscription.unsubscribe()
     unsubscribed = true
     for (const counts of acquisitionCounts.values()) {
-      expect(counts).toEqual({ acquisitions: 1, releases: 1 })
+      oracleAssertion('existing comparison at 1030', () =>
+        expect(counts).toEqual({ acquisitions: 1, releases: 1 }),
+      )
     }
   } finally {
     for (const load of pending) load.deferred.resolve()
@@ -1084,35 +1156,51 @@ async function runCleanupRestartScenario(
 
   try {
     const oldResult = collection._sync.loadSubset({})
-    expect(oldResult).toBeInstanceOf(Promise)
+    oracleAssertion('existing comparison at 1087', () =>
+      expect(oldResult).toBeInstanceOf(Promise),
+    )
     if (oldResult instanceof Promise) void oldResult.catch(() => {})
-    expect(collection.isLoadingSubset).toBe(true)
+    oracleAssertion('existing comparison at 1089', () =>
+      expect(collection.isLoadingSubset).toBe(true),
+    )
 
     await collection.cleanup()
-    expect(collection.isLoadingSubset).toBe(false)
+    oracleAssertion('existing comparison at 1092', () =>
+      expect(collection.isLoadingSubset).toBe(false),
+    )
 
     collection.startSyncImmediate()
     const newResult = collection._sync.loadSubset({})
-    expect(newResult).toBeInstanceOf(Promise)
+    oracleAssertion('existing comparison at 1096', () =>
+      expect(newResult).toBeInstanceOf(Promise),
+    )
     if (newResult instanceof Promise) void newResult.catch(() => {})
-    expect(loads.map(({ syncRunGeneration }) => syncRunGeneration)).toEqual([
-      0, 1,
-    ])
-    expect(collection.isLoadingSubset).toBe(true)
+    oracleAssertion('existing comparison at 1098', () =>
+      expect(loads.map(({ syncRunGeneration }) => syncRunGeneration)).toEqual([
+        0, 1,
+      ]),
+    )
+    oracleAssertion('existing comparison at 1101', () =>
+      expect(collection.isLoadingSubset).toBe(true),
+    )
 
     const oldSyncRun = syncRuns[0]!
     oldSyncRun.begin()
     oldSyncRun.write({ type: `insert`, value: { id: `one`, value: 1 } })
     oldSyncRun.commit()
-    expect(collection.toArray).toEqual([])
+    oracleAssertion('existing comparison at 1107', () =>
+      expect(collection.toArray).toEqual([]),
+    )
 
     const currentSyncRun = syncRuns[1]!
     currentSyncRun.begin()
     currentSyncRun.write({ type: `insert`, value: { id: `two`, value: 2 } })
     currentSyncRun.commit()
-    expect(collection.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
-      { id: `two`, value: 2 },
-    ])
+    oracleAssertion('existing comparison at 1113', () =>
+      expect(
+        collection.toArray.map(({ id, value }) => ({ id, value })),
+      ).toEqual([{ id: `two`, value: 2 }]),
+    )
 
     const settlementOrder = scenario.settleOldFirst ? [0, 1] : [1, 0]
     const outcomes = [scenario.oldOutcome, scenario.newOutcome] as const
@@ -1120,10 +1208,14 @@ async function runCleanupRestartScenario(
     for (const loadIndex of settlementOrder) {
       await settle(loadIndex, outcomes[loadIndex]!)
       if (loadIndex === 1) newSettled = true
-      expect(collection.isLoadingSubset).toBe(!newSettled)
-      expect(
-        collection.toArray.map(({ id, value }) => ({ id, value })),
-      ).toEqual([{ id: `two`, value: 2 }])
+      oracleAssertion('existing comparison at 1123', () =>
+        expect(collection.isLoadingSubset).toBe(!newSettled),
+      )
+      oracleAssertion('existing comparison at 1124', () =>
+        expect(
+          collection.toArray.map(({ id, value }) => ({ id, value })),
+        ).toEqual([{ id: `two`, value: 2 }]),
+      )
     }
   } finally {
     for (const { deferred } of loads) deferred.resolve()
@@ -1193,16 +1285,26 @@ async function expectScheduledReplaySettlementIsGenerationSafe(
     commit()
     await flushPromises()
 
-    expect(loads).toHaveLength(2)
-    expect(loads[0]!.signal?.aborted).toBe(true)
+    oracleAssertion('existing comparison at 1196', () =>
+      expect(loads).toHaveLength(2),
+    )
+    oracleAssertion('existing comparison at 1197', () =>
+      expect(loads[0]!.signal?.aborted).toBe(true),
+    )
 
     await scheduler.waitAll()
     await Promise.all(loads.map(({ outcome }) => outcome))
     await flushPromises()
 
-    expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
-    expect(subscription.status).toBe(`ready`)
-    expect(subscription.lastError).toBeUndefined()
+    oracleAssertion('existing comparison at 1203', () =>
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }]),
+    )
+    oracleAssertion('existing comparison at 1204', () =>
+      expect(subscription.status).toBe(`ready`),
+    )
+    oracleAssertion('existing comparison at 1205', () =>
+      expect(subscription.lastError).toBeUndefined(),
+    )
   } finally {
     if (scheduler.count() > 0) await scheduler.waitAll()
     await Promise.allSettled(loads.map(({ outcome }) => outcome))
@@ -1271,20 +1373,32 @@ async function runSharedSubscriptionScenario(
   try {
     subscriptions[0].requestSnapshot({ where })
     subscriptions[1].requestSnapshot({ where })
-    expect(transportOptions).toHaveLength(2)
-    expect(subscriptions[0].status).toBe(`loadingSubset`)
-    expect(subscriptions[1].status).toBe(`loadingSubset`)
+    oracleAssertion('existing comparison at 1274', () =>
+      expect(transportOptions).toHaveLength(2),
+    )
+    oracleAssertion('existing comparison at 1275', () =>
+      expect(subscriptions[0].status).toBe(`loadingSubset`),
+    )
+    oracleAssertion('existing comparison at 1276', () =>
+      expect(subscriptions[1].status).toBe(`loadingSubset`),
+    )
 
     if (scenario.releaseCountBeforeSettlement >= 1) {
       subscriptions[0].unsubscribe()
       firstUnsubscribed = true
-      expect(transportOptions[0]?.signal?.aborted).toBe(true)
-      expect(transportOptions[1]?.signal?.aborted).toBe(false)
+      oracleAssertion('existing comparison at 1281', () =>
+        expect(transportOptions[0]?.signal?.aborted).toBe(true),
+      )
+      oracleAssertion('existing comparison at 1282', () =>
+        expect(transportOptions[1]?.signal?.aborted).toBe(false),
+      )
     }
     if (scenario.releaseCountBeforeSettlement === 2) {
       subscriptions[1].unsubscribe()
       secondUnsubscribed = true
-      expect(transportOptions[1]?.signal?.aborted).toBe(true)
+      oracleAssertion('existing comparison at 1287', () =>
+        expect(transportOptions[1]?.signal?.aborted).toBe(true),
+      )
     }
 
     const failure = new Error(`shared transport failed`)
@@ -1307,22 +1421,36 @@ async function runSharedSubscriptionScenario(
     await flushPromises()
 
     if (!secondUnsubscribed) {
-      expect(subscriptions[1].status).toBe(`ready`)
-      expect(subscriptions[1].lastError).toBe(
-        scenario.outcome === `reject` ? failure : undefined,
+      oracleAssertion('existing comparison at 1310', () =>
+        expect(subscriptions[1].status).toBe(`ready`),
       )
-      expect([...visible[1].values()]).toEqual(
-        scenario.outcome === `resolve` ? [{ id: `one`, value: 1 }] : [],
+      oracleAssertion('existing comparison at 1311', () =>
+        expect(subscriptions[1].lastError).toBe(
+          scenario.outcome === `reject` ? failure : undefined,
+        ),
+      )
+      oracleAssertion('existing comparison at 1314', () =>
+        expect([...visible[1].values()]).toEqual(
+          scenario.outcome === `resolve` ? [{ id: `one`, value: 1 }] : [],
+        ),
       )
     } else {
-      expect(subscriptions[1].lastError).toBeUndefined()
-      expect([...visible[1].values()]).toEqual([])
+      oracleAssertion('existing comparison at 1318', () =>
+        expect(subscriptions[1].lastError).toBeUndefined(),
+      )
+      oracleAssertion('existing comparison at 1319', () =>
+        expect([...visible[1].values()]).toEqual([]),
+      )
     }
     if (firstUnsubscribed) {
-      expect(subscriptions[0].lastError).toBeUndefined()
+      oracleAssertion('existing comparison at 1322', () =>
+        expect(subscriptions[0].lastError).toBeUndefined(),
+      )
     } else {
-      expect(subscriptions[0].lastError).toBe(
-        scenario.outcome === `reject` ? failure : undefined,
+      oracleAssertion('existing comparison at 1324', () =>
+        expect(subscriptions[0].lastError).toBe(
+          scenario.outcome === `reject` ? failure : undefined,
+        ),
       )
     }
 
@@ -1334,8 +1462,12 @@ async function runSharedSubscriptionScenario(
       subscriptions[1].unsubscribe()
       secondUnsubscribed = true
     }
-    expect(unloads).toHaveLength(2)
-    expect(new Set(unloads).size).toBe(2)
+    oracleAssertion('existing comparison at 1337', () =>
+      expect(unloads).toHaveLength(2),
+    )
+    oracleAssertion('existing comparison at 1338', () =>
+      expect(new Set(unloads).size).toBe(2),
+    )
   } finally {
     for (const transport of transports) transport.resolve()
     await flushPromises()
@@ -1434,7 +1566,9 @@ async function runOptimisticReplayScenario(
 
   try {
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect(sortedRows(visible)).toEqual(sortedRows(initialSource))
+    oracleAssertion('existing comparison at 1437', () =>
+      expect(sortedRows(visible)).toEqual(sortedRows(initialSource)),
+    )
 
     transaction.mutate(() => {
       if (scenario.operation === `insert`) {
@@ -1448,12 +1582,16 @@ async function runOptimisticReplayScenario(
       }
     })
     const optimisticBaseline = applyOptimisticOperation(initialSource, scenario)
-    expect(sortedRows(visible)).toEqual(sortedRows(optimisticBaseline))
-    expect(
-      sortedRows(
-        rowsById(collection.toArray.map(({ id, value }) => ({ id, value }))),
-      ),
-    ).toEqual(sortedRows(optimisticBaseline))
+    oracleAssertion('existing comparison at 1451', () =>
+      expect(sortedRows(visible)).toEqual(sortedRows(optimisticBaseline)),
+    )
+    oracleAssertion('existing comparison at 1452', () =>
+      expect(
+        sortedRows(
+          rowsById(collection.toArray.map(({ id, value }) => ({ id, value }))),
+        ),
+      ).toEqual(sortedRows(optimisticBaseline)),
+    )
     batches.length = 0
 
     begin()
@@ -1483,12 +1621,18 @@ async function runOptimisticReplayScenario(
       scenario.outcome === `resolve`
         ? publicationDiff(optimisticBaseline, expected)
         : []
-    expect(sortedRows(visible)).toEqual(sortedRows(expected))
-    expect(batches.map(sortedChanges)).toEqual(
-      expectedBatch.length > 0 ? [sortedChanges(expectedBatch)] : [],
+    oracleAssertion('existing comparison at 1486', () =>
+      expect(sortedRows(visible)).toEqual(sortedRows(expected)),
     )
-    expect(subscription.lastError).toBe(
-      scenario.outcome === `reject` ? replayFailure : undefined,
+    oracleAssertion('existing comparison at 1487', () =>
+      expect(batches.map(sortedChanges)).toEqual(
+        expectedBatch.length > 0 ? [sortedChanges(expectedBatch)] : [],
+      ),
+    )
+    oracleAssertion('existing comparison at 1490', () =>
+      expect(subscription.lastError).toBe(
+        scenario.outcome === `reject` ? replayFailure : undefined,
+      ),
     )
 
     subscription.unsubscribe()
@@ -1502,7 +1646,7 @@ async function runOptimisticReplayScenario(
   }
 }
 
-const { multiplier, ...replayConfig } = readOracleRunConfig()
+const { multiplier } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 /**
@@ -1558,40 +1702,58 @@ describe(`CollectionSubscription replay oracle`, () => {
       oracleFixedSeed(1755, { numRuns: 300 }),
     )
 
-    expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(true)
-    expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true)
-    expect(
-      scenarios.some(({ attempts }) =>
-        attempts.some(({ loads }) =>
-          loads.some(({ outcome }) => outcome === `reject`),
+    oracleAssertion('existing comparison at 1561', () =>
+      expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(
+        true,
+      ),
+    )
+    oracleAssertion('existing comparison at 1562', () =>
+      expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1563', () =>
+      expect(
+        scenarios.some(({ attempts }) =>
+          attempts.some(({ loads }) =>
+            loads.some(({ outcome }) => outcome === `reject`),
+          ),
         ),
-      ),
-    ).toBe(true)
-    expect(
-      scenarios.some(({ attempts }) =>
-        attempts.some(({ loads }) =>
-          loads.some(({ writeBeforeSettlement }) => writeBeforeSettlement),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1570', () =>
+      expect(
+        scenarios.some(({ attempts }) =>
+          attempts.some(({ loads }) =>
+            loads.some(({ writeBeforeSettlement }) => writeBeforeSettlement),
+          ),
         ),
-      ),
-    ).toBe(true)
-    expect(
-      scenarios.some(({ settlementOrder }) =>
-        settlementOrder.some((value, index) => value !== index),
-      ),
-    ).toBe(true)
-    expect(
-      scenarios.some(({ releaseOnLastAttempt }) =>
-        Boolean(releaseOnLastAttempt),
-      ),
-    ).toBe(true)
-    expect(
-      scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
-    ).toBe(true)
-    expect(
-      scenarios.some(({ afterSettlement }) =>
-        afterSettlement.some(({ type }) => type === `request`),
-      ),
-    ).toBe(true)
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1577', () =>
+      expect(
+        scenarios.some(({ settlementOrder }) =>
+          settlementOrder.some((value, index) => value !== index),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1582', () =>
+      expect(
+        scenarios.some(({ releaseOnLastAttempt }) =>
+          Boolean(releaseOnLastAttempt),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1587', () =>
+      expect(
+        scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1590', () =>
+      expect(
+        scenarios.some(({ afterSettlement }) =>
+          afterSettlement.some(({ type }) => type === `request`),
+        ),
+      ).toBe(true),
+    )
   })
 
   // A snapshot chosen while a direct truncate replay is pending enters the
@@ -1699,7 +1861,9 @@ describe(`CollectionSubscription replay oracle`, () => {
     target.setOrderByIndex(index)
     try {
       target.requestLimitedSnapshot({ orderBy, limit: 1 })
-      expect(batches).toEqual([[`insert:one`]])
+      oracleAssertion('existing comparison at 1702', () =>
+        expect(batches).toEqual([[`insert:one`]]),
+      )
       batches.length = 0
 
       target.requestSnapshot({
@@ -1710,7 +1874,9 @@ describe(`CollectionSubscription replay oracle`, () => {
       truncate()
       commit()
       await flushPromises()
-      expect(heldRequestCount).toBe(1)
+      oracleAssertion('existing comparison at 1713', () =>
+        expect(heldRequestCount).toBe(1),
+      )
 
       armed = true
       begin()
@@ -1718,21 +1884,37 @@ describe(`CollectionSubscription replay oracle`, () => {
       commit()
       await flushPromises()
 
-      expect(reentered).toBe(true)
-      expect(batches).toEqual([])
-      expect(loadOptions.at(-1)).toMatchObject({ offset: 0 })
-      expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
-        1 + privatelySelected.size + Number(nextOrdered !== undefined),
+      oracleAssertion('existing comparison at 1721', () =>
+        expect(reentered).toBe(true),
       )
-      expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined()
+      oracleAssertion('existing comparison at 1722', () =>
+        expect(batches).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1723', () =>
+        expect(loadOptions.at(-1)).toMatchObject({ offset: 0 }),
+      )
+      oracleAssertion('existing comparison at 1724', () =>
+        expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
+          1 + privatelySelected.size + Number(nextOrdered !== undefined),
+        ),
+      )
+      oracleAssertion('existing comparison at 1727', () =>
+        expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined(),
+      )
       heldReplay.resolve()
       await flushPromises()
-      expect(batches.map((batch) => [...batch].sort())).toEqual([
-        expectedReplacement.sort(),
-      ])
-      expect(invalidChanges).toEqual([])
-      expect([...publicRows.keys()].sort()).toEqual(
-        rows.map(({ id }) => id).sort(),
+      oracleAssertion('existing comparison at 1730', () =>
+        expect(batches.map((batch) => [...batch].sort())).toEqual([
+          expectedReplacement.sort(),
+        ]),
+      )
+      oracleAssertion('existing comparison at 1733', () =>
+        expect(invalidChanges).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1734', () =>
+        expect([...publicRows.keys()].sort()).toEqual(
+          rows.map(({ id }) => id).sort(),
+        ),
       )
     } finally {
       heldReplay.resolve()
@@ -2079,17 +2261,6 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  const replayScenarioFixedSeed = oracleFixedSeed(1756, {
-    numRuns: generatedRuns,
-  })
-  fcTest.prop([replayScenarioArbitrary], replayScenarioFixedSeed)(
-    `matches replay and ownership laws for a fixed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(replayScenarioFixedSeed))
-      return runReplayScenario(...args)
-    },
-  )
-
   // The fixed campaign's histories reach a replacement that changes a row
   // only by a zero's sign, where a diff without signed zeros publishes
   // nothing.
@@ -2102,158 +2273,163 @@ describe(`CollectionSubscription replay oracle`, () => {
     )) {
       await runReplayScenario(scenario)
     }
-    expect(zeroSignReplacements).toBeGreaterThan(0)
+    oracleAssertion('existing comparison at 2105', () =>
+      expect(zeroSignReplacements).toBeGreaterThan(0),
+    )
   })
+})
 
-  const replayScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.completion`,
-  )
-  fcTest.prop([replayScenarioArbitrary], replayScenarioCampaign)(
-    `matches replay and ownership laws for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(replayScenarioCampaign))
-      return runReplayScenario(...args)
-    },
-  )
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.completion`,
+  law: {
+    statement: `Replay publication is atomic and obsolete work cannot publish.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: {
+    arbitrary: replayScenarioArbitrary,
+    runs: 30,
+    fixedSeeds: [1756],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Replay publication is atomic and obsolete work cannot publish.`,
+      plan,
+      observe,
+      () => runReplayScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
-  const sequentialReplayScenarioFixedSeed = oracleFixedSeed(1761, {
-    numRuns: generatedRuns,
-  })
-  fcTest.prop(
-    [sequentialReplayScenarioArbitrary],
-    sequentialReplayScenarioFixedSeed,
-  )(
-    `matches synchronous, asynchronous, and partial-failure replay laws for a fixed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(sequentialReplayScenarioFixedSeed))
-      return runSequentialReplayScenario(...args)
-    },
-  )
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.sequential`,
+  law: {
+    statement: `Synchronous, asynchronous, and partially failed replays preserve the last complete snapshot.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: {
+    arbitrary: sequentialReplayScenarioArbitrary,
+    runs: 30,
+    fixedSeeds: [1761],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Synchronous, asynchronous, and partially failed replays preserve the last complete snapshot.`,
+      plan,
+      observe,
+      () => runSequentialReplayScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
-  const sequentialReplayScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.sequential`,
-  )
-  fcTest.prop(
-    [sequentialReplayScenarioArbitrary],
-    sequentialReplayScenarioCampaign,
-  )(
-    `matches synchronous, asynchronous, and partial-failure replay laws for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(sequentialReplayScenarioCampaign))
-      return runSequentialReplayScenario(...args)
-    },
-  )
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.restart`,
+  law: {
+    statement: `Cleanup retires the sync run and its obsolete replay work.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: {
+    arbitrary: cleanupRestartScenarioArbitrary,
+    runs: 30,
+    fixedSeeds: [1757],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Cleanup retires the sync run and its obsolete replay work.`,
+      plan,
+      observe,
+      () => runCleanupRestartScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
-  const cleanupRestartScenarioFixedSeed = oracleFixedSeed(1757, {
-    numRuns: generatedRuns,
-  })
-  fcTest.prop(
-    [cleanupRestartScenarioArbitrary],
-    cleanupRestartScenarioFixedSeed,
-  )(`isolates cleanup and restart sync runs for a fixed seed`, (...args) => {
-    oracleRoute(oracleRouteOf(cleanupRestartScenarioFixedSeed))
-    return runCleanupRestartScenario(...args)
-  })
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.same-tick`,
+  law: {
+    statement: `Same-tick obsolete replay settlement cannot overwrite the current replay.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: { arbitrary: fc.scheduler(), runs: 30, fixedSeeds: [1760] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Same-tick obsolete replay settlement cannot overwrite the current replay.`,
+      plan,
+      observe,
+      () =>
+        expectScheduledReplaySettlementIsGenerationSafe(
+          fc.cloneIfNeeded(plan.history),
+        ),
+    ),
+  check: forwardAssertionJudgment,
+})
 
-  const cleanupRestartScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.restart`,
-  )
-  fcTest.prop(
-    [cleanupRestartScenarioArbitrary],
-    cleanupRestartScenarioCampaign,
-  )(
-    `isolates cleanup and restart sync runs for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(cleanupRestartScenarioCampaign))
-      return runCleanupRestartScenario(...args)
-    },
-  )
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.shared`,
+  law: {
+    statement: `Physical transport sharing preserves independent logical ownership.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: {
+    arbitrary: sharedSubscriptionScenarioArbitrary,
+    runs: 30,
+    fixedSeeds: [1758],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Physical transport sharing preserves independent logical ownership.`,
+      plan,
+      observe,
+      () => runSharedSubscriptionScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
-  const fixedCampaign = oracleFixedSeed(1760, { numRuns: generatedRuns })
-  fcTest.prop([fc.scheduler()], fixedCampaign)(
-    `keeps same-tick obsolete and current replay settlements generation-safe`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(fixedCampaign))
-      return expectScheduledReplaySettlementIsGenerationSafe(...args)
-    },
-  )
-
-  const randomCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.same-tick`,
-  )
-  fcTest.prop([fc.scheduler()], randomCampaign)(
-    `keeps same-tick replay settlements generation-safe for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign))
-      return expectScheduledReplaySettlementIsGenerationSafe(...args)
-    },
-  )
-
-  const sharedSubscriptionScenarioFixedSeed = oracleFixedSeed(1758, {
-    numRuns: generatedRuns,
-  })
-  fcTest.prop(
-    [sharedSubscriptionScenarioArbitrary],
-    sharedSubscriptionScenarioFixedSeed,
-  )(
-    `keeps independent transport and logical ownership aligned for a fixed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(sharedSubscriptionScenarioFixedSeed))
-      return runSharedSubscriptionScenario(...args)
-    },
-  )
-
-  const sharedSubscriptionScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.shared`,
-  )
-  fcTest.prop(
-    [sharedSubscriptionScenarioArbitrary],
-    sharedSubscriptionScenarioCampaign,
-  )(
-    `keeps independent transport and logical ownership aligned for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(sharedSubscriptionScenarioCampaign))
-      return runSharedSubscriptionScenario(...args)
-    },
-  )
-
-  const optimisticReplayScenarioFixedSeed = oracleFixedSeed(1759, {
-    numRuns: generatedRuns,
-  })
-  fcTest.prop(
-    [optimisticReplayScenarioArbitrary],
-    optimisticReplayScenarioFixedSeed,
-  )(
-    `preserves optimistic overlays across replay outcomes for a fixed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(optimisticReplayScenarioFixedSeed))
-      return runOptimisticReplayScenario(...args)
-    },
-  )
-
-  const optimisticReplayScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replayConfig,
-    `subscription-replay.optimistic`,
-  )
-  fcTest.prop(
-    [optimisticReplayScenarioArbitrary],
-    optimisticReplayScenarioCampaign,
-  )(
-    `preserves optimistic overlays across replay outcomes for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(optimisticReplayScenarioCampaign))
-      return runOptimisticReplayScenario(...args)
-    },
-  )
+// The existing independent helper retains its model and comparison checkpoints.
+oracleProperty({
+  id: `subscription-replay.optimistic`,
+  law: {
+    statement: `Replay preserves optimistic overlays until their existing settlement checkpoint.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
+    owner: `Collection lifecycle replay`,
+  },
+  histories: {
+    arbitrary: optimisticReplayScenarioArbitrary,
+    runs: 30,
+    fixedSeeds: [1759],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Replay preserves optimistic overlays until their existing settlement checkpoint.`,
+      plan,
+      observe,
+      () => runOptimisticReplayScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
