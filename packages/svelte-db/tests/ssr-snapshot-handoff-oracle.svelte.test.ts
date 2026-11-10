@@ -1,6 +1,5 @@
 import { TextEncoder } from 'node:util'
-import { fc } from '@fast-check/vitest'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, expect, vi } from 'vitest'
 import { flushSync, hydrate, mount, unmount } from 'svelte'
 import { BTreeIndex, DbClient, collectionOptions } from '@tanstack/db'
 import {
@@ -12,17 +11,15 @@ import {
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  pass,
+  violation,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { peopleQuery } from './ssr-test-utils'
 import SsrDbApp from './SsrDbApp.svelte'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { createServer } from 'vite'
 import type { renderSsrSnapshotHistory } from './ssr-snapshot-fixture'
 import type {
@@ -68,22 +65,20 @@ afterAll(async () => {
   await server.close()
 })
 
-const makeReach = () =>
-  createOracleReach(`svelte-actual-handoff`, [
-    `cold`,
-    `query`,
-    `source-ready`,
-    `source-loading`,
-    `rejected`,
-    `server-write`,
-    `browser-write`,
-    `same-query-preload`,
-  ])
-async function check(
+const handoffStates = [
+  `cold`,
+  `query`,
+  `source-ready`,
+  `source-loading`,
+  `rejected`,
+  `server-write`,
+  `browser-write`,
+  `same-query-preload`,
+] as const
+async function recordHandoff(
   history: SsrSnapshotHistory,
-  reach: ReturnType<typeof makeReach>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
-  reach.beginHistory()
   const expected = expectedSsrSnapshot(history)
   const browserWindow = globalThis.window
   let rendered: Awaited<ReturnType<typeof renderServer>>
@@ -94,14 +89,12 @@ async function check(
     vi.stubGlobal(`window`, browserWindow)
   }
   if (expected.rejects) {
-    expect(rendered.error, `server rejects unsupported markup`).toMatch(
-      /SSR.*(?:preload|hydrat)/i,
-    )
-    reach.reach(`rejected`)
+    observe(`server rejection`, rendered.error)
+    observe(`reach`, `rejected`)
     return
   }
-  expect(rendered.error).toBeUndefined()
-  expect(typeof window, `receiving host uses the browser branch`).toBe(`object`)
+  observe(`server error`, rendered.error)
+  observe(`browser branch`, typeof window)
   const client = new DbClient()
   let starts = 0,
     publish = () => {}
@@ -154,14 +147,14 @@ async function check(
     if (history.browserWrite) {
       if (history.browserPreload) {
         await client.preloadLiveQuery(peopleQuery(descriptor))
-        reach.reach(`same-query-preload`)
+        observe(`reach`, `same-query-preload`)
       }
       await client.collection(descriptor).preload()
       publish()
-      reach.reach(`browser-write`)
+      observe(`reach`, `browser-write`)
     }
     if (history.serverWrite && history.sourceState !== `idle`)
-      reach.reach(`server-write`)
+      observe(`reach`, `server-write`)
     let failure: unknown
     try {
       app = hydrate(SsrDbApp, {
@@ -179,11 +172,16 @@ async function check(
     } catch (error) {
       failure = error
     }
-    expect(failure, `real browser initialization remains legal`).toBeUndefined()
-    expect(initial, `real browser hook matches the render-time model`).toEqual([
-      { rows: expected.rows, status: expected.status },
-    ])
-    reach.reach(
+    observe(`browser initialization error`, failure)
+    observe(
+      `first browser view`,
+      initial.map((view) => ({
+        ...view,
+        rows: view.rows.map((row) => ({ ...row })),
+      })),
+    )
+    observe(
+      `reach`,
       history.preparation === `query`
         ? `query`
         : history.preparation === `source` && history.sourceState !== `idle`
@@ -193,43 +191,13 @@ async function check(
           : `cold`,
     )
     flushSync()
-    expect(starts, `browser commit starts or reuses one source`).toBe(1)
+    observe(`browser starts`, starts)
   } finally {
     if (app) await unmount(app)
     target.remove()
     await client.cleanup()
   }
 }
-
-describe(`Svelte real SSR handoff`, () => {
-  for (const history of ssrSnapshotExamples)
-    it(`replays ${history.preparation}/${history.sourceState}/${history.rows.length} server-write=${!!history.serverWrite} browser-write=${!!history.browserWrite}`, () => {
-      oracleRoute(`case`)
-      return check(history, makeReach())
-    })
-  for (const campaign of [`fixed`, `random`] as const)
-    it(`matches the actual browser initialization (${campaign})`, async () => {
-      const reach = makeReach()
-      const parameters = {
-        ...(campaign === `fixed`
-          ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
-          : oraclePropertyOptions(120, `svelte.ssr-handoff`)),
-        examples: ssrSnapshotExamples.map((history) => [history]),
-      }
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
-          check(history, reach),
-        ),
-        parameters,
-      )
-      reach.assertReached()
-      console.info(
-        `svelte-actual-handoff ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    }, 30_000)
-})
 
 /**
  * This receiving path keeps one client's transport while native Svelte roots
@@ -245,29 +213,27 @@ describe(`Svelte real SSR handoff`, () => {
  * forever cannot satisfy the comparison. No private hydration flag or query
  * record supplies the expected answer or controls the tested host path.
  */
-const makeReceivingReach = () =>
-  createOracleReach(`svelte-receiving-reader`, [
-    `first-hydrate`,
-    `late-hydrate`,
-    `fresh-mount`,
-    `fresh-child`,
-    `inherited-provider-hydration`,
-    `explicit-provider-hydration`,
-    `fresh-nested-mount`,
-    `earlier-authoritative`,
-    `multiple-earlier-readers`,
-    `same-rows`,
-    `different-rows`,
-    `loading-server-view`,
-    `ready-server-view`,
-    `authoritative-view`,
-  ])
+const receivingStates = [
+  `first-hydrate`,
+  `late-hydrate`,
+  `fresh-mount`,
+  `fresh-child`,
+  `inherited-provider-hydration`,
+  `explicit-provider-hydration`,
+  `fresh-nested-mount`,
+  `earlier-authoritative`,
+  `multiple-earlier-readers`,
+  `same-rows`,
+  `different-rows`,
+  `loading-server-view`,
+  `ready-server-view`,
+  `authoritative-view`,
+] as const
 
-async function checkReceivingHistory(
+async function recordReceivingHistory(
   history: SsrReceivingHistory,
-  reach: ReturnType<typeof makeReceivingReach>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
-  reach.beginHistory()
   const views = expectedSsrReceivingViews(history)
   const serverView = expectedSsrSnapshot(history.snapshot)
   const browserWindow = globalThis.window
@@ -278,10 +244,7 @@ async function checkReceivingHistory(
   } finally {
     vi.stubGlobal(`window`, browserWindow)
   }
-  expect(
-    rendered.error,
-    `every receiving history prepares legal markup`,
-  ).toBeUndefined()
+  observe(`server error`, rendered.error)
 
   const client = new DbClient()
   let starts = 0
@@ -318,9 +281,11 @@ async function checkReceivingHistory(
   let failure: { error: unknown } | undefined
   const cleanupErrors: Array<unknown> = []
   type View = { rows: SsrSnapshotHistory[`rows`]; status: string }
+  let reader = 0
+  const recordView = (view: View | undefined) =>
+    view && { ...view, rows: view.rows.map((row) => ({ ...row })) }
   const initialize = async (
     kind: SsrReceivingHistory[`initializationKind`],
-    expectedInitial: View,
   ) => {
     const target = document.createElement(`div`)
     if (kind === `hydrate`) target.innerHTML = rendered.html!
@@ -355,19 +320,26 @@ async function checkReceivingHistory(
       target.remove()
       throw error
     }
-    expect(initial, `${kind} first hook view before effects`).toEqual([
-      expectedInitial,
-    ])
+    observe(`reader initial`, {
+      reader,
+      initialSnapshots: initial.map(recordView),
+    })
     // Bounded to the test's one-second wait: the assertion supplies the
     // authoritative premise, rather than a fixed sleep or a consumed record.
-    await vi.waitFor(() => {
-      flushSync()
-      expect(current, `${kind} reaches the authoritative browser view`).toEqual(
-        views.authoritative,
-      )
-    })
-    expect(starts, `all roots reuse the same browser source`).toBe(1)
-    reach.reach(`authoritative-view`)
+    try {
+      await vi.waitFor(() => {
+        flushSync()
+        expect(
+          current,
+          `${kind} reaches the authoritative browser view`,
+        ).toEqual(views.authoritative)
+      })
+    } finally {
+      observe(`reader authoritative`, { reader, view: recordView(current) })
+    }
+    observe(`browser starts`, starts)
+    reader++
+    observe(`reach`, `authoritative-view`)
   }
 
   try {
@@ -375,33 +347,34 @@ async function checkReceivingHistory(
     // the transport boundary explicit for this receiving path too.
     client.hydrate(JSON.parse(JSON.stringify(rendered.state)))
     for (let index = 0; index < history.previousReaders; index++) {
-      await initialize(`hydrate`, {
-        rows: serverView.rows,
-        status: serverView.status,
-      })
-      reach.reach(`earlier-authoritative`)
-      if (index > 0) reach.reach(`multiple-earlier-readers`)
+      await initialize(`hydrate`)
+      observe(`reach`, `earlier-authoritative`)
+      if (index > 0) observe(`reach`, `multiple-earlier-readers`)
     }
-    reach.reach(
+    observe(
+      `reach`,
       history.initializationKind === `mount`
         ? `fresh-mount`
         : history.previousReaders > 0
           ? `late-hydrate`
           : `first-hydrate`,
     )
-    reach.reach(
+    observe(
+      `reach`,
       JSON.stringify(history.snapshot.rows) ===
         JSON.stringify(history.browserRows)
         ? `same-rows`
         : `different-rows`,
     )
-    reach.reach(
+    observe(
+      `reach`,
       serverView.status === `loading`
         ? `loading-server-view`
         : `ready-server-view`,
     )
     if (history.providerNesting === `inherit`)
-      reach.reach(
+      observe(
+        `reach`,
         history.initializationKind === `hydrate`
           ? `inherited-provider-hydration`
           : `fresh-nested-mount`,
@@ -410,31 +383,35 @@ async function checkReceivingHistory(
       history.providerNesting === `marked` &&
       history.initializationKind === `hydrate`
     )
-      reach.reach(`explicit-provider-hydration`)
+      observe(`reach`, `explicit-provider-hydration`)
     if (
       history.initializationKind === `mount` &&
       history.mountLocation === `child`
     ) {
-      expect(
-        revealLater,
-        `the earlier root exposes its child mount`,
-      ).toBeTypeOf(`function`)
-      reach.reach(`fresh-child`)
+      observe(`child mount available`, typeof revealLater)
+      observe(`reach`, `fresh-child`)
       revealLater!()
       flushSync()
-      expect(
-        laterInitial,
-        `a child added after hydration reads live rows`,
-      ).toEqual([views.initial])
-      await vi.waitFor(() => {
-        flushSync()
-        expect(
-          laterCurrent,
-          `the new child follows the live browser view`,
-        ).toEqual(views.authoritative)
+      observe(`reader initial`, {
+        reader,
+        initialSnapshots: laterInitial.map(recordView),
       })
+      try {
+        await vi.waitFor(() => {
+          flushSync()
+          expect(
+            laterCurrent,
+            `the new child follows the live browser view`,
+          ).toEqual(views.authoritative)
+        })
+      } finally {
+        observe(`reader authoritative`, {
+          reader,
+          view: recordView(laterCurrent),
+        })
+      }
     } else {
-      await initialize(history.initializationKind, views.initial)
+      await initialize(history.initializationKind)
     }
   } catch (error) {
     failure = { error }
@@ -467,52 +444,328 @@ async function checkReceivingHistory(
     throw new AggregateError(cleanupErrors, `SSR receiving root cleanup failed`)
 }
 
-describe(`Svelte SSR receiving readers`, () => {
-  for (const history of ssrReceivingExamples)
-    it.skipIf(oracleReplayRequested())(
-      `replays ${history.initializationKind} ${history.mountLocation ?? `root`} after ${history.previousReaders} readers with ${history.snapshot.sourceState}/${history.snapshot.rows.length} server rows nesting=${history.providerNesting ?? `none`}`,
-      () => {
-        oracleRoute(`case`)
-        return checkReceivingHistory(history, makeReceivingReach())
-      },
-    )
-
-  const campaign = async (fixed: boolean) => {
-    const reach = makeReceivingReach()
-    try {
-      const parameters = fixed
-        ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
-        : oraclePropertyOptions(120, `svelte.ssr-receiving-reader`)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(ssrReceivingHistoryArbitrary, (history) =>
-          checkReceivingHistory(history, reach),
-        ),
-        parameters,
+function checkHandoff(
+  history: SsrSnapshotHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedSsrSnapshot>,
+): Verdict {
+  const targets: Record<string, unknown> = {
+    [`server error`]: undefined,
+    [`browser branch`]: `object`,
+    [`browser initialization error`]: undefined,
+    [`first browser view`]: [{ rows: expected.rows, status: expected.status }],
+    [`browser starts`]: 1,
+  }
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) continue
+    if (checkpoint === `server rejection`) {
+      if (typeof value !== `string` || !/SSR.*(?:preload|hydrat)/i.test(value))
+        return violation(
+          checkpoint,
+          `expected SSR preparation rejection`,
+          `SSR browser handoff`,
+        )
+    } else {
+      const wrong = differs(
+        checkpoint,
+        `SSR browser handoff`,
+        value,
+        targets[checkpoint],
       )
-      reach.assertReached()
-    } finally {
-      console.info(
-        `svelte-receiving-reader ${fixed ? `fixed` : `random`}`,
-        Object.fromEntries(reach.counts()),
-      )
+      if (wrong) return wrong
     }
   }
-  it.skipIf(oracleReplayRequested())(
-    `preserves each receiving reader view (fixed)`,
-    () => campaign(true),
-    30_000,
+  for (const checkpoint of expected.rejects
+    ? [`server rejection`]
+    : Object.keys(targets))
+    if (trace.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+      return violation(
+        checkpoint,
+        `expected one observation`,
+        `SSR browser handoff`,
+      )
+  return pass
+}
+function checkReceivingHistory(
+  history: SsrReceivingHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedSsrReceivingViews>,
+): Verdict {
+  const serverView = expectedSsrSnapshot(history.snapshot)
+  const child =
+    history.initializationKind === `mount` && history.mountLocation === `child`
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) continue
+    let actual: unknown = value
+    let target: unknown
+    if (checkpoint === `server error`) target = undefined
+    else if (checkpoint === `child mount available`) target = `function`
+    else if (checkpoint === `browser starts`) target = 1
+    else if (checkpoint === `reader initial`) {
+      const entry = value as {
+        reader: number
+        initialSnapshots: Array<unknown>
+      }
+      actual = entry.initialSnapshots
+      target = [
+        entry.reader < history.previousReaders
+          ? { rows: serverView.rows, status: serverView.status }
+          : expected.initial,
+      ]
+    } else if (checkpoint === `reader authoritative`) {
+      actual = (value as { view: unknown }).view
+      target = expected.authoritative
+    } else
+      return violation(
+        checkpoint,
+        `unexpected observation`,
+        `SSR receiving readers`,
+      )
+    const wrong = differs(checkpoint, `SSR receiving readers`, actual, target)
+    if (wrong) return wrong
+  }
+  if (
+    trace.filter(({ checkpoint }) => checkpoint === `server error`).length !== 1
   )
-  it(
-    `preserves each receiving reader view (random)`,
-    () => campaign(false),
-    30_000,
+    return violation(
+      `server error`,
+      `expected one observation`,
+      `SSR receiving readers`,
+    )
+  for (let reader = 0; reader <= history.previousReaders; reader++)
+    for (const checkpoint of [`reader initial`, `reader authoritative`])
+      if (
+        trace.filter(
+          (entry) =>
+            entry.checkpoint === checkpoint &&
+            (entry.value as { reader: number }).reader === reader,
+        ).length !== 1
+      )
+        return violation(
+          checkpoint,
+          `expected every receiving reader`,
+          `SSR receiving readers`,
+        )
+  if (
+    trace.filter(({ checkpoint }) => checkpoint === `browser starts`).length !==
+    history.previousReaders + Number(!child)
   )
+    return violation(
+      `browser starts`,
+      `expected each initialized root`,
+      `SSR receiving readers`,
+    )
+  if (
+    child &&
+    !trace.some(({ checkpoint }) => checkpoint === `child mount available`)
+  )
+    return violation(
+      `child mount available`,
+      `expected the child receiving cut`,
+      `SSR receiving readers`,
+    )
+  return pass
+}
+const handoffLaw = {
+  statement: `Every admitted Svelte browser initialization reproduces its render-time server rows and status before effects subscribe.`,
+  authority: `docs/guides/ssr.md preparation/hydration contract and packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+  limits: `Existing eager source/preparation and write timing grammar at real server compilation and browser hydrate; no asynchronous provider claim.`,
+}
+oracleProperty({
+  id: `svelte.ssr-handoff.cases`,
+  law: handoffLaw,
+  histories: ssrSnapshotExamples,
+  model: expectedSsrSnapshot,
+  driver: recordHandoff,
+  check: checkHandoff,
 })
-
+const handoffConstructions = [
+  {
+    name: `cold`,
+    enters: [`cold`],
+    history: { preparation: `none`, sourceState: `idle`, rows: [] },
+  },
+  {
+    name: `query`,
+    enters: [`query`],
+    history: { preparation: `query`, sourceState: `ready`, rows: [] },
+  },
+  {
+    name: `source ready`,
+    enters: [`source-ready`],
+    history: { preparation: `source`, sourceState: `ready`, rows: [] },
+  },
+  {
+    name: `source loading`,
+    enters: [`source-loading`],
+    history: { preparation: `source`, sourceState: `loading`, rows: [] },
+  },
+  {
+    name: `rejected`,
+    enters: [`rejected`],
+    history: { preparation: `none`, sourceState: `ready`, rows: [] },
+  },
+  {
+    name: `server write`,
+    enters: [`server-write`],
+    history: {
+      preparation: `source`,
+      sourceState: `loading`,
+      rows: [],
+      serverWrite: true,
+    },
+  },
+  {
+    name: `browser write`,
+    enters: [`browser-write`],
+    history: {
+      preparation: `source`,
+      sourceState: `loading`,
+      rows: [],
+      browserWrite: true,
+    },
+  },
+  {
+    name: `same query preload`,
+    enters: [`same-query-preload`],
+    history: {
+      preparation: `source`,
+      sourceState: `loading`,
+      rows: [],
+      browserWrite: true,
+      browserPreload: true,
+    },
+  },
+] satisfies Array<{
+  name: string
+  enters: Array<string>
+  history: SsrSnapshotHistory
+}>
+oracleProperty({
+  id: `svelte.ssr-handoff`,
+  law: handoffLaw,
+  histories: {
+    arbitrary: ssrSnapshotHistoryArbitrary,
+    runs: 120,
+    fixedSeeds: [2229],
+    states: handoffStates,
+    constructed: handoffConstructions.map(({ name, enters, history }) => ({
+      name,
+      enters,
+      build: () => history,
+    })),
+    fixed: ssrSnapshotExamples.map((history, index) => ({
+      name: `SSR handoff ${index}`,
+      history,
+    })),
+  },
+  model: expectedSsrSnapshot,
+  driver: recordHandoff,
+  check: checkHandoff,
+  timeout: 30_000,
+})
+const receivingLaw = {
+  statement: `Every hydrating reader receives its server view, while a fresh mount receives the current browser view after earlier authoritative readers; each reader then follows that browser view.`,
+  authority: `docs/guides/ssr.md per-reader hydration and ordinary browser laws; maintainer decision2026-10-26`,
+  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+  limits: `Existing bounded reader, root/child and provider nesting grammar on native Svelte roots with one shared transported client.`,
+}
+const receivingConstructions: Array<{
+  name: string
+  enters: Array<string>
+  history: SsrReceivingHistory
+}> = [
+  {
+    name: `first hydrate`,
+    enters: [
+      `first-hydrate`,
+      `same-rows`,
+      `loading-server-view`,
+      `authoritative-view`,
+    ],
+    history: {
+      snapshot: { preparation: `none`, sourceState: `idle`, rows: [] },
+      browserRows: [],
+      initializationKind: `hydrate`,
+      previousReaders: 0,
+    },
+  },
+  {
+    name: `late hydrate`,
+    enters: [
+      `late-hydrate`,
+      `earlier-authoritative`,
+      `multiple-earlier-readers`,
+      `different-rows`,
+      `ready-server-view`,
+    ],
+    history: { ...ssrReceivingExamples[0]!, previousReaders: 2 },
+  },
+  {
+    name: `fresh mount`,
+    enters: [`fresh-mount`],
+    history: { ...ssrReceivingExamples[0]!, initializationKind: `mount` },
+  },
+  {
+    name: `fresh child`,
+    enters: [`fresh-child`],
+    history: {
+      ...ssrReceivingExamples[0]!,
+      initializationKind: `mount`,
+      mountLocation: `child`,
+    },
+  },
+  {
+    name: `inherited hydration`,
+    enters: [`inherited-provider-hydration`],
+    history: { ...ssrReceivingExamples[0]!, providerNesting: `inherit` },
+  },
+  {
+    name: `explicit hydration`,
+    enters: [`explicit-provider-hydration`],
+    history: { ...ssrReceivingExamples[0]!, providerNesting: `marked` },
+  },
+  {
+    name: `fresh nested mount`,
+    enters: [`fresh-nested-mount`],
+    history: {
+      ...ssrReceivingExamples[0]!,
+      initializationKind: `mount`,
+      providerNesting: `inherit`,
+    },
+  },
+]
+oracleProperty({
+  id: `svelte.ssr-receiving-reader.cases`,
+  law: receivingLaw,
+  histories: ssrReceivingExamples,
+  model: expectedSsrReceivingViews,
+  driver: recordReceivingHistory,
+  check: checkReceivingHistory,
+})
+oracleProperty({
+  id: `svelte.ssr-receiving-reader`,
+  law: receivingLaw,
+  histories: {
+    arbitrary: ssrReceivingHistoryArbitrary,
+    runs: 120,
+    fixedSeeds: [2229],
+    states: receivingStates,
+    constructed: receivingConstructions.map(({ name, enters, history }) => ({
+      name,
+      enters,
+      build: () => history,
+    })),
+  },
+  model: expectedSsrReceivingViews,
+  driver: recordReceivingHistory,
+  check: checkReceivingHistory,
+  timeout: 30_000,
+})
 declareOracle({
   owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrSnapshot, expectedSsrReceivingViews],
-  check: [check, checkReceivingHistory],
+  check: [checkHandoff, checkReceivingHistory],
   grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],
 })

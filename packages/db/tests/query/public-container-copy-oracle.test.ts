@@ -1,5 +1,5 @@
 import { D2 } from '@tanstack/db-ivm'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import { afterAll, beforeAll, expect } from 'vitest'
 import { getQueryIR } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
@@ -10,17 +10,10 @@ import {
 } from '../../src/query/compiler/route-metadata.js'
 import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { Query, eq, include } from '../../src/query/index.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oracleProperty, pass, violation } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { ValueResolver } from '../../src/query/live/materialized-pipeline.js'
 
 /**
@@ -95,7 +88,7 @@ declareOracle({
     `src/query/live/materialized-pipeline.ts#compileValueResolver`,
   ],
   model: [expectedCopy],
-  check: [expectCopyFollowsLaw, checkCopyPrograms],
+  check: [expectCopyFollowsLaw, checkCopyPrograms, checkCopyCampaign],
   grammar: [programs, inputGrammar],
 })
 
@@ -131,14 +124,12 @@ beforeAll(() => {
 })
 afterAll(() => source.collection.cleanup())
 
-function checkCopyPrograms(description: CopyInput): void {
-  const states = programs.map(
-    ({ path, prototype, changed }) => `${path}/${prototype}/${changed}`,
-  )
-  const reach = createOracleReach(`public-container-copy`, states)
+function checkCopyPrograms(
+  description: CopyInput,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
   const failures: Array<unknown> = []
   for (const program of programs) {
-    reach.beginHistory()
     const input: Array<unknown> = new Array(description.size)
     if (description.size > 0) input[description.size - 1] = description.value
     Object.setPrototypeOf(
@@ -189,11 +180,21 @@ function checkCopyPrograms(description: CopyInput): void {
             : compiled(input, resolve)
       // A return is the component checkpoint. All states count before their
       // comparison, so a failed shape cannot masquerade as missing reach.
-      reach.reach(`${program.path}/${program.prototype}/${program.changed}`)
+      observe(
+        `reach`,
+        `${program.path}/${program.prototype}/${program.changed}`,
+      )
       expectCopyFollowsLaw(actual, expected)
       expect(Object.getOwnPropertyDescriptors(input)).toEqual(before)
       expect(reads).toBe(0)
     } catch (error) {
+      // Only the existing comparison's assertion failure is a semantic
+      // observation. Runtime failures keep their original aggregate behavior.
+      if (error instanceof Error && error.name === `AssertionError`)
+        observe(`${program.path}/${program.prototype}/${program.changed}`, {
+          kind: `copy comparison mismatch`,
+          difference: String(error),
+        })
       failures.push(
         new Error(
           `${program.path}/${program.prototype}/${program.changed}: ${String(error)}`,
@@ -202,7 +203,6 @@ function checkCopyPrograms(description: CopyInput): void {
       )
     }
   }
-  reach.assertReached()
   if (failures.length)
     throw new AggregateError(
       failures,
@@ -210,35 +210,72 @@ function checkCopyPrograms(description: CopyInput): void {
     )
 }
 
-const property = `query.public-container-copy`
-const examples: Array<[CopyInput]> = [
-  [{ size: 0, value: 0, locked: false }],
-  [{ size: 8, value: -1, locked: true }],
-]
-for (const campaign of [
-  {
-    name: `fixed`,
-    options: oracleFixedSeed(2355, {
-      numRuns: oracleRuns(6) + examples.length,
-      examples,
-    }),
-  },
-  {
-    name: `fresh or replayed`,
-    options: oraclePropertyOptions(6, property, { examples }),
-  },
-]) {
-  const register =
-    campaign.name === `fixed`
-      ? oracleReplayTest(fcTest)
-      : oracleReplayTest(fcTest, property)
-  register.prop([inputGrammar], campaign.options)(
-    `cleanup preserves authored public copies (${campaign.name})`,
-    (description) => {
-      // The options are built when the file loads, so each run registers its
-      // campaign's route.
-      oracleRoute(oracleRouteOf(campaign.options))
-      checkCopyPrograms(description)
-    },
-  )
+const copyStates = programs.map(
+  ({ path, prototype, changed }) => `${path}/${prototype}/${changed}`,
+)
+
+// The original descriptor/reference judgment above remains beside its model.
+// This adapter forwards only its assertion failures, preserving the original
+// AggregateError and assertion stack as the driver's cause. Reach is checked
+// after comparisons, so a missing state cannot replace a setup failure.
+function checkCopyCampaign(
+  _description: CopyInput,
+  trace: ReadonlyArray<Observation>,
+  requiredStates: ReadonlyArray<string>,
+): Verdict {
+  for (const entry of trace) {
+    const value = entry.value as { kind?: string; difference?: string } | null
+    if (value?.kind === `copy comparison mismatch`)
+      return violation(entry.checkpoint, value.difference!, `public copy shape`)
+  }
+  for (const state of requiredStates)
+    if (
+      !trace.some(
+        (entry) => entry.checkpoint === `reach` && entry.value === state,
+      )
+    )
+      return violation(
+        `constructed states`,
+        `public copy program missed ${state}`,
+        `public copy reach`,
+      )
+  return pass
 }
+
+oracleProperty({
+  id: `query.public-container-copy`,
+  law: {
+    statement: `Cleanup copies preserve public array shape, prototypes, descriptors, user symbols and reference leaves without reading accessors or mutating the source.`,
+    authority: `ARCHITECTURE.md's public-value preservation law, stated at the start of this owner.`,
+    limits: `The original twenty-four cleanup-path/prototype/change cells, sparse sizes zero through eight and locked lengths; resolver return before Collection enrichment. No publication or provider claim.`,
+    owner: `Public-container cleanup copies`,
+  },
+  histories: {
+    arbitrary: inputGrammar,
+    runs: 6,
+    fixedSeeds: [2355],
+    fixed: [
+      {
+        name: `empty unlocked array`,
+        history: { size: 0, value: 0, locked: false },
+      },
+      {
+        name: `eight-slot locked array`,
+        history: { size: 8, value: -1, locked: true },
+      },
+    ],
+    states: copyStates,
+    constructed: [
+      {
+        name: `all copy programs with generated array data`,
+        enters: copyStates,
+        build: (generated) => ({ ...generated }),
+      },
+    ],
+  },
+  // The expected descriptors remain computed by expectedCopy for each runtime
+  // input. The registration model carries the existing full-program reach law.
+  model: () => copyStates,
+  driver: checkCopyPrograms,
+  check: checkCopyCampaign,
+})

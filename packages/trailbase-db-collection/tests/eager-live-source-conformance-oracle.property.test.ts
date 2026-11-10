@@ -1,22 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { describe } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../../db-adapter-conformance/src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
 import { trailBaseConformanceDriver } from './conformance-driver'
 
 /**
@@ -38,49 +32,29 @@ import { trailBaseConformanceDriver } from './conformance-driver'
  * limited to the controlled RecordApi.
  */
 
-const property = `adapter-conformance.eager-live-source.trailbase`
-const driver = trailBaseConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-// `field-removed` needs a held row with a note and a later upsert without
-// one. With value kinds, 400 histories reached it as few as 7 times across
-// eight seeds, so TrailBase runs 600.
-const runs = 600
-const campaignTimeoutMs = 120_000
+describe(`eager live-source conformance: trailbase`, () => {
+  const property = `adapter-conformance.eager-live-source.trailbase`
+  const driver = trailBaseConformanceDriver()
+  const historyArb = eagerLiveSourceHistoryArb(driver)
+  const runs = 600
+  const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
-    minimum: 5,
+  oracleProperty({
+    id: property,
+    ...eagerLiveSourceOracle(driver),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(driver),
+      runs,
+      fixedSeeds: [2118],
+    },
+    timeout: campaignTimeoutMs,
   })
-  oracleRoute(oracleRouteOf(options))
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
-  return reach
-}
 
-describe(`eager live-source conformance: TrailBase`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-})
-
-declareOracle({
-  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  declareOracle({
+    owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+    check: [checkEagerLiveSourceHistory],
+    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+    grammar: [historyArb],
+  })
 })

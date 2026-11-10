@@ -14,8 +14,7 @@
  * which crash the Collection (`isCrashed`), or Suspense.
  */
 import { TextEncoder } from 'node:util'
-import { fc } from '@fast-check/vitest'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, expect, vi } from 'vitest'
 import { flushSync, hydrate, unmount } from 'svelte'
 import { DbClient, collectionOptions } from '@tanstack/db'
 import {
@@ -24,17 +23,14 @@ import {
   ssrRuntimeErrorHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  pass,
+  violation,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import SsrDbApp from './SsrDbApp.svelte'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { createServer } from 'vite'
 import type { SsrRuntimeErrorHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
 import type { renderSsrRuntimeErrorHistory } from './ssr-snapshot-fixture'
@@ -67,23 +63,21 @@ afterAll(async () => {
   await server.close()
 })
 
-const makeRuntimeReach = () =>
-  createOracleReach(`svelte-ssr-runtime`, [
-    `server-error-browser-cold`,
-    `server-ready-browser-failed-before-hydration`,
-    `server-error-browser-ready-before-hydration`,
-    `matching-ready`,
-    `matching-error`,
-    `undefined-cause`,
-    `defined-cause`,
-    `browser-commit`,
-  ])
+const runtimeStates = [
+  `server-error-browser-cold`,
+  `server-ready-browser-failed-before-hydration`,
+  `server-error-browser-ready-before-hydration`,
+  `matching-ready`,
+  `matching-error`,
+  `undefined-cause`,
+  `defined-cause`,
+  `browser-commit`,
+] as const
 
-async function checkRuntimeHistory(
+async function recordRuntimeHistory(
   history: SsrRuntimeErrorHistory,
-  reach: ReturnType<typeof makeRuntimeReach>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
-  reach.beginHistory()
   const expected = expectedSsrRuntimeErrorViews(history)
   const browserWindow = globalThis.window
   let rendered: Awaited<ReturnType<typeof renderServer>>
@@ -93,9 +87,7 @@ async function checkRuntimeHistory(
   } finally {
     vi.stubGlobal(`window`, browserWindow)
   }
-  expect(rendered.view, `server runtime outcome remains readable`).toEqual(
-    expected.initial,
-  )
+  observe(`server view`, rendered.view)
   const client = new DbClient()
   let starts = 0
   const descriptor = collectionOptions(`svelte-ssr-people`, () => ({
@@ -131,9 +123,7 @@ async function checkRuntimeHistory(
         .collection(descriptor)
         .preload()
         .catch(() => {})
-    expect(starts, `pre-hydration source startup is controlled`).toBe(
-      Number(history.browserPreload),
-    )
+    observe(`pre-hydration starts`, starts)
     app = hydrate(SsrDbApp, {
       target,
       props: {
@@ -155,39 +145,44 @@ async function checkRuntimeHistory(
         },
       },
     })
-    expect(initial.length, `native hydrate reached the public hook`).toBe(1)
+    observe(`initial count`, initial.length)
     // Observe the live error surface before comparing the first read. A RED
     // initial-view result therefore still establishes the neighboring cut.
-    await vi.waitFor(() => {
-      flushSync()
-      expect(committed, `browser runtime outcome remains readable`).toEqual(
-        expected.committed,
-      )
-    })
-    expect(starts, `browser effects start or reuse one source`).toBe(1)
-    reach.reach(`browser-commit`)
-    reach.reach(history.definedError ? `defined-cause` : `undefined-cause`)
+    // Preserve the original receiving wait. Record its final public value even
+    // if the wait fails, so the native check judges the mismatch first.
+    try {
+      await vi.waitFor(() => {
+        flushSync()
+        expect(committed, `browser runtime outcome remains readable`).toEqual(
+          expected.committed,
+        )
+      })
+    } finally {
+      observe(`committed browser view`, committed)
+    }
+    observe(`browser starts`, starts)
+    observe(`reach`, `browser-commit`)
+    observe(`reach`, history.definedError ? `defined-cause` : `undefined-cause`)
     if (history.serverOutcome === `error` && !history.browserPreload)
-      reach.reach(`server-error-browser-cold`)
+      observe(`reach`, `server-error-browser-cold`)
     if (
       history.serverOutcome === `ready` &&
       history.browserOutcome === `error` &&
       history.browserPreload
     )
-      reach.reach(`server-ready-browser-failed-before-hydration`)
+      observe(`reach`, `server-ready-browser-failed-before-hydration`)
     if (
       history.serverOutcome === `error` &&
       history.browserOutcome === `ready` &&
       history.browserPreload
     )
-      reach.reach(`server-error-browser-ready-before-hydration`)
+      observe(`reach`, `server-error-browser-ready-before-hydration`)
     if (history.serverOutcome === history.browserOutcome)
-      reach.reach(
+      observe(
+        `reach`,
         history.serverOutcome === `ready` ? `matching-ready` : `matching-error`,
       )
-    expect(initial[0], `first browser flags reproduce server output`).toEqual(
-      rendered.view,
-    )
+    observe(`first hydration view`, initial[0])
   } catch (error) {
     failure = { error }
   } finally {
@@ -219,56 +214,148 @@ async function checkRuntimeHistory(
     )
 }
 
-// checkRuntimeHistory compares the server view, the browser's first hydration
-// view and its committed view with the shared runtime model's expected views.
+// The model remains shared with the core admission owner. Judge the server,
+// committed browser and first hydration cuts in the same order as before.
+function checkRuntimeTrace(
+  history: SsrRuntimeErrorHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedSsrRuntimeErrorViews>,
+): Verdict {
+  const serverView = trace.find(
+    ({ checkpoint }) => checkpoint === `server view`,
+  )
+  const targets: Record<string, unknown> = {
+    [`server view`]: expected.initial,
+    [`pre-hydration starts`]: Number(history.browserPreload),
+    [`initial count`]: 1,
+    [`committed browser view`]: expected.committed,
+    [`browser starts`]: 1,
+    [`first hydration view`]: serverView?.value,
+  }
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) continue
+    const wrong = differs(
+      checkpoint,
+      `SSR runtime hydration`,
+      value,
+      targets[checkpoint],
+    )
+    if (wrong) return wrong
+  }
+  for (const checkpoint of Object.keys(targets))
+    if (trace.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+      return violation(
+        checkpoint,
+        `expected one observation`,
+        `SSR runtime hydration`,
+      )
+  return pass
+}
+const runtimeLaw = {
+  statement: `Handled provider failure stays readable; first browser rows and flags reproduce server output, then the browser's own runtime outcome becomes visible.`,
+  authority: `docs/guides/ssr.md preparation/hydration promises and maintainer runtime-error decision; packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+  limits: `Svelte server/browser compilation, JSON transport and hydrate with empty eager sources; no throwing callbacks, portable error identity or Suspense claim.`,
+}
+oracleProperty({
+  id: `svelte.ssr-runtime-errors.cases`,
+  law: runtimeLaw,
+  histories: ssrRuntimeErrorExamples,
+  model: expectedSsrRuntimeErrorViews,
+  driver: recordRuntimeHistory,
+  check: checkRuntimeTrace,
+})
+oracleProperty({
+  id: `svelte.ssr-runtime-errors`,
+  law: runtimeLaw,
+  histories: {
+    arbitrary: ssrRuntimeErrorHistoryArbitrary,
+    runs: 64,
+    fixedSeeds: [2229],
+    states: runtimeStates,
+    constructed: [
+      {
+        name: `browser committed`,
+        enters: [`browser-commit`],
+        build: (history): SsrRuntimeErrorHistory => ({ ...history }),
+      },
+      {
+        name: `cold browser receives server error`,
+        enters: [`server-error-browser-cold`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          serverOutcome: `error`,
+          browserPreload: false,
+        }),
+      },
+      {
+        name: `failed browser receives ready server`,
+        enters: [`server-ready-browser-failed-before-hydration`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          serverOutcome: `ready`,
+          browserOutcome: `error`,
+          browserPreload: true,
+        }),
+      },
+      {
+        name: `ready browser receives server error`,
+        enters: [`server-error-browser-ready-before-hydration`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          serverOutcome: `error`,
+          browserOutcome: `ready`,
+          browserPreload: true,
+        }),
+      },
+      {
+        name: `matching ready`,
+        enters: [`matching-ready`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          serverOutcome: `ready`,
+          browserOutcome: `ready`,
+        }),
+      },
+      {
+        name: `matching error`,
+        enters: [`matching-error`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          serverOutcome: `error`,
+          browserOutcome: `error`,
+        }),
+      },
+      {
+        name: `undefined error cause`,
+        enters: [`undefined-cause`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          definedError: false,
+        }),
+      },
+      {
+        name: `defined error cause`,
+        enters: [`defined-cause`],
+        build: (history): SsrRuntimeErrorHistory => ({
+          ...history,
+          definedError: true,
+        }),
+      },
+    ],
+    fixed: ssrRuntimeErrorExamples.map((history, index) => ({
+      name: `runtime outcome ${index}`,
+      history,
+    })),
+  },
+  model: expectedSsrRuntimeErrorViews,
+  driver: recordRuntimeHistory,
+  check: checkRuntimeTrace,
+  timeout: 30_000,
+})
 declareOracle({
   owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
-  check: [checkRuntimeHistory],
-})
-
-describe(`Svelte SSR runtime errors`, () => {
-  for (const history of ssrRuntimeErrorExamples)
-    it.skipIf(oracleReplayRequested())(
-      `runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-      () => {
-        oracleRoute(`case`)
-        return checkRuntimeHistory(history, makeRuntimeReach())
-      },
-    )
-  const runCampaign = async (campaign: `fixed` | `random`) => {
-    const reach = makeRuntimeReach()
-    try {
-      const parameters = {
-        ...(campaign === `fixed`
-          ? oracleFixedSeed(2229, { numRuns: oracleRuns(64) })
-          : oraclePropertyOptions(64, `svelte.ssr-runtime-errors`)),
-        examples: ssrRuntimeErrorExamples.map((history) => [history]),
-      }
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
-          checkRuntimeHistory(history, reach),
-        ),
-        parameters,
-      )
-      reach.assertReached()
-    } finally {
-      console.info(
-        `svelte-ssr-runtime ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    }
-  }
-  // The fixed campaign stands aside during every replay; the random campaign
-  // runs as this property's replay.
-  oracleReplayTest(it)(
-    `keeps runtime failures on their ordinary error surface (fixed)`,
-    () => runCampaign(`fixed`),
-    30_000,
-  )
-  oracleReplayTest(it, `svelte.ssr-runtime-errors`)(
-    `keeps runtime failures on their ordinary error surface (random)`,
-    () => runCampaign(`random`),
-    30_000,
-  )
+  model: [expectedSsrRuntimeErrorViews],
+  check: [checkRuntimeTrace],
+  grammar: [ssrRuntimeErrorHistoryArbitrary],
 })

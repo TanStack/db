@@ -18,6 +18,10 @@ const config = defineConfig({
       exclude: [
         `**/node_modules/**`,
         `tests/collection-setup-reopen-oracle.test.ts`,
+        `tests/shared-logical-scheduling-oracle.test.ts`,
+        `tests/persisted-reload-replacement-oracle.test.ts`,
+        `tests/persisted-readiness-oracle.test.ts`,
+        `tests/persisted-sync-problem-oracle.test.ts`,
         `tests/persisted-optimistic-history-oracle.property.test.ts`,
       ],
     },

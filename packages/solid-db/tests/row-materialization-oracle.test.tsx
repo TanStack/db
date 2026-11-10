@@ -24,15 +24,25 @@ import { createCollection } from '@tanstack/db'
 import { render, waitFor } from '@solidjs/testing-library'
 import { For, createRenderEffect, createRoot, createSignal } from 'solid-js'
 import { createStore } from 'solid-js/store'
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { createRowStore } from '../src/store-materialization'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty } from '../../db/tests/oracle-config'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
 import type { InitialQueryBuilder } from '@tanstack/db'
+
+// Keep the existing independent assertions at their authored host cuts. The
+// adapter transports their judgment without serializing live getters, callable
+// identities or native stores, and leaves runtime and cleanup errors intact.
+type Observer = (checkpoint: string, value: unknown) => void
 
 type Element = { value: number }
 type Row = {
@@ -111,15 +121,26 @@ function compare(
   mounts: number,
   reads: number,
 ) {
-  expect(elements(current)[0]!.value, `current element value`).toBe(
-    expectedValue,
+  oracleAssertion(`current element value`, () =>
+    expect(elements(current)[0]!.value, `current element value`).toBe(
+      expectedValue,
+    ),
   )
-  expect(mounts, `unchanged elements do not remount`).toBe(admitted.mounts)
-  expect(reads, `unchanged element references do not invalidate effects`).toBe(
-    admitted.reads,
+  oracleAssertion(`unchanged elements do not remount`, () =>
+    expect(mounts, `unchanged elements do not remount`).toBe(admitted.mounts),
   )
-  expect(elements(current)[0], `unchanged nested element identity`).toBe(
-    admitted.element,
+  oracleAssertion(
+    `unchanged element references do not invalidate effects`,
+    () =>
+      expect(
+        reads,
+        `unchanged element references do not invalidate effects`,
+      ).toBe(admitted.reads),
+  )
+  oracleAssertion(`unchanged nested element identity`, () =>
+    expect(elements(current)[0], `unchanged nested element identity`).toBe(
+      admitted.element,
+    ),
   )
 }
 
@@ -130,20 +151,22 @@ function compareArray(
   rendered: string | null,
   admitted: Array<number>,
 ) {
-  expect(observed, `array consumers follow current membership`).toEqual(
-    admitted,
+  oracleAssertion(`array consumers follow current membership`, () =>
+    expect(observed, `array consumers follow current membership`).toEqual(
+      admitted,
+    ),
   )
-  expect(rendered, `rendered array membership`).toBe(admitted.join(``))
+  oracleAssertion(`rendered array membership`, () =>
+    expect(rendered, `rendered array membership`).toBe(admitted.join(``)),
+  )
 }
 
-async function runHistory(history: History) {
-  oracleRoute(`case`)
+async function runHistory(history: History, observe: Observer) {
   const parentState =
     history.initialParent === history.nextParent
       ? `same-parent-control`
       : `parent-transition`
-  const reach = createOracleReach(
-    `solid.materialization.${history.input}.${history.nested}.${history.native}.${history.law}.${history.initialParent}.${history.nextParent}.${history.reactiveInput}`,
+  const requiredStates =
     history.law === `reorder` || history.law === `resize`
       ? [
           history.law === `reorder` ? `source-reorder` : `array-resize`,
@@ -157,9 +180,8 @@ async function runHistory(history: History) {
           `element-replacement`,
           `source-only-write`,
           ...(history.reactiveInput ? [`query-input-change`] : []),
-        ],
-  )
-  reach.beginHistory()
+        ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const [nativePayload, setNativePayload] = createStore({ value: 0 })
@@ -215,7 +237,11 @@ async function runHistory(history: History) {
             : useLiveQuery(build)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(2))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(2)`, () =>
+          expect(query()).toHaveLength(2),
+        ),
+      )
       const current = () => query().find((row) => row.id === `a`)!
       if (history.law === `resize`) {
         let observed: Array<number> = []
@@ -243,29 +269,39 @@ async function runHistory(history: History) {
           source.utils.begin()
           source.utils.write({ type: `update`, value: next })
           source.utils.commit()
-          await waitFor(() => expect(current().value).toBe(next.value))
+          await waitFor(() =>
+            oracleAssertion(`expect(current().value).toBe(next.value)`, () =>
+              expect(current().value).toBe(next.value),
+            ),
+          )
           compareArray(observed, view.container.textContent, values)
-          reach.reach(`array-resize`)
+          entered.add(`array-resize`)
         }
         return
       }
       if (history.law === `reorder`) {
         const initialElements = [...elements(current())]
         const initialSources = elements(source.get(`a`)!)
-        expect(
-          initialSources.map((element) => element.value),
-          `complete admitted source values`,
-        ).toEqual(initialValues)
-        if (history.nativeElements) {
+        oracleAssertion(`complete admitted source values`, () =>
           expect(
-            initialSources,
-            `complete source child admission`,
-          ).toHaveLength(sourceElements.length)
+            initialSources.map((element) => element.value),
+            `complete admitted source values`,
+          ).toEqual(initialValues),
+        )
+        if (history.nativeElements) {
+          oracleAssertion(`complete source child admission`, () =>
+            expect(
+              initialSources,
+              `complete source child admission`,
+            ).toHaveLength(sourceElements.length),
+          )
           for (const [index, element] of initialSources.entries())
-            expect(element, `source admitted the native child`).toBe(
-              sourceElements[index],
+            oracleAssertion(`source admitted the native child`, () =>
+              expect(element, `source admitted the native child`).toBe(
+                sourceElements[index],
+              ),
             )
-          reach.reach(`native-element-admission`)
+          entered.add(`native-element-admission`)
         }
         let admissions = 0
         view = render(() => (
@@ -307,26 +343,38 @@ async function runHistory(history: History) {
           source.utils.begin()
           source.utils.write({ type: `update`, value: next })
           source.utils.commit()
-          await waitFor(() => expect(current().value).toBe(next.value))
+          await waitFor(() =>
+            oracleAssertion(`expect(current().value).toBe(next.value)`, () =>
+              expect(current().value).toBe(next.value),
+            ),
+          )
           const admittedSources = elements(source.get(`a`)!)
-          expect(
-            admittedSources.map((element) => element.value),
-            `complete unchanged source values`,
-          ).toEqual(expectedValues)
+          oracleAssertion(`complete unchanged source values`, () =>
+            expect(
+              admittedSources.map((element) => element.value),
+              `complete unchanged source values`,
+            ).toEqual(expectedValues),
+          )
           if (history.nativeElements) {
             const expectedSources =
               turn === 0 ? [...sourceElements].reverse() : sourceElements
-            expect(
-              admittedSources,
-              `complete unchanged source child admission`,
-            ).toHaveLength(expectedSources.length)
-            for (const [index, element] of admittedSources.entries())
+            oracleAssertion(`complete unchanged source child admission`, () =>
               expect(
-                element,
+                admittedSources,
+                `complete unchanged source child admission`,
+              ).toHaveLength(expectedSources.length),
+            )
+            for (const [index, element] of admittedSources.entries())
+              oracleAssertion(
                 `source retained the unchanged native child`,
-              ).toBe(expectedSources[index])
-            reach.reach(`source-identity-reuse`)
-            reach.reach(parentState)
+                () =>
+                  expect(
+                    element,
+                    `source retained the unchanged native child`,
+                  ).toBe(expectedSources[index]),
+              )
+            entered.add(`source-identity-reuse`)
+            entered.add(parentState)
           }
           compareArray(
             elements(current()).map((element) => element.value),
@@ -334,13 +382,17 @@ async function runHistory(history: History) {
             expectedValues,
           )
           for (const [index, element] of elements(current()).entries())
-            expect(element, `source element identity follows reorder`).toBe(
-              expectedElements[index],
+            oracleAssertion(`source element identity follows reorder`, () =>
+              expect(element, `source element identity follows reorder`).toBe(
+                expectedElements[index],
+              ),
             )
-          expect(admissions, `reordering does not admit new elements`).toBe(
-            tags.length,
+          oracleAssertion(`reordering does not admit new elements`, () =>
+            expect(admissions, `reordering does not admit new elements`).toBe(
+              tags.length,
+            ),
           )
-          reach.reach(`source-reorder`)
+          entered.add(`source-reorder`)
         }
         return
       }
@@ -388,8 +440,12 @@ async function runHistory(history: History) {
       ] as const) {
         write(index, replacement)
         await waitFor(() =>
-          expect(query().find((row) => row.id === rows[index]!.id)!.value).toBe(
-            rows[index]!.value,
+          oracleAssertion(
+            `expect(query().find((row) => row.id === rows[index]!.id)!.value).toBe( rows[index]!.value, )`,
+            () =>
+              expect(
+                query().find((row) => row.id === rows[index]!.id)!.value,
+              ).toBe(rows[index]!.value),
           ),
         )
         const replaced = rows[0]!.value >= 2
@@ -397,12 +453,18 @@ async function runHistory(history: History) {
           if (replacement) {
             // Only current values are promised at a changed-source cut. The
             // next peer edit must preserve whichever identity was admitted.
-            expect(elements(current())[0]!.value).toBe(1)
-            expect(view!.container.textContent).toBe(`1`)
+            oracleAssertion(
+              `expect(elements(current())[0]!.value).toBe(1)`,
+              () => expect(elements(current())[0]!.value).toBe(1),
+            )
+            oracleAssertion(
+              `expect(view!.container.textContent).toBe('1')`,
+              () => expect(view!.container.textContent).toBe(`1`),
+            )
             admitted = { element: elements(current())[0]!, mounts, reads }
           } else compare(current(), replaced ? 1 : 0, admitted, mounts, reads)
         }
-        reach.reach(
+        entered.add(
           replacement
             ? `element-replacement`
             : index === 0
@@ -415,38 +477,84 @@ async function runHistory(history: History) {
       const starts = subscriptions.mock.calls.length
       setNativePayload(`value`, 1)
       await new Promise<void>((resolve) => queueMicrotask(resolve))
-      expect(
-        subscriptions.mock.calls.length,
-        `row reads cannot rebind the hook`,
-      ).toBe(starts)
-      reach.reach(`source-only-write`)
+      oracleAssertion(`row reads cannot rebind the hook`, () =>
+        expect(
+          subscriptions.mock.calls.length,
+          `row reads cannot rebind the hook`,
+        ).toBe(starts),
+      )
+      entered.add(`source-only-write`)
       if (history.reactiveInput) {
         setInputVersion(1)
         await waitFor(() =>
-          expect(Reflect.get(current(), `inputVersion`)).toBe(inputVersion()),
+          oracleAssertion(
+            `expect(Reflect.get(current(), 'inputVersion')).toBe(inputVersion())`,
+            () =>
+              expect(Reflect.get(current(), `inputVersion`)).toBe(
+                inputVersion(),
+              ),
+          ),
         )
-        expect(
-          subscriptions.mock.calls.length,
-          `query-input reads still rebind the hook`,
-        ).toBeGreaterThan(starts)
-        reach.reach(`query-input-change`)
+        oracleAssertion(`query-input reads still rebind the hook`, () =>
+          expect(
+            subscriptions.mock.calls.length,
+            `query-input reads still rebind the hook`,
+          ).toBeGreaterThan(starts),
+        )
+        entered.add(`query-input-change`)
       }
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
 
-it.each([...histories()])(
-  `preserves $law through $input, nested=$nested native=$native reactive=$reactiveInput`,
-  runHistory,
-)
+oracleProperty({
+  id: `solid.row-materialization`,
+  law: {
+    statement: `Unchanged nested elements retain identity and quiet consumers, while current array values and authored reactive query inputs follow their source.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing callback/config/Collection finite grammar at settled Solid host cuts; no changed-element identity, native-source-only value liveness, cycles or elapsed-time claim.`,
+  },
+  histories: [...histories()],
+  driver: (history: Parameters<typeof runHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.row-materialization`, history, observe, () =>
+      runHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 
-it.each([...nativeParentHistories()])(
-  `preserves native element identity through $input, nested=$nested parents=$initialParent->$nextParent`,
-  runHistory,
-)
+oracleProperty({
+  id: `solid.native-parent-materialization`,
+  law: {
+    statement: `Unchanged native children retain admission and identity across ordinary and native parent replacement in both directions.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing same-parent and parent-transition cases at one or two array levels through three public inputs.`,
+  },
+  histories: [...nativeParentHistories()],
+  driver: (history: Parameters<typeof runHistory>[0], observe) =>
+    recordAssertionJudgment(
+      `solid.native-parent-materialization`,
+      history,
+      observe,
+      () => runHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 
 declareOracle({
   grammar: [histories, nativeParentHistories],
@@ -487,73 +595,121 @@ function compareVisibility(
   key: string,
 ) {
   const expected = visible ? [key] : []
-  expect(
-    observed,
-    `enumeration observer follows descriptor visibility`,
-  ).toEqual(expected)
-  expect(Object.keys(current), `current descriptor visibility`).toEqual(
-    expected,
+  oracleAssertion(`enumeration observer follows descriptor visibility`, () =>
+    expect(
+      observed,
+      `enumeration observer follows descriptor visibility`,
+    ).toEqual(expected),
+  )
+  oracleAssertion(`current descriptor visibility`, () =>
+    expect(Object.keys(current), `current descriptor visibility`).toEqual(
+      expected,
+    ),
   )
 }
 
-it.each([...visibilityHistories()])(
-  `notifies helper visibility for $key $kind, initially=$initial`,
-  async ({ kind, initial, key }) => {
-    oracleRoute(`case`)
-    const reach = createOracleReach(
-      `solid.materialization.visibility.${key}.${kind}.${initial}`,
-      [`unchanged`, `hidden`, `visible`, `visibility-restored`],
-    )
-    reach.beginHistory()
-    const payload =
-      kind === `undefined`
-        ? undefined
-        : kind === `null`
-          ? null
-          : kind === `scalar`
-            ? 1
-            : kind === `array`
-              ? [1]
-              : kind === `native`
-                ? createStore({ value: 1 })[0]
-                : { value: 1 }
-    const sourceRow = (visible: boolean) =>
-      Object.defineProperty({} as Record<string, unknown>, key, {
-        value: payload,
-        enumerable: visible,
-        writable: true,
-        configurable: true,
-      })
-    const resources = new ScenarioLifetime()
-    await resources.run(async () => {
-      const original = sourceRow(initial)
-      const entry = createRowStore(original)
-      const row = entry.value
-      const admitted = row[key]
-      let observed: Array<string> = []
-      createRoot((dispose) => {
-        resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = Object.keys(row)
-        })
-      })
-      compareVisibility(observed, row, initial, key)
-      for (const visible of [initial, !initial, initial, !initial]) {
-        entry.update(sourceRow(visible))
-        await new Promise<void>((resolve) => queueMicrotask(resolve))
-        compareVisibility(observed, row, visible, key)
-        expect(entry.value, `ordinary root identity`).toBe(row)
-        expect(row[key], `visibility keeps the admitted payload`).toBe(admitted)
-        expect(original[key], `source payload remains borrowed`).toBe(payload)
-        expect(Object.keys(original)).toEqual(initial ? [key] : [])
-        reach.reach(visible ? `visible` : `hidden`)
-      }
-      reach.reach(`unchanged`)
-      reach.reach(`visibility-restored`)
+type VisibilityHistory =
+  ReturnType<typeof visibilityHistories> extends Generator<infer H> ? H : never
+async function runVisibilityHistory(
+  history: VisibilityHistory,
+  observe: Observer,
+) {
+  const { kind, initial, key } = history
+  const requiredStates = [
+    `unchanged`,
+    `hidden`,
+    `visible`,
+    `visibility-restored`,
+  ]
+  const entered = new Set<string>()
+  const payload =
+    kind === `undefined`
+      ? undefined
+      : kind === `null`
+        ? null
+        : kind === `scalar`
+          ? 1
+          : kind === `array`
+            ? [1]
+            : kind === `native`
+              ? createStore({ value: 1 })[0]
+              : { value: 1 }
+  const sourceRow = (visible: boolean) =>
+    Object.defineProperty({} as Record<string, unknown>, key, {
+      value: payload,
+      enumerable: visible,
+      writable: true,
+      configurable: true,
     })
-    reach.assertReached()
+  const resources = new ScenarioLifetime()
+  await resources.run(async () => {
+    const original = sourceRow(initial)
+    const entry = createRowStore(original)
+    const row = entry.value
+    const admitted = row[key]
+    let observed: Array<string> = []
+    createRoot((dispose) => {
+      resources.defer(dispose)
+      createRenderEffect(() => {
+        observed = Object.keys(row)
+      })
+    })
+    compareVisibility(observed, row, initial, key)
+    for (const visible of [initial, !initial, initial, !initial]) {
+      entry.update(sourceRow(visible))
+      await new Promise<void>((resolve) => queueMicrotask(resolve))
+      compareVisibility(observed, row, visible, key)
+      oracleAssertion(`ordinary root identity`, () =>
+        expect(entry.value, `ordinary root identity`).toBe(row),
+      )
+      oracleAssertion(`visibility keeps the admitted payload`, () =>
+        expect(row[key], `visibility keeps the admitted payload`).toBe(
+          admitted,
+        ),
+      )
+      oracleAssertion(`source payload remains borrowed`, () =>
+        expect(original[key], `source payload remains borrowed`).toBe(payload),
+      )
+      oracleAssertion(
+        `expect(Object.keys(original)).toEqual(initial ? [key] : [])`,
+        () => expect(Object.keys(original)).toEqual(initial ? [key] : []),
+      )
+      entered.add(visible ? `visible` : `hidden`)
+    }
+    entered.add(`unchanged`)
+    entered.add(`visibility-restored`)
+  })
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
+}
+
+oracleProperty({
+  id: `solid.descriptor-visibility`,
+  law: {
+    statement: `A stable helper root notifies enumeration consumers when an own data descriptor changes visibility while preserving payload and source identity.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite helper-only visibility grammar; no public descriptor admission, accessors, symbols or in-place source edits.`,
   },
-)
+  histories: [...visibilityHistories()],
+  driver: (history: Parameters<typeof runVisibilityHistory>[0], observe) =>
+    recordAssertionJudgment(
+      `solid.descriptor-visibility`,
+      history,
+      observe,
+      () => runVisibilityHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 
 declareOracle({
   grammar: [visibilityHistories],
@@ -594,8 +750,10 @@ function compareLabel(
   locale: string,
   value: number,
 ) {
-  expect(actual, `live getter at the host cut`).toEqual(
-    expectedLabel(history.object, locale, value),
+  oracleAssertion(`live getter at the host cut`, () =>
+    expect(actual, `live getter at the host cut`).toEqual(
+      expectedLabel(history.object, locale, value),
+    ),
   )
 }
 
@@ -603,20 +761,16 @@ function compareLabel(
 // Initial and later container admission use the same model and observation.
 // The getter is nested: spreading a root getter in a query projection would
 // evaluate it in Core before it could reach the framework adapter boundary.
-async function runGetterHistory(history: GetterHistory) {
-  oracleRoute(`case`)
-  const reach = createOracleReach(
-    `solid.getter.${history.input}.${history.object}.${history.later}.${history.stable}`,
-    [
-      `getter-admission`,
-      `source-replacement`,
-      `signal-only-write`,
-      `retained-getter`,
-      `getter-omission`,
-      `getter-readmission`,
-    ],
-  )
-  reach.beginHistory()
+async function runGetterHistory(history: GetterHistory, observe: Observer) {
+  const requiredStates = [
+    `getter-admission`,
+    `source-replacement`,
+    `signal-only-write`,
+    `retained-getter`,
+    `getter-omission`,
+    `getter-readmission`,
+  ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const [locale, setLocale] = createSignal(`en`)
@@ -672,7 +826,11 @@ async function runGetterHistory(history: GetterHistory) {
             : useLiveQuery(build)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(1))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(1)`, () =>
+          expect(query()).toHaveLength(1),
+        ),
+      )
       let observed: Label | undefined
       let member = false
       let keys: Array<string> = []
@@ -691,24 +849,30 @@ async function runGetterHistory(history: GetterHistory) {
         source.utils.begin()
         source.utils.write({ type: `update`, value: sourceRow(value) })
         source.utils.commit()
-        await waitFor(() => expect(query()[0]!.value).toBe(value))
-        reach.reach(value === 0 ? `getter-admission` : `source-replacement`)
-        if (!history.later) reach.reach(`getter-admission`)
+        await waitFor(() =>
+          oracleAssertion(`expect(query()[0]!.value).toBe(value)`, () =>
+            expect(query()[0]!.value).toBe(value),
+          ),
+        )
+        entered.add(value === 0 ? `getter-admission` : `source-replacement`)
+        if (!history.later) entered.add(`getter-admission`)
         const labelVersion = history.stable ? 0 : value
         compareLabel(observed, history, locale(), labelVersion)
         const language = value % 2 === 0 ? `fr` : `de`
         const starts = subscriptions.mock.calls.length
         setLocale(language)
         await new Promise<void>((resolve) => queueMicrotask(resolve))
-        reach.reach(`signal-only-write`)
+        entered.add(`signal-only-write`)
         compareLabel(observed, history, language, labelVersion)
-        expect(
-          subscriptions.mock.calls.length,
-          `getter reads cannot rebind the hook`,
-        ).toBe(starts)
+        oracleAssertion(`getter reads cannot rebind the hook`, () =>
+          expect(
+            subscriptions.mock.calls.length,
+            `getter reads cannot rebind the hook`,
+          ).toBe(starts),
+        )
         for (const saved of admitted)
           compareLabel(saved.config.label, history, language, saved.value)
-        reach.reach(`retained-getter`)
+        entered.add(`retained-getter`)
       }
       source.utils.begin()
       source.utils.write({
@@ -716,33 +880,72 @@ async function runGetterHistory(history: GetterHistory) {
         value: { id: `a`, value: 3, config: {} },
       })
       source.utils.commit()
-      await waitFor(() => expect(query()[0]!.value).toBe(3))
-      expect(observed, `omitted getter value`).toBeUndefined()
-      expect(member, `omitted getter membership`).toBe(false)
-      expect(keys, `omitted getter enumeration`).toEqual([])
-      reach.reach(`getter-omission`)
+      await waitFor(() =>
+        oracleAssertion(`expect(query()[0]!.value).toBe(3)`, () =>
+          expect(query()[0]!.value).toBe(3),
+        ),
+      )
+      oracleAssertion(`omitted getter value`, () =>
+        expect(observed, `omitted getter value`).toBeUndefined(),
+      )
+      oracleAssertion(`omitted getter membership`, () =>
+        expect(member, `omitted getter membership`).toBe(false),
+      )
+      oracleAssertion(`omitted getter enumeration`, () =>
+        expect(keys, `omitted getter enumeration`).toEqual([]),
+      )
+      entered.add(`getter-omission`)
       source.utils.begin()
       source.utils.write({ type: `update`, value: sourceRow(4) })
       source.utils.commit()
-      await waitFor(() => expect(query()[0]!.value).toBe(4))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()[0]!.value).toBe(4)`, () =>
+          expect(query()[0]!.value).toBe(4),
+        ),
+      )
       compareLabel(observed, history, locale(), history.stable ? 0 : 4)
       setLocale(`de`)
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       compareLabel(observed, history, `de`, history.stable ? 0 : 4)
-      expect(member, `readmitted getter membership`).toBe(true)
-      expect(keys, `readmitted getter enumeration`).toContain(`label`)
-      reach.reach(`getter-readmission`)
+      oracleAssertion(`readmitted getter membership`, () =>
+        expect(member, `readmitted getter membership`).toBe(true),
+      )
+      oracleAssertion(`readmitted getter enumeration`, () =>
+        expect(keys, `readmitted getter enumeration`).toContain(`label`),
+      )
+      entered.add(`getter-readmission`)
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
 
-it.each([...getterHistories()])(
-  `preserves live getters through $input, object=$object later=$later stable=$stable`,
-  runGetterHistory,
-)
+oracleProperty({
+  id: `solid.live-getters`,
+  law: {
+    statement: `Admitted nested live getters follow signal changes without rebinding the query and preserve retained source getters through replacement, omission and readmission.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite object/scalar, early/later and stable/fresh getter grammar through three public inputs at settled host cuts.`,
+  },
+  histories: [...getterHistories()],
+  driver: (history: Parameters<typeof runGetterHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.live-getters`, history, observe, () =>
+      runGetterHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 
 declareOracle({
   model: [expectedLabel],
@@ -787,19 +990,35 @@ export function compareGraphValues(
   expected: Graph,
   seen = new WeakMap<object, Set<object>>(),
 ): void {
-  expect(actual).not.toBeNull()
-  expect(typeof actual).toBe(`object`)
-  expect(Array.isArray(actual)).toBe(false)
+  oracleAssertion(`expect(actual).not.toBeNull()`, () =>
+    expect(actual).not.toBeNull(),
+  )
+  oracleAssertion(`expect(typeof actual).toBe('object')`, () =>
+    expect(typeof actual).toBe(`object`),
+  )
+  oracleAssertion(`expect(Array.isArray(actual)).toBe(false)`, () =>
+    expect(Array.isArray(actual)).toBe(false),
+  )
   const record = actual as Record<string, unknown>
   const pairs = seen.get(record) ?? new Set<object>()
   if (pairs.has(expected)) return
   pairs.add(expected)
   seen.set(record, pairs)
   if (`value` in expected) {
-    expect(Object.keys(record)).toEqual([`value`])
-    expect(record.value, `complete graph leaf`).toBe(expected.value)
+    oracleAssertion(`expect(Object.keys(record)).toEqual(['value'])`, () =>
+      expect(Object.keys(record)).toEqual([`value`]),
+    )
+    oracleAssertion(`complete graph leaf`, () =>
+      expect(record.value, `complete graph leaf`).toBe(expected.value),
+    )
   } else {
-    expect(new Set(Object.keys(record))).toEqual(new Set([`left`, `right`]))
+    oracleAssertion(
+      `expect(new Set(Object.keys(record))).toEqual(new Set(['left', 'right']))`,
+      () =>
+        expect(new Set(Object.keys(record))).toEqual(
+          new Set([`left`, `right`]),
+        ),
+    )
     compareGraphValues(record.left, expected.left, seen)
     compareGraphValues(record.right, expected.right, seen)
   }
@@ -812,49 +1031,79 @@ function compareGraph(
   containers: number,
 ) {
   // Counts enter by value before the checker traverses any observation.
-  expect(
-    visits,
-    `source enumeration scales with distinct containers`,
-  ).toBeLessThanOrEqual(enumerationBudget(containers))
+  oracleAssertion(`source enumeration scales with distinct containers`, () =>
+    expect(
+      visits,
+      `source enumeration scales with distinct containers`,
+    ).toBeLessThanOrEqual(enumerationBudget(containers)),
+  )
   compareGraphValues(actual, expected)
 }
 
 // A wrong observation changes one interior path while keeping the two extreme
 // paths intact. The same complete comparison must reject it at every crossed
 // depth; a checker of only all-left/all-right leaves would accept it.
-it.each([...graphHistories()].filter((history) => history.crossed))(
-  `rejects mixed-path corruption at crossed depth=$depth`,
-  ({ depth, shared, crossed }) => {
-    oracleRoute(`calibration`)
-    const expected = semanticGraph(depth, 0, shared, crossed)
-    function corrupted(graph: Graph, remaining: number): Graph {
-      if (`value` in graph) return { value: 99 }
-      const side = remaining === depth * 2 - 1 ? `right` : `left`
-      return { ...graph, [side]: corrupted(graph[side], remaining - 1) }
-    }
-    expect(() =>
-      compareGraphValues(corrupted(expected, depth * 2), expected),
-    ).toThrow()
-  },
-)
+function runGraphCalibration(
+  history: ReturnType<typeof graphHistories> extends Generator<infer H>
+    ? H
+    : never,
+  _observe: Observer,
+) {
+  const { depth, shared, crossed } = history
+  const expected = semanticGraph(depth, 0, shared, crossed)
+  function corrupted(graph: Graph, remaining: number): Graph {
+    if (`value` in graph) return { value: 99 }
+    const side = remaining === depth * 2 - 1 ? `right` : `left`
+    return { ...graph, [side]: corrupted(graph[side], remaining - 1) }
+  }
+  oracleAssertion(
+    `expect(() => compareGraphValues(corrupted(expected, depth * 2), expected), ).toThrow()`,
+    () =>
+      expect(() =>
+        compareGraphValues(corrupted(expected, depth * 2), expected),
+      ).toThrow(),
+  )
+}
 
-async function runGraphHistory({
-  depth,
-  shared,
-  crossed,
-}: {
-  depth: number
-  shared: boolean
-  crossed: boolean
-}) {
-  oracleRoute(`case`)
-  const reach = createOracleReach(`solid.graph.${depth}.${shared}.${crossed}`, [
+oracleProperty({
+  id: `solid.shared-graph-calibration`,
+  law: {
+    statement: `The existing complete graph comparison rejects interior mixed-path corruption even when the extreme paths are intact.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing three crossed-depth calibration inputs and unchanged graph comparison; no new mutation campaign.`,
+  },
+  histories: [...graphHistories()].filter((history) => history.crossed),
+  driver: (history: Parameters<typeof runGraphCalibration>[0], observe) =>
+    recordAssertionJudgment(
+      `solid.shared-graph-calibration`,
+      history,
+      observe,
+      () => runGraphCalibration(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
+
+async function runGraphHistory(
+  {
+    depth,
+    shared,
+    crossed,
+  }: {
+    depth: number
+    shared: boolean
+    crossed: boolean
+  },
+  observe: Observer,
+) {
+  const requiredStates = [
     `graph-admission`,
     `graph-replacement`,
     `branch-divergence`,
     ...(crossed ? [`crossed-sharing`] : []),
-  ])
-  reach.beginHistory()
+  ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     let visits = 0
@@ -946,14 +1195,18 @@ async function runGraphHistory({
         return useLiveQuery(() => source)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(1))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(1)`, () =>
+          expect(query()).toHaveLength(1),
+        ),
+      )
       compareGraph(
         query()[0]!.config,
         semanticGraph(depth, 0, shared, crossed),
         visits,
         containers,
       )
-      reach.reach(`graph-admission`)
+      entered.add(`graph-admission`)
       for (const value of [1, 2]) {
         const config =
           value === 1
@@ -967,7 +1220,11 @@ async function runGraphHistory({
           value: { id: `a`, value, config },
         })
         source.utils.commit()
-        await waitFor(() => expect(query()[0]!.value).toBe(value))
+        await waitFor(() =>
+          oracleAssertion(`expect(query()[0]!.value).toBe(value)`, () =>
+            expect(query()[0]!.value).toBe(value),
+          ),
+        )
         compareGraph(
           query()[0]!.config,
           value === 1
@@ -979,19 +1236,40 @@ async function runGraphHistory({
           visits,
           containers,
         )
-        reach.reach(value === 1 ? `graph-replacement` : `branch-divergence`)
-        if (crossed && value === 1) reach.reach(`crossed-sharing`)
+        entered.add(value === 1 ? `graph-replacement` : `branch-divergence`)
+        if (crossed && value === 1) entered.add(`crossed-sharing`)
       }
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
-it.each([...graphHistories()])(
-  `materializes depth=$depth shared=$shared crossed=$crossed graphs`,
-  runGraphHistory,
-)
+oracleProperty({
+  id: `solid.shared-graphs`,
+  law: {
+    statement: `Shared acyclic graph materialization preserves every public value path within the existing source-enumeration regression budget.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite graph grammar and unchanged 32 enumerations per distinct admitted container; no public SLO, alias topology or cyclic support claim.`,
+  },
+  histories: [...graphHistories()],
+  driver: (history: Parameters<typeof runGraphHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.shared-graphs`, history, observe, () =>
+      runGraphHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 declareOracle({
   model: [enumerationBudget, semanticGraph],
   grammar: [graphHistories],
@@ -1027,6 +1305,13 @@ type CallableRow = {
   format?: CallableValue
   hasOwnProperty?: unknown
   config: CallableContainer | null
+}
+
+function requiredFirstRow<T>(rows: ReadonlyArray<T>): T {
+  const row = rows[0]
+  if (row === undefined)
+    throw new Error(`the settled materialization checkpoint has no row`)
+  return row
 }
 type CallableHistory = {
   input: History[`input`]
@@ -1077,29 +1362,31 @@ function compareCallable(
   actual: CallableObservation,
   expected: CallableObservation,
 ) {
-  expect(actual.callable, `tracked callable identity`).toBe(expected.callable)
-  expect(
-    actual.value,
-    `tracked callable result with the current receiver`,
-  ).toBe(expected.value)
+  oracleAssertion(`tracked callable identity`, () =>
+    expect(actual.callable, `tracked callable identity`).toBe(
+      expected.callable,
+    ),
+  )
+  oracleAssertion(`tracked callable result with the current receiver`, () =>
+    expect(
+      actual.value,
+      `tracked callable result with the current receiver`,
+    ).toBe(expected.value),
+  )
 }
 
-async function runCallableHistory(history: CallableHistory) {
-  oracleRoute(`case`)
-  const reach = createOracleReach(
-    `solid.callable.${history.input}.${history.location}.${history.property}.${history.shape}`,
-    [
-      `callable-admission`,
-      `tracked-initial`,
-      `source-replacement`,
-      `signal-only-read`,
-      `callable-omission`,
-      `callable-readmission`,
-      `retained-source`,
-      `quiet-neighbor`,
-    ],
-  )
-  reach.beginHistory()
+async function runCallableHistory(history: CallableHistory, observe: Observer) {
+  const requiredStates = [
+    `callable-admission`,
+    `tracked-initial`,
+    `source-replacement`,
+    `signal-only-read`,
+    `callable-omission`,
+    `callable-readmission`,
+    `retained-source`,
+    `quiet-neighbor`,
+  ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const [signal, setSignal] = createSignal(0)
@@ -1163,7 +1450,11 @@ async function runCallableHistory(history: CallableHistory) {
             : useLiveQuery(build)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(1))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(1)`, () =>
+          expect(query()).toHaveLength(1),
+        ),
+      )
       const container = (row: CallableRow): CallableContainer =>
         history.location === `root` ? row : row.config!
       const retained: Array<{
@@ -1174,29 +1465,37 @@ async function runCallableHistory(history: CallableHistory) {
       const admit = (version: number, omitted: boolean) => {
         const row = source.get(`a`)!
         const fields = container(row)
-        expect(
-          Object.hasOwn(fields, `format`),
-          `source admitted callable ownness`,
-        ).toBe(!omitted)
+        oracleAssertion(`source admitted callable ownness`, () =>
+          expect(
+            Object.hasOwn(fields, `format`),
+            `source admitted callable ownness`,
+          ).toBe(!omitted),
+        )
         if (history.shape === `null-prototype`)
-          expect(
-            Object.getPrototypeOf(fields),
-            `source admitted nested null prototype`,
-          ).toBe(null)
+          oracleAssertion(`source admitted nested null prototype`, () =>
+            expect(
+              Object.getPrototypeOf(fields),
+              `source admitted nested null prototype`,
+            ).toBe(null),
+          )
         if (history.shape.startsWith(`shadow`)) {
-          expect(
-            Object.hasOwn(fields, `hasOwnProperty`),
-            `source admitted ordinary shadow`,
-          ).toBe(true)
-          expect(
-            fields.hasOwnProperty,
-            `source admitted user shadow value`,
-          ).toBe(history.shape === `shadow-value` ? 0 : shadow)
+          oracleAssertion(`source admitted ordinary shadow`, () =>
+            expect(
+              Object.hasOwn(fields, `hasOwnProperty`),
+              `source admitted ordinary shadow`,
+            ).toBe(true),
+          )
+          oracleAssertion(`source admitted user shadow value`, () =>
+            expect(
+              fields.hasOwnProperty,
+              `source admitted user shadow value`,
+            ).toBe(history.shape === `shadow-value` ? 0 : shadow),
+          )
         }
         retained.push({ row, version, omitted })
       }
       admit(0, false)
-      reach.reach(`callable-admission`)
+      entered.add(`callable-admission`)
       const root = query()[0]!
       let observed: CallableObservation = {
         callable: undefined,
@@ -1209,7 +1508,7 @@ async function runCallableHistory(history: CallableHistory) {
       createRoot((dispose) => {
         resources.defer(dispose)
         createRenderEffect(() => {
-          const current = container(query()[0]!)
+          const current = container(requiredFirstRow(query()))
           observed = { callable: current.format, value: current.format?.() }
           reads++
         })
@@ -1219,14 +1518,20 @@ async function runCallableHistory(history: CallableHistory) {
         })
       })
       compareCallable(observed, expectedCallable(history, 0, signal(), choices))
-      reach.reach(`tracked-initial`)
+      entered.add(`tracked-initial`)
       const compareCurrentCallable = (version: number, omitted = false) => {
         compareCallable(
           observed,
           expectedCallable(history, version, signal(), choices, omitted),
         )
-        expect(query()[0]!, `ordinary root stays stable`).toBe(root)
-        expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(1)
+        oracleAssertion(`ordinary root stays stable`, () =>
+          expect(query()[0], `ordinary root stays stable`).toBe(root),
+        )
+        oracleAssertion(`unchanged scalar neighbor stays quiet`, () =>
+          expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(
+            1,
+          ),
+        )
         for (const saved of retained) {
           const fields = container(saved.row)
           compareCallable(
@@ -1239,30 +1544,38 @@ async function runCallableHistory(history: CallableHistory) {
               saved.omitted,
             ),
           )
-          expect(saved.row.version, `retained source version`).toBe(
-            saved.version,
+          oracleAssertion(`retained source version`, () =>
+            expect(saved.row.version, `retained source version`).toBe(
+              saved.version,
+            ),
           )
-          expect(
-            Object.hasOwn(fields, `format`),
-            `retained source ownness`,
-          ).toBe(!saved.omitted)
+          oracleAssertion(`retained source ownness`, () =>
+            expect(
+              Object.hasOwn(fields, `format`),
+              `retained source ownness`,
+            ).toBe(!saved.omitted),
+          )
         }
         if (history.shape.startsWith(`shadow`))
           for (const fields of [
-            container(query()[0]!),
+            container(requiredFirstRow(query())),
             ...retained.map((saved) => container(saved.row)),
           ]) {
-            expect(
-              Object.hasOwn(fields, `hasOwnProperty`),
-              `current and retained user shadow ownness`,
-            ).toBe(true)
-            expect(
-              fields.hasOwnProperty,
-              `current and retained user shadow value`,
-            ).toBe(history.shape === `shadow-value` ? 0 : shadow)
+            oracleAssertion(`current and retained user shadow ownness`, () =>
+              expect(
+                Object.hasOwn(fields, `hasOwnProperty`),
+                `current and retained user shadow ownness`,
+              ).toBe(true),
+            )
+            oracleAssertion(`current and retained user shadow value`, () =>
+              expect(
+                fields.hasOwnProperty,
+                `current and retained user shadow value`,
+              ).toBe(history.shape === `shadow-value` ? 0 : shadow),
+            )
           }
-        reach.reach(`retained-source`)
-        reach.reach(`quiet-neighbor`)
+        entered.add(`retained-source`)
+        entered.add(`quiet-neighbor`)
       }
       compareCurrentCallable(0)
       const signalOnly = async (selected: number, version: number) => {
@@ -1271,16 +1584,22 @@ async function runCallableHistory(history: CallableHistory) {
         setSignal(selected)
         await new Promise<void>((resolve) => queueMicrotask(resolve))
         compareCurrentCallable(version)
-        expect(
-          subscriptions.mock.calls.length,
-          `callable reads cannot rebind the hook`,
-        ).toBe(starts)
-        if (history.property === `data`)
+        oracleAssertion(`callable reads cannot rebind the hook`, () =>
           expect(
-            reads,
+            subscriptions.mock.calls.length,
+            `callable reads cannot rebind the hook`,
+          ).toBe(starts),
+        )
+        if (history.property === `data`)
+          oracleAssertion(
             `a data callable does not depend on the getter signal`,
-          ).toBe(before)
-        reach.reach(`signal-only-read`)
+            () =>
+              expect(
+                reads,
+                `a data callable does not depend on the getter signal`,
+              ).toBe(before),
+          )
+        entered.add(`signal-only-read`)
       }
       const write = async (version: number, omitted = false) => {
         source.utils.begin()
@@ -1289,29 +1608,54 @@ async function runCallableHistory(history: CallableHistory) {
           value: sourceRow(version, omitted),
         })
         source.utils.commit()
-        await waitFor(() => expect(query()[0]!.version).toBe(version))
+        await waitFor(() =>
+          oracleAssertion(`expect(query()[0]!.version).toBe(version)`, () =>
+            expect(query()[0]!.version).toBe(version),
+          ),
+        )
         admit(version, omitted)
         compareCurrentCallable(version, omitted)
       }
       await signalOnly(1, 0)
       await write(1)
-      reach.reach(`source-replacement`)
+      entered.add(`source-replacement`)
       await signalOnly(0, 1)
       await write(2, true)
-      reach.reach(`callable-omission`)
+      entered.add(`callable-omission`)
       await write(3)
-      reach.reach(`callable-readmission`)
+      entered.add(`callable-readmission`)
       await signalOnly(1, 3)
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
-it.each([...callableHistories()])(
-  `tracks callable $property through $input at $location with $shape`,
-  runCallableHistory,
-)
+oracleProperty({
+  id: `solid.callable-fields`,
+  law: {
+    statement: `Tracked callable data and getter fields retain current identity and receiver results while unchanged neighbors stay quiet and retained sources remain intact.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite callable grammar through three public inputs; no arbitrary function/getter bodies, mutable-source writes, cycles or browser rendering.`,
+  },
+  histories: [...callableHistories()],
+  driver: (history: Parameters<typeof runCallableHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.callable-fields`, history, observe, () =>
+      runCallableHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 declareOracle({
   model: [expectedCallable],
   grammar: [callableHistories],
@@ -1374,30 +1718,34 @@ function expectedReservedField(
       : { value }
 }
 function compareReservedField(observed: unknown, expected: unknown) {
-  if (expected === Object.prototype) expect(observed).toBe(expected)
+  if (expected === Object.prototype)
+    oracleAssertion(`expect(observed).toBe(expected)`, () =>
+      expect(observed).toBe(expected),
+    )
   else
-    expect(observed, `tracked own data follows its admitted stage`).toEqual(
-      expected,
+    oracleAssertion(`tracked own data follows its admitted stage`, () =>
+      expect(observed, `tracked own data follows its admitted stage`).toEqual(
+        expected,
+      ),
     )
 }
-async function runReservedFieldHistory(history: ReservedFieldHistory) {
-  oracleRoute(`case`)
-  const reach = createOracleReach(
-    `solid.own-field.${history.input}.${history.key}.${history.initial}.${history.payload}`,
-    [
-      `initial-source-shape`,
-      `tracked-initial`,
-      `first-replacement`,
-      `own-undefined`,
-      `omission`,
-      `readmission`,
-      `retained-source`,
-      `quiet-neighbor`,
-      `tracked-own-keys`,
-      `prototype-preserved`,
-    ],
-  )
-  reach.beginHistory()
+async function runReservedFieldHistory(
+  history: ReservedFieldHistory,
+  observe: Observer,
+) {
+  const requiredStates = [
+    `initial-source-shape`,
+    `tracked-initial`,
+    `first-replacement`,
+    `own-undefined`,
+    `omission`,
+    `readmission`,
+    `retained-source`,
+    `quiet-neighbor`,
+    `tracked-own-keys`,
+    `prototype-preserved`,
+  ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const sourceRow = (stage: number): ReservedFieldRow => ({
@@ -1438,15 +1786,21 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
             : useLiveQuery(build)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(1))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(1)`, () =>
+          expect(query()).toHaveLength(1),
+        ),
+      )
       const root = query()[0]!
       const retained: Array<{ row: ReservedFieldRow; stage: number }> = []
       const admit = (stage: number) => {
         const row = source.get(`a`)!
-        expect(
-          Object.hasOwn(row, history.key),
-          `Core admitted the authored ownness`,
-        ).toBe(stage !== 3 && (stage !== 0 || history.initial !== `absent`))
+        oracleAssertion(`Core admitted the authored ownness`, () =>
+          expect(
+            Object.hasOwn(row, history.key),
+            `Core admitted the authored ownness`,
+          ).toBe(stage !== 3 && (stage !== 0 || history.initial !== `absent`)),
+        )
         compareReservedField(
           row[history.key],
           expectedReservedField(
@@ -1459,7 +1813,7 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
         retained.push({ row, stage })
       }
       admit(0)
-      reach.reach(`initial-source-shape`)
+      entered.add(`initial-source-shape`)
       let observed: unknown
       let observedKeys: Array<string> = []
       let observedOwn = false
@@ -1470,8 +1824,8 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
           observed = query()[0]![history.key]
         })
         createRenderEffect(() => {
-          observedKeys = Object.keys(query()[0]!)
-          observedOwn = Object.hasOwn(query()[0]!, history.key)
+          observedKeys = Object.keys(requiredFirstRow(query()))
+          observedOwn = Object.hasOwn(requiredFirstRow(query()), history.key)
         })
         createRenderEffect(() => {
           void query()[0]!.unchanged
@@ -1482,12 +1836,16 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
         observed,
         expectedReservedField(0, history.initial, history.key, history.payload),
       )
-      reach.reach(`tracked-initial`)
+      entered.add(`tracked-initial`)
       for (const stage of [1, 2, 3, 4]) {
         source.utils.begin()
         source.utils.write({ type: `update`, value: sourceRow(stage) })
         source.utils.commit()
-        await waitFor(() => expect(query()[0]!.version).toBe(stage))
+        await waitFor(() =>
+          oracleAssertion(`expect(query()[0]!.version).toBe(stage)`, () =>
+            expect(query()[0]!.version).toBe(stage),
+          ),
+        )
         admit(stage)
         compareReservedField(
           query()[0]![history.key],
@@ -1507,27 +1865,48 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
             history.payload,
           ),
         )
-        expect(
-          Object.hasOwn(query()[0]!, history.key),
-          `current own user field`,
-        ).toBe(stage !== 3)
-        expect([...observedKeys].sort(), `tracked own keys`).toEqual(
-          Object.keys(source.get(`a`)!).sort(),
-        )
-        expect(observedOwn, `tracked ownness`).toBe(stage !== 3)
-        expect(Object.getPrototypeOf(query()[0]!)).toBe(Object.prototype)
-        expect(Object.hasOwn(Object.prototype, `value`)).toBe(false)
-        reach.reach(`tracked-own-keys`)
-        reach.reach(`prototype-preserved`)
-        expect(query()[0]!, `ordinary root identity`).toBe(root)
-        expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(1)
-        for (const saved of retained) {
+        oracleAssertion(`current own user field`, () =>
           expect(
-            Object.hasOwn(saved.row, history.key),
-            `retained source ownness`,
-          ).toBe(
-            saved.stage !== 3 &&
-              (saved.stage !== 0 || history.initial !== `absent`),
+            Object.hasOwn(requiredFirstRow(query()), history.key),
+            `current own user field`,
+          ).toBe(stage !== 3),
+        )
+        oracleAssertion(`tracked own keys`, () =>
+          expect([...observedKeys].sort(), `tracked own keys`).toEqual(
+            Object.keys(source.get(`a`)!).sort(),
+          ),
+        )
+        oracleAssertion(`tracked ownness`, () =>
+          expect(observedOwn, `tracked ownness`).toBe(stage !== 3),
+        )
+        oracleAssertion(
+          `expect(Object.getPrototypeOf(query()[0]!)).toBe(Object.prototype)`,
+          () =>
+            expect(Object.getPrototypeOf(query()[0])).toBe(Object.prototype),
+        )
+        oracleAssertion(
+          `expect(Object.hasOwn(Object.prototype, 'value')).toBe(false)`,
+          () => expect(Object.hasOwn(Object.prototype, `value`)).toBe(false),
+        )
+        entered.add(`tracked-own-keys`)
+        entered.add(`prototype-preserved`)
+        oracleAssertion(`ordinary root identity`, () =>
+          expect(query()[0], `ordinary root identity`).toBe(root),
+        )
+        oracleAssertion(`unchanged scalar neighbor stays quiet`, () =>
+          expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(
+            1,
+          ),
+        )
+        for (const saved of retained) {
+          oracleAssertion(`retained source ownness`, () =>
+            expect(
+              Object.hasOwn(saved.row, history.key),
+              `retained source ownness`,
+            ).toBe(
+              saved.stage !== 3 &&
+                (saved.stage !== 0 || history.initial !== `absent`),
+            ),
           )
           compareReservedField(
             saved.row[history.key],
@@ -1539,7 +1918,7 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
             ),
           )
         }
-        reach.reach(
+        entered.add(
           stage === 1
             ? `first-replacement`
             : stage === 2
@@ -1548,19 +1927,40 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
                 ? `omission`
                 : `readmission`,
         )
-        reach.reach(`retained-source`)
-        reach.reach(`quiet-neighbor`)
+        entered.add(`retained-source`)
+        entered.add(`quiet-neighbor`)
       }
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
-it.each([...reservedFieldHistories()])(
-  `tracks own $key data through $input initially=$initial payload=$payload`,
-  runReservedFieldHistory,
-)
+oracleProperty({
+  id: `solid.reserved-fields`,
+  law: {
+    statement: `Own user fields including __proto__ follow their admitted stage in Solid listeners while preserving own keys, prototypes, retained sources and quiet neighbors.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite ordinary/reserved-name, initial-ownness and scalar/signed-zero/object/array grammar through three public inputs.`,
+  },
+  histories: [...reservedFieldHistories()],
+  driver: (history: Parameters<typeof runReservedFieldHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.reserved-fields`, history, observe, () =>
+      runReservedFieldHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 declareOracle({
   model: [expectedReservedField],
   grammar: [reservedFieldHistories],
@@ -1605,24 +2005,24 @@ function expectedMethods(version: number): MethodObservation {
   return { mapped: [version * 2, (version + 1) * 2], total: version * 2 + 1 }
 }
 function compareMethods(actual: MethodObservation, version: number) {
-  expect(
-    actual,
+  oracleAssertion(
     `tracked array and subclass methods preserve their scalar result`,
-  ).toEqual(expectedMethods(version))
-}
-async function runMethodHistory(history: MethodHistory) {
-  oracleRoute(`case`)
-  const reach = createOracleReach(
-    `solid.methods.${history.input}.${history.subclass}.${history.shape}`,
-    [
-      `array-admission`,
-      `tracked-methods`,
-      `array-replacement`,
-      `retained-source`,
-      `quiet-neighbor`,
-    ],
+    () =>
+      expect(
+        actual,
+        `tracked array and subclass methods preserve their scalar result`,
+      ).toEqual(expectedMethods(version)),
   )
-  reach.beginHistory()
+}
+async function runMethodHistory(history: MethodHistory, observe: Observer) {
+  const requiredStates = [
+    `array-admission`,
+    `tracked-methods`,
+    `array-replacement`,
+    `retained-source`,
+    `quiet-neighbor`,
+  ]
+  const entered = new Set<string>()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const shadow = () => false
@@ -1659,33 +2059,47 @@ async function runMethodHistory(history: MethodHistory) {
             : useLiveQuery(build)
       })
       resources.defer(() => query.collection.cleanup())
-      await waitFor(() => expect(query()).toHaveLength(1))
+      await waitFor(() =>
+        oracleAssertion(`expect(query()).toHaveLength(1)`, () =>
+          expect(query()).toHaveLength(1),
+        ),
+      )
       const retained: Array<{ row: MethodRow; version: number }> = []
       const checkFields = (values: Array<number>) => {
         if (history.shape !== `ordinary`) {
-          expect(
-            Object.hasOwn(values, `hasOwnProperty`),
-            `array keeps user shadow ownness`,
-          ).toBe(true)
-          expect(
-            Reflect.get(values, `hasOwnProperty`),
-            `array keeps user shadow value`,
-          ).toBe(history.shape === `shadow-value` ? 0 : shadow)
+          oracleAssertion(`array keeps user shadow ownness`, () =>
+            expect(
+              Object.hasOwn(values, `hasOwnProperty`),
+              `array keeps user shadow ownness`,
+            ).toBe(true),
+          )
+          oracleAssertion(`array keeps user shadow value`, () =>
+            expect(
+              Reflect.get(values, `hasOwnProperty`),
+              `array keeps user shadow value`,
+            ).toBe(history.shape === `shadow-value` ? 0 : shadow),
+          )
         }
       }
       const sourceAdmission = (version: number) => {
         const row = source.get(`a`)!
-        expect(Array.isArray(row.values), `source admitted an array`).toBe(true)
+        oracleAssertion(`source admitted an array`, () =>
+          expect(Array.isArray(row.values), `source admitted an array`).toBe(
+            true,
+          ),
+        )
         if (history.subclass)
-          expect(
-            typeof Reflect.get(row.values, `total`),
-            `source admitted subclass method`,
-          ).toBe(`function`)
+          oracleAssertion(`source admitted subclass method`, () =>
+            expect(
+              typeof Reflect.get(row.values, `total`),
+              `source admitted subclass method`,
+            ).toBe(`function`),
+          )
         checkFields(row.values)
         retained.push({ row, version })
       }
       sourceAdmission(0)
-      reach.reach(`array-admission`)
+      entered.add(`array-admission`)
       let observed: MethodObservation = { mapped: [], total: 0 }
       let unchangedReads = 0
       const readMethods = (values: Array<number>): MethodObservation => {
@@ -1712,34 +2126,63 @@ async function runMethodHistory(history: MethodHistory) {
         })
       })
       compareMethods(observed, 0)
-      reach.reach(`tracked-methods`)
+      entered.add(`tracked-methods`)
       for (const version of [1, 2]) {
         source.utils.begin()
         source.utils.write({ type: `update`, value: sourceRow(version) })
         source.utils.commit()
-        await waitFor(() => expect(query()[0]!.version).toBe(version))
+        await waitFor(() =>
+          oracleAssertion(`expect(query()[0]!.version).toBe(version)`, () =>
+            expect(query()[0]!.version).toBe(version),
+          ),
+        )
         sourceAdmission(version)
         compareMethods(observed, version)
         checkFields(query()[0]!.values)
-        expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(1)
+        oracleAssertion(`unchanged scalar neighbor stays quiet`, () =>
+          expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(
+            1,
+          ),
+        )
         for (const saved of retained) {
           compareMethods(readMethods(saved.row.values), saved.version)
           checkFields(saved.row.values)
         }
-        reach.reach(`array-replacement`)
-        reach.reach(`retained-source`)
-        reach.reach(`quiet-neighbor`)
+        entered.add(`array-replacement`)
+        entered.add(`retained-source`)
+        entered.add(`quiet-neighbor`)
       }
     } finally {
       resources.defer(() => source.cleanup())
     }
   })
-  reach.assertReached()
+  oracleAssertion(`declared finite reach`, () =>
+    oracleAssertion(
+      `expect(requiredStates.filter((state) => !entered.has(state))).toEqual([])`,
+      () =>
+        expect(requiredStates.filter((state) => !entered.has(state))).toEqual(
+          [],
+        ),
+    ),
+  )
+  for (const state of entered) observe(`reach`, state)
 }
-it.each([...methodHistories()])(
-  `reads inherited methods through $input, subclass=$subclass with $shape`,
-  runMethodHistory,
-)
+oracleProperty({
+  id: `solid.array-methods`,
+  law: {
+    statement: `Admitted arrays retain inherited and subclass methods in Solid listeners even when user data shadows hasOwnProperty.`,
+    authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
+    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
+    limits: `The existing finite array/subclass and user-shadow grammar through three public inputs; no arbitrary class instances or prototype edits.`,
+  },
+  histories: [...methodHistories()],
+  driver: (history: Parameters<typeof runMethodHistory>[0], observe) =>
+    recordAssertionJudgment(`solid.array-methods`, history, observe, () =>
+      runMethodHistory(history, observe),
+    ),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+})
 declareOracle({
   owns: [
     `src/useLiveQuery.ts#useLiveQuery`,

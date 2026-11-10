@@ -1,211 +1,240 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
-import { hash } from '../src/hashing/hash'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-
 /**
- * Mixed-carrier graphs extend the established structural-hash graph law across
- * every recursive container (see hash-graph-oracle.property.test.ts and the structural
- * values row in docs/contributing/oracle-coverage.md).
- *
- * Law: a reachable structural cycle rejects each hash attempt; unfolding
- * sharing in an acyclic value graph preserves its hash. The model's abstract
- * graph stores only labels, targets, and carrier names. These are model-only
- * terms: an edge becomes an object field, array slot, Map key/value, Set
- * member, or symbol-keyed field in the production input. Reachability and
- * acyclicity are judged before constructing those values, so a carrier bug
- * cannot be copied into the cycle decision.
- *
- * The grammar has 1-6 nodes, 0-3 ordered outgoing edges per node, labels 0-2,
- * six carriers, and only in-range targets. The root is node 0; disconnected
- * nodes are allowed. Target choice controls self-cycles, longer cycles, and
- * sharing; removing it loses those laws. Carrier choice makes an edge traverse
- * each recursive container; removing one loses that boundary. Labels keep
- * equal and unequal payloads possible. Zero edges permits the isolated root;
- * two edges permit sharing; three edges and six nodes bound fan-out and path
- * length. One node is the lower size margin.
- * A negative or out-of-range target is outside this grammar. Named witnesses
- * reconstruct equal distinct nodes, sharing, a mixed back edge, and its
- * disconnected acyclic neighbor. This oracle does not claim collision freedom,
- * ordering invariance, opaque references, deep/work-limit behavior, or retry
- * atomicity. The public observation is the hash result or thrown error when
- * the real hash entry point returns, compared below with the graph model.
+ * Reachable mixed-carrier cycles reject on both serial hash attempts. An
+ * acyclic shared graph agrees with its independently unfolded tree. The
+ * established structural-value law covers six recursive carriers, one to six
+ * labeled nodes, and zero to three edges per node. Collision freedom, opaque
+ * references, work limits, and failed-traversal atomicity stay with other owners.
  */
+import { hash } from '../src/hashing/hash'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleReplayRequested } from '../../db/tests/oracle-config.js'
+import {
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-property.js'
+import {
+  carriers,
+  checkMixedGraph,
+  driveMixedGraph,
+  expectedMixedGraph,
+  graphArbitrary,
+  isAcyclic,
+  unfoldGraph,
+} from './hash-mixed-graph-shared-oracle'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from '../../db/tests/oracle-property.js'
+import type { Carrier, Edge, Graph } from './hash-mixed-graph-shared-oracle'
 
-type Carrier = `object` | `array` | `map-key` | `map-value` | `set` | `symbol`
-type Edge = Readonly<{ target: number; carrier: Carrier }>
-type Node = Readonly<{ label: number; edges: ReadonlyArray<Edge> }>
-type Graph = ReadonlyArray<Node>
-
-const carriers: Array<Carrier> = [
-  `object`,
-  `array`,
-  `map-key`,
-  `map-value`,
-  `set`,
-  `symbol`,
+const states = [
+  ...carriers.flatMap((carrier) => [
+    `cycle via ${carrier}`,
+    `shared target via ${carrier}`,
+    `equal distinct nodes via ${carrier}`,
+  ]),
+  `mixed back edge`,
+  `disconnected mixed neighbor`,
+  `mixed diamond`,
 ]
-const graphArbitrary = fc
-  .array(
-    fc.record({
-      label: fc.integer({ min: 0, max: 2 }),
-      edges: fc.array(
-        fc.record({
-          target: fc.nat({ max: 5 }),
-          carrier: fc.constantFrom(...carriers),
-        }),
-        { maxLength: 3 },
-      ),
-    }),
-    { minLength: 1, maxLength: 6 },
-  )
-  .map((nodes): Graph =>
-    nodes.map((node) =>
-      Object.freeze({
-        label: node.label,
-        edges: Object.freeze(
-          node.edges.map((edge) =>
-            Object.freeze({ ...edge, target: edge.target % nodes.length }),
-          ),
-        ),
-      }),
-    ),
-  )
 
-const mixedGraphPropertyId = `ivm.hash-mixed-graph`
-
-// Reachable indegrees are a topology authority, not the hasher's recursion
-// stack. Payloads and carrier allocation never enter this decision.
-function isAcyclic(graph: Graph): boolean {
+// These are model graph premises recorded only after the real hash calls.
+// Reachability names the executed root graph, not disconnected authored nodes.
+function mixedStates(graph: Graph): Array<string> {
+  const reached: Array<string> = []
   const reachable = new Set([0])
   for (const node of reachable)
     for (const edge of graph[node]!.edges) reachable.add(edge.target)
-  const incoming = new Map([...reachable].map((node) => [node, 0]))
-  for (const node of reachable)
-    for (const edge of graph[node]!.edges)
-      incoming.set(edge.target, incoming.get(edge.target)! + 1)
-  const ready = [...reachable].filter((node) => incoming.get(node) === 0)
-  for (const node of ready)
-    for (const edge of graph[node]!.edges) {
-      const remaining = incoming.get(edge.target)! - 1
-      incoming.set(edge.target, remaining)
-      if (remaining === 0) ready.push(edge.target)
+  const connects = (start: number, end: number): boolean => {
+    const seen = new Set([start])
+    for (const node of seen) {
+      if (node === end) return true
+      for (const edge of graph[node]!.edges) seen.add(edge.target)
     }
-  return ready.length === reachable.size
-}
-
-function carry(carrier: Carrier, target: unknown, symbol: symbol): unknown {
-  switch (carrier) {
-    case `object`:
-      return { target }
-    case `array`:
-      return [target]
-    case `map-key`:
-      return new Map([[target, 0]])
-    case `map-value`:
-      return new Map([[0, target]])
-    case `set`:
-      return new Set([target])
-    case `symbol`:
-      return { [symbol]: target }
+    return false
   }
-}
-
-// Model: the value that an acyclic graph denotes from node `id`. Sharing is
-// unfolded into distinct equal values, and each edge keeps its carrier.
-function unfoldGraph(graph: Graph, id: number, symbol: symbol): unknown {
-  return {
-    label: graph[id]!.label,
-    edges: graph[id]!.edges.map((edge) =>
-      carry(edge.carrier, unfoldGraph(graph, edge.target, symbol), symbol),
-    ),
-  }
-}
-
-function expectMixedGraph(
-  graph: Graph,
-  hashValue: (value: unknown) => number = hash,
-): void {
-  const symbol = Symbol(`edge`)
-  const nodes = graph.map((node) => ({
-    label: node.label,
-    edges: [] as Array<unknown>,
-  }))
-  graph.forEach((node, index) => {
-    // Each edge owns a one-entry carrier. Set/Map cannot deduplicate two
-    // semantic edges when sharing is unfolded into distinct equal objects.
-    nodes[index]!.edges = node.edges.map((edge) =>
-      carry(edge.carrier, nodes[edge.target], symbol),
+  const acyclic = isAcyclic(graph)
+  for (const carrier of carriers) {
+    if (
+      [...reachable].some((node) =>
+        graph[node]!.edges.some(
+          (edge) => edge.carrier === carrier && connects(edge.target, node),
+        ),
+      )
     )
-  })
-  if (!isAcyclic(graph)) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      expect(() => hashValue(nodes[0])).toThrow(
-        `Cannot hash cyclic structural values`,
-      )
-    }
-    return
+      reached.push(`cycle via ${carrier}`)
+    if (
+      acyclic &&
+      [...reachable].some((node) => {
+        const edges = graph[node]!.edges.filter(
+          (edge) => edge.carrier === carrier,
+        )
+        return edges.some((edge, index) =>
+          edges.slice(index + 1).some((other) => other.target === edge.target),
+        )
+      })
+    )
+      reached.push(`shared target via ${carrier}`)
+    if (
+      acyclic &&
+      [...reachable].some((node) => {
+        const edges = graph[node]!.edges.filter(
+          (edge) => edge.carrier === carrier,
+        )
+        return edges.some((edge, index) =>
+          edges
+            .slice(index + 1)
+            .some(
+              (other) =>
+                edge.target !== other.target &&
+                graph[edge.target]!.edges.length === 0 &&
+                graph[other.target]!.edges.length === 0 &&
+                graph[edge.target]!.label === graph[other.target]!.label,
+            ),
+        )
+      })
+    )
+      reached.push(`equal distinct nodes via ${carrier}`)
   }
-  expect(hashValue(nodes[0])).toBe(hashValue(unfoldGraph(graph, 0, symbol)))
+  const edge = (node: number, target: number, carrier: Carrier) =>
+    graph[node]?.edges.some(
+      (value) => value.target === target && value.carrier === carrier,
+    ) === true
+  if (edge(0, 1, `map-key`) && edge(1, 2, `set`) && edge(2, 0, `symbol`))
+    reached.push(`mixed back edge`)
+  if (graph[0]!.edges.length === 0 && edge(1, 2, `set`) && edge(2, 0, `symbol`))
+    reached.push(`disconnected mixed neighbor`)
+  if (
+    acyclic &&
+    edge(0, 1, `object`) &&
+    edge(0, 2, `array`) &&
+    edge(1, 3, `map-value`) &&
+    edge(2, 3, `set`)
+  )
+    reached.push(`mixed diamond`)
+  return reached
 }
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/hashing/hash.ts#hash`],
-  check: [expectMixedGraph],
-  model: [isAcyclic, unfoldGraph],
-})
-
-function mixedGraphProperty(
-  hashValue: (value: unknown) => number = hash,
-  recordCheck: () => void = () => {},
-) {
-  let firstFailureLaw: `reachable cycle` | `acyclic unfolding` | undefined
-  let firstFailureGraph: Graph | undefined
-  return fc.property(graphArbitrary, (graph) => {
-    recordCheck()
-    const law = isAcyclic(graph) ? `acyclic unfolding` : `reachable cycle`
-    try {
-      expectMixedGraph(graph, hashValue)
-    } catch (cause) {
-      if (firstFailureLaw === undefined) {
-        firstFailureLaw = law
-        firstFailureGraph = graph
-      }
-      // A shrink in the other topology class is not the original failure.
-      if (law !== firstFailureLaw) return
-      throw new Error(
-        `Mixed graph ${law} failed at the hash call; original graph ${JSON.stringify(firstFailureGraph)}; candidate graph ${JSON.stringify(graph)}`,
-        { cause },
-      )
-    }
-  })
+// Force only the required topology. Generated labels and disconnected suffix
+// nodes remain. Each result has fresh keys for per-invocation obligations.
+function prefix(
+  graph: Graph,
+  edges: Array<Array<Edge>>,
+  equalLeaves = false,
+): Graph {
+  const result = Array.from(
+    { length: Math.max(graph.length, edges.length) },
+    (_, node) => ({
+      label: graph[node]?.label ?? graph[0]!.label,
+      edges: [...(edges[node] ?? graph[node]!.edges)],
+    }),
+  )
+  if (equalLeaves) result[2]!.label = result[1]!.label
+  return result.map((node) =>
+    Object.freeze({ ...node, edges: Object.freeze(node.edges) }),
+  )
 }
 
-describe(`mixed-carrier structural graph laws`, () => {
-  it.each(carriers)(`rejects a reachable cycle through %s`, (carrier) => {
-    oracleRoute(`calibration`)
-    const graph: Graph = [{ label: 0, edges: [{ target: 0, carrier }] }]
-    expect(isAcyclic(graph)).toBe(false)
-    expectMixedGraph(graph)
-    expect(() => expectMixedGraph(graph, () => 0)).toThrow()
-  })
+const constructionStates = new WeakMap<Graph, ReadonlyArray<string>>()
+function enforceConstructed(
+  builders: Array<ConstructedHistory<Graph>>,
+): Array<ConstructedHistory<Graph>> {
+  return builders.map((builder) => ({
+    ...builder,
+    build: (generated) => {
+      const graph = builder.build(generated)
+      constructionStates.set(graph, builder.enters)
+      return graph
+    },
+  }))
+}
 
-  it.each(carriers)(
-    `preserves distinct equal nodes and sharing through %s`,
-    (carrier) => {
-      oracleRoute(`case`)
-      const distinct: Graph = [
+const constructed: Array<ConstructedHistory<Graph>> = [
+  ...carriers.flatMap((carrier): Array<ConstructedHistory<Graph>> => [
+    {
+      name: `cycle through ${carrier}`,
+      enters: [`cycle via ${carrier}`],
+      build: (graph) => prefix(graph, [[{ target: 0, carrier }]]),
+    },
+    {
+      name: `sharing through ${carrier}`,
+      enters: [`shared target via ${carrier}`],
+      build: (graph) =>
+        prefix(graph, [
+          [
+            { target: 1, carrier },
+            { target: 1, carrier },
+          ],
+          [],
+        ]),
+    },
+    {
+      name: `equal distinct leaves through ${carrier}`,
+      enters: [`equal distinct nodes via ${carrier}`],
+      build: (graph) =>
+        prefix(
+          graph,
+          [
+            [
+              { target: 1, carrier },
+              { target: 2, carrier },
+            ],
+            [],
+            [],
+          ],
+          true,
+        ),
+    },
+  ]),
+  {
+    name: `mixed back edge`,
+    enters: [`mixed back edge`],
+    build: (graph) =>
+      prefix(graph, [
+        [{ target: 1, carrier: `map-key` }],
+        [{ target: 2, carrier: `set` }],
+        [{ target: 0, carrier: `symbol` }],
+      ]),
+  },
+  {
+    name: `disconnected mixed neighbor`,
+    enters: [`disconnected mixed neighbor`],
+    build: (graph) =>
+      prefix(graph, [
+        [],
+        [{ target: 2, carrier: `set` }],
+        [{ target: 0, carrier: `symbol` }],
+      ]),
+  },
+  {
+    name: `mixed diamond`,
+    enters: [`mixed diamond`],
+    build: (graph) =>
+      prefix(graph, [
+        [
+          { target: 1, carrier: `object` },
+          { target: 2, carrier: `array` },
+        ],
+        [{ target: 3, carrier: `map-value` }],
+        [{ target: 3, carrier: `set` }],
+        [],
+      ]),
+  },
+]
+
+// Fixed witnesses reconstruct every former named production case. Generated
+// constructions above carry required reach; these literal histories do not.
+const fixed = [
+  ...carriers.flatMap((carrier) => [
+    {
+      name: `cycle through ${carrier}`,
+      history: [{ label: 0, edges: [{ target: 0, carrier }] }],
+    },
+    {
+      name: `distinct equal leaves through ${carrier}`,
+      history: [
         {
           label: 0,
           edges: [
@@ -215,147 +244,163 @@ describe(`mixed-carrier structural graph laws`, () => {
         },
         { label: 1, edges: [] },
         { label: 1, edges: [] },
-      ]
-      expect(distinct[1]).not.toBe(distinct[2])
-      expect(distinct[1]).toEqual(distinct[2])
-      expectMixedGraph(distinct)
-      expectMixedGraph([
+      ],
+    },
+    {
+      name: `shared leaf through ${carrier}`,
+      history: [
         {
-          ...distinct[0]!,
+          label: 0,
           edges: [
             { target: 1, carrier },
             { target: 1, carrier },
           ],
         },
-        ...distinct.slice(1),
-      ])
+        { label: 1, edges: [] },
+        { label: 1, edges: [] },
+      ],
     },
-  )
-
-  it(`distinguishes a mixed-container back edge from its disconnected near-neighbor`, () => {
-    oracleRoute(`case`)
-    const cycle: Graph = [
-      { label: 0, edges: [{ carrier: `map-key`, target: 1 }] },
-      { label: 0, edges: [{ carrier: `set`, target: 2 }] },
-      { label: 0, edges: [{ carrier: `symbol`, target: 0 }] },
-    ]
-    const disconnected: Graph = [{ label: 0, edges: [] }, ...cycle.slice(1)]
-    expect(isAcyclic(cycle)).toBe(false)
-    expect(isAcyclic(disconnected)).toBe(true)
-    expectMixedGraph(cycle)
-    expectMixedGraph(disconnected)
-    expect(() => expectMixedGraph(cycle, () => 0)).toThrow()
-    expectMixedGraph(disconnected, () => 0)
-  })
-
-  it(`preserves a shared mixed-carrier DAG when unfolded`, () => {
-    oracleRoute(`case`)
-    const diamond: Graph = [
+  ]),
+  {
+    name: `mixed back edge`,
+    history: [
+      { label: 0, edges: [{ carrier: `map-key` as const, target: 1 }] },
+      { label: 0, edges: [{ carrier: `set` as const, target: 2 }] },
+      { label: 0, edges: [{ carrier: `symbol` as const, target: 0 }] },
+    ],
+  },
+  {
+    name: `disconnected mixed neighbor`,
+    history: [
+      { label: 0, edges: [] },
+      { label: 0, edges: [{ carrier: `set` as const, target: 2 }] },
+      { label: 0, edges: [{ carrier: `symbol` as const, target: 0 }] },
+    ],
+  },
+  {
+    name: `mixed diamond`,
+    history: [
       {
         label: 0,
         edges: [
-          { carrier: `object`, target: 1 },
-          { carrier: `array`, target: 2 },
+          { carrier: `object` as const, target: 1 },
+          { carrier: `array` as const, target: 2 },
         ],
       },
-      { label: 1, edges: [{ carrier: `map-value`, target: 3 }] },
-      { label: 2, edges: [{ carrier: `set`, target: 3 }] },
+      { label: 1, edges: [{ carrier: `map-value` as const, target: 3 }] },
+      { label: 2, edges: [{ carrier: `set` as const, target: 3 }] },
       { label: 2, edges: [] },
-    ]
-    expect(isAcyclic(diamond)).toBe(true)
-    expectMixedGraph(diamond)
-    const rejectsAll = (): number => {
-      throw new TypeError(`Cannot hash cyclic structural values`)
-    }
-    expect(() => expectMixedGraph(diamond, rejectsAll)).toThrow()
-  })
+    ],
+  },
+]
 
-  // A calibration replay of this property runs its wrong-result control.
-  function expectMixedGraphCampaign(
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ): void {
-    let checked = 0
+function expectedCampaign(graph: Graph) {
+  return {
+    graph: expectedMixedGraph(graph),
+    requiredStates: constructionStates.get(graph) ?? [],
+  }
+}
+function checkCampaign(
+  graph: Graph,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedCampaign>,
+): Verdict {
+  const semantic = checkMixedGraph(graph, trace, expected.graph)
+  if (semantic.kind !== `pass`) return semantic
+  for (const state of expected.requiredStates)
+    if (
+      !trace.some(
+        (entry) => entry.checkpoint === `reach` && entry.value === state,
+      )
+    )
+      return violation(
+        `constructed states`,
+        `constructed history missed ${state}`,
+        `constructed reach`,
+      )
+  return pass
+}
+
+declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
+  model: [isAcyclic, unfoldGraph, expectedCampaign],
+  check: [checkMixedGraph, checkCampaign],
+  grammar: [graphArbitrary],
+})
+
+oracleProperty({
+  id: `ivm.hash-mixed-graph`,
+  law: {
+    statement: `A reachable structural cycle rejects each hash attempt; unfolding sharing in an acyclic value graph preserves its hash across object, array, Map-key, Map-value, Set, and symbol-keyed carriers.`,
+    authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives; hash-graph oracle.`,
+    limits: `One to six nodes, zero to three ordered edges per node, labels 0..2, six recursive carriers, and in-range targets. No collision freedom, ordering invariance, opaque references, work/depth limits, or retry atomicity.`,
+    owner: `Structural values and ordered primitives`,
+  },
+  histories: {
+    arbitrary: graphArbitrary,
+    runs: 150,
+    fixedSeeds: [205203],
+    states,
+    constructed: enforceConstructed(constructed),
+    fixed,
+  },
+  model: expectedCampaign,
+  driver: (graph, observe) => {
     const hashValue =
       oracleReplayRequested() &&
       process.env.TANSTACK_DB_ORACLE_CALIBRATION === `accept-cycles`
         ? () => 0
         : hash
-    const property = mixedGraphProperty(hashValue, () => checked++)
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(property, parameters)
-    // A green normal campaign must reach the graph check for every run.
-    if (parameters.path === undefined) expect(checked).toBe(parameters.numRuns)
-    else expect(checked).toBeGreaterThan(0)
-  }
-
-  oracleReplayTest(it)(
-    `matches independent labels and mixed-carrier topology (fixed seed 205203)`,
-    () => {
-      expectMixedGraphCampaign(
-        oracleFixedSeed(205203, { numRuns: oracleRuns(150) }),
-      )
+    driveMixedGraph(graph, observe, hashValue)
+    for (const state of mixedStates(graph)) observe(`reach`, state)
+  },
+  check: checkCampaign,
+  calibrations: [
+    {
+      name: `accepts a reachable cycle`,
+      law: `reachable cycle`,
+      corrupt: (trace, graph) =>
+        isAcyclic(graph)
+          ? undefined
+          : trace.map((entry) =>
+              entry.checkpoint === `cycle rejection attempt 1`
+                ? { ...entry, value: false }
+                : entry,
+            ),
     },
-  )
-  oracleReplayTest(it, mixedGraphPropertyId)(
-    `matches independent labels and mixed-carrier topology (random)`,
-    () => {
-      expectMixedGraphCampaign(oraclePropertyOptions(150, mixedGraphPropertyId))
+    {
+      name: `omits the second rejection`,
+      law: `reachable cycle`,
+      corrupt: (trace, graph) =>
+        isAcyclic(graph)
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `cycle rejection attempt 2`,
+            ),
     },
-  )
-
-  it(`replays a generated cycle-acceptance mismatch at the same law`, () => {
-    oracleRoute(`calibration`)
-    const acceptsCycles = (): number => 0
-    const failed = fc.check(mixedGraphProperty(acceptsCycles), {
-      seed: 205203,
-      numRuns: 150,
-    })
-    expect(failed.failed).toBe(true)
-    expect(failed.counterexamplePath).not.toBeNull()
-    expect(String(failed.errorInstance)).toContain(`reachable cycle`)
-    if (failed.counterexamplePath === null)
-      throw new Error(`Missing mixed graph replay path`)
-    const replay = fc.check(mixedGraphProperty(acceptsCycles), {
-      seed: failed.seed,
-      path: failed.counterexamplePath,
-      numRuns: 150,
-      endOnFailure: true,
-    })
-    expect(replay.failed).toBe(true)
-    expect(replay.counterexample).toEqual(failed.counterexample)
-    expect(String(replay.errorInstance)).toContain(`reachable cycle`)
-  })
-
-  it(`rejects unequal DAG and unfolding output and preserves the witness on replay`, () => {
-    oracleRoute(`calibration`)
-    const property = fc.property(fc.integer({ min: 0, max: 2 }), (label) => {
-      const graph: Graph = [
-        {
-          label,
-          edges: [
-            { target: 1, carrier: `map-value` },
-            { target: 1, carrier: `map-value` },
-          ],
-        },
-        { label, edges: [] },
-      ]
-      expectMixedGraph(graph)
-      let calls = 0
-      expectMixedGraph(graph, () => ++calls)
-    })
-    const failed = fc.check(property, { seed: 205203, numRuns: 1 })
-    expect(failed.failed).toBe(true)
-    expect(failed.numShrinks).toBeGreaterThan(0)
-    expect(failed.counterexamplePath).toBe(`0:0`)
-    expect(failed.errorInstance).toMatchObject({ name: `AssertionError` })
-    if (failed.counterexamplePath === null)
-      throw new Error(`Missing graph replay path`)
-    const replay = fc.check(property, {
-      seed: failed.seed,
-      path: failed.counterexamplePath,
-      endOnFailure: true,
-    })
-    expect(replay.counterexample).toEqual(failed.counterexample)
-    expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
-  })
+    {
+      name: `shared graph and unfolding disagree`,
+      law: `acyclic unfolding`,
+      corrupt: (trace, graph) =>
+        !isAcyclic(graph)
+          ? undefined
+          : trace.map((entry) =>
+              entry.checkpoint === `acyclic graph and unfolded tree`
+                ? { ...entry, value: false }
+                : entry,
+            ),
+    },
+    {
+      name: `omits a constructed state`,
+      law: `constructed reach`,
+      corrupt: (trace, graph) => {
+        const state = constructionStates.get(graph)?.[0]
+        return state === undefined
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `reach` || entry.value !== state,
+            )
+      },
+    },
+  ],
 })

@@ -1,15 +1,19 @@
 import { createCollection } from '@tanstack/db'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, expect, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import type {
   PersistedCollectionCoordinator,
   PersistenceAdapter,
 } from '../src/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
-
 /**
  * # Which problems does the persisted wrapper report, and to which sync run?
  *
@@ -109,7 +113,6 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * demand to another tab, and the coordinator's own retry of a queued ensure
  * (which only warns), are outside this owner.
  */
-
 type Site =
   | `release`
   | `unload-throw`
@@ -127,23 +130,21 @@ type History = {
   readiness: Readiness
   recovery: `none` | `repeat` | `other`
 }
-
-type Row = { id: string; value: string }
-
+type Row = {
+  id: string
+  value: string
+}
 const REMOTE_FAILURE = `remote request failed`
 const ADAPTER_BREACH = `unloadSubset broke its contract`
-
 type Observation = {
   status: string
   error: string | null
   failureReason: string | null
   uncaught: Array<string>
 }
-
 // ---------------------------------------------------------------------------
 // Independent model
 // ---------------------------------------------------------------------------
-
 // Every site but the adapter's own `unloadSubset` is a remote request.
 const REMOTE_SITES: ReadonlySet<Site> = new Set<Site>([
   `release`,
@@ -153,17 +154,17 @@ const REMOTE_SITES: ReadonlySet<Site> = new Set<Site>([
   `rotated-owner-load`,
   `cleanup-release`,
 ])
-
 // The sites whose request the next scoped recovery repeats.
 const REPEATED_SITES: ReadonlySet<Site> = new Set<Site>([
   `refresh-ensure`,
   `rotated-ensure`,
   `rotated-owner-load`,
 ])
-
 function expected(history: History): {
   afterFailure: Observation
-  atEnd: Observation & { reload: `none` | `resolved` }
+  atEnd: Observation & {
+    reload: `none` | `resolved`
+  }
 } {
   const { site, timing, readiness } = history
   // Only the run that made the request may hear about it, and only once it is
@@ -195,11 +196,9 @@ function expected(history: History): {
     },
   }
 }
-
 // ---------------------------------------------------------------------------
 // History grammar
 // ---------------------------------------------------------------------------
-
 const SITES: ReadonlyArray<Site> = [
   `release`,
   `unload-throw`,
@@ -233,7 +232,6 @@ for (const site of SITES) {
     }
   }
 }
-
 const reachStates = SITES.flatMap((site) =>
   [`current`, `retired`].map((timing) => `${site} failed, ${timing} run`),
 )
@@ -252,11 +250,9 @@ const reachStates = SITES.flatMap((site) =>
       )
       .map((site) => `${site} failed, then another request succeeded`),
   )
-
 // ---------------------------------------------------------------------------
 // Production driver
 // ---------------------------------------------------------------------------
-
 function deferred<T = void>() {
   let resolve!: (value: T) => void
   let reject!: (reason: unknown) => void
@@ -266,12 +262,10 @@ function deferred<T = void>() {
   })
   return { promise, resolve, reject }
 }
-
 // Lets every queued microtask and timer task run.
 async function settle(): Promise<void> {
   for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
 }
-
 // An in-memory persistence adapter with no rows. With `claims`, it manages a
 // cache generation that a scoped recovery rotates.
 function controlledAdapter(claims: boolean): PersistenceAdapter {
@@ -279,7 +273,7 @@ function controlledAdapter(claims: boolean): PersistenceAdapter {
   const claim = () => ({
     storageCollectionId: `storage-${storage}`,
     claimId: `claim`,
-    expiresAtMs: Date.now() + 60_000,
+    expiresAtMs: Date.now() + 60000,
   })
   return {
     loadSubset: async () => [],
@@ -300,7 +294,7 @@ function controlledAdapter(claims: boolean): PersistenceAdapter {
     ...(claims
       ? {
           claimCacheGeneration: async () => claim(),
-          renewCacheGenerationClaim: async () => Date.now() + 60_000,
+          renewCacheGenerationClaim: async () => Date.now() + 60000,
           rotateCacheGeneration: async () => {
             storage++
             return claim()
@@ -310,7 +304,6 @@ function controlledAdapter(claims: boolean): PersistenceAdapter {
       : {}),
   } as PersistenceAdapter
 }
-
 // A coordinator that elects this tab and routes demand through itself. The
 // history's target requests are held; every other request succeeds.
 function routedCoordinator(
@@ -352,7 +345,6 @@ function routedCoordinator(
   }
   return { coordinator, held }
 }
-
 function createSource(history: History, id: string) {
   const { site } = history
   const single =
@@ -432,7 +424,6 @@ function createSource(history: History, id: string) {
           : routed.held,
   }
 }
-
 // Core reports an uncaught error by throwing it from a microtask. This
 // records each such error, and each unhandled rejection, instead of letting
 // it escape.
@@ -461,7 +452,6 @@ function captureUncaught() {
     },
   }
 }
-
 function observe(
   collection: ReturnType<typeof createSource>[`collection`],
   uncaught: ReadonlyArray<string>,
@@ -473,131 +463,147 @@ function observe(
     uncaught: [...uncaught].sort(),
   }
 }
-
-describe(`persisted sync problem oracle`, () => {
-  const reach = createOracleReach(`persisted-sync-problem.history`, reachStates)
-  let historiesRan = 0
-  afterAll(() => {
-    if (historiesRan === histories.length) reach.assertReached()
-  })
-
-  it.each(
-    histories.map(
-      (history) =>
-        [
-          `${history.site}, ${history.readiness}, ${history.timing}${history.recovery === `none` ? `` : `, ${history.recovery} succeeds`}`,
-          history,
-        ] as const,
-    ),
-  )(`%s`, async (name, history) => {
-    oracleRoute(`case`)
-    const source = createSource(history, `sync-problem ${name}`)
-    const { collection, runs } = source
-    const capture = captureUncaught()
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const site = history.site
-    reach.beginHistory()
-    try {
-      void collection.preload().catch(() => undefined)
-      await settle()
-      // A rotation reacquires a retained demand only while its load is the
-      // same request; a subscriber replays its demand after the recovery's
-      // truncate, as a new request, which the wrapper refreshes instead. So
-      // the rotation sites hold one load at the sync layer, as a demand that
-      // outlives the truncate.
-      const subscription = site.startsWith(`rotated`)
-        ? undefined
-        : collection.subscribeChanges(() => {}, { includeInitialState: true })
-      if (!subscription)
-        void Promise.resolve(collection._sync.loadSubset({ limit: 1 })).catch(
-          () => undefined,
-        )
-      await settle()
-
-      // Start the history's request.
-      if (site === `release` || site.startsWith(`unload`)) {
-        subscription!.unsubscribe()
-      } else if (site !== `cleanup-release`) {
-        await runs[0]!.metadata!.persistence!.startScopedRecovery!().catch(
-          () => undefined,
-        )
-      }
-      await settle()
-
-      // Retire the run that made it.
-      let reload: Promise<void> | undefined
-      let reloadOutcome = `none`
-      if (history.timing !== `current`) {
-        reload = collection.reload()
-        reload.then(
-          () => (reloadOutcome = `resolved`),
-          () => (reloadOutcome = `rejected`),
-        )
-        await settle()
-        if (history.timing === `retired-after-new-ready`) {
-          runs.at(-1)!.markReady()
-          await settle()
-        }
-      }
-
-      // The requests fail, all with one error value: one failure.
-      const held = source.held()
-      if (site !== `unload-throw`) {
-        expect(held.length, `${name}: the request was made`).toBeGreaterThan(0)
-        const failure = new Error(
-          site.startsWith(`unload`) ? ADAPTER_BREACH : REMOTE_FAILURE,
-        )
-        for (const request of held) request.reject(failure)
-        Object.assign(held, { closed: true })
-      }
-      reach.reach(
-        `${site} failed, ${history.timing === `current` ? `current` : `retired`} run`,
+const reachedStates = new Set<(typeof reachStates)[number]>()
+const reach = {
+  reach: (state: (typeof reachStates)[number]) => reachedStates.add(state),
+  assertReached: () => {
+    for (const state of reachStates)
+      if (!reachedStates.has(state))
+        throw new Error(`persisted-sync-problem.history missed ${state}`)
+  },
+}
+let historiesRan = 0
+afterAll(() => {
+  if (historiesRan === histories.length) reach.assertReached()
+})
+async function judgeHistory(history: (typeof histories)[number]) {
+  const name = `${history.site}, ${history.readiness}, ${history.timing}${history.recovery === `none` ? `` : `, ${history.recovery} succeeds`}`
+  const source = createSource(history, `sync-problem ${name}`)
+  const { collection, runs } = source
+  const capture = captureUncaught()
+  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const site = history.site
+  try {
+    void collection.preload().catch(() => undefined)
+    await settle()
+    // A rotation reacquires a retained demand only while its load is the
+    // same request; a subscriber replays its demand after the recovery's
+    // truncate, as a new request, which the wrapper refreshes instead. So
+    // the rotation sites hold one load at the sync layer, as a demand that
+    // outlives the truncate.
+    const subscription = site.startsWith(`rotated`)
+      ? undefined
+      : collection.subscribeChanges(() => {}, { includeInitialState: true })
+    if (!subscription)
+      void Promise.resolve(collection._sync.loadSubset({ limit: 1 })).catch(
+        () => undefined,
+      )
+    await settle()
+    // Start the history's request.
+    if (site === `release` || site.startsWith(`unload`)) {
+      subscription!.unsubscribe()
+    } else if (site !== `cleanup-release`) {
+      await runs[0]!.metadata!.persistence!.startScopedRecovery!().catch(
+        () => undefined,
+      )
+    }
+    await settle()
+    // Retire the run that made it.
+    let reload: Promise<void> | undefined
+    let reloadOutcome = `none`
+    if (history.timing !== `current`) {
+      reload = collection.reload()
+      reload.then(
+        () => (reloadOutcome = `resolved`),
+        () => (reloadOutcome = `rejected`),
       )
       await settle()
-      const model = expected(history)
-      expect(
-        observe(collection, capture.uncaught),
-        `${name}: after the failure`,
-      ).toEqual(model.afterFailure)
-
-      // A later remote request succeeds: the next scoped recovery's repeat,
-      // or another subset's acquisition.
-      if (history.recovery === `repeat`) {
-        await runs[0]!.metadata!.persistence!.startScopedRecovery!().catch(
-          () => undefined,
-        )
-        await settle()
-        reach.reach(`${site} failed, then its repeat succeeded`)
-      } else if (history.recovery === `other`) {
-        void Promise.resolve(collection._sync.loadSubset({ limit: 2 })).catch(
-          () => undefined,
-        )
-        await settle()
-        reach.reach(`${site} failed, then another request succeeded`)
-      }
-
-      // The new run becomes ready; the reload ends.
-      if (history.timing === `retired-before-new-ready`) {
+      if (history.timing === `retired-after-new-ready`) {
         runs.at(-1)!.markReady()
         await settle()
       }
+    }
+    // The requests fail, all with one error value: one failure.
+    const held = source.held()
+    if (site !== `unload-throw`) {
+      oracleAssertion('existing comparison at 538', () =>
+        expect(held.length, `${name}: the request was made`).toBeGreaterThan(0),
+      )
+      const failure = new Error(
+        site.startsWith(`unload`) ? ADAPTER_BREACH : REMOTE_FAILURE,
+      )
+      for (const request of held) request.reject(failure)
+      Object.assign(held, { closed: true })
+    }
+    reach.reach(
+      `${site} failed, ${history.timing === `current` ? `current` : `retired`} run`,
+    )
+    await settle()
+    const model = expected(history)
+    oracleAssertion('existing comparison at 550', () =>
+      expect(
+        observe(collection, capture.uncaught),
+        `${name}: after the failure`,
+      ).toEqual(model.afterFailure),
+    )
+    // A later remote request succeeds: the next scoped recovery's repeat,
+    // or another subset's acquisition.
+    if (history.recovery === `repeat`) {
+      await runs[0]!.metadata!.persistence!.startScopedRecovery!().catch(
+        () => undefined,
+      )
+      await settle()
+      reach.reach(`${site} failed, then its repeat succeeded`)
+    } else if (history.recovery === `other`) {
+      void Promise.resolve(collection._sync.loadSubset({ limit: 2 })).catch(
+        () => undefined,
+      )
+      await settle()
+      reach.reach(`${site} failed, then another request succeeded`)
+    }
+    // The new run becomes ready; the reload ends.
+    if (history.timing === `retired-before-new-ready`) {
+      runs.at(-1)!.markReady()
+      await settle()
+    }
+    oracleAssertion('existing comparison at 576', () =>
       expect(
         { ...observe(collection, capture.uncaught), reload: reloadOutcome },
         `${name}: at the end`,
-      ).toEqual(model.atEnd)
-      historiesRan++
-    } finally {
-      capture.restore()
-      warn.mockRestore()
-      consoleError.mockRestore()
-      await collection.cleanup().catch(() => undefined)
-    }
-  })
-})
-
+      ).toEqual(model.atEnd),
+    )
+    historiesRan++
+  } finally {
+    capture.restore()
+    warn.mockRestore()
+    consoleError.mockRestore()
+    await collection.cleanup().catch(() => undefined)
+  }
+}
 declareOracle({
   owns: [`src/persisted.ts`],
   model: [expected],
   grammar: [histories],
+})
+// The existing helper retains its independent expected() model and every
+// observation-time assertion. Native registration transports its judgment.
+oracleProperty({
+  id: `persisted-sync-problem.history`,
+  law: {
+    statement: `Every retained persistence history agrees with its existing independent model at each named public checkpoint.`,
+    authority: `The existing contract and maintainer decisions stated above the independent model.`,
+    limits: `The existing finite histories and controlled in-memory persistence boundary; no new provider, schedule, or gap-closure claim.`,
+    owner: `SQLite persistence`,
+  },
+  histories,
+  label: (history) =>
+    `${history.site}, ${history.readiness}, ${history.timing}${history.recovery === `none` ? `` : `, ${history.recovery} succeeds`}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`existing persistence model`, plan, observe, () =>
+      judgeHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })

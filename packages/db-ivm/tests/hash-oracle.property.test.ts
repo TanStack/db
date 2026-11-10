@@ -1,17 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { expectEqualHashes } from './hash-support.js'
-import type { HashValue } from './hash-support.js'
+import {
+  arbitraryNonIndexEntries,
+  checkHashComparisons,
+  comparisonReferences,
+  observePermutedHashes,
+} from './hash-value-oracle.js'
+import type { ComparisonRecorder } from './hash-value-oracle.js'
 import type { Arbitrary } from 'fast-check'
 
 /**
@@ -51,38 +49,13 @@ const arbitrarySimpleObject = fc.dictionary(fc.string(), fc.integer(), {
 
 const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 
-// Prefixing preserves arbitrary string content while excluding integer-index
-// keys. Unique keys and at least two entries make reversal consequential.
-// Canonically equivalent spellings are distinct keys that locale collation
-// ranks as equal, so the order the hash visits keys must not depend on
-// collation.
-const collationTies = [`\u00C5`, `A\u030A`, `\u00E9`, `e\u0301`, `\u212B`]
-const arbitraryNonIndexEntries = fc.uniqueArray(
-  fc.tuple(
-    fc
-      .oneof(fc.string(), fc.constantFrom(...collationTies))
-      .map((key) => `key:${key}`),
-    fc.integer(),
-  ),
-  { minLength: 2, maxLength: 5, selector: ([key]) => key },
-)
-
-function expectPermutedHashes(
-  entries: Array<[string, number]>,
-  hashValue: HashValue = hash,
-): void {
-  const original = Object.fromEntries(entries)
-  const reversed = Object.fromEntries([...entries].reverse())
-  expect(Object.keys(original)).not.toEqual(Object.keys(reversed))
-  expect(original).toEqual(reversed)
-  expectEqualHashes(original, reversed, hashValue)
-}
-// The key-order law: permuting the keys of an object leaves its hash unchanged.
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
+// The flat-value law remains a differential comparison between independent
+// equivalent constructors; each cell records its original pair of results.
 declareOracle({
   owns: [`src/hashing/hash.ts#hash`],
-  check: [expectPermutedHashes],
+  check: [checkHashComparisons],
+  model: [comparisonReferences],
+  grammar: [arbitraryNonIndexEntries],
 })
 
 // The reusable value laws run with identical generators and checks in a
@@ -91,22 +64,41 @@ declareOracle({
 // TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 \
 //   TANSTACK_DB_ORACLE_PROPERTY=ivm.hash-value \
 //   pnpm exec vitest --run tests/hash-oracle.property.test.ts -t 'cloned arrays have same hash'
-const valueProperty = `ivm.hash-value`
-
 function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: Arbitrary<Ts[K]>
 }) {
-  return (name: string, check: (...values: Ts) => void): void => {
-    const property = fc.property(...arbitraries, check)
-    oracleReplayTest(it)(`${name} (fixed)`, () => {
-      const parameters = oracleFixedSeed(1657021, { numRuns: oracleRuns(100) })
-      oracleRoute(oracleRouteOf(parameters))
-      fc.assert(property, parameters)
-    })
-    oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
-      const campaignParameters = oraclePropertyOptions(100, valueProperty)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      fc.assert(property, campaignParameters)
+  return (
+    name: string,
+    drive: (record: ComparisonRecorder, ...values: Ts) => void,
+  ): void => {
+    describe(name, () => {
+      oracleProperty<Ts, Array<unknown>>({
+        id: `ivm.hash-value`,
+        law: {
+          statement: name,
+          authority: `The existing deterministic fingerprint and equal-constructor laws documented above.`,
+          limits: `The original flat-value constructor domain for this cell; distinct digests and graph topology are outside this owner.`,
+          owner: `D2 flat-value hashing`,
+        },
+        histories: {
+          arbitrary: fc.tuple(...arbitraries) as Arbitrary<Ts>,
+          runs: 100,
+          fixedSeeds: [1657021],
+        },
+        // The second independently constructed result is the established
+        // differential reference, including the original construction guards.
+        model: comparisonReferences,
+        driver: (values, observe) => {
+          let at = 0
+          drive(
+            (actual, reference, relation = `same value`) => {
+              observe(`comparison ${at++}`, { actual, reference, relation })
+            },
+            ...values,
+          )
+        },
+        check: checkHashComparisons,
+      })
     })
   }
 }
@@ -115,43 +107,46 @@ describe(`hash property-based tests`, () => {
   describe(`determinism`, () => {
     hashProp([arbitraryPrimitive])(
       `hash is deterministic for primitives`,
-      (value) => {
+      (record, value) => {
         const first = hash(value)
         const second = hash(value)
-        expect(first).toBe(second)
+        record(first, second, `same value`)
       },
     )
 
     hashProp([arbitrarySimpleObject])(
       `hash is deterministic for objects`,
-      (obj) => {
+      (record, obj) => {
         const first = hash(obj)
         const second = hash(obj)
-        expect(first).toBe(second)
+        record(first, second, `same value`)
       },
     )
 
     hashProp([arbitrarySimpleArray])(
       `hash is deterministic for arrays`,
-      (arr) => {
+      (record, arr) => {
         const first = hash(arr)
         const second = hash(arr)
-        expect(first).toBe(second)
+        record(first, second, `same value`)
       },
     )
 
-    hashProp([arbitraryDate])(`hash is deterministic for dates`, (date) => {
-      const first = hash(date)
-      const second = hash(date)
-      expect(first).toBe(second)
-    })
+    hashProp([arbitraryDate])(
+      `hash is deterministic for dates`,
+      (record, date) => {
+        const first = hash(date)
+        const second = hash(date)
+        record(first, second, `same value`)
+      },
+    )
 
     hashProp([arbitraryUint8Array])(
       `hash is deterministic for Uint8Arrays`,
-      (arr) => {
+      (record, arr) => {
         const first = hash(arr)
         const second = hash(arr)
-        expect(first).toBe(second)
+        record(first, second, `same value`)
       },
     )
   })
@@ -159,45 +154,51 @@ describe(`hash property-based tests`, () => {
   describe(`equal-hash consequences of D2 value identity`, () => {
     hashProp([arbitrarySimpleObject])(
       `cloned objects have same hash`,
-      (obj) => {
+      (record, obj) => {
         const clone = { ...obj }
-        expect(hash(clone)).toBe(hash(obj))
+        record(hash(clone), hash(obj), `same value`)
       },
     )
 
-    hashProp([arbitrarySimpleArray])(`cloned arrays have same hash`, (arr) => {
-      const clone = [...arr]
-      expect(hash(clone)).toBe(hash(arr))
-    })
+    hashProp([arbitrarySimpleArray])(
+      `cloned arrays have same hash`,
+      (record, arr) => {
+        const clone = [...arr]
+        record(hash(clone), hash(arr), `same value`)
+      },
+    )
 
-    hashProp([arbitraryDate])(`dates with same time have same hash`, (date) => {
-      const clone = new Date(date.getTime())
-      expect(hash(clone)).toBe(hash(date))
-    })
+    hashProp([arbitraryDate])(
+      `dates with same time have same hash`,
+      (record, date) => {
+        const clone = new Date(date.getTime())
+        record(hash(clone), hash(date), `same value`)
+      },
+    )
 
     hashProp([arbitraryUint8Array])(
       `Uint8Arrays with same content have same hash`,
-      (arr) => {
+      (record, arr) => {
         const clone = new Uint8Array(arr)
-        expect(hash(clone)).toBe(hash(arr))
+        record(hash(clone), hash(arr), `same value`)
       },
     )
 
     hashProp([fc.array(fc.tuple(fc.string(), fc.integer()), { maxLength: 5 })])(
       `Maps with same entries have same hash`,
-      (entries) => {
+      (record, entries) => {
         const map1 = new Map(entries)
         const map2 = new Map(entries)
-        expect(hash(map1)).toBe(hash(map2))
+        record(hash(map1), hash(map2), `same value`)
       },
     )
 
     hashProp([fc.array(fc.integer(), { maxLength: 10 })])(
       `Sets with same values have same hash`,
-      (arr) => {
+      (record, arr) => {
         const set1 = new Set(arr)
         const set2 = new Set(arr)
-        expect(hash(set1)).toBe(hash(set2))
+        record(hash(set1), hash(set2), `same value`)
       },
     )
   })
@@ -212,11 +213,11 @@ describe(`hash property-based tests`, () => {
       fc.integer(),
     ])(
       `objects with same properties in different order have same hash`,
-      ([key1, key2], val1, val2) => {
-        expect(key1).not.toBe(key2)
+      (record, [key1, key2], val1, val2) => {
+        record(key1, key2, `different value`)
         const obj1 = { [key1!]: val1, [key2!]: val2 }
         const obj2 = { [key2!]: val2, [key1!]: val1 }
-        expect(hash(obj1)).toBe(hash(obj2))
+        record(hash(obj1), hash(obj2), `same value`)
       },
     )
 
@@ -226,46 +227,49 @@ describe(`hash property-based tests`, () => {
         fc.integer(),
         { minKeys: 2, maxKeys: 5 },
       ),
-    ])(`object hash is independent of property insertion order`, (obj) => {
-      const keys = Object.keys(obj)
-      const reversedKeys = [...keys].reverse()
+    ])(
+      `object hash is independent of property insertion order`,
+      (record, obj) => {
+        const keys = Object.keys(obj)
+        const reversedKeys = [...keys].reverse()
 
-      // Create new object with reversed key order
-      const reversed: Record<string, number> = {}
-      for (const key of reversedKeys) {
-        reversed[key] = obj[key]!
-      }
+        // Create new object with reversed key order
+        const reversed: Record<string, number> = {}
+        for (const key of reversedKeys) {
+          reversed[key] = obj[key]!
+        }
 
-      expect(hash(reversed)).toBe(hash(obj))
-    })
+        record(hash(reversed), hash(obj), `same value`)
+      },
+    )
 
     hashProp([arbitraryNonIndexEntries])(
       `preserves hashes after an observed non-index key permutation`,
-      (entries) => {
-        expectPermutedHashes(entries)
+      (record, entries) => {
+        observePermutedHashes(entries, record)
       },
     )
   })
 
   describe(`number normalization`, () => {
-    hashProp([fc.constant(0)])(`0 and -0 have the same hash`, () => {
-      expect(hash(0)).toBe(hash(-0))
+    hashProp([fc.constant(0)])(`0 and -0 have the same hash`, (record) => {
+      record(hash(0), hash(-0), `same value`)
     })
 
-    hashProp([fc.constant(NaN)])(`NaN has consistent hash`, () => {
+    hashProp([fc.constant(NaN)])(`NaN has consistent hash`, (record) => {
       const first = hash(NaN)
       const second = hash(NaN)
-      expect(first).toBe(second)
+      record(first, second, `same value`)
     })
 
-    hashProp([fc.integer()])(`integers hash consistently`, (n) => {
-      expect(hash(n)).toBe(hash(n))
+    hashProp([fc.integer()])(`integers hash consistently`, (record, n) => {
+      record(hash(n), hash(n), `same value`)
     })
 
     hashProp([fc.double({ noNaN: true, noDefaultInfinity: true })])(
       `doubles hash consistently`,
-      (n) => {
-        expect(hash(n)).toBe(hash(n))
+      (record, n) => {
+        record(hash(n), hash(n), `same value`)
       },
     )
   })
@@ -273,9 +277,9 @@ describe(`hash property-based tests`, () => {
   describe(`nested structures`, () => {
     hashProp([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
-    ])(`nested arrays hash consistently`, (nested) => {
+    ])(`nested arrays hash consistently`, (record, nested) => {
       const clone = nested.map((inner) => [...inner])
-      expect(hash(clone)).toBe(hash(nested))
+      record(hash(clone), hash(nested), `same value`)
     })
 
     hashProp([
@@ -284,36 +288,36 @@ describe(`hash property-based tests`, () => {
         fc.dictionary(fc.string(), fc.integer(), { maxKeys: 3 }),
         { maxKeys: 3 },
       ),
-    ])(`nested objects hash consistently`, (nested) => {
+    ])(`nested objects hash consistently`, (record, nested) => {
       const clone = Object.fromEntries(
         Object.entries(nested).map(([k, v]) => [k, { ...v }]),
       )
-      expect(hash(clone)).toBe(hash(nested))
+      record(hash(clone), hash(nested), `same value`)
     })
   })
 
   describe(`hash produces numbers`, () => {
     hashProp([arbitraryPrimitive])(
       `hash returns a number for primitives`,
-      (value) => {
-        expect(typeof hash(value)).toBe(`number`)
-        expect(Number.isFinite(hash(value))).toBe(true)
+      (record, value) => {
+        record(typeof hash(value), `number`, `same value`)
+        record(Number.isFinite(hash(value)), true, `same value`)
       },
     )
 
     hashProp([arbitrarySimpleObject])(
       `hash returns a number for objects`,
-      (obj) => {
-        expect(typeof hash(obj)).toBe(`number`)
-        expect(Number.isFinite(hash(obj))).toBe(true)
+      (record, obj) => {
+        record(typeof hash(obj), `number`, `same value`)
+        record(Number.isFinite(hash(obj)), true, `same value`)
       },
     )
 
     hashProp([arbitrarySimpleArray])(
       `hash returns a number for arrays`,
-      (arr) => {
-        expect(typeof hash(arr)).toBe(`number`)
-        expect(Number.isFinite(hash(arr))).toBe(true)
+      (record, arr) => {
+        record(typeof hash(arr), `number`, `same value`)
+        record(Number.isFinite(hash(arr)), true, `same value`)
       },
     )
   })
@@ -321,66 +325,20 @@ describe(`hash property-based tests`, () => {
   describe(`reconstructed primitive equality`, () => {
     hashProp([fc.integer()])(
       `integer decimal round trips preserve hashes`,
-      (value) => {
+      (record, value) => {
         const equivalent = Number(String(value))
-        expect(equivalent).toBe(value)
-        expectEqualHashes(value, equivalent)
+        record(equivalent, value, `same value`)
+        record(hash(value), hash(equivalent))
       },
     )
 
     hashProp([fc.string()])(
       `reconstructed strings preserve hashes`,
-      (value) => {
+      (record, value) => {
         const equivalent = value.split(``).join(``)
-        expect(equivalent).toBe(value)
-        expectEqualHashes(value, equivalent)
+        record(equivalent, value, `same value`)
+        record(hash(value), hash(equivalent))
       },
     )
-  })
-
-  describe(`law checker calibration`, () => {
-    it(`rejects an insertion-order-sensitive result but accepts equal structures`, () => {
-      oracleRoute(`calibration`)
-      const entries: Array<[string, number]> = [
-        [`key:left`, 1],
-        [`key:right`, 2],
-      ]
-      expect(() =>
-        expectPermutedHashes(entries, (value) =>
-          Object.keys(value as object)[0] === `key:left` ? 1 : 2,
-        ),
-      ).toThrow()
-      expectPermutedHashes(entries)
-      // The reach guard must also reject a nominal reversal of index keys.
-      expect(() =>
-        expectPermutedHashes([
-          [`0`, 1],
-          [`1`, 2],
-        ]),
-      ).toThrow()
-    })
-
-    it(`shrinks and replays an injected equality-law failure`, () => {
-      oracleRoute(`calibration`)
-      const property = fc.property(arbitraryNonIndexEntries, (entries) => {
-        let calls = 0
-        expectPermutedHashes(entries, () => ++calls)
-      })
-      const failed = fc.check(property, { seed: 1657021, numRuns: 100 })
-      expect(failed.failed).toBe(true)
-      expect(failed.counterexample).not.toBeNull()
-      expect(failed.numShrinks).toBeGreaterThan(0)
-      if (failed.counterexamplePath === null) {
-        throw new Error(`Expected a counterexample path for replay`)
-      }
-      const replayed = fc.check(property, {
-        seed: failed.seed,
-        path: failed.counterexamplePath,
-        numRuns: 100,
-        endOnFailure: true,
-      })
-      expect(replayed.failed).toBe(true)
-      expect(replayed.counterexample).toEqual(failed.counterexample)
-    })
   })
 })

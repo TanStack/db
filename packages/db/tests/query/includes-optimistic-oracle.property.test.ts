@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -14,14 +15,9 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-} from '../oracle-config.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   assertCanStartOptimisticChange,
   assertMatchingConfirmation,
@@ -559,7 +555,9 @@ const projection: TraceProjection<
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute,
   assertEqual: (actual, expected) => {
-    expect(actual).toEqual(expected)
+    oracleAssertion('includes optimistic-oracle.property comparison 563', () =>
+      expect(actual).toEqual(expected),
+    )
   },
 }
 
@@ -661,23 +659,11 @@ function optimisticProperty(
   name: string,
   run: (routes: RouteValues) => Promise<void>,
 ): void {
-  const options = oraclePropertyOptions(12, property)
-  // Both campaigns use the same arbitrary, driver, checker, and budget. A path
-  // replay of this property runs only the random campaign, from its path.
-  const routeValuesFixedSeed = oracleFixedSeed(1_658_013, { ...options })
-  oracleReplayTest(fcTest).prop([routeValuesArbitrary], routeValuesFixedSeed)(
-    `${name} (fixed seed)`,
-    (...args: Parameters<typeof run>) => {
-      oracleRoute(oracleRouteOf(routeValuesFixedSeed))
-      return run(...args)
-    },
-  )
-  oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
-    `${name} (random seed)`,
-    (...args: Parameters<typeof run>) => {
-      oracleRoute(oracleRouteOf(options))
-      return run(...args)
-    },
+  registerIncludesProperty(
+    [routeValuesArbitrary],
+    { property, runs: 12, fixedSeed: 1_658_013 },
+    name,
+    run,
   )
 }
 
