@@ -126,3 +126,49 @@ remain uncommitted.
 | ORC-014 | No new real-device claim: frozen published provider receipts and controlled SQLite shim paths keep their previous boundaries. |
 | ORC-015 | All declared states have randomized constructions and measured actual receiving-path reach; fixed histories do not discharge reach. |
 | ORC-016 | Fixed product histories use the same model, driver and named comparison. Ordinary checker machinery, including its 20-run shrink/replay test, lives in the ordinary test file. |
+
+
+## Normal package runner integration
+
+The earlier focused GREEN disabled Vitest type checking and ran the full project
+compiler separately. It therefore missed a default-runner integration failure:
+Vitest's static type-test collector cannot discover the runtime tests registered
+by `oracleProperty`. With dependencies present, the unchanged default package
+command passed all 303 tests but failed the oracle file's empty static suite.
+
+The runner follow-up is based on `f111489697892be70a429d0ab77b155a96ef94f5`.
+The companion JSON binds its evidence to the exact updated config bytes by SHA256
+and retains the unchanged oracle source hash. No oracle model, runtime production
+driver, comparison, run budget, runtime include, or production source changed.
+
+The config excludes only `op-sqlite-driver-oracle.test.ts` from static type-test
+collection. It still runs that file's runtime oracle tests. The explicit
+`./tsconfig.json` retains the complete project include (`src`, `tests`, `e2e`,
+and both Vite configs), and Vitest continues to report compiler diagnostics from
+files outside static collection as source errors. Source errors remain enabled.
+The existing SQLite core config uses this same separation.
+
+- **Law and authority:** the package's normal `test` script must execute its
+  runtime tests and reject errors from its complete TypeScript project. The
+  package script, Vite config and TypeScript include define that existing scope.
+- **RED:** `pnpm --filter @tanstack/react-native-db-sqlite-persistence test --maxWorkers=2`
+  on the conversion head exits 1 with `No test suite found` for the property-only
+  oracle. All 303 tests pass, with no compiler or missing-dependency errors.
+- **GREEN:** the same command with coverage and Vitest type checking enabled
+  exits 0: 11 files and 303 tests pass, with no type or source errors.
+- **Compiler calibration:** append a temporary `number` declaration initialized
+  with a string inside the statically excluded oracle and rerun the same
+  command. All 303 tests still pass, but the command exits 1 with the expected
+  `TypeCheckError` at that declaration, reported as an `Unhandled Source Error`.
+  The oracle is restored byte for byte in `finally`; no calibration declaration
+  or dummy test remains. The companion JSON preserves the injected text,
+  restoration hash, and every checked outcome.
+- **Limits:** this is a runner integration repair. It does not change the row law
+  or supply new production mutation evidence; the 29 retained mutant kills
+  above remain the conversion's evidence. The compiler calibration exercises
+  the excluded owner rather than every TypeScript diagnostic kind.
+
+Logs: `/tmp/oracle-persistence-rn-default-red.log`,
+`/tmp/oracle-persistence-rn-default-green.log`, and
+`/tmp/oracle-persistence-rn-default-type-probe.log`. The companion JSON records
+all log hashes, the config hash, and the probe's restoration checks.

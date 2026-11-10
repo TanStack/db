@@ -339,5 +339,60 @@
       ]
     }
   ],
-  "implementationCommit": "366be721dc4d4910234f19f7805c42afadcff16b"
+  "implementationCommit": "366be721dc4d4910234f19f7805c42afadcff16b",
+  "runnerIntegration": {
+    "baseCommit": "f111489697892be70a429d0ab77b155a96ef94f5",
+    "configPath": "packages/react-native-db-sqlite-persistence/vite.config.ts",
+    "configSha256": "8df25c43eb527b5895e715f3972cdebc81069f7e9a952fcd8dfd9f3baf90184f",
+    "command": "pnpm --filter @tanstack/react-native-db-sqlite-persistence test --maxWorkers=2",
+    "staticCollectorExclusion": "tests/op-sqlite-driver-oracle.test.ts",
+    "runtimeIncludeUnchanged": [
+      "tests/**/*.test.ts"
+    ],
+    "tsconfig": "./tsconfig.json",
+    "tsconfigIncludeUnchanged": [
+      "src",
+      "tests",
+      "e2e",
+      "vite.config.ts",
+      "vitest.e2e.config.ts"
+    ],
+    "ignoreSourceErrors": false,
+    "runs": {
+      "red": {
+        "path": "/tmp/oracle-persistence-rn-default-red.log",
+        "sha256": "e2854475e7c4398f70d637967f95a2247b73c50e1fc166ac013250956b96f0ec",
+        "exitCode": 1,
+        "passingTests": 303
+      },
+      "green": {
+        "path": "/tmp/oracle-persistence-rn-default-green.log",
+        "sha256": "181b8e428a73cc508604a59b844fe3c34b9a85d611f599d3f8f26eeb1f3873b5",
+        "exitCode": 0,
+        "passingTests": 303
+      },
+      "compilerCalibration": {
+        "path": "/tmp/oracle-persistence-rn-default-type-probe.log",
+        "sha256": "87062aeee2f22efe9c15aff44253711b601ba82c275b634bd77bee77b3a83f98",
+        "exitCode": 1,
+        "passingTests": 303
+      }
+    },
+    "compilerCalibration": {
+      "command": "pnpm --filter @tanstack/react-native-db-sqlite-persistence test --maxWorkers=2",
+      "exitCode": 1,
+      "ownerSha256": "5c2c51b0c8dc43377f884ed9b357597e6ab8e07294ca0f534b5f975363d2820c",
+      "injectedText": "\n// Temporary compiler-coverage calibration; removed after this run.\nconst oracleCompilerCoverageProbe: number = `compiler must reject this`\nvoid oracleCompilerCoverageProbe\n",
+      "checks": {
+        "exitNonzero": true,
+        "expectedCompilerError": true,
+        "ownerNamed": true,
+        "runtimeTestsUnchanged": true,
+        "sourceErrorReported": true,
+        "noEmptyStaticSuite": true,
+        "restoredByteForByte": true
+      }
+    },
+    "oracleRuntimeSourcesChanged": false
+  }
 }
