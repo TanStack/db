@@ -320,7 +320,10 @@ async function recordReceivingHistory(
       target.remove()
       throw error
     }
-    observe(`reader initial`, { reader, views: initial.map(recordView) })
+    observe(`reader initial`, {
+      reader,
+      initialSnapshots: initial.map(recordView),
+    })
     // Bounded to the test's one-second wait: the assertion supplies the
     // authoritative premise, rather than a fixed sleep or a consumed record.
     try {
@@ -389,7 +392,10 @@ async function recordReceivingHistory(
       observe(`reach`, `fresh-child`)
       revealLater!()
       flushSync()
-      observe(`reader initial`, { reader, views: laterInitial.map(recordView) })
+      observe(`reader initial`, {
+        reader,
+        initialSnapshots: laterInitial.map(recordView),
+      })
       try {
         await vi.waitFor(() => {
           flushSync()
@@ -496,8 +502,11 @@ function checkReceivingHistory(
     else if (checkpoint === `child mount available`) target = `function`
     else if (checkpoint === `browser starts`) target = 1
     else if (checkpoint === `reader initial`) {
-      const entry = value as { reader: number; views: Array<unknown> }
-      actual = entry.views
+      const entry = value as {
+        reader: number
+        initialSnapshots: Array<unknown>
+      }
+      actual = entry.initialSnapshots
       target = [
         entry.reader < history.previousReaders
           ? { rows: serverView.rows, status: serverView.status }

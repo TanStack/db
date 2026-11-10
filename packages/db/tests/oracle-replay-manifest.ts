@@ -1545,7 +1545,7 @@ function directReplayTestName(property: string): string | undefined {
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
-    return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   return replayTestNames.get(property)
 }
 
