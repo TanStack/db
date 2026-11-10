@@ -293,11 +293,10 @@ function measureSubset(
  * matter and needs no dedupe.
  *
  * On the first failure, every other chunk's request is aborted through a
- * local `AbortController` combined with the caller's own signal
- * (`AbortSignal.any`) — this keeps the same all-or-nothing semantics an
- * unsplit request has ("one failed page fails the whole load") instead of
- * surfacing a partial result, and the first error encountered is what
- * `Promise.all` rejects with.
+ * local `AbortController` that also follows the caller's own signal — this
+ * keeps the same all-or-nothing semantics an unsplit request has ("one failed
+ * page fails the whole load") instead of surfacing a partial result, and the
+ * first error encountered is what `Promise.all` rejects with.
  */
 async function loadChunks<TItem>(
   supabase: SupabaseClient,
@@ -306,8 +305,14 @@ async function loadChunks<TItem>(
   chunks: Array<LoadSubsetOptions>,
   signal: AbortSignal,
 ): Promise<Array<TItem>> {
+  // Not `AbortSignal.any`: React Native (Hermes) and Safari before 17.4 lack it.
   const controller = new AbortController()
-  const combinedSignal = AbortSignal.any([signal, controller.signal])
+  const abortFromCaller = () => controller.abort(signal.reason)
+  if (signal.aborted) {
+    abortFromCaller()
+  } else {
+    signal.addEventListener('abort', abortFromCaller, { once: true })
+  }
   const results: Array<Array<TItem>> = new Array(chunks.length)
   let nextIndex = 0
 
@@ -320,7 +325,7 @@ async function loadChunks<TItem>(
           tableName,
           keys,
           chunks[index]!,
-          combinedSignal,
+          controller.signal,
         )
       } catch (error) {
         controller.abort()
@@ -330,7 +335,11 @@ async function loadChunks<TItem>(
   }
 
   const workerCount = Math.min(MAX_CONCURRENT_CHUNKS, chunks.length)
-  await Promise.all(Array.from({ length: workerCount }, runWorker))
+  try {
+    await Promise.all(Array.from({ length: workerCount }, runWorker))
+  } finally {
+    signal.removeEventListener('abort', abortFromCaller)
+  }
   return results.flat()
 }
 
