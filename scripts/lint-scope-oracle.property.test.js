@@ -103,18 +103,13 @@ import { dirname, join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
+import { afterAll, beforeAll, expect } from 'vitest'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  withOracleFixedHistories,
+  differs,
+  oracleProperty,
+  oracleReplayRequested,
+  pass,
 } from '../packages/db/tests/oracle-config.js'
-import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
 
 const PROPERTY = `scripts.lint-scope`
 const FIXED_SEED = 2234
@@ -263,8 +258,6 @@ function programOf({ shape, ...skeleton }) {
   return buildProgram(shapes[shape](drawn))
 }
 
-const programArbitrary = skeletonArbitrary.map(programOf)
-
 /**
  * Constructed histories. The declared states below can be missed by 24 random
  * draws: each configuration edit, a lockfile hook with unchanged plugin entries,
@@ -305,16 +298,6 @@ const constructions = [
     ),
   }),
 ]
-
-function constructedPrograms(seed) {
-  const skeletons = fc.sample(skeletonArbitrary, {
-    seed,
-    numRuns: constructions.length,
-  })
-  return constructions.map((construct, index) => [
-    programOf(construct(skeletons[index])),
-  ])
-}
 
 const shapes = {
   free: (skeleton) => skeleton,
@@ -985,7 +968,7 @@ function observedSelections(program) {
 
 /** Each observation equals the model's prediction, as sorted basenames. */
 function compareSelected(observed, expected) {
-  expect(observed).toEqual(expected)
+  return differs(`selected files`, `lint selection`, observed, expected) ?? pass
 }
 
 /**
@@ -993,7 +976,14 @@ function compareSelected(observed, expected) {
  * carries the edited rule's mark exactly when the model predicts it.
  */
 function compareRuleSource(marks, marked) {
-  expect([...marks].filter((mark) => mark !== marked)).toEqual([])
+  return (
+    differs(
+      `rule source`,
+      `session rule`,
+      [...marks].filter((mark) => mark !== marked),
+      [],
+    ) ?? pass
+  )
 }
 
 // -- 5. Reach -----------------------------------------------------------------
@@ -1064,7 +1054,7 @@ const STATES = [
   `worktree-own-rule`,
   `scratch-directory`,
 ]
-const reach = createOracleReach(PROPERTY, STATES, { minimum: 2 })
+const counts = new Map(STATES.map((state) => [state, 0]))
 
 /** Every simple path of imports from `start`, as its list of modules. */
 function pathsFrom(program, start) {
@@ -1095,8 +1085,7 @@ function withoutEdges(program, drop) {
 }
 
 /** Marks the states that the program enters. */
-function recordStates(program) {
-  reach.beginHistory()
+function recordStates(program, observe) {
   const states = new Set()
   const { changed, hook } = editedByScope(program)
   const edited = new Set(changed)
@@ -1182,75 +1171,134 @@ function recordStates(program) {
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }
-  for (const state of states) reach.reach(state)
+  for (const state of states) {
+    observe(`reach`, state)
+    if (!expect.getState().currentTestName.endsWith(`determinism`))
+      counts.set(state, counts.get(state) + 1)
+  }
 }
 
-function campaign(name) {
-  // A history runs its child processes synchronously, so the predicate yields
-  // between complete histories: the test worker then answers its progress
-  // messages, and a long campaign cannot time out the worker's RPC channel.
-  const predicate = async (program) => {
-    await setImmediate()
-    recordStates(program)
-    const observed = observedSelections(program)
+// Native constructions preserve the original configuration and production-hook
+// prefixes, drawing their varying fields from this campaign's skeleton source.
+// Original generated prefixes may add this one explicit production edge. Keep
+// random generation and shrinking unchanged while recognizing that existing
+// finite prefix in the native constructor-membership check.
+class SkeletonWithProductionPrefix extends fc.Arbitrary {
+  generate(...args) {
+    return skeletonArbitrary.generate(...args)
+  }
+  shrink(...args) {
+    return skeletonArbitrary.shrink(...args)
+  }
+  canShrinkWithoutContext(skeleton) {
+    if (skeletonArbitrary.canShrinkWithoutContext(skeleton)) return true
+    if (skeleton?.shape !== `free` || !Array.isArray(skeleton.oracles))
+      return false
+    const oracles = skeleton.oracles.map((oracle, index) => {
+      if (oracle.fixedTargets === undefined) return oracle
+      if (
+        index !== 0 ||
+        oracle.fixedTargets.length !== 1 ||
+        oracle.fixedTargets[0] !== PRODUCTION
+      )
+        return oracle
+      const { fixedTargets, ...generated } = oracle
+      return generated
+    })
+    return skeletonArbitrary.canShrinkWithoutContext({ ...skeleton, oracles })
+  }
+}
+
+const constructedStates = [
+  ...PLUGIN_EDITS.map((edit) => `${edit}-edit`),
+  `lockfile-edit`,
+  `settings-edit`,
+  `hook-lockfile-same-plugin`,
+  `large-lockfile-same-plugin`,
+  `missing-base-lockfile`,
+  `hook-production-boundary`,
+]
+
+oracleProperty({
+  id: PROPERTY,
+  law: {
+    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule.`,
+    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10.`,
+    limits: `The unchanged bounded import, checkout, hook, and lockfile language described above.`,
+    owner: `Small structures and test mechanics`,
+  },
+  histories: {
+    arbitrary: new SkeletonWithProductionPrefix(),
+    runs: BASE_RUNS,
+    fixedSeeds: [FIXED_SEED],
+    states: constructedStates,
+    measured: STATES.filter((state) => !constructedStates.includes(state)),
+    constructed: constructions.map((build, index) => ({
+      name: constructedStates[index],
+      enters: [constructedStates[index]],
+      build,
+    })),
+  },
+  resolve: programOf,
+  model: (program) => {
     const scopes = editedByScope(program)
-    const marked = predictRuleMarked(program)
+    return {
+      marked: predictRuleMarked(program),
+      selections: Object.fromEntries(
+        [`changed`, `named`, `hook`, `stop`].map((scope) => [
+          scope,
+          predictSelected(program, scopes[scope]),
+        ]),
+      ),
+    }
+  },
+  driver: async (program, observe) => {
+    await setImmediate()
+    recordStates(program, observe)
+    const observed = observedSelections(program)
+    observe(
+      `completed selections`,
+      Object.fromEntries(
+        Object.entries(observed).map(([scope, value]) => [
+          scope,
+          value === undefined
+            ? undefined
+            : { ...value, marks: [...value.marks] },
+        ]),
+      ),
+    )
+  },
+  check: (_program, trace, expected) => {
+    const observed = trace.find(
+      ({ checkpoint }) => checkpoint === `completed selections`,
+    )?.value
+    if (observed === undefined)
+      return differs(
+        `completed selections`,
+        `lint selection`,
+        observed,
+        expected.selections,
+      )
     for (const scope of [`changed`, `named`, `hook`, `stop`]) {
       if (observed[scope] === undefined) continue
-      compareSelected(
+      const selection = compareSelected(
         observed[scope].oracles,
-        predictSelected(program, scopes[scope]),
+        expected.selections[scope],
       )
-      compareRuleSource(observed[scope].marks, marked)
+      if (selection.kind !== `pass`) return selection
+      const source = compareRuleSource(observed[scope].marks, expected.marked)
+      if (source.kind !== `pass`) return source
     }
-  }
-  // The constructed histories run first, on top of the random ones, as the
-  // framework adds examples; a path replay runs only its one history.
-  oracleReplayTest(it)(
-    `${name}: fixed-seed campaign`,
-    async () => {
-      const parameters = oracleFixedSeed(FIXED_SEED, {
-        numRuns: oracleRuns(BASE_RUNS),
-      })
-      const options = withOracleFixedHistories(
-        parameters,
-        constructedPrograms(FIXED_SEED),
-      )
-      oracleRoute(oracleRouteOf(options))
-      await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
-    },
-    1_200_000,
-  )
-  oracleReplayTest(it, PROPERTY)(
-    `${name}: random-seed campaign`,
-    async () => {
-      // The constructed histories are drawn from the campaign's seed, so the
-      // options come first.
-      const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-      const options = withOracleFixedHistories(
-        parameters,
-        constructedPrograms(parameters.seed),
-      )
-      oracleRoute(oracleRouteOf(options))
-      await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
-    },
-    1_200_000,
-  )
-}
-
-describe(`lint selection after an edit`, () => {
-  campaign(`changed, named, edit-hook, and stop-hook scopes`)
-  // Every declared state must be entered by the campaigns above.
-  afterAll(() => {
-    if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
-      console.log(`REACH`, JSON.stringify([...reach.counts()]))
-    reach.assertReached()
-  })
+    return pass
+  },
+  timeout: 1_200_000,
 })
 
-// The declaration names the parts above. It runs nothing, so it follows them.
-declareOracle({
-  model: [predictSelected, predictRuleMarked],
-  check: [compareSelected, compareRuleSource],
-  grammar: [programArbitrary, constructedPrograms],
+// Keep the original aggregate reach minimum for the remaining graph states;
+// the native per-campaign constructor checks additionally enforce their prefixes.
+afterAll(() => {
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+    console.log(`REACH`, JSON.stringify([...counts]))
+  if (!oracleReplayRequested())
+    expect([...counts].filter(([, count]) => count < 2)).toEqual([])
 })

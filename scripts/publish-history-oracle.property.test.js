@@ -18,9 +18,13 @@
  * credential authentication and GitHub Actions themselves are not claimed.
  */
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
-import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
+import { oracleProperty } from '../packages/db/tests/oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../packages/db/tests/oracle-assertion-adapter.js'
 import {
   checkPublishObservation,
   expectedPublishes,
@@ -33,149 +37,139 @@ import {
 } from './release-fixture.js'
 import { publishDuringRc } from './publish-packages.mjs'
 
-declareOracle({
-  check: [checkPublishObservation],
-  model: [expectedPublishes],
-  grammar: [publishHistories],
-})
+import { requiredStateRecorder } from './required-state-recorder.js'
 
-test.each(publishHistories)(
-  'release command registry history %j',
-  async (history) => {
-    const reach = createOracleReach(
-      'release.command-registry',
-      [
-        'registry-read',
-        'restored',
-        'compared',
-        ...(history.failure === 'none' ? [] : ['failure-observed', 'retried']),
-        ...(history.registry === 'current'
-          ? ['already-current']
-          : ['new-version']),
-      ],
-      { replaying: false },
+async function receiveCommand(history, observe) {
+  const reach = requiredStateRecorder(
+    [
+      'registry-read',
+      'restored',
+      'compared',
+      ...(history.failure === 'none' ? [] : ['failure-observed', 'retried']),
+      ...(history.registry === 'current'
+        ? ['already-current']
+        : ['new-version']),
+    ],
+    observe,
+  )
+  await withReleaseWorkspace(async ({ root }) => {
+    const receiver = preparePublishReceiver(root, history)
+    const expected = expectedPublishes(
+      receiver.manifests,
+      receiver.initialRegistry,
     )
-    reach.beginHistory()
-    await withReleaseWorkspace(async ({ root }) => {
-      const receiver = preparePublishReceiver(root, history)
-      const expected = expectedPublishes(
-        receiver.manifests,
-        receiver.initialRegistry,
+    const before = receiver.bytes()
+    let commandError
+    try {
+      await receiver.run(publishDuringRc)
+    } catch (error) {
+      commandError = error
+    }
+    const firstRequests = receiver.readRequests()
+    if (history.failure === 'none') {
+      if (commandError)
+        throw new Error('Command failed outside controlled registry failure', {
+          cause: commandError,
+        })
+    } else {
+      const failure = firstRequests.find(
+        (entry) => entry.type === 'publish' && !entry.success,
       )
-      const before = receiver.bytes()
-      let commandError
-      try {
-        await receiver.run(publishDuringRc)
-      } catch (error) {
-        commandError = error
-      }
-      const firstRequests = receiver.readRequests()
-      if (history.failure === 'none') {
-        if (commandError)
-          throw new Error(
-            'Command failed outside controlled registry failure',
-            { cause: commandError },
-          )
-      } else {
-        const failure = firstRequests.find(
-          (entry) => entry.type === 'publish' && !entry.success,
-        )
-        // A setup failure is not evidence for retry or restoration. The exact
-        // controlled failed request must exist before the expected error counts.
-        if (!failure || !commandError)
-          throw new Error(
-            'Controlled package-publish failure was not observed',
-            { cause: commandError },
-          )
+      // A setup failure is not evidence for retry or restoration. The exact
+      // controlled failed request must exist before the expected error counts.
+      if (!failure || !commandError)
+        throw new Error('Controlled package-publish failure was not observed', {
+          cause: commandError,
+        })
+      oracleAssertion(`existing release comparison`, () =>
         assert.equal(
           failure.name,
           history.failure === 'stable' ? packageNames.query : packageNames.db,
           'failure reaches its requested publish phase',
-        )
-        reach.reach('failure-observed')
-      }
+        ),
+      )
+      reach.enter('failure-observed')
+    }
+    oracleAssertion(`existing release comparison`, () =>
       assert.deepEqual(
         receiver.bytes(),
         before,
         'publish attempt restores original workspace bytes',
-      )
-      if (history.failure !== 'none') {
-        await receiver.run(publishDuringRc)
+      ),
+    )
+    if (history.failure !== 'none') {
+      await receiver.run(publishDuringRc)
+      oracleAssertion(`existing release comparison`, () =>
         assert.deepEqual(
           receiver.bytes(),
           before,
           'publish retry restores original workspace bytes',
-        )
-        reach.reach('retried')
-      }
-      reach.reach('restored')
-      const requests = receiver.readRequests()
-      const infoNames = new Set(
-        requests
-          .filter((entry) => entry.type === 'info')
-          .map((entry) => entry.name),
+        ),
       )
+      reach.enter('retried')
+    }
+    reach.enter('restored')
+    const requests = receiver.readRequests()
+    const infoNames = new Set(
+      requests
+        .filter((entry) => entry.type === 'info')
+        .map((entry) => entry.name),
+    )
+    oracleAssertion(`existing release comparison`, () =>
       assert.deepEqual(
         [...infoNames].sort(),
         Object.values(packageNames).sort(),
         'real Changesets inspected both candidate and stable package phases',
-      )
-      reach.reach('registry-read')
-      const failures = requests.filter(
-        (entry) => entry.type === 'publish' && !entry.success,
-      )
+      ),
+    )
+    reach.enter('registry-read')
+    const failures = requests.filter(
+      (entry) => entry.type === 'publish' && !entry.success,
+    )
+    oracleAssertion(`existing release comparison`, () =>
       assert.equal(
         failures.length,
         history.failure === 'none' ? 0 : 1,
         'the retry has exactly one controlled failed request',
-      )
+      ),
+    )
+    oracleAssertion(`existing release comparison`, () =>
       checkPublishObservation(
         requests,
         expected,
         'registry after publish and optional retry',
-      )
-      reach.reach('compared')
-      reach.reach(
-        history.registry === 'current' ? 'already-current' : 'new-version',
-      )
-      reach.assertReached()
-    })
-  },
-  20_000,
-)
-
-// Wrong observations reuse the same judgment as the command receiver. Sorting
-// permits concurrent package order, but must retain omission and multiplicity.
-test.each(['duplicate', 'omission', 'tag', 'version', 'registry', 'access'])(
-  'release publish judgment rejects wrong %s observation',
-  (fault) => {
-    const expected = [
-      { name: packageNames.db, version: '1.0.0-rc.1.10', tag: 'latest' },
-    ]
-    const correct = [
-      {
-        type: 'publish',
-        ...expected[0],
-        success: true,
-        registry: 'http://127.0.0.1:4873',
-        access: 'public',
-      },
-    ]
-    checkPublishObservation(correct, expected, 'legal calibration')
-    const wrong = structuredClone(correct)
-    if (fault === 'duplicate') wrong.push({ ...wrong[0] })
-    else if (fault === 'omission') wrong.length = 0
-    else
-      wrong[0][fault] =
-        fault === 'tag'
-          ? 'rc'
-          : fault === 'version'
-            ? '1.0.0-rc.1.9'
-            : fault === 'registry'
-              ? 'https://example.invalid'
-              : 'restricted'
-    assert.throws(() =>
-      checkPublishObservation(wrong, expected, 'wrong calibration'),
+      ),
     )
+    reach.enter('compared')
+    reach.enter(
+      history.registry === 'current' ? 'already-current' : 'new-version',
+    )
+    reach.assertComplete()
+  })
+}
+
+// The complete existing independent helper retains every comparison cut. Native
+// enumeration supplies stable exact-case titles, data checks, and determinism.
+oracleProperty({
+  id: 'scripts.publish-command',
+  law: {
+    statement:
+      'Release versioning and publication refine the independent ledger at every original observation cut.',
+    authority:
+      'CONTRIBUTING.md: Changesets and Releases; maintainer policy decision 2026-10-29.',
+    limits:
+      'The unchanged finite histories and real-tool receiving boundary described above.',
+    owner: 'Release tooling',
   },
-)
+  histories: publishHistories,
+  label: (history) =>
+    'release command registry history ' + JSON.stringify(history),
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment('release ledger', plan, observe, () =>
+      receiveCommand(plan.history, observe),
+    ),
+  check: forwardAssertionJudgment,
+  timeout: 20000,
+})

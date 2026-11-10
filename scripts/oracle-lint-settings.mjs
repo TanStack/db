@@ -335,30 +335,6 @@ export const oracleLintSettings = {
         file: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
-      {
-        file: `scripts/lint-scope-oracle.property.test.js`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `scripts/publish-history-oracle.property.test.js`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `scripts/publish-http-oracle.property.test.js`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `scripts/release-history-oracle.property.test.js`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `scripts/run-budget-oracle.property.test.js`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `scripts/strip-oracle-probes-oracle.property.test.js`,
-        reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
     ],
     replayWitnessModules: [`packages/db/tests/oracle-replay-witness.ts`],
   },

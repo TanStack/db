@@ -7012,9 +7012,15 @@ unrepaired until the full oracle campaign completes. Strict local shims provide
 command metadata and retain raw requests; real npm HTTP, tarballs, installed
 consumers and Actions remain separate receiving work under O13/O22.
 
-Canonical release replays use the shared property registry/manifest and a new
-finite comparison witness; setup is not recorded as a completed comparison,
-and primary/writer/cleanup failures remain distinct. The older standalone
+Release receivers use native `oracleProperty` enumeration. The shared manifest
+marks `scripts.release-version`, `scripts.release-seed-failure`,
+`scripts.publish-command`, and `scripts.publish-http` as enumerated campaigns.
+Replay an exact case with its complete stable Vitest title, including the JSON
+history, under `scripts/oracle-scripts.vitest.config.mjs`; native enumeration
+replaces the earlier release-only PROPERTY/SEED/PATH index bridge. Every original
+finite case and comparison cut remains. Authored assertion failures retain their
+original error, while setup and cleanup failures remain driver errors.
+The older standalone
 `recordOracleReplay` comment promises never to throw, but a real RunDetails plus
 a directory channel throws EISDIR (P03). Its owner is the guarded replay/
 standalone recorder checks in `packages/db/tests/oracle-replay.test.ts`; the
