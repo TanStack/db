@@ -1213,9 +1213,32 @@ function compileQueryInternal(
     )
   }
 
+  // An included relation is one relation per parent route, so equal rows of
+  // different parents are distinct, and a limit applies within each parent.
+  const includeRouteIdentity = parentKeyStream
+    ? (row: unknown) => {
+        const route = getNamespacedRouteMetadata(row, mainSource)
+        const correlationIdentity = valueIdentity.equality(
+          route?.correlationKey,
+        )
+        return route?.parentContext != null
+          ? serializeValue([
+              correlationIdentity,
+              getParentContextIdentity(route.parentContext),
+            ])
+          : correlationIdentity
+      }
+    : undefined
+
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
-    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
+    pipeline = pipeline.pipe(
+      distinct(([_key, row]) =>
+        includeRouteIdentity
+          ? [includeRouteIdentity(row), row.$selected]
+          : row.$selected,
+      ),
+    )
   }
 
   const metadataSource = query.select
@@ -1293,23 +1316,10 @@ function compileQueryInternal(
   let resultPipeline: ResultStream
   let ownWindowFn: ((options: WindowOptions) => void) | undefined
   if (hasOrderBy || query.singleResult) {
-    // When in includes mode with limit/offset, use grouped ordering so that
-    // the limit is applied per parent (per correlation key), not globally.
     const includesGroupKeyFn =
-      parentKeyStream &&
+      includeRouteIdentity &&
       (resultLimit !== undefined || query.offset !== undefined)
-        ? (_key: unknown, row: unknown) => {
-            const route = getNamespacedRouteMetadata(row, mainSource)
-            const correlationKey = route?.correlationKey
-            const parentContext = route?.parentContext
-            if (parentContext != null) {
-              return serializeValue([
-                valueIdentity.equality(correlationKey),
-                getParentContextIdentity(parentContext),
-              ])
-            }
-            return valueIdentity.equality(correlationKey)
-          }
+        ? (_key: unknown, row: unknown) => includeRouteIdentity(row)
         : undefined
 
     const ordered = processOrderBy(

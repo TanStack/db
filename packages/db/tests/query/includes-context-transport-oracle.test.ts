@@ -88,7 +88,7 @@ import type {
  * Each grammar family has a small JavaScript model for its own result. The
  * production side compiles the matching live query and crosses the full
  * boundary. The suite expands the grammar across three materialization forms
- * and three checkpoints for 819 explicit observations. The public-field family
+ * and three checkpoints for 855 explicit observations. The public-field family
  * adds 1200 observations across five admission stages and four receiving paths.
  * This finite matrix does
  * not establish arbitrary query structures, values, or update histories.
@@ -118,8 +118,9 @@ const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 // projection; unmatched versus null correlation; immediate versus ancestor
 // scope; grouping versus aggregate placement; recursive boundary versus
 // evaluation phase; join-key side versus correlation attachment; union form;
-// derived-result boundary versus selection and nullability; user-name location
-// versus boundary and spelling; or public-surface shape. Within a family, the
+// derived-result boundary versus selection and nullability; DISTINCT relation
+// identity versus parent context and window; user-name location versus
+// boundary and spelling; or public-surface shape. Within a family, the
 // asserted parent and child changes distinguish route reuse from recomputation.
 // The fixtures bound the range to small finite source Collections, three public
 // forms, and the listed updates. New numeric values with the same relations
@@ -161,6 +162,10 @@ const routeContextGrammar = {
     boundaries: [`from-query-ref`, `joined-query-ref`, `union-all`] as const,
     selections: [`expression`, `functional`] as const,
     domains: [`non-null`, `nullable`] as const,
+  },
+  distinctRelation: {
+    contexts: [`correlation-only`, `parent-filter`] as const,
+    windows: [`unwindowed`, `ordered-limit`] as const,
   },
   namespaceCollision: {
     locations: [`parent-alias`, `selected-field`] as const,
@@ -233,6 +238,12 @@ type DerivedResultCell = {
   domain: (typeof routeContextGrammar.derivedResult.domains)[number]
 }
 
+type DistinctRelationCell = {
+  family: `distinct-relation`
+  context: (typeof routeContextGrammar.distinctRelation.contexts)[number]
+  window: (typeof routeContextGrammar.distinctRelation.windows)[number]
+}
+
 type NamespaceCollisionCell = {
   family: `namespace-collision`
   location: (typeof routeContextGrammar.namespaceCollision.locations)[number]
@@ -254,6 +265,7 @@ type GrammarCell =
   | JoinCell
   | UnionIdentityCell
   | DerivedResultCell
+  | DistinctRelationCell
   | NamespaceCollisionCell
   | PublicSurfaceCell
   | PublicFieldCell
@@ -321,6 +333,15 @@ const grammarCells: Array<GrammarCell> = [
       ),
     ),
   ),
+  ...routeContextGrammar.distinctRelation.contexts.flatMap((context) =>
+    routeContextGrammar.distinctRelation.windows.map(
+      (window): DistinctRelationCell => ({
+        family: `distinct-relation`,
+        context,
+        window,
+      }),
+    ),
+  ),
   ...routeContextGrammar.namespaceCollision.locations.flatMap((location) =>
     routeContextGrammar.namespaceCollision.boundaries.flatMap((boundary) =>
       routeContextGrammar.namespaceCollision.names.map(
@@ -365,6 +386,8 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${String(cell.key)} / ${cell.location} / ${cell.selection} / ${cell.destination}`
     case `public-field-overlap`:
       return `${cell.family} / ${cell.destination} / ${cell.operation} / ${cell.descriptor}`
+    case `distinct-relation`:
+      return `${cell.family} / ${cell.context} / ${cell.window}`
     case `public-surface`:
       return `${cell.family} / ${cell.shape}`
   }
@@ -2423,6 +2446,116 @@ async function runPublicFieldOverlapPaths(cell: PublicFieldOverlapCell) {
     )
 }
 
+type DistinctCandidateRow = CandidateRow
+
+// Law: an include is one relation per parent row, so DISTINCT removes equal
+// values within one parent's relation only. Each parent keeps the distinct
+// values of its group's candidates, at most its parameter under
+// `parent-filter`; `ordered-limit` keeps the largest of them.
+function expectedDistinctValues(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    parameter: number
+  }>,
+  candidates: ControlledCollection<DistinctCandidateRow>,
+  { context, window }: DistinctRelationCell,
+  parentId: number,
+): Array<number> {
+  const parent = parents.collection.get(parentId)!
+  const values = [
+    ...new Set(
+      candidates.collection.toArray
+        .filter(
+          (candidate) =>
+            candidate.parentGroup === parent.group &&
+            (context === `correlation-only` ||
+              candidate.value <= parent.parameter),
+        )
+        .map(({ value }) => value),
+    ),
+  ].sort((left, right) => left - right)
+  return window === `ordered-limit` ? values.slice(-1) : values
+}
+
+// Parents 1 and 2 share group 1, so they share a correlation key; under
+// `parent-filter` their parameters give them different parent contexts.
+// Candidates repeat value 1 within group 1 and across groups, so a DISTINCT
+// keyed on the value alone, or on the correlation key without the parent
+// context, hands a shared value to only one parent.
+async function runDistinctRelationCell(
+  cell: DistinctRelationCell,
+): Promise<void> {
+  const name = `distinct-${cell.context}-${cell.window}`
+  const parents = createGrammarCollection(`${name}-parents`, [
+    { id: 1, group: 1, parameter: 1 },
+    { id: 2, group: 1, parameter: 2 },
+    { id: 3, group: 2, parameter: 2 },
+  ])
+  const candidates = createGrammarCollection<DistinctCandidateRow>(
+    `${name}-candidates`,
+    [
+      { id: 10, parentGroup: 1, value: 1 },
+      { id: 20, parentGroup: 1, value: 1 },
+      { id: 30, parentGroup: 1, value: 2 },
+      { id: 40, parentGroup: 2, value: 1 },
+    ],
+  )
+
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ parent: parents.collection })
+      .orderBy(({ parent }) => parent.id)
+      .select(({ parent }) => {
+        let correlated = q
+          .from({ candidate: candidates.collection })
+          .where(({ candidate }) => eq(candidate.parentGroup, parent.group))
+        if (cell.context === `parent-filter`) {
+          correlated = correlated.where(({ candidate }) =>
+            lte(candidate.value, parent.parameter),
+          )
+        }
+        const distinctValues = correlated
+          .select(({ candidate }) => ({ value: candidate.value }))
+          .distinct()
+        return {
+          id: parent.id,
+          ...includeInEveryForm(
+            cell.window === `ordered-limit`
+              ? distinctValues
+                  .orderBy(({ candidate }) => candidate.value, `desc`)
+                  .limit(1)
+              : distinctValues,
+          ),
+        }
+      }),
+  )
+
+  const values = (rows: Iterable<{ value: number }>) =>
+    [...rows].map(({ value }) => value).sort((left, right) => left - right)
+  const assertResult = () => {
+    for (const parentId of [1, 2, 3]) {
+      expectEveryForm(
+        live.get(parentId)!,
+        values,
+        expectedDistinctValues(parents, candidates, cell, parentId),
+      )
+    }
+  }
+
+  await runWithCleanup(live, [parents, candidates], async () => {
+    await live.preload()
+    assertResult()
+
+    parents.write(`update`, { id: 2, group: 1, parameter: 1 })
+    assertResult()
+
+    candidates.write(`delete`, { id: 10, parentGroup: 1, value: 1 })
+    candidates.write(`insert`, { id: 50, parentGroup: 2, value: 2 })
+    assertResult()
+  })
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -2441,6 +2574,8 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runUnionIdentityCell(cell)
     case `derived-result`:
       return runDerivedResultCell(cell)
+    case `distinct-relation`:
+      return runDistinctRelationCell(cell)
     case `namespace-collision`:
       return runNamespaceCollisionCell(cell)
     case `public-field`:
@@ -2470,6 +2605,7 @@ declareOracle({
     expectedCandidateRows,
     expectedUnionRows,
     expectedDerivedRows,
+    expectedDistinctValues,
     expectedJoinRows,
     expectedCollisionRows,
     expectedPublicField,
@@ -2497,6 +2633,8 @@ describe(`correlated include route-context transport grammar`, () => {
       routeContextGrammar.derivedResult.boundaries.length *
         routeContextGrammar.derivedResult.selections.length *
         routeContextGrammar.derivedResult.domains.length +
+      routeContextGrammar.distinctRelation.contexts.length *
+        routeContextGrammar.distinctRelation.windows.length +
       routeContextGrammar.namespaceCollision.locations.length *
         routeContextGrammar.namespaceCollision.boundaries.length *
         routeContextGrammar.namespaceCollision.names.length +
@@ -2516,7 +2654,7 @@ describe(`correlated include route-context transport grammar`, () => {
       ).length *
         materializationForms.length *
         checkpoints.length,
-    ).toBe(819)
+    ).toBe(855)
     expect(
       grammarCells.filter((cell) => cell.family === `public-field`).length *
         fieldStages.length *

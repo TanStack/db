@@ -5722,6 +5722,50 @@ framework/provider receiving behavior, arbitrary graph topology, or Collection
 publication descriptor policy. Opaque-payload scan work remains with the
 includes-work owner; Collection attribution remains with virtual-row-fields.
 
+## Include DISTINCT per parent relation
+
+Law: an include is one relation per parent row
+(`packages/db/src/query/live/ARCHITECTURE.md`, include routes), so DISTINCT,
+ORDER BY, and LIMIT in an include child apply within each parent's relation.
+An equal child value under two parents stays in both; equal values under one
+parent collapse. Top-level DISTINCT is unchanged.
+
+Two owners enforce it. The scope-identity owner
+(`packages/db/tests/query/includes-scope-identity-oracle.ts`, run by
+`includes alpha-renaming across lexical scopes` in
+`packages/db/tests/query/includes-oracle.property.test.ts`) adds an include
+`members` dimension: member rows, DISTINCT member client ids, or the first
+DISTINCT client id by order with limit 1. Its plain recomputation applies those
+clauses per parent row. The `includes.scoped-distinct` campaign draws the
+DISTINCT variants with at least two parts and members and declares three
+reach states: an equal child value under two parents, an equal value twice
+under one parent, and the windowed cross-parent state. Each fixed and random
+60-run campaign reached every state 8 to 20 times. It crosses the four include
+bodies (direct, joined, `unionAll()` with an anchor join, `from()` subquery),
+`toArray()` and `materialize()`, eager and on-demand providers, and up to four
+source writes.
+
+The route-context transport owner
+(`packages/db/tests/query/includes-context-transport-oracle.test.ts`) adds a
+`distinct-relation` family. Parents share a correlation key, with and without a
+parent-referencing filter that gives them different parent contexts, and with
+and without an ordered limit, in all three materialization forms across the
+initial, parent-update, and child-update checkpoints.
+
+RED on the parent compiler: both scope campaigns and all four transport cells
+fail. Mutants: DISTINCT keyed on the correlation key without the parent context
+fails `distinct-relation / parent-filter / unwindowed`; DISTINCT keyed on the
+parent context without the correlation key fails both scope campaigns and all
+four transport cells; dropping DISTINCT in include children fails both scope
+campaigns and both unwindowed transport cells.
+
+Limits: nested includes (a DISTINCT grandchild under a list of children) and
+Collection-valued `include()` with an ordered limit have focused regressions in
+`packages/db/tests/query/includes.test.ts` (`distinct in child queries`) but no
+generator dimension. Optimistic, paginated, and lazy-loaded include histories
+with DISTINCT children remain with the includes-optimistic, pagination, and
+includes-temporal owners and are not exercised.
+
 ## Compound joins
 
 The high review extends the route-context owner with independent join source

@@ -59,6 +59,7 @@ import {
   updateModel,
 } from './includes-route-grammar-oracle.js'
 import {
+  SCOPED_DISTINCT_REACH_STATES,
   applyScopedWrite,
   canonicalScopedAliases,
   classifyScopedNaming,
@@ -67,6 +68,8 @@ import {
   createScopedSources,
   normalizeScopedRows,
   recomputeScopedRows,
+  scopedDistinctReachStates,
+  scopedDistinctScenarioArbitrary,
   scopedScenarioArbitrary,
   sortedRequests,
 } from './includes-scope-identity-oracle.js'
@@ -96,6 +99,7 @@ import type {
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 import type {
   ScopedAliases,
+  ScopedDistinctReachState,
   ScopedPart,
   ScopedRef,
   ScopedResultRow,
@@ -4660,8 +4664,10 @@ describe(`includes recompute oracle`, () => {
  * plain, ordered-and-limited, or DISTINCT body, and whole-row or field
  * selection. The include varies its body (direct, joined, a `unionAll()`
  * with an anchor join, or a `from()` subquery that reads the parent row),
- * `toArray()` or `materialize()`, its source, an extra child predicate, and
- * outer spread or field selection. Sources are
+ * `toArray()` or `materialize()`, its source, an extra child predicate,
+ * outer spread or field selection, and what each parent's relation holds:
+ * member rows, DISTINCT member client ids, or the first DISTINCT client id
+ * by order with limit 1. Sources are
  * eager or on-demand finite providers. Alias slots draw from a three-name
  * pool, so cross-scope reuse is frequent.
  *
@@ -4676,6 +4682,10 @@ describe(`includes recompute oracle`, () => {
  *
  * 1. The canonical all-distinct naming equals a plain recomputation of the
  *    current source rows. This judges the shape independently of aliases.
+ *    It also enforces that DISTINCT, ORDER BY, and LIMIT inside an include
+ *    apply to each parent's relation alone: an equal child value under two
+ *    parents stays in both. The campaign declares that reach, a value
+ *    repeated under one parent, and the windowed variant.
  * 2. The generated naming equals the canonical naming. This is the law.
  * 3. For on-demand sources, each Collection receives the same `loadSubset`
  *    WHERE clauses under both namings. Requests name Collection fields, not
@@ -4713,6 +4723,7 @@ async function expectScopedNamingRejected(
 async function expectScopedAlphaRenamingHolds(
   scenario: ScopedScenario,
   expectedAfterPreload?: Array<ScopedResultRow>,
+  reach?: (state: ScopedDistinctReachState) => void,
 ) {
   const naming = classifyScopedNaming(scenario.shape, scenario.aliases)
   if (naming === `sameScope`) {
@@ -4750,6 +4761,8 @@ async function expectScopedAlphaRenamingHolds(
         `${label}: loadSubset requests per Collection`,
       ).toEqual(sortedRequests(canonicalSources))
     }
+    for (const reached of scopedDistinctReachStates(scenario.shape, state))
+      reach?.(reached)
   }
 
   let primary: unknown
@@ -5000,6 +5013,41 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
       },
       // Each run builds four live queries; scale with the run budget.
       Math.max(5_000, oracleRuns(80) * 50),
+    )
+  }
+
+  // DISTINCT, ORDER BY, and LIMIT in an include apply to each parent's
+  // relation. Check 1 judges that law in every scenario; this campaign makes
+  // the states where it can fail frequent and declares their reach.
+  for (const { label, options } of generatedCampaigns(
+    60,
+    `includes.scoped-distinct`,
+    2357,
+  )) {
+    fcTest(
+      `keeps include DISTINCT within each parent's relation [${label}]`,
+      async () => {
+        const reach = createOracleReach(
+          `includes.scoped-distinct`,
+          SCOPED_DISTINCT_REACH_STATES,
+        )
+        await fc.assert(
+          fc.asyncProperty(scopedDistinctScenarioArbitrary, (scenario) => {
+            reach.beginHistory()
+            return expectScopedAlphaRenamingHolds(
+              scenario,
+              undefined,
+              (state) => reach.reach(state),
+            )
+          }),
+          options,
+        )
+        reach.assertReached()
+        process.stdout.write(
+          `includes scoped distinct ${label} reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        )
+      },
+      Math.max(5_000, oracleRuns(60) * 50),
     )
   }
 })
