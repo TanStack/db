@@ -124,3 +124,7 @@ pnpm --filter @tanstack/preact-db exec vitest run --maxWorkers=2 --coverage.enab
 pnpm exec eslint packages/preact-db/tests/window-render-oracle.test.tsx
 pnpm lint:changed packages/preact-db/tests/window-render-oracle.test.tsx
 ```
+
+The later [CI follow-up](2026-11-10-conversion-ci-followup.md) adds explicit
+calibration parameter types without changing emitted JavaScript. The
+source-bound mutation record above retains its original reviewed blob.

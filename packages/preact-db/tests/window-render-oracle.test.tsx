@@ -394,7 +394,10 @@ for (const [id, remote, keyed, move] of renderProperties) {
             {
               name: `aborted render changes the committed width`,
               law: `ordered window rows`,
-              corrupt: (trace, history) =>
+              corrupt: (
+                trace: ReadonlyArray<Observation>,
+                history: RenderHistory,
+              ) =>
                 trace.map((entry) =>
                   entry.checkpoint === `aborted`
                     ? {

@@ -60,3 +60,7 @@ The focused verification command, from `packages/db-ivm`, was:
 ```
 
 The final cold AFTER completed all 148 selected sites: 144 killed, 2 survived, and 2 crashed. All 144 prior semantic kills and all 148 stable identities match. Both runs have zero reused units, no exclusions, and no nondeterministic owners. The final-source hash comparison checked 3600 files.
+
+The later [CI follow-up](2026-11-10-conversion-ci-followup.md) moves a type-only
+import without changing emitted JavaScript. The source-bound mutation record
+above retains its original reviewed blob.

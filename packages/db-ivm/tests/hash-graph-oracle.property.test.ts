@@ -12,11 +12,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import type {
-  ConstructedHistory,
-  Observation,
-  Verdict,
-} from '../../db/tests/oracle-property.js'
 import {
   checkGraph,
   driveGraph,
@@ -25,6 +20,11 @@ import {
   graphWitnesses,
   isAcyclic,
 } from './hash-graph-shared-oracle'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from '../../db/tests/oracle-property.js'
 import type { GraphHistory } from './hash-graph-shared-oracle'
 
 // Retain the old topology grammar. The offset supplies randomized numeric
