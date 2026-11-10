@@ -1306,6 +1306,13 @@ type CallableRow = {
   hasOwnProperty?: unknown
   config: CallableContainer | null
 }
+
+function requiredFirstRow<T>(rows: ReadonlyArray<T>): T {
+  const row = rows[0]
+  if (row === undefined)
+    throw new Error(`the settled materialization checkpoint has no row`)
+  return row
+}
 type CallableHistory = {
   input: History[`input`]
   location: `root` | `nested`
@@ -1501,7 +1508,7 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
       createRoot((dispose) => {
         resources.defer(dispose)
         createRenderEffect(() => {
-          const current = container(query()[0])
+          const current = container(requiredFirstRow(query()))
           observed = { callable: current.format, value: current.format?.() }
           reads++
         })
@@ -1551,7 +1558,7 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
         }
         if (history.shape.startsWith(`shadow`))
           for (const fields of [
-            container(query()[0]),
+            container(requiredFirstRow(query())),
             ...retained.map((saved) => container(saved.row)),
           ]) {
             oracleAssertion(`current and retained user shadow ownness`, () =>
@@ -1817,8 +1824,8 @@ async function runReservedFieldHistory(
           observed = query()[0]![history.key]
         })
         createRenderEffect(() => {
-          observedKeys = Object.keys(query()[0])
-          observedOwn = Object.hasOwn(query()[0], history.key)
+          observedKeys = Object.keys(requiredFirstRow(query()))
+          observedOwn = Object.hasOwn(requiredFirstRow(query()), history.key)
         })
         createRenderEffect(() => {
           void query()[0]!.unchanged
@@ -1860,7 +1867,7 @@ async function runReservedFieldHistory(
         )
         oracleAssertion(`current own user field`, () =>
           expect(
-            Object.hasOwn(query()[0], history.key),
+            Object.hasOwn(requiredFirstRow(query()), history.key),
             `current own user field`,
           ).toBe(stage !== 3),
         )
