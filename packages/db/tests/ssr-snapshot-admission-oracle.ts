@@ -73,6 +73,31 @@ export const ssrSnapshotHistoryArbitrary = fc
         name: `server ${index + 1}`,
       })),
     }),
+    (value) => {
+      // Fixed and constructed histories use the same generated language.
+      // This inverse changes no generation: it reconstructs the pre-map count
+      // and optional action flags, while rejecting rows the mapper cannot author.
+      const history = value as SsrSnapshotHistory
+      if (
+        !Array.isArray(history.rows) ||
+        Array.from(history.rows).some(
+          (row, index) =>
+            row.id !== String(index + 1) || row.name !== `server ${index + 1}`,
+        )
+      )
+        throw new Error(`Invalid SSR snapshot rows`)
+      return {
+        preparation: history.preparation,
+        sourceState: history.sourceState,
+        count: history.rows.length,
+        serverWrite:
+          history.serverWrite === undefined ? false : history.serverWrite,
+        browserWrite:
+          history.browserWrite === undefined ? false : history.browserWrite,
+        browserPreload:
+          history.browserPreload === undefined ? false : history.browserPreload,
+      }
+    },
   )
 
 export function expectedSsrSnapshot(history: SsrSnapshotHistory) {
