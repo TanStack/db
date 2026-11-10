@@ -419,6 +419,14 @@ const ownerGroups: ReadonlyArray<
   ],
   // Owners of properties that a module names and a host file runs carry
   // that module as the fourth element.
+  ...[`electric`, `trailbase`, `rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
+        `adapter.${adapter}`,
+        `persisted-startup`,
+      ] as const,
+  ),
   [
     `convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
     `adapter.convex`,
@@ -961,7 +969,12 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
-  ...[`query.startup-ownership`, `adapter.convex.persisted-startup`].map(
+  ...[
+    `query.startup-ownership`,
+    ...[`convex`, `electric`, `trailbase`, `rxdb`, `powersync`].map(
+      (adapter) => `adapter.${adapter}.persisted-startup`,
+    ),
+  ].map(
     (property) =>
       [
         property,

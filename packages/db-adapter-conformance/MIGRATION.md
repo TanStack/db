@@ -528,3 +528,25 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
   - **Remaining work:** other persisted adapters have no receiving driver yet.
     This property does not cover on-demand persistence, reload, concurrent
     writers, failed I/O, arbitrary metadata or the rest of `P-*`/`S-*`.
+
+- **2026-11-10, persisted startup receiving audit.** The maintainer required
+  checking every applicable published source adapter. Electric, TrailBase,
+  RxDB and PowerSync now receive the same shared startup law and composition.
+  - **RED before production:** both Node hosts reject the original RxDB,
+    PowerSync and TrailBase implementations (32 failed comparisons total).
+    Actual worker/OPFS rejects 10 startup snapshots, including a real browser
+    PowerSync source. Electric and Convex pass without production changes.
+  - **Repairs:** RxDB and PowerSync select snapshots when a persistence
+    capability is present, including before its rows restore; their prior
+    unwrapped conditions remain. TrailBase hydrates before the complete eager
+    list's omission sweep while retaining its event fence and cancellation check.
+  - **GREEN:** 80 histories in each fixed/random campaign per adapter and Node
+    host, with separate enforced reach. All six pass 86 checks, comprising
+    1,920 generated histories, 56 fixed histories and six checker calibrations.
+    All 28 OPFS histories pass. Every new replay ID has two successful guarded
+    witnesses, one per Node host. Existing run budgets are unchanged.
+  - **Limits:** fresh complete source results, no mutation during initial
+    fetch, one wrapper persistence instance and the shared three-key domain.
+    Electric resume, deployed TrailBase service delivery, remote RxDB/PowerSync
+    replication, on-demand windows and concurrent writers retain other owners.
+    See the [versioned amendment](../../docs/contributing/oracle-reviews/2026-11-10-persisted-startup-adapters.md).

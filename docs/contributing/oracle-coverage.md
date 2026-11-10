@@ -7731,10 +7731,17 @@ complete-result and scope-local omission contract, and persistence's durable
 acceptance contract. The maintainer selected this shared owner on 2026-11-09.
 The independent set model has no Query cache, source diff, or restore algorithm.
 
-[Query](../../packages/query-db-collection/tests/persisted-startup-conformance-oracle.test.ts)
-and [Convex](../../packages/convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
-are real receiving paths: a QueryClient and a Convex JavaScript SDK over a
-controlled protocol socket. Each uses the same
+[Query](../../packages/query-db-collection/tests/persisted-startup-conformance-oracle.test.ts),
+[Convex](../../packages/convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[Electric](../../packages/electric-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[TrailBase](../../packages/trailbase-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[RxDB](../../packages/rxdb-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
+and [PowerSync](../../packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
+supply receiving paths. Query uses QueryClient; Convex uses its SDK and a
+controlled socket; Electric uses ShapeStream and controlled HTTP responses;
+TrailBase uses a controlled RecordApi and native stream; RxDB uses real memory
+storage; PowerSync uses real local SQLite through its Node and browser SDKs.
+Each uses the same
 [composition driver](../../packages/db-adapter-conformance/tests/persisted-startup-driver.ts),
 judgment, controlled storage, and real Node SQLite hosts. Per host, fixed and
 random campaigns each run 80 generated histories with separate enforced reach.
@@ -7751,24 +7758,33 @@ snapshots also check exact ownership at all four snapshot cuts. Startup checks
 the reload owner's one-full-row-read law before its own durable observation.
 Query's receiving driver preserves exact fetch-count and pending-fetch premises.
 The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
-runs all eight previous Query histories and four complete-snapshot Convex
-histories through the same composition and check on the real worker/OPFS host.
+runs eight Query histories and four complete-result histories for each of the
+other five adapters through the same composition and check on real worker/OPFS.
 
 The original Query omission fails startup on both Node hosts and OPFS. Convex
 without its first-result truncate, a survivor in the bare eager-source grammar,
 now fails the same comparison on all three hosts. Current Convex passes; this
-migration confirms no new Convex defect. The original Query baseline-await
-repair stays at its adapter boundary. The old Query-only startup model/runner
+migration confirms no new Convex defect. Electric also passes unchanged.
+The new receiving campaigns expose startup violations in RxDB, PowerSync and
+TrailBase before production edits, on both Node hosts and real OPFS. RxDB and
+PowerSync select snapshots for pending persisted baselines; TrailBase hydrates
+before its complete eager-list omission sweep. Unwrapped snapshot selection
+and TrailBase's event fence remain. The original Query baseline-await repair
+stays at its adapter boundary. The old Query-only startup model/runner
 and OPFS files are retired after receiving parity; Query-specific ownership
 laws and the unrelated direct-write/failure-fidelity repairs remain.
 
 Limits: eager startup, three string keys and numeric values, one persistence
-instance, one source scope plus an optional persisted peer. No on-demand window,
+instance, one source scope plus an optional persisted peer, and no mutation
+during the initial fetch. No on-demand window,
 concurrent tab writer, arbitrary metadata namespace, failed-I/O, or every
-intermediate-publication claim. Other adapters' persisted receiving paths remain
-open under this shared owner; their bare eager conformance does not establish
-persisted startup. See [migration status](../../packages/db-adapter-conformance/MIGRATION.md)
-and the [versioned evidence](oracle-reviews/2026-11-09-issue-2367.md).
+intermediate-publication claim. Electric's resumed delta-only streams belong to
+its recovery owner; a fresh full shape supplies this family's replacement
+premise. TrailBase has no deployed-server or SDK-wire claim, and the local RxDB
+and PowerSync sources supply no remote-replication claim. See
+[migration status](../../packages/db-adapter-conformance/MIGRATION.md),
+[original evidence](oracle-reviews/2026-11-09-issue-2367.md) and the
+[all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md).
 
 ## Adapter conformance: eager live sources (#2118)
 

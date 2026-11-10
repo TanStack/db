@@ -15,6 +15,10 @@ import {
   queryStartupHistories,
 } from '../../query-db-collection/tests/persisted-startup-driver'
 import { convexStartupAdapter } from '../../convex-db-collection/tests/persisted-startup-driver'
+import { electricStartupAdapter } from '../../electric-db-collection/tests/persisted-startup-driver'
+import { trailBaseStartupAdapter } from '../../trailbase-db-collection/tests/persisted-startup-driver'
+import { rxdbStartupAdapter } from '../../rxdb-db-collection/tests/persisted-startup-driver'
+import { powerSyncBrowserStartupAdapter } from '../../powersync-db-collection/tests/persisted-startup-browser'
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import {
   createBrowserWASQLitePersistence,
@@ -86,6 +90,18 @@ async function run() {
   try {
     await receive(`query`, queryStartupAdapter, queryStartupHistories)
     await receive(`convex`, convexStartupAdapter, persistedStartupHistories)
+    await receive(`electric`, electricStartupAdapter, persistedStartupHistories)
+    await receive(
+      `trailbase`,
+      trailBaseStartupAdapter,
+      persistedStartupHistories,
+    )
+    await receive(`rxdb`, rxdbStartupAdapter, persistedStartupHistories)
+    await receive(
+      `powersync`,
+      powerSyncBrowserStartupAdapter,
+      persistedStartupHistories,
+    )
     window.__persistedStartupConformance = { results }
   } catch (error) {
     window.__persistedStartupConformance = {

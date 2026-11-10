@@ -1,0 +1,85 @@
+/**
+ * A real local PowerSync SQLite table supplies the entire eager source result.
+ * The public onLoad hook holds that read while the oracle orders it against
+ * persisted restore. The shared model checks the second persistence store;
+ * source SQLite is not a reason to waive replacement in a wrapped Collection.
+ * Reload reads the unchanged table again. Remote PowerSync replication is
+ * outside this local-table witness.
+ */
+import { Schema, Table, column } from '@powersync/common'
+import { createCollection } from '@tanstack/db'
+import { z } from 'zod'
+import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  sortedStartupRows,
+  startupRows,
+} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+import { powerSyncCollectionOptions } from '../src'
+import type { CommonPowerSyncDatabase } from '@powersync/common'
+import type { PersistedStartupHistory } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+
+const schema = new Schema({ rows: new Table({ value: column.integer }) })
+const rowSchema = z.object({ id: z.string(), value: z.number() })
+export function powerSyncStartupAdapterFor(
+  open: (schema: Schema) => Promise<{
+    database: CommonPowerSyncDatabase
+    dispose: () => Promise<void>
+  }>,
+): PersistedStartupAdapter<PersistedStartupHistory> {
+  return {
+    scope: `collection`,
+    async create(persistence, history, id) {
+      const { database, dispose } = await open(schema)
+      await database.writeTransaction(async (tx) => {
+        for (const row of startupRows(history.next, 2))
+          await tx.execute(`INSERT INTO rows (id, value) VALUES (?, ?)`, [
+            row.id,
+            row.value,
+          ])
+      })
+      let pending: (() => void) | undefined
+      let available = false
+      const collection = createCollection(
+        persistedCollectionOptions({
+          ...powerSyncCollectionOptions({
+            id,
+            database,
+            table: schema.props.rows,
+            schema: rowSchema,
+            onDeserializationError: () => {},
+            onLoad: () =>
+              new Promise<void>((resolve) => {
+                pending = resolve
+              }),
+          }),
+          persistence,
+        }),
+      )
+      const deliver = async () => {
+        await untilStartup(() => pending !== undefined)
+        const release = pending!
+        pending = undefined
+        available = true
+        release()
+      }
+      return {
+        collection,
+        snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
+        deliver,
+        responseAvailable: () => available,
+        refresh: async () => {
+          const reloaded = collection.reload()
+          await deliver()
+          await reloaded
+        },
+        dispose: async () => {
+          pending?.()
+          await withOracleCleanup(() => collection.cleanup(), [dispose])
+        },
+      }
+    },
+  }
+}

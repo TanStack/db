@@ -137,11 +137,13 @@ export function rxdbCollectionOptions(
          */
         let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
-        // The initial fetch reads every document. When the Collection holds
-        // rows, such as a reload's kept rows, it is a snapshot that replaces
-        // them, so a row RxDB no longer has goes.
+        // Replace retained rows, including a persisted baseline whose restore
+        // has not completed. An empty, unwrapped Collection keeps ordinary
+        // commit ordering with pending mutations.
         begin({
-          snapshot: !collection._state.acceptedSyncedEntries().next().done,
+          snapshot:
+            !!params.metadata?.persistence ||
+            !collection._state.acceptedSyncedEntries().next().done,
         })
 
         while (!initialFetchComplete) {

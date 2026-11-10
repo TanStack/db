@@ -1584,6 +1584,9 @@ importers:
       '@powersync/node':
         specifier: 0.21.0
         version: 0.21.0(@powersync/common@2.5.0)(better-sqlite3@12.11.1)
+      '@powersync/web':
+        specifier: 2.6.0
+        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))
       '@types/debug':
         specifier: ^4.1.13
         version: 4.1.13
@@ -4692,6 +4695,9 @@ packages:
   '@journeyapps/wa-sqlite@1.7.2':
     resolution: {integrity: sha512-EVRMzqHtHgJBFcTGOgQ5/YlxrYFSXLFFztC5yo6+jQx2mqFR+a1kkLV4IirquiBzIonjmYXfBtvZ26fmI8r9Nw==}
 
+  '@journeyapps/wa-sqlite@2.0.10':
+    resolution: {integrity: sha512-6Wo5ZijOc4/6M9u+MDsJdW8zDCdrct/p+7LcG7S7CT5YKu42j6lshMfUvgtGYMaZeuH7rpQHULZupPTQFqbS0w==}
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -5377,6 +5383,18 @@ packages:
     resolution: {integrity: sha512-EiYxTbqbD6lfpDERLyECBsORDfrrgLSf4nmQ35Ug4cUNKFBwO4tGPZaquGeXbr4O+uJk0QFE/f6+33MLCDurIA==}
     peerDependencies:
       '@powersync/common': 2.0.0
+
+  '@powersync/shared-internals@1.5.0':
+    resolution: {integrity: sha512-dIaMenW6gJNyKzD93d4X4CiBtJxyJ63pvK2CYGjqBtVqubGBt9d+jg6V6JTKw4VLPjFCZh7/zrXMV34wl7kzGw==}
+    peerDependencies:
+      '@powersync/common': ^2.5.0
+
+  '@powersync/web@2.6.0':
+    resolution: {integrity: sha512-/B8u/sPHyNiPH1bj+vOfN/9sHlbp9lwQGtS6BHJJjqWlhBaUxzh4xQMydyQcS6puHaDXzddpOlkZIvTLOTLMnw==}
+    hasBin: true
+    peerDependencies:
+      '@powersync/common': ^2.5.0
+      '@powersync/shared-internals': ^1.5.0
 
   '@publint/pack@0.1.7':
     resolution: {integrity: sha512-4EDEmvxWtgsCnnVeBvtFIFZtUhPPt1+bA9JrSwU4Sa//6oKtzCSlGGXYJr44OD9aGISymbieJ4mCKHUygUDU+g==}
@@ -16892,6 +16910,8 @@ snapshots:
 
   '@journeyapps/wa-sqlite@1.7.2': {}
 
+  '@journeyapps/wa-sqlite@2.0.10': {}
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -17469,6 +17489,18 @@ snapshots:
   '@powersync/shared-internals@1.1.1(@powersync/common@2.5.0)':
     dependencies:
       '@powersync/common': 2.5.0
+
+  '@powersync/shared-internals@1.5.0(@powersync/common@2.5.0)':
+    dependencies:
+      '@powersync/common': 2.5.0
+
+  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))':
+    dependencies:
+      '@journeyapps/wa-sqlite': 2.0.10
+      '@powersync/common': 2.5.0
+      '@powersync/shared-internals': 1.5.0(@powersync/common@2.5.0)
+      comlink: 4.4.2
+      commander: 12.1.0
 
   '@publint/pack@0.1.7':
     dependencies:

@@ -11,9 +11,16 @@ function checkStartupConformance(result: StartupConformanceResult) {
   expect(
     result.results.filter((item) => item.adapter === `query`),
   ).toHaveLength(queryStartupHistories.length)
-  expect(
-    result.results.filter((item) => item.adapter === `convex`),
-  ).toHaveLength(persistedStartupHistories.length)
+  for (const adapter of [
+    `convex`,
+    `electric`,
+    `trailbase`,
+    `rxdb`,
+    `powersync`,
+  ])
+    expect(
+      result.results.filter((item) => item.adapter === adapter),
+    ).toHaveLength(persistedStartupHistories.length)
   expect(result.results.flatMap(({ violations }) => violations)).toEqual([])
 }
 declareOracle({ check: [checkStartupConformance] })

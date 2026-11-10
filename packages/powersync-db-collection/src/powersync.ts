@@ -625,9 +625,11 @@ function createPowerSyncCollectionConfig<
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
             {
-              // When the Collection holds rows, such as a reload's kept rows,
-              // the load of every row replaces them.
-              snapshot: !collection._state.acceptedSyncedEntries().next().done,
+              // Replace retained rows, including persisted rows whose restore
+              // has not completed when this load starts.
+              snapshot:
+                !!params.metadata?.persistence ||
+                !collection._state.acceptedSyncedEntries().next().done,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,
