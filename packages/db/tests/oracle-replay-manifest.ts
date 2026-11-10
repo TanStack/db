@@ -1201,10 +1201,6 @@ const replayTestNames = new Map([
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
   [`oracle.declared-reach`, `reach ledgers refine the declared reach model`],
-  [
-    `includes-work.projection-payload`,
-    `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
-  ],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1302,10 +1298,6 @@ const replayTestNames = new Map([
   [
     `ivm.distinct-representatives-unit-split`,
     `ivm\\.distinct-representatives-unit-split > random seed`,
-  ],
-  [
-    `includes.bucket-collisions`,
-    `preserves colliding active buckets.*(random|replay)`,
   ],
   [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [
@@ -1466,6 +1458,25 @@ const enumeratedProperties = new Set([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  // Includes registrations now use the framework's canonical campaign name.
+  if (
+    property.startsWith(`includes.matrix.`) ||
+    property.startsWith(`includes-collection.`) ||
+    property.startsWith(`includes-cross-formulation.`) ||
+    property.startsWith(`includes-optimistic.`) ||
+    property.startsWith(`includes-publication.`) ||
+    property.startsWith(`includes-query-shape.`) ||
+    property.startsWith(`includes-work.`) ||
+    [
+      `includes.alpha-renaming`,
+      `includes.scoped-alpha-renaming`,
+      `includes.incremental-history`,
+      `includes.nested-scalar-materialization`,
+      `includes.optimistic-convergence`,
+      `includes.bucket-collisions`,
+    ].includes(property)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (property.startsWith(`pagination.limit-admission-`)) {
