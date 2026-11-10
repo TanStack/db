@@ -1,0 +1,332 @@
+{
+  "files": [
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/partial-v9-validation.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/partial-v9-validation.md",
+      "bytes": 6577
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/prep-pr/follower-batch/publication-preparation/candidate-integrity-v2/report-v2.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/prep-pr/follower-batch/publication-preparation/candidate-integrity-v2/report-v2.md",
+      "bytes": 2419
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/follower/report.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/follower/report.md",
+      "bytes": 7518
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/prep-pr/replay-batch/evaluation/report-v3.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/prep-pr/replay-batch/evaluation/report-v3.md",
+      "bytes": 15091
+    },
+    {
+      "path": "docs/misfits-survey/updates/issue-2296-comment-6617143865.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/updates/issue-2296-comment-6617143865.md",
+      "bytes": 5093
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2317.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2317.md",
+      "bytes": 3440
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2352-2353.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2352-2353.md",
+      "bytes": 5056
+    },
+    {
+      "path": "docs/misfits-investigations/pilot-2026-10-29/summary.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-investigations/pilot-2026-10-29/summary.md",
+      "bytes": 10913
+    },
+    {
+      "path": "docs/misfits-survey/intake-2026-11-09.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/intake-2026-11-09.md",
+      "bytes": 23077
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/evaluation-current-main-v3.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/evaluation-current-main-v3.md",
+      "bytes": 11373
+    },
+    {
+      "path": "docs/misfits-survey/refresh-2026-11-02/session-prompt-updates.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/refresh-2026-11-02/session-prompt-updates.md",
+      "bytes": 19808
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/report-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/report-v1.md",
+      "bytes": 5224
+    },
+    {
+      "path": "docs/misfits-survey.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey.md",
+      "bytes": 226413
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/next-held-validation-plan-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/first-transfer-v2/semantic-gate-v3/guard8-account-v1/next-held-validation-plan-v1.md",
+      "bytes": 18755
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/report-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/report-v1.md",
+      "bytes": 13816
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2334-2335.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2334-2335.md",
+      "bytes": 5078
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2315.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2315.md",
+      "bytes": 3856
+    },
+    {
+      "path": "docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/report.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-investigations/pilot-2026-10-29/c-ordered-loading-lifetimes/report.md",
+      "bytes": 21229
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md",
+      "source": "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md",
+      "bytes": 3764
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2337-2342.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2337-2342.md",
+      "bytes": 8259
+    },
+    {
+      "path": "docs/misfits-investigations/revalidate-2337-2342/summary.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-investigations/revalidate-2337-2342/summary.md",
+      "bytes": 4530
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/follower/final-code-freeze-v2.json",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/follower/final-code-freeze-v2.json",
+      "bytes": 3060
+    },
+    {
+      "path": "docs/misfits-survey/intake-2026-11-10.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/intake-2026-11-10.md",
+      "bytes": 23845
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/final-handoff-receipt-v3.json",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/final-handoff-receipt-v3.json",
+      "bytes": 1633
+    },
+    {
+      "path": "docs/misfits-survey/refresh-2026-11-02/categories.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/refresh-2026-11-02/categories.md",
+      "bytes": 23653
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2344-2347.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2344-2347.md",
+      "bytes": 4954
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/ordered/strategy-progress-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/ordered/strategy-progress-v1.md",
+      "bytes": 14020
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/partial-v10-validation.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/partial-v10-validation.md",
+      "bytes": 5170
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/native-shutdown-v1/EV-NATIVE-SHUTDOWN-001-result.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/native-shutdown-v1/EV-NATIVE-SHUTDOWN-001-result.md",
+      "bytes": 7254
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/status.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/status.md",
+      "bytes": 21464
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/independent-audit-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/independent-audit-v1.md",
+      "bytes": 885
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/current-main-candidate-freeze-v3.json",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/current-main-candidate-freeze-v3.json",
+      "bytes": 2651
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2349.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2349.md",
+      "bytes": 3756
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/v5-source-diagnosis-and-minimal-repair-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/v5-source-diagnosis-and-minimal-repair-v1.md",
+      "bytes": 4989
+    },
+    {
+      "path": "docs/misfits-survey/supplement-2329.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/supplement-2329.md",
+      "bytes": 2585
+    },
+    {
+      "path": "docs/misfits-cluster-investigation-workflow.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-cluster-investigation-workflow.md",
+      "bytes": 29892
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-repair.md",
+      "source": "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-repair.md",
+      "bytes": 10376
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/report-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/report-v1.md",
+      "bytes": 13412
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3/result-qualification-v1.json",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3/result-qualification-v1.json",
+      "bytes": 1488
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/original-claim-accounting-addendum-v4.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/metadata/original-claim-accounting-addendum-v4.md",
+      "bytes": 7727
+    },
+    {
+      "path": ".agents/skills/oracle-authoring/SKILL.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/.agents/skills/oracle-authoring/SKILL.md",
+      "bytes": 5710
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3/handoff-v1.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/replay-H02-diagnosis-v1/neighbor-ownership-current-main-v3/handoff-v1.md",
+      "bytes": 999
+    },
+    {
+      "path": "docs/misfits-survey/refresh-2026-11-02/updates/issue-2315-comment-6579843541.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-survey/refresh-2026-11-02/updates/issue-2315-comment-6579843541.md",
+      "bytes": 3252
+    },
+    {
+      "path": "docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/report.md",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-investigations/pilot-2026-10-29/c-query-subset-errors/report.md",
+      "bytes": 39956
+    }
+  ],
+  "directories": [
+    {
+      "path": "docs/misfits-repairs/2026-10-29/prep-pr/replay-batch/evaluation/initial-preload-repair-v1",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/prep-pr/replay-batch/evaluation/initial-preload-repair-v1",
+      "topLevelMarkdown": [
+        "independent-source-review-v1.md",
+        "r03-oracle-repair-plan-v1.md",
+        "r03-e08-independent-source-acceptance-v2.md",
+        "minimal-production-repair-plan-v1.md",
+        "independent-plan-review-v1.md",
+        "final-r02-handoff-v2.md",
+        "causal-correction-addendum-v1.md",
+        "r03-targeted-driver-plan-v2.md",
+        "independent-candidate-c2-finite-review-v1.md",
+        "successor-enforcement-inventory-v2.md",
+        "final-r02-handoff-v1.md",
+        "independent-runtime-binding-review-v1.md",
+        "independent-candidate-c3-full-primary-review-v1.md",
+        "independent-gate-review-v5.md",
+        "r03-oracle-repair-plan-feasibility-v1.md",
+        "minimal-production-repair-plan-v2.md",
+        "independent-source-review-v2.md",
+        "authority-refinement-v1.md",
+        "bounded-keyed-failure-addendum-v3.md",
+        "plan-and-receiving-inventory-v1.md"
+      ]
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/integration/combined-C2-R03-diagnosis-v1",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/integration/combined-C2-R03-diagnosis-v1",
+      "topLevelMarkdown": [
+        "R03-E03-E04-launcher-gap-independent-review-v1.md",
+        "R03-E07-v1-source-and-recipe-blockers-v1.md",
+        "R03-lifecycle-listener-selector-v2-independent-D02-result-v1.md",
+        "R03-E07-v2-independent-source-and-staged-recipe-review-v1.md",
+        "R03-original-guarded-replay-independent-classification-v1.md",
+        "R03-E05-independent-partial-finite-result-v1.md",
+        "R03-next-oracle-stage-independent-suitability-v1.md",
+        "R03-D04-publication-timing-v2-independent-static-acceptance-v1.md",
+        "R03-D04-result-and-evaluation-plan-v2-independent-review-v1.md",
+        "R03-lifecycle-ready-receiver-proposal-v1-independent-source-only-review-v1.md",
+        "R03-E06-independent-native-selector-and-recipe-review-v1.md",
+        "R03-final-drain-calibration-v2-independent-admission-v1.md",
+        "R03-E09-R02-independent-bounded-result-review-v1.md",
+        "R03-frozen-overlay-independent-admission-review-v1.md",
+        "R03-E01-v1-interim-source-review-v2.md",
+        "R03-E06-request-error-ownership-plan-independent-review-v1.md",
+        "R03-lifecycle-listener-diagnosis-v1-independent-static-acceptance-v1.md",
+        "R03-S02-independent-execution-classification-v1.md",
+        "R03-finite-seven-independent-review-and-campaign-admission-v1.md",
+        "R03-E09-v1-independent-source-and-staged-recipe-review-v1.md",
+        "R03-E09-R01-independent-bounded-result-review-v1.md",
+        "R03-lifecycle-listener-selector-v2-independent-static-acceptance-v1.md",
+        "R03-D04-evaluation-repair-plan-v1.md",
+        "R03-E01-v2-own-verdict-pre-freeze-challenges-v1.md",
+        "R03-trace-plan-v1.md",
+        "R03-deciding-site-independent-execution-review-v1.md",
+        "R03-own-verdict-account-independent-static-review-v1.md",
+        "R03-final-campaign-pair-independent-classification-v1.md",
+        "R03-D03-covering-authority-independent-reconciliation-review-v1.md",
+        "R03-E05-independent-source-and-finite-admission-v1.md",
+        "R03-E07-R03-independent-partial-result-and-quiet-successor-review-v1.md",
+        "R03-lifecycle-cuts-v1-independent-static-review-v1.md",
+        "diagnostic-result-v1.md",
+        "R03-deciding-site-overlay-independent-admission-v1.md",
+        "R03-D04-evaluation-repair-plan-v2.md",
+        "R03-lifecycle-ready-receiver-d03-v1-independent-static-acceptance-v1.md",
+        "R03-lifecycle-cuts-v4-independent-finite-result-v1.md",
+        "R03-three-lifecycle-dimensions-independent-plan-review-v1.md",
+        "R03-E01-v1-interim-source-review-v1.md",
+        "R03-E08-R02-distinct-window-premise-diagnosis-and-source-plan-v1.md",
+        "R03-E09-R03-independent-bounded-control-result-review-v1.md",
+        "R03-E08-v1-independent-source-and-staged-recipe-review-v1.md",
+        "R03-final-drain-calibration-v2-independent-RED-review-v1.md",
+        "R03-E01-v2-request-identity-challenge-v1.md",
+        "R03-trace-plan-precision-addendum-v1.md",
+        "R03-E08-R02-independent-partial-result-and-refinement-premise-review-v1.md",
+        "R03-E06-independent-partial-result-and-health-ownership-review-v1.md",
+        "R03-lifecycle-cuts-v4-independent-static-acceptance-v1.md",
+        "R03-driver-only-independent-review-v1.md",
+        "R03-E08-R01-independent-bounded-result-review-v1.md",
+        "R03-grouped-account-repair-v3-independent-GREEN-review-v1.md",
+        "R03-shape-and-status-addendum-v1.md",
+        "R03-covering-authority-reconciliation-v1.md",
+        "R03-lifecycle-listener-diagnosis-v1-independent-selection-result-v1.md",
+        "R03-E06-request-error-ownership-correction-plan-v1.md"
+      ]
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/integration-current-main-v1",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/integration-current-main-v1",
+      "topLevelMarkdown": [
+        "report-v1.md"
+      ]
+    },
+    {
+      "path": "docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/prep-pr-new-delta-v1",
+      "source": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-survey-open-items/docs/misfits-repairs/2026-10-29/external-reviews-2026-10-30/retirement/prep-pr-new-delta-v1",
+      "topLevelMarkdown": [
+        "whole-review-plan-v1.md",
+        "workflow-adapter-v1.md",
+        "evidence-amendment-draft-v1.md",
+        "evidence-amendment-v2.md",
+        "report-v1.md"
+      ]
+    }
+  ],
+  "missing": []
+}

@@ -1,0 +1,25 @@
+{
+  "sourceChecks": {
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts": true,
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts": true,
+    "packages/db/tests/oracle-config.ts": true,
+    "packages/db/tests/oracle-replay-manifest.ts": true,
+    "packages/db/tests/sync-metadata-session-oracle.ts": true,
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.test.ts": true,
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.ts": true,
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-write-work.test.ts": true
+  },
+  "artifacts": {
+    "claims.jsonl": "35fdc8ca1d1ab4f6eaeb010eee396d86512051d1c819cb16555bab189ee934d4",
+    "evaluation-current-main-v3.md": "e37bcb5eeee4b2bdbfc119da76239fdd4f66e478c0fd3eaef7cb6965efdf92b2",
+    "current-main-candidate-freeze-v3.json": "ed19008123037e5090fb946a8c124a1460bb05389740217e43e8891cdf81086e",
+    "current-main-candidate-v3.patch": "3b82a8471cae91982e0085dade060804354904ffa839405856eef7c50ca243a9",
+    "prep-code-review-current-main-v2.md": "753031910a76cc7f72cf6a9c374d2bd6ddc1a76eb3e753e87b37fae82aa1eeba",
+    "prep-code-review-doc-addendum-v3.md": "b1fbbc5df212f3693492180913bf07519befbff94f5eb71f090d84dbac665324",
+    "prep-simplification-current-main-v2.md": "560f721c793ff77d0a16e6ad296132bfc08f11e7deeb683571d2e894845d81b5",
+    "prep-simplification-meta-ext-006-current-main-v2.patch": "377051d7942a44949f96e35b83039f9165aa20504d1669c0554f463a8e3d257b"
+  },
+  "heavyCommandsRunning": false,
+  "resourceSlot3": "released",
+  "published": false
+}

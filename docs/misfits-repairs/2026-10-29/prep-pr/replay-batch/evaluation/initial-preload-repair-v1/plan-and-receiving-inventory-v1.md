@@ -1,0 +1,31 @@
+# Initial/preload settled-window test gate
+
+Status: test-only plan. Production remains builder SHA256 `08a621237296456aad194a4b5087889016cd78049e570a1af6a21f471b53a8f2`. REPLAY-COMPOSITION-R02 names the final quiet empty result instead of model rank 10. Earlier window-fulfillment timing is a separate hypothesis.
+
+## Law and repair boundary
+
+ARCHITECTURE.md, Atomic window publication and normative laws 9 and 10, already require the complete chosen window after successful remaining acquisition work settles. A retired older failed acquisition cannot hold the newer successful window forever. The model remains finite provider truth, relational filtering, ordering and slicing. No new early-return timing rule or model change is proposed.
+
+The exact shared replay is seed -1820259748, path 264:3:2:4:8:8:5:5:6:6:6:6 of replay.ordered-preload-recovery: window(0,1), settle newest successfully while holding later work, reject oldest while releasing the hold, window(0,1); initial/preload, inner join, on-demand markers, ascending ranks 10..50, no include/peer/ties. Keep that original property and its arbitrary mapping unchanged so its coordinates remain meaningful.
+
+## Materially affected receiving inventory, before test edits
+
+| Path | Material premise and controls | Promised cuts and inventory |
+| --- | --- | --- |
+| Primary controlled core replay | Indexed on-demand root; marker-first inner-join growth; initial preload overlaps window calls; old root fails and retires; newer replacement succeeds while another root participant remains held. Existing driver already models and rejects the final quiet defect. | Adapter-observed root/marker attempts, exact options, result kinds, outcomes, abort/unload and held work establish reach before the final model comparison. Preserve final quiet comparison before recovery truncate. Extend the primary owner with a focused generated family and exact replay input. |
+| Actual default-cache Query marker adapter | Same causal initial/preload sequence, indexed controlled root, real QueryClient/queryCollectionOptions marker adapter with default subset-key cache. Hold actual queryFn delivery, not only returned acquisition receipts. Record adapter acquisition separately from Query transport, because several acquisitions may share a fetch. No custom queryKey hash/cache workaround. | Public reads/events, move receipts, preload settlement, current successful acquisitions and exact retirement at quiet cut. Compare final rows with the same independent model and shared judgment. Declare measured reach for this receiving path before comparison, including on RED. |
+| Root result shape | Existing core root always returns Promise; a real Query marker may return Promise or cached true. A successful root replacement that is literal true versus asynchronous is a discriminating neighbor identified in source review. | Inventory each observed result kind; never call cached true asynchronous evidence. Add supported result-shape variation only with rows fully applied before true, and preserve ordinary Promise coverage. A missing shape remains a stated limit until measured. |
+| Adjacent initial/ordinary/retirement behavior | Initial success without failure; established ordinary lazy failure; existing settled join/include resolve/reject/retire cases; older rejection after newer success; current failure retains preceding snapshot. | Existing shared Query window receiver provides ordinary and retirement controls. New focused family must distinguish initial preload from established operation and old rejection from current failure. Controls are separate executions, never borrowed from an aggregate RED exit. |
+| Other adapters, framework hosts and Effects | No claim yet across persistence, Electric, TrailBase, React first commit, or Effect callback boundaries. | Controlled core plus actual Query supplies the present pre-edit gate only. Additional receiving paths need their own witnesses if a proposed repair changes their behavior. |
+
+## Test-only sequence
+
+1. Extend the existing primary owner with a focused generated initial/preload window family; reuse a shared history description and retain the exact four-action replay through its existing production driver/model/comparison. Preserve all existing campaigns and budgets.
+2. Add declared reach recorded at adapter/operation boundaries before assertions can throw: initial pending window, marker-first growth while the old root waits, old-root rejection, old-root retirement, successful replacement with another participant pending, latest success/older rejection, and final quiet model comparison. A state counts only when observed, never because a command was requested.
+3. Add the actual default-cache Query receiving driver for the same family and finite relational model. Inventory generic versus cache/result-shape branches and record reads/events/operation outcomes independently. Always drain and clean up without replacing the semantic failure.
+4. Freeze exact test sources, production identity, command/environment and artifact inventory in a new epoch. Run primary and actual Query comparisons serially on unchanged production in slot2, maxWorkers=1. Obtain semantic RED at the final quiet value comparison and measure generated reach. Run positive initial, ordinary, and retirement neighbors separately.
+5. Send root the frozen tests, raw runs/receipts, reach and causal repair plan. Wait for root review before any production edit. No model, budget, expectation relaxation, optional simplification, commit, push or PR in this test-only gate. SIMP-REPLAY-001 remains pending and unapplied.
+
+## Causal hypothesis to challenge
+
+Source-only analysis suggests an old root failure leaves sync-global orderedLoadFailed set while a marker-triggered keyed root participant remains pending. A retry begun before that participant settles cannot clear the flag; a synchronous successful replacement adds no new promise; final success then cannot schedule/flush. This is a hypothesis, not a proven causal edit. Compare sibling-before versus sibling-after retry, async versus literal-true replacement, obsolete older rejection, current failure, and sync-run fencing before selecting a production repair.

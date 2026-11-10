@@ -1,0 +1,11 @@
+{
+  "archiveSourceBytes": 1317994614,
+  "extraHandoffFiles": 3,
+  "codeIntegrity": "code-integrity.json",
+  "originalLocalArchiveFileEntries": 73674,
+  "excludedVendorCopies": 35,
+  "excludedSourceSha256": "19e00833036e7d25f20da1bc70dd4b19dd3081c051bfc9eea8f70d026534cad4",
+  "includedSourceEntries": 73639,
+  "allIncludedArchiveGitBlobsMatchSourceBytes": true,
+  "fullArchiveExported": false
+}

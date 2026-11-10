@@ -1,0 +1,38 @@
+{
+  "version": 3,
+  "at": "2026-10-30T04:05:30.196282+00:00",
+  "workspace": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-metadata-review-current-main",
+  "head": "ea769ec8d3b4c1bffc286e1d88b1b0c553c5cc5f",
+  "mergeHead": "9cfa11fc712866f8f276e85762865ebb8bd49cbe",
+  "netPatchSha256": "3b82a8471cae91982e0085dade060804354904ffa839405856eef7c50ca243a9",
+  "trackedPaths": [
+    "docs/contributing/oracle-coverage.md",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts",
+    "packages/db/tests/oracle-config.ts",
+    "packages/db/tests/oracle-replay-manifest.ts",
+    "packages/db/tests/sync-metadata-session-oracle.ts"
+  ],
+  "untrackedPaths": [
+    "docs/contributing/oracle-reviews/2026-10-30-kept-metadata-durability.md",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.test.ts",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.ts",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-write-work.test.ts"
+  ],
+  "sourceHashes": {
+    "docs/contributing/oracle-coverage.md": "1c84ce5763a6dfc34dc49e075b9399dfec41d367123dfa6556577bb78c2f62a9",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts": "0a568a76809363068f885c132ed66ecea74bbbc984d5d27116ec852b9d83bac0",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts": "a6387073a9cd3fa08c2d553d0e30f949a0df53c11644080985e2113698b1c47c",
+    "packages/db/tests/oracle-config.ts": "4b471212918f3ab7bf321807d4bb9d3aaa726053a74c30804ba0b79332be0602",
+    "packages/db/tests/oracle-replay-manifest.ts": "c4b646bbf631d1da8151cf590bf111289545b29d2eaf65e1f80ec57a33950307",
+    "packages/db/tests/sync-metadata-session-oracle.ts": "584d767b43aa7a9f4661c65fa431ac579d0037e5e1fa8415e693817b0dae635c",
+    "docs/contributing/oracle-reviews/2026-10-30-kept-metadata-durability.md": "f9118804d45103fb0653785d15437c9342361521555643479e76bddb1545c20b",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.test.ts": "68315184b9fb6ac284b92b5af8ad487815e571e4ba40f04055a19083dfb3bc99",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-sqlite-driver.ts": "99ec1af0f43f4885558c61296c66f2a42226fae7be58b32efaa970c831cde059",
+    "packages/db-sqlite-persistence-core/tests/sync-metadata-write-work.test.ts": "8c0e19497c3d8d1590d19f48333064a138991677b8bf5b06bc2ef58cd4d6e5cb"
+  },
+  "semanticSourcesUnchangedSinceV2": true,
+  "productionDiffAgainstMain": false,
+  "dependencyManifestDiff": false,
+  "published": false
+}

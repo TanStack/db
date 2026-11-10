@@ -1,0 +1,10 @@
+{
+  "textBlocks": 62,
+  "everyPromptRequiresIntake": true,
+  "allHistoricalIssueReferencesPreserved": true,
+  "savedCoordinatesPreservedAndQualified": true,
+  "p1PrimaryComparisonRolesExplicit": true,
+  "mainPromptsPrecedeAdditions": true,
+  "noMachineAbsolutePaths": true,
+  "newReproductions": false
+}

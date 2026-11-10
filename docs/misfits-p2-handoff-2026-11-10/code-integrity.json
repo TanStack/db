@@ -1,0 +1,20 @@
+[
+  {
+    "branch": "codex-misfits-h02-progress-wip",
+    "commit": "6320d060d23ab8e1fc85b94e41bec02a0cf068b8",
+    "sourceFileBytesMatch": true,
+    "changedPaths": 35
+  },
+  {
+    "branch": "codex-misfits-h02-candidate-controls-wip",
+    "commit": "37974065d2c410cc5a383ce0074cd047ddfc644c",
+    "sourceFileBytesMatch": true,
+    "changedPaths": 54
+  },
+  {
+    "branch": "codex-misfits-raw-publication-reference",
+    "commit": "79eec745f54624b461026ee5052d57d6f7bd969d",
+    "sourceFileBytesMatch": true,
+    "changedPaths": 347
+  }
+]

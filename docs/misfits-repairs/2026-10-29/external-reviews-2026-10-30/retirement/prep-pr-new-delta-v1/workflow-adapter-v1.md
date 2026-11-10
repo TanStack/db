@@ -1,0 +1,5 @@
+# prep-pr workflow adapter
+
+Read /Users/kyle.mathews/programs/linux-config/skills/prep-pr/SKILL.md and references/workflow.md in full. The current runtime exposes no Skill or Task tool and no installed code-review/code-simplifier SKILL.md was found under the Codex skills/plugin roots. Two collaboration agents were launched together for the named quality-review and simplification roles; quality review can delegate a parallel audit. Both are read-only and explicitly ignore processdocs and generated Superpowers artifacts. All findings will enter the lossless evaluate-review ledger before any optional suggestion is presented.
+
+Root-authorized scope is only the new two-file test+coverage delta. Existing exact-head external evaluation and independent oracle audit remain frozen. No behavioral source edits occurred after final test evidence. Fresh origin/main fetch is recorded in review-input-v1.json. No commit/push/changeset/PR-body phase is authorized before root's final concrete human gate.

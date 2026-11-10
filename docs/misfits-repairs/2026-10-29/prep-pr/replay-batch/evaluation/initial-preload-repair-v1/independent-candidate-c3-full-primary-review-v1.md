@@ -1,0 +1,17 @@
+# Independent full-primary successor review
+
+Accepted as additional executed evidence for candidate c2. The config-only c3 successor changes no production, test, model, grammar, comparison, recorder, runtime byte or run budget. All1414 original c2 files remain identical. The only added inventory bindings are the recovered own-dist resolver (`13e16d65011a628415bd5e305fa85187de926d3367c8d1afc1c18566f65fd877`) and its existing freshness helper. All911 archived snapshots and139 actual source-map source bodies match the c3 manifest.
+
+F01 runs the complete primary owner normally on source:59 tests pass, no type errors, empty oracle override environment,111.421seconds. The source retains the original300/300 histories and all other pre-existing budgets. F02 freshly rebuilds minified DB with all c2 bound bytes unchanged. F03 replays the original guarded property/seed/path on source; its witness executes once and passes.
+
+F04 explicitly selects the own-dist configuration and runs the complete primary owner normally:59 tests pass, empty oracle override environment,110.334seconds. The recovered config maps own source runtime modules to their corresponding emitted ESM files and throws when a runtime module has no built output. Only files containing import/export/type/interface declarations may fall back to source, with their dependencies passing through the same resolver. The freshness assertion runs before the suite. Its bytes equal the previously preserved resolver. This static config/build/map association establishes the intended own-minified path within the recorded environment; it is not a full loaded-module trace. The dedicated config does not run a typecheck; type evidence remains the source/default and earlier explicit type runs.
+
+F05 replays `replay.ordered-preload-recovery`, seed `-1820259748`, path `264:3:2:4:8:8:5:5:6:6:6:6`, through that explicit own-minified configuration. The preserved runner command includes the config and the witness executes once, passes, and reports `numRuns:1` and `failed:false`.
+
+Both normal full-owner runs report the focused initial-window fixed20/random20 campaigns with all17 normal generated states at least20, zero shrinks, and no failure. Their additional shared-source/fault/shape campaign metadata and reach are preserved in the raw audit. All receipt log hashes and before/after inventories match their assigned c2 or c3 freeze. Diagnostic observation arrays are not claimed fully preserved.
+
+After F05, the recorded final identity removes only the temporary config and retains all1414 c2 source/runtime hashes, including exact source and minified builder bytes. F06 changed-file lint passes with raw before/after inventories matching c2 again.
+
+This is additive to `independent-candidate-c2-finite-review-v1.md`; it does not rewrite that historical finite acceptance or expand the product law. Combined integration, full284ordered-file coverage, other providers/frameworks/persistence, and whole-PR readiness remain outside this verdict.
+
+Full commands, environments, original budgets, seeds, reach, receipt/log hashes, config provenance and restoration are in `independent-candidate-c3-full-primary-audit-v1.json`, SHA `6d9675c1c598c936a6513752b23e5d233b608c87e7bd37cbe6e5429ea08a3aa7`. C3 freeze SHA is `45b01c9efe12ef51ff88dd799eb89c4c83907ac6a8c088f1b74c0dc7afb427e3`; final identity statement SHA is `4da3c0dfc8d3e4613069e0ee36c1f7e04ef29abf7f7f45cdde7a0e12b670999e`.

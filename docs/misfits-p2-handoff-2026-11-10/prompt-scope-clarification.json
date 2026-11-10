@@ -1,0 +1,746 @@
+{
+  "promptCount": 62,
+  "scopes": [
+    {
+      "session": "P1",
+      "title": "Ordered pagination and source-prefix correctness",
+      "primary": [
+        2214,
+        2182,
+        2183
+      ],
+      "comparison": [
+        2335
+      ],
+      "context": [
+        2138,
+        2155,
+        2174,
+        2185,
+        2186
+      ],
+      "scopeText": "Primary task: #2214, #2182, #2183.\nComparison items: #2335.\nContext items: #2138, #2155, #2174, #2185, #2186."
+    },
+    {
+      "session": "P2",
+      "title": "Queued backend answer progress",
+      "primary": [],
+      "comparison": [],
+      "context": [
+        2294,
+        2241
+      ],
+      "scopeText": "Primary task: H02: finite queued backend answer progress.\nComparison items: none listed.\nContext items: #2294, #2241."
+    },
+    {
+      "session": "P3",
+      "title": "Follower cache rotation and persistence composition",
+      "primary": [
+        2139
+      ],
+      "comparison": [],
+      "context": [
+        2329,
+        2085,
+        2272,
+        2281,
+        2283,
+        2317,
+        2298,
+        2209,
+        2267
+      ],
+      "scopeText": "Primary task: #2139.\nComparison items: none listed.\nContext items: #2329, #2085, #2272, #2281, #2283, #2317, #2298, #2209, #2267."
+    },
+    {
+      "session": "P4",
+      "title": "Remaining live-query replay, preload and includes convergence",
+      "primary": [
+        2294,
+        2310,
+        2315
+      ],
+      "comparison": [],
+      "context": [
+        2309,
+        2314,
+        2318
+      ],
+      "scopeText": "Primary task: #2294, #2310, #2315.\nComparison items: none listed.\nContext items: #2309, #2314, #2318."
+    },
+    {
+      "session": "P5",
+      "title": "Retirement PR #2302 review closeout",
+      "primary": [
+        2302
+      ],
+      "comparison": [],
+      "context": [
+        2222
+      ],
+      "scopeText": "Primary task: #2302.\nComparison items: none listed.\nContext items: #2222."
+    },
+    {
+      "session": "P6",
+      "title": "Metadata PR #2303 correction and review closeout",
+      "primary": [
+        2303
+      ],
+      "comparison": [],
+      "context": [
+        2281,
+        2317
+      ],
+      "scopeText": "Primary task: #2303.\nComparison items: none listed.\nContext items: #2281, #2317."
+    },
+    {
+      "session": "P7",
+      "title": "Query subset error visibility and recovery",
+      "primary": [
+        540,
+        2270,
+        2271
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #540, #2270, #2271.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "P8",
+      "title": "Persisted metadata session reads across peer notices",
+      "primary": [
+        2317
+      ],
+      "comparison": [],
+      "context": [
+        2341,
+        2342,
+        2303,
+        2314,
+        2272
+      ],
+      "scopeText": "Primary task: #2317.\nComparison items: none listed.\nContext items: #2341, #2342, #2303, #2314, #2272."
+    },
+    {
+      "session": "B01",
+      "title": "Optimistic inserts and stable view keys",
+      "primary": [
+        19,
+        734
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #19, #734.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B02",
+      "title": "Record writes, optimistic status and persistence",
+      "primary": [
+        20,
+        661
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #20, #661.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B03",
+      "title": "Transaction validation, rollback and failure feedback",
+      "primary": [
+        22,
+        487
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #22, #487.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B04",
+      "title": "Item-level list rendering",
+      "primary": [
+        50,
+        126
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #50, #126.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B05",
+      "title": "Electric metadata for generic mutations",
+      "primary": [
+        96,
+        103
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #96, #103.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B06",
+      "title": "Generated fields and read/write payloads",
+      "primary": [
+        456,
+        465,
+        878,
+        1115,
+        2340
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #456, #465, #878, #1115, #2340.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B07",
+      "title": "PowerSync settlement and backend confirmation",
+      "primary": [
+        900,
+        1526
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #900, #1526.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B08",
+      "title": "Agent skills and server examples",
+      "primary": [
+        1333,
+        1336
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #1333, #1336.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B09",
+      "title": "Effects delivery, readiness and replay",
+      "primary": [
+        1394,
+        2117,
+        2277
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #1394, #2117, #2277.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B10",
+      "title": "Electric write confirmation and optimism",
+      "primary": [
+        337,
+        1602,
+        2120,
+        2244,
+        2304
+      ],
+      "comparison": [],
+      "context": [
+        2298
+      ],
+      "scopeText": "Primary task: #337, #1602, #2120, #2244, #2304.\nComparison items: none listed.\nContext items: #2298."
+    },
+    {
+      "session": "B11",
+      "title": "Framework SSR and hydration",
+      "primary": [
+        1963,
+        1964,
+        1965,
+        2322,
+        2323
+      ],
+      "comparison": [],
+      "context": [
+        2334
+      ],
+      "scopeText": "Primary task: #1963, #1964, #1965, #2322, #2323.\nComparison items: none listed.\nContext items: #2334."
+    },
+    {
+      "session": "B12",
+      "title": "Offline subset coverage and readiness",
+      "primary": [
+        2102,
+        2211,
+        2284
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2102, #2211, #2284.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B13",
+      "title": "Relation filters and join acquisition",
+      "primary": [
+        2123,
+        2124,
+        2130,
+        2241,
+        2242
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2123, #2124, #2130, #2241, #2242.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B14",
+      "title": "On-demand optimism and preload visibility",
+      "primary": [
+        2148,
+        2169,
+        2184
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2148, #2169, #2184.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B15",
+      "title": "Failed ordered requests and recovery",
+      "primary": [
+        2165,
+        2191,
+        2315,
+        2318
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2165, #2191, #2315, #2318.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B16",
+      "title": "Query acquisition ownership and cancellation",
+      "primary": [
+        2160,
+        2162,
+        2188,
+        2352,
+        2353
+      ],
+      "comparison": [],
+      "context": [
+        1935,
+        2268,
+        2354
+      ],
+      "scopeText": "Primary task: #2160, #2162, #2188, #2352, #2353.\nComparison items: none listed.\nContext items: #1935, #2268, #2354."
+    },
+    {
+      "session": "B17",
+      "title": "Persisted legacy-owner migration",
+      "primary": [
+        2180,
+        2181
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2180, #2181.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B18",
+      "title": "Remaining ordered loading lifetimes",
+      "primary": [
+        2223,
+        2260,
+        2268,
+        2296
+      ],
+      "comparison": [],
+      "context": [
+        2353,
+        2352,
+        2346,
+        2335,
+        2302,
+        2214,
+        2222
+      ],
+      "scopeText": "Primary task: #2223, #2260, #2268, #2296.\nComparison items: none listed.\nContext items: #2353, #2352, #2346, #2335, #2302, #2214, #2222."
+    },
+    {
+      "session": "B19",
+      "title": "Oracle ownership and contribution enforcement",
+      "primary": [
+        2234,
+        2264
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2234, #2264.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B20",
+      "title": "Declared reach and seed replay reliability",
+      "primary": [
+        2287,
+        2289,
+        2290,
+        2329,
+        2347
+      ],
+      "comparison": [],
+      "context": [
+        2346,
+        2334
+      ],
+      "scopeText": "Primary task: #2287, #2289, #2290, #2329, #2347.\nComparison items: none listed.\nContext items: #2346, #2334."
+    },
+    {
+      "session": "B21",
+      "title": "Test CPU time, waits and timeouts",
+      "primary": [
+        2238,
+        2274,
+        2275,
+        2276
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2238, #2274, #2275, #2276.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B22",
+      "title": "Pagination API and index configuration",
+      "primary": [
+        2291,
+        2292,
+        2314,
+        2316,
+        2326
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2291, #2292, #2314, #2316, #2326.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B23",
+      "title": "Framework binding conformance",
+      "primary": [
+        1699,
+        1728,
+        2327
+      ],
+      "comparison": [
+        2334
+      ],
+      "context": [
+        2310,
+        2328,
+        2302,
+        2333
+      ],
+      "scopeText": "Primary task: #1699, #1728, #2327.\nComparison items: #2334.\nContext items: #2310, #2328, #2302, #2333."
+    },
+    {
+      "session": "B27",
+      "title": "#2337: Subquery literals / undefined and empty records",
+      "primary": [
+        2337
+      ],
+      "comparison": [],
+      "context": [
+        2171,
+        2187
+      ],
+      "scopeText": "Primary task: #2337.\nComparison items: none listed.\nContext items: #2171, #2187."
+    },
+    {
+      "session": "B25",
+      "title": "#2338: Callback metadata / static receiving types",
+      "primary": [
+        2338
+      ],
+      "comparison": [],
+      "context": [
+        2312,
+        2340,
+        2337
+      ],
+      "scopeText": "Primary task: #2338.\nComparison items: none listed.\nContext items: #2312, #2340, #2337."
+    },
+    {
+      "session": "B28",
+      "title": "#2339: Public types / inferred Collection declaration emission",
+      "primary": [
+        2339
+      ],
+      "comparison": [],
+      "context": [
+        1012,
+        393
+      ],
+      "scopeText": "Primary task: #2339.\nComparison items: none listed.\nContext items: #1012, #393."
+    },
+    {
+      "session": "B06",
+      "title": "#2340: Collection mutations / generated fields and read-write payloads",
+      "primary": [
+        2340
+      ],
+      "comparison": [],
+      "context": [
+        2338,
+        2264
+      ],
+      "scopeText": "Primary task: #2340.\nComparison items: none listed.\nContext items: #2338, #2264."
+    },
+    {
+      "session": "P8",
+      "title": "#2341: SQLite persistence / Electric multi-tab coordination",
+      "primary": [
+        2341
+      ],
+      "comparison": [],
+      "context": [
+        2317,
+        2281,
+        2272
+      ],
+      "scopeText": "Primary task: #2341.\nComparison items: none listed.\nContext items: #2317, #2281, #2272."
+    },
+    {
+      "session": "B29",
+      "title": "#2342: Adapter receiving / applied receipts and lazy child readiness",
+      "primary": [
+        2342
+      ],
+      "comparison": [],
+      "context": [
+        2118,
+        2317
+      ],
+      "scopeText": "Primary task: #2342.\nComparison items: none listed.\nContext items: #2118, #2317."
+    },
+    {
+      "session": "B30",
+      "title": "#2344: Deleted payload retention and storage growth",
+      "primary": [
+        2344
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2344.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B31",
+      "title": "#2349: Nested draft values and prototype preservation",
+      "primary": [
+        2349
+      ],
+      "comparison": [],
+      "context": [
+        1714,
+        1800,
+        2346
+      ],
+      "scopeText": "Primary task: #2349.\nComparison items: none listed.\nContext items: #1714, #1800, #2346."
+    },
+    {
+      "session": "B32",
+      "title": "OPFS interrupted-writer recovery",
+      "primary": [
+        2357
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2357.\nComparison items: none listed.\nContext items: none listed.\nUpstream context: wa-sqlite #392/#393, using the repository links in #2357."
+    },
+    {
+      "session": "B33",
+      "title": "PowerSync rejected delivery and pending writes",
+      "primary": [
+        2358
+      ],
+      "comparison": [],
+      "context": [
+        2118
+      ],
+      "scopeText": "Primary task: #2358.\nComparison items: none listed.\nContext items: #2118."
+    },
+    {
+      "session": "B34",
+      "title": "Shared application SQL scheduling capability",
+      "primary": [
+        2363
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2363.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B35",
+      "title": "Optional TypeScript peer policy",
+      "primary": [
+        2364
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2364.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B36",
+      "title": "Nullish aggregate semantics",
+      "primary": [
+        2365,
+        2375
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2365, #2375.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B37",
+      "title": "PowerSync managed SQLite tables",
+      "primary": [
+        2366
+      ],
+      "comparison": [],
+      "context": [
+        2118
+      ],
+      "scopeText": "Primary task: #2366.\nComparison items: none listed.\nContext items: #2118."
+    },
+    {
+      "session": "B38",
+      "title": "Full-read authority across persisted hydration",
+      "primary": [
+        2367
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2367.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B39",
+      "title": "Supabase adapter proposal",
+      "primary": [
+        2376
+      ],
+      "comparison": [],
+      "context": [
+        2118
+      ],
+      "scopeText": "Primary task: #2376.\nComparison items: none listed.\nContext items: #2118."
+    },
+    {
+      "session": "B40",
+      "title": "SQLite-free PowerSync protocol adapter",
+      "primary": [
+        2377
+      ],
+      "comparison": [],
+      "context": [
+        2118
+      ],
+      "scopeText": "Primary task: #2377.\nComparison items: none listed.\nContext items: #2118."
+    },
+    {
+      "session": "B41",
+      "title": "Simple comparison extraction rejects nonliterals",
+      "primary": [
+        2381
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2381.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B42",
+      "title": "Include DISTINCT within each parent",
+      "primary": [
+        2385,
+        2387
+      ],
+      "comparison": [],
+      "context": [
+        2273
+      ],
+      "scopeText": "Primary task: #2385, #2387.\nComparison items: none listed.\nContext items: #2273."
+    },
+    {
+      "session": "B43",
+      "title": "Filtered include joins preserve keyed lazy demand",
+      "primary": [
+        2386,
+        2388
+      ],
+      "comparison": [],
+      "context": [
+        2321
+      ],
+      "scopeText": "Primary task: #2386, #2388.\nComparison items: none listed.\nContext items: #2321."
+    },
+    {
+      "session": "B44",
+      "title": "React Suspense initial success and failure lifetimes",
+      "primary": [
+        2396,
+        2397
+      ],
+      "comparison": [],
+      "context": [
+        1343
+      ],
+      "scopeText": "Primary task: #2396, #2397.\nComparison items: none listed.\nContext items: #1343."
+    },
+    {
+      "session": "B45",
+      "title": "Joined demand exposes subset loading after readiness",
+      "primary": [
+        2384
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2384.\nComparison items: none listed.\nContext items: none listed."
+    },
+    {
+      "session": "B46",
+      "title": "Functional select validation cost and rejection policy",
+      "primary": [
+        2399
+      ],
+      "comparison": [],
+      "context": [
+        2321
+      ],
+      "scopeText": "Primary task: #2399.\nComparison items: none listed.\nContext items: #2321."
+    },
+    {
+      "session": "B47",
+      "title": "Bounded ordered acquisition capability",
+      "primary": [
+        2398
+      ],
+      "comparison": [],
+      "context": [
+        2166,
+        2240
+      ],
+      "scopeText": "Primary task: #2398.\nComparison items: none listed.\nContext items: #2166, #2240."
+    },
+    {
+      "session": "B48",
+      "title": "PowerSync numeric key capability and identity preservation",
+      "primary": [
+        2392
+      ],
+      "comparison": [],
+      "context": [
+        2358
+      ],
+      "scopeText": "Primary task: #2392.\nComparison items: none listed.\nContext items: #2358."
+    },
+    {
+      "session": "B49",
+      "title": "Electric configurable awaitMatch history",
+      "primary": [
+        2395
+      ],
+      "comparison": [],
+      "context": [],
+      "scopeText": "Primary task: #2395.\nComparison items: none listed.\nContext items: none listed."
+    }
+  ],
+  "sourceComment": "https://gist.github.com/KyleAMathews/75bbadfbc449d798c9f0b9691a540406#gistcomment-6466940",
+  "noNewReproduction": true
+}

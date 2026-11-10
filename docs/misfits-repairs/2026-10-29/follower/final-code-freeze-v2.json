@@ -1,0 +1,41 @@
+{
+  "revision": "3937a73aeb3a273c95ab77b8d8dd66fc739517c5",
+  "version": 2,
+  "time": "2026-10-29T18:52:17.007098+00:00",
+  "production": {
+    "path": "packages/db-sqlite-persistence-core/src/persisted.ts",
+    "sha256": "105091d9769b4ba80777b279c8c1d300410f3a3a5f7dc829f3f0a56b352b3dce"
+  },
+  "testSupportHashes": {
+    "packages/browser-db-sqlite-persistence/e2e/follower-rotation-oracle.opfs.spec.ts": "593d7fcf8e23307daf396839ceaebc2ead7be5f633abb625d1bf00c260570849",
+    "packages/browser-db-sqlite-persistence/e2e/follower-rotation.opfs.html": "87f219116bb22895c43d3d1397af3e8a596765fc0ec1714636266a3290c3430e",
+    "packages/browser-db-sqlite-persistence/e2e/follower-rotation.opfs.ts": "3c61f2ed338d7155e0dc1c89434c4756049def75855f3f1fc9800da79c873509",
+    "packages/browser-db-sqlite-persistence/package.json": "23c14682fe93665d22d1bd865543e700453efbbf5c8efdb16eacdf8d93cd690c",
+    "packages/browser-db-sqlite-persistence/playwright.opfs.config.ts": "3ed2627580448697e24f48f406e88121a032ec4104c192baa284b726cdc3784e",
+    "packages/browser-db-sqlite-persistence/tests/follower-rotation-oracle.test.ts": "9e07f53cc1593f23ced7df82dc09f9c2d09f4f578670126c6c216a24e1ff424e",
+    "packages/browser-db-sqlite-persistence/tests/follower-rotation-support.ts": "4c5fa375f6a47dc88513905a78187db8066c309ef8b794bc70139343d1eb6440",
+    "packages/db-sqlite-persistence-core/tests/follower-rotation-oracle.ts": "aad37a7265cc79222feccdb44541f628b3115ee488dfdf8a486bac5a322020e1",
+    "packages/db-sqlite-persistence-core/tests/follower-rotation-support.ts": "e98b9a79223a5199e628f5d1fef5504d6ef6e0eb330641a942afcf09e32e35ef",
+    "packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts": "f38daf7f24eb1017ed5cf1709970f26380c4c483fc6ff72dc7db1e2fa81c178b",
+    "packages/db-sqlite-persistence-core/tests/persisted-support.ts": "47ca3120fac23ddbb04a9830f865fa855b36865d4bfc962e6eca416c95bf1cd6",
+    "packages/db-sqlite-persistence-core/tests/persisted.test.ts": "c84a6f800d2c4e27ec2303afab6f138e026a4139985f281647228c750e068e73",
+    "packages/db/tests/oracle-config.ts": "cf8fc3fc17d913db3b6b75a22c143b5b1204be989881b1a8c23a6b8e55344510",
+    "packages/db/tests/oracle-replay-manifest.ts": "43e39dc98feeb7b052b2ed3e55fb1ea92d0d38ca3a86f893f64ad0c65af39f58"
+  },
+  "evidenceOnlyConfig": {
+    "path": "packages/browser-db-sqlite-persistence/playwright.follower-rotation.config.ts",
+    "sha256": "aaf5ddcb15b5b99eee13e13ebc355c2b0d836cd4454d4ea5d33e82c46195d796"
+  },
+  "earlierGates": [
+    "pre-production-freeze.json",
+    "reopen-pre-source-freeze.json",
+    "reopen-relocated-pre-source-freeze.json"
+  ],
+  "v1Preserved": "v1-review-freeze/",
+  "repairPatch": {
+    "path": "repair-v2.patch",
+    "sha256": "09f4f1c1b3efb219d7460f54856f571921811f82a93318d10076c3e26b70944c"
+  },
+  "note": "Source restored after every mutant. No code/model/driver/support mutation during reviewer execution. Coverage proposal integrated by root separately.",
+  "unchangedModelAndCheckSha256": "ace8a8a6859fb11b4e4414703e86f4b2ff526427a468041500092acc9a232856"
+}

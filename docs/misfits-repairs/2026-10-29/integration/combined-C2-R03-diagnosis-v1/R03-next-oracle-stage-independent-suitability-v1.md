@@ -1,0 +1,13 @@
+# R03 next oracle stage: independent suitability verdict
+
+**SUITABLE for an oracle-only independent account and R03-DRIVER-001 repair.** The seven frozen finite diagnostics establish the required actual mapping and deciding cuts. They supply enough evidence to specify a reference account from driver-controlled adapter obligations and batches. The original R03 remains a false product RED in the reference model/comparison, not a demonstrated production defect. No production repair follows from this evidence.
+
+This verdict incorporates `R03-deciding-site-independent-execution-review-v1.md`, SHA-256 `10ee930235a2c52bdc180bbb3e7f6c5e524aee66c7a87a630422fbcd2f554f71`, and its JSON evidence, SHA-256 `617392275f0cabb58231059602b53bd5a1e5e6c08101d69117736e976e3c005e`.
+
+The next patch must preserve the source publication Barrier while separating own obligations, eligible ordered failures, and immutable completed receipts. A completion episode is not identified solely by the mutable replay container: the observed container can acquire another Deferred/Promise. The model must derive completion and candidate Error identities independently, before matching W. Actual replay identity, selected Error, completion flags, and deciding probes are mapping evidence, not reference inputs. Shared Error identity can span several owners. Same-batch candidate freedom needs an explicit abstraction and authority; no source-global priority is introduced.
+
+Both reentries start a distinct noncovering demand and retire the exact old failed demand after its old receipt rejected. Stored `replaces=[]`; they establish completed-verdict preservation, not pre-verdict covering replacement. The local-success witness keeps the same receipt open for sibling-held publication and accepts new own demand. These distinctions must survive model design and checker calibration.
+
+The DRIVER-001 repair belongs in this oracle-only stage because otherwise a late drain rejection can leave a false GREEN. It must make a would-be GREEN fail, retain a pre-existing identity/publication failure as primary, and retain drain failures as secondary evidence. A finalizer throw that overwrites the original failure is unsuitable. Static review must inspect both success and existing-failure propagation before root admits calibration execution.
+
+Suitability does not discharge the report's remaining witnesses, declared/measured generated reach, original-defect RED, repaired GREEN, hostile mutants, or any receiving-path claim. Native Promise engine settlement is unobserved; the admitted boundary is the original Deferred operation and immediately read pending flag. This review ran no product runtime and admits no further execution.
