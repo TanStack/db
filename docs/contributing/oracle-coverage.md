@@ -4270,10 +4270,14 @@ A budget that a helper computes at run time is not tracked either: the script
 reads the counts and keys written at a campaign's call, or in constants that the
 oracle file declares or imports. The op-sqlite alias campaigns in
       `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`
-(`op-sqlite.write-marker-aliases` and `op-sqlite.columnar-sql-aliases`, 50 runs
-each) register through `registerAliasOracle`, which builds its parameters from
-`readAliasOracleRuns()` and `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS`, so lowering
-them is not reported. On main the script instead counted the literal
+(`op-sqlite.write-marker-aliases`, `op-sqlite.result-carrier-equivalence`, and
+`op-sqlite.columnar-sql-aliases`, 50 base runs each) now register directly through
+`oracleProperty`. Their base run budget still comes from `readAliasOracleRuns()`
+and the existing `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS` override, so lowering that
+helper's runtime result is not reported. The framework applies the shared run
+multiplier once. The former 20-run checker shrink/replay calibration is unchanged
+in the ordinary `op-sqlite-driver.test.ts`; its move is reported as a removed
+oracle run budget, although normal package tests still execute all 20 attempts. On main the script instead counted the literal
 `oracleRandomParameters(50, …)` calls in a unit test of those parameters. That
 unit test now lives in `op-sqlite-driver.test.ts`, so the script reports both
 keys and the fixed seed 271828 as removed, although both campaigns still run in
@@ -4819,6 +4823,14 @@ a mutant wrong-answer control, and an explicit statement of remaining limits.
       otherwise minimally distinguishable results. Renaming a selected column to a
       structural-looking alias must not turn a data row into a write envelope.
       Owner: `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`.
+      Its three `oracleProperty` campaigns share the independent model and exact
+      row/key-order comparison in `op-sqlite-alias-oracle.ts`. Randomized
+      constructions reach every declared alias and all eight documented carrier
+      paths; the SQL campaign retains both real columnar and real direct-row
+      SQLite shim paths. The seed-165903 conversion reports contain the same 361
+      mutant keys and retain all 29 prior kills under named laws. The
+      [conversion record](oracle-reviews/2026-11-10-op-sqlite-oracle-property.md)
+      preserves the commands, reached states, and scope.
 - [x] **Carrier coexistence and representation symmetry.** Cross `rows`,
       `rawRows`, `columnNames`, and supported result containers, including legal
       coexistence. Equivalent array and object forms must agree on rows or on the

@@ -744,10 +744,6 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
