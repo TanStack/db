@@ -225,6 +225,7 @@ const staticOracleProperties = [
   `cursor-pagination.partition`,
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
+  `query.ordered-mutation-outcome`,
   `query-db.refetch-ordered-prefix`,
   `query-db.refetch-held-page-end`,
   `ordered-loader.request-authority`,

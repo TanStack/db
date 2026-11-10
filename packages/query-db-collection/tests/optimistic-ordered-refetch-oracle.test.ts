@@ -5,16 +5,17 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { applyPredicates } from '../e2e/query-filter.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
 import { isNarrowRankTieProbe } from './optimistic-ordered-refetch-probe.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type { QueryCollectionConfig } from '../src/query'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { Row } from './optimistic-ordered-refetch-probe.js'
@@ -77,26 +78,11 @@ const orderedMutationHistories: Array<OrderedMutationHistory> = (
     })),
   ),
 )
-const orderedReach = createOracleReach(
-  `query.ordered-mutation-outcome`,
-  orderedMutationHistories.map(
-    (h) => `${h.operation}/${h.ending}/${h.reportDuringHold}`,
-  ),
-)
-
-async function checkOptimisticOrderedRefetch(
+async function driveOptimisticOrderedRefetch(
   history: OrderedMutationHistory,
+  observe: (checkpoint: string, value: unknown) => void,
 ): Promise<void> {
   const { operation, ending, reportDuringHold } = history
-  orderedReach.beginHistory()
-  const reach = createOracleReach(`ordered-mutation-cuts`, [
-    `optimistic`,
-    `settled-fixed-point`,
-    ...(operation === `insert` ? [] : [`bounded-refill`]),
-    ...(reportDuringHold ? [`held-report`] : []),
-    ...(ending === `reject-before-write` ? [] : [`handler-confirmation`]),
-  ])
-  reach.beginHistory()
   const failure = new Error(`ordered handler failure`)
   let handlerConfirmed = false
   const queryClient = new QueryClient({
@@ -109,20 +95,6 @@ async function checkOptimisticOrderedRefetch(
     folder: id === 4 ? `archive` : `inbox`,
     at: id,
   }))
-  // Recompute the visible installed prefix under local intent. A departure
-  // may be short while its replacement's accepted sync rows remain held.
-  const installed = remote
-    .filter((row) => expectedPublicWindow(remote).includes(row.id))
-    .map((row) => ({ ...row }))
-  const optimisticRows =
-    operation === `insert`
-      ? [...installed, { id: 5, folder: `inbox` as const, at: 7 }]
-      : operation === `delete`
-        ? installed.filter(({ id }) => id !== 3)
-        : installed.map((row) =>
-            row.id === 3 ? { ...row, folder: `archive` as const } : row,
-          )
-  const immediateWindow = expectedPublicWindow(optimisticRows)
   const persistence = createDeferred<void>()
   let providerPhase: ProviderPhase = `initial`
   const requests: Array<{
@@ -206,8 +178,8 @@ async function checkOptimisticOrderedRefetch(
     const publicIds = () => live.toArray.map(({ id }) => id)
     const publications: Array<Array<number>> = []
     await live.preload()
-    expect(publicIds()).toEqual(expectedPublicWindow(remote))
-    expect(source.toArray.map(({ id }) => id).sort()).toEqual([2, 3])
+    observe(`initial`, publicIds())
+    observe(`installed`, source.toArray.map(({ id }) => id).sort())
     const subscription = live.subscribeChanges(
       () => publications.push(publicIds()),
       { includeInitialState: true },
@@ -229,9 +201,12 @@ async function checkOptimisticOrderedRefetch(
       () => undefined,
       (error: unknown) => error,
     )
-    expect(publicIds()).toEqual(immediateWindow)
-    expect(publications).toEqual([immediateWindow])
-    reach.reach(`optimistic`)
+    observe(`optimistic`, publicIds())
+    observe(
+      `optimistic-publications`,
+      publications.map((ids) => [...ids]),
+    )
+    observe(`cut optimistic`, true)
 
     if (operation !== `insert`) {
       await vi.waitFor(() => {
@@ -248,7 +223,7 @@ async function checkOptimisticOrderedRefetch(
             ),
         ).toBe(true)
       })
-      reach.reach(`bounded-refill`)
+      observe(`cut bounded-refill`, true)
     }
     for (const { options, ids } of requests.filter(
       ({ phase }) => phase === `optimistic`,
@@ -258,16 +233,16 @@ async function checkOptimisticOrderedRefetch(
         options.limit !== undefined &&
         options.limit <= 4
       const rankTieProbe = isNarrowRankTieProbe(options, remote)
-      expect(orderedPage || rankTieProbe).toBe(true)
-      expect(ids).not.toContain(4)
+      observe(`optimistic-request`, {
+        orderedOrTie: orderedPage || rankTieProbe,
+        archiveIncluded: ids.includes(4),
+      })
     }
-    expect(publicIds()).toEqual(immediateWindow)
-    expect(
-      publications.every(
-        (snapshot) =>
-          JSON.stringify(snapshot) === JSON.stringify(immediateWindow),
-      ),
-    ).toBe(true)
+    observe(`held-optimistic`, publicIds())
+    observe(
+      `held-publications`,
+      publications.map((ids) => [...ids]),
+    )
 
     if (reportDuringHold) {
       const head = operation === `insert` ? 6 : 5
@@ -291,9 +266,12 @@ async function checkOptimisticOrderedRefetch(
             ),
         ).toBe(true),
       )
-      expect(publicIds()).toEqual(immediateWindow)
-      expect(publications).toEqual([immediateWindow])
-      reach.reach(`held-report`)
+      observe(`reported-optimistic`, publicIds())
+      observe(
+        `reported-publications`,
+        publications.map((ids) => [...ids]),
+      )
+      observe(`cut held-report`, true)
     }
 
     persistence.resolve()
@@ -301,25 +279,27 @@ async function checkOptimisticOrderedRefetch(
       verdict,
       `ordered handler settlement`,
     )
-    expect(actualError).toBe(ending.startsWith(`reject`) ? failure : undefined)
-    expect(transaction.state).toBe(
-      ending.startsWith(`reject`) ? `failed` : `completed`,
+    observe(
+      `handler-error-identity`,
+      actualError === (ending.startsWith(`reject`) ? failure : undefined),
     )
+    observe(`transaction-state`, transaction.state)
     if (ending !== `reject-before-write`) {
-      expect(handlerConfirmed).toBe(true)
-      reach.reach(`handler-confirmation`)
+      observe(`handler-confirmed`, handlerConfirmed)
+      observe(`cut handler-confirmation`, true)
     }
     if (
       !reportDuringHold &&
       operation !== `insert` &&
       ending !== `reject-before-write`
     ) {
-      expect(
+      observe(
+        `handler-refill`,
         requests.some(
           ({ phase, ids }) =>
             phase === `handler-refetch` && ids.includes(1) && !ids.includes(3),
         ),
-      ).toBe(true)
+      )
     }
     await vi.waitFor(() =>
       checkOrderedMutationObservation(
@@ -333,10 +313,9 @@ async function checkOptimisticOrderedRefetch(
         failure,
       ),
     )
-    expect(publications.at(-1)).toEqual(publicIds())
-    reach.reach(`settled-fixed-point`)
-    reach.assertReached()
-    orderedReach.reach(`${operation}/${ending}/${reportDuringHold}`)
+    observe(`settled`, publicIds())
+    observe(`settled-publication`, publications.at(-1))
+    observe(`cut settled-fixed-point`, true)
   }, [
     () => persistence.resolve(),
     () =>
@@ -378,28 +357,142 @@ function checkOrderedMutationObservation(
 
 declareOracle({
   owns: [`src/query.ts#queryCollectionOptions`],
-  check: [checkOptimisticOrderedRefetch, checkOrderedMutationObservation],
+  check: [checkOrderedMutationTrace, checkOrderedMutationObservation],
   model: [expectedPublicWindow],
   grammar: [orderedMutationHistories],
 })
 
-// The original two update/success histories remain rows of this finite
-// grammar, alongside neighboring wrapper, error and discarded-value histories.
-describe(`ordered mutation histories`, () => {
-  afterAll(() => {
-    orderedReach.assertReached()
-    console.info(
-      `query.ordered-mutation-outcome reach`,
-      Object.fromEntries(orderedReach.counts()),
-    )
-  })
-  it.each(orderedMutationHistories)(
-    `preserves ordered mutation outcomes: %j`,
-    (history) => {
-      oracleRoute(`case`)
-      return checkOptimisticOrderedRefetch(history)
-    },
+// Recompute the original immediate and settled windows from the authored
+// operation and handler ending. Request shapes stay observations of the real
+// adapter; they do not decide the independent row ledger.
+function modelOrderedMutation(history: OrderedMutationHistory) {
+  const { operation, ending, reportDuringHold } = history
+  const remote: Array<Row> = [-1, 0, 1, 2, 3, 4].map((id) => ({
+    id,
+    folder: id === 4 ? `archive` : `inbox`,
+    at: id,
+  }))
+  const installed = remote
+    .filter((row) => expectedPublicWindow(remote).includes(row.id))
+    .map((row) => ({ ...row }))
+  const optimisticRows =
+    operation === `insert`
+      ? [...installed, { id: 5, folder: `inbox` as const, at: 7 }]
+      : operation === `delete`
+        ? installed.filter(({ id }) => id !== 3)
+        : installed.map((row) =>
+            row.id === 3 ? { ...row, folder: `archive` as const } : row,
+          )
+  const immediate = expectedPublicWindow(optimisticRows)
+  const initial = expectedPublicWindow(remote)
+  if (reportDuringHold) {
+    const head = operation === `insert` ? 6 : 5
+    remote.push({ id: head, folder: `inbox`, at: head })
+  }
+  if (ending !== `reject-before-write`) {
+    if (operation === `insert`) remote.push({ id: 5, folder: `inbox`, at: 5 })
+    else if (operation === `delete`)
+      remote.splice(
+        remote.findIndex(({ id }) => id === 3),
+        1,
+      )
+    else remote.find(({ id }) => id === 3)!.folder = `archive`
+  }
+  const settled = expectedPublicWindow(remote)
+  return {
+    initial,
+    installed: [2, 3],
+    optimistic: immediate,
+    'optimistic-publications': [immediate],
+    'cut optimistic': true,
+    ...(operation !== `insert` ? { 'cut bounded-refill': true } : {}),
+    'held-optimistic': immediate,
+    'held-publications': immediate,
+    ...(reportDuringHold
+      ? {
+          'reported-optimistic': immediate,
+          'reported-publications': [immediate],
+          'cut held-report': true,
+        }
+      : {}),
+    'handler-error-identity': true,
+    'transaction-state': ending.startsWith(`reject`) ? `failed` : `completed`,
+    ...(ending !== `reject-before-write`
+      ? { 'handler-confirmed': true, 'cut handler-confirmation': true }
+      : {}),
+    ...(!reportDuringHold &&
+    operation !== `insert` &&
+    ending !== `reject-before-write`
+      ? { 'handler-refill': true }
+      : {}),
+    settled,
+    'settled-publication': settled,
+    'cut settled-fixed-point': true,
+  }
+}
+function checkOrderedMutationTrace(
+  _history: OrderedMutationHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelOrderedMutation>,
+): Verdict {
+  const owed: Readonly<Record<string, unknown>> = expected
+  const seen = new Set<string>()
+  for (const observation of trace) {
+    if (observation.checkpoint === `optimistic-request`) {
+      const verdict = differs(
+        observation.checkpoint,
+        `bounded optimistic refill`,
+        observation.value,
+        { orderedOrTie: true, archiveIncluded: false },
+      )
+      if (verdict) return verdict
+    } else if (observation.checkpoint === `held-publications`) {
+      const snapshots = observation.value as Array<Array<number>>
+      seen.add(observation.checkpoint)
+      for (const ids of snapshots) {
+        const verdict = differs(
+          observation.checkpoint,
+          `optimistic publication`,
+          ids,
+          expected.optimistic,
+        )
+        if (verdict) return verdict
+      }
+    } else {
+      const verdict = differs(
+        observation.checkpoint,
+        `ordered mutation`,
+        observation.value,
+        owed[observation.checkpoint],
+      )
+      if (verdict) return verdict
+      seen.add(observation.checkpoint)
+    }
+  }
+  return (
+    differs(
+      `complete ordered mutation`,
+      `ordered mutation`,
+      [...seen].sort(),
+      Object.keys(expected).sort(),
+    ) ?? pass
   )
+}
+
+// All24 original histories remain finite inputs to the same production path.
+// Each cut formerly counted by local reach is now a required native observation.
+oracleProperty({
+  id: `query.ordered-mutation-outcome`,
+  law: {
+    statement: `Optimistic ordered CRUD keeps its immediate publication while persistence is held, then follows the authoritative backend window and handler outcome.`,
+    authority: `queryCollectionOptions mutation and ordered-refetch contracts; oracle-coverage.md, Query DB ordered refetch`,
+    limits: `Finite controlled QueryClient histories, one bounded inbox window and handler-refetch path; no HTTP or framework host claim.`,
+    owner: `Query DB ordered refetch`,
+  },
+  histories: orderedMutationHistories,
+  model: modelOrderedMutation,
+  driver: driveOptimisticOrderedRefetch,
+  check: checkOrderedMutationTrace,
 })
 
 // These controls challenge the same public-window/outcome comparison. They

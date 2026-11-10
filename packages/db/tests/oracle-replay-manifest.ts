@@ -80,6 +80,11 @@ const ownerGroups: ReadonlyArray<
     `descriptor-start-release`,
   ],
   [
+    `query-db-collection/tests/optimistic-ordered-refetch-oracle.test.ts`,
+    `query`,
+    `ordered-mutation-outcome`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -1409,6 +1414,7 @@ const enumeratedProperties = new Set([
   `svelte.ssr-runtime-errors.cases`,
   `svelte.cache-options`,
   `svelte.descriptor-start-release`,
+  `query.ordered-mutation-outcome`,
   `reverse-index.large-reads`,
   `react.ssr-effects-react18-disabled`,
   `react.ssr-effects-current-disabled`,
