@@ -557,7 +557,7 @@ async function observeHistory(
       move = observe(live.utils.setWindow({ offset: 0, limit: 3 }))
       await flushPromises()
       compareAt(`ordered-lifecycle-oracle.property.test.ts:532`, () =>
-        expect(move.state.settled).toBe(false),
+        expect(move!.state.settled).toBe(false),
       )
       check(`pending-move-window`, live.utils.getWindow(), {
         offset: 0,
@@ -1139,7 +1139,7 @@ describe(`ordered lifecycle product`, () => {
       owner: `Ordered acquisition`,
     },
     histories: { arbitrary, runs: 20, fixedSeeds: [93471] },
-    model: recordedComparison,
+    model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
       observeComparison(history, observe, async () => {
         const scenario = history
@@ -2568,7 +2568,7 @@ describe(`nullable multi-term lifecycle product`, () => {
       owner: `Ordered acquisition`,
     },
     histories: { arbitrary, runs: 20, fixedSeeds: [93472] },
-    model: recordedComparison,
+    model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
       observeComparison(history, observe, async () => {
         const scenario = history
