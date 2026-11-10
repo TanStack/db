@@ -11,8 +11,10 @@ import {
 } from '@tanstack/db'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import {
+  oracleReplayRequested,
+  oracleRoute,
+} from '../../db/tests/oracle-config.js'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
 import {
@@ -1692,24 +1694,38 @@ describe(`query collection ownership lifecycle`, () => {
       (h) =>
         `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
     )
-    const mutationReach = createOracleReach(
-      `query.mutation-confirmation`,
-      mutationReachStates,
+    // These histories are a finite table, not generated campaigns. Keep its
+    // existing minimum of one completed history per declared state, and keep
+    // the former path-replay bypass when a test-name filter selects one case.
+    const mutationReach = new Map(
+      mutationReachStates.map((state) => [state, 0]),
     )
+    const markMutationHistory = (state: string) => {
+      const count = mutationReach.get(state)
+      if (count === undefined)
+        throw new Error(
+          `query.mutation-confirmation: undeclared reach state ${state}`,
+        )
+      mutationReach.set(state, count + 1)
+    }
     afterAll(() => {
-      mutationReach.assertReached()
+      if (!oracleReplayRequested())
+        for (const [state, count] of mutationReach)
+          expect(
+            count,
+            `query.mutation-confirmation: ${state}`,
+          ).toBeGreaterThanOrEqual(1)
       console.info(
         `query.mutation-confirmation reach`,
-        Object.fromEntries(mutationReach.counts()),
+        Object.fromEntries(mutationReach),
       )
     })
     it.each(mutationHistories)(
       `refreshes only when the handler requests it: %j`,
       async (history) => {
         oracleRoute(`case`)
-        mutationReach.beginHistory()
         const { operation, confirmation, outcome, returned } = history
-        const localReach = createOracleReach(`query.mutation-cuts`, [
+        const requiredCuts = new Set([
           `entered`,
           `settled`,
           `settlement-waiter`,
@@ -1720,7 +1736,14 @@ describe(`query collection ownership lifecycle`, () => {
             ? [`late-confirmed`]
             : []),
         ])
-        localReach.beginHistory()
+        const enteredCuts = new Set<string>()
+        const markCut = (cut: string) => {
+          if (!requiredCuts.has(cut))
+            throw new Error(
+              `query.mutation-cuts: undeclared reach state ${cut}`,
+            )
+          enteredCuts.add(cut)
+        }
         const queryClient = createQueryClient()
         const enterRelease = createDeferred<void>()
         const confirmationRelease = createDeferred<void>()
@@ -1854,7 +1877,7 @@ describe(`query collection ownership lifecycle`, () => {
           )
           await atMutationCheckpoint(entered.promise, `Query handler entry`)
           checkMutationConfirmation(history, `entered`, observe(), failure)
-          localReach.reach(`entered`)
+          markCut(`entered`)
           enterRelease.resolve()
           if (outcome !== `reject-before-write`) {
             await atMutationCheckpoint(
@@ -1867,7 +1890,7 @@ describe(`query collection ownership lifecycle`, () => {
               observe(),
               failure,
             )
-            localReach.reach(`server-written`)
+            markCut(`server-written`)
             confirmationRelease.resolve()
             if (confirmation === `refetch`) {
               await atMutationCheckpoint(
@@ -1880,7 +1903,7 @@ describe(`query collection ownership lifecycle`, () => {
                 observe(),
                 failure,
               )
-              localReach.reach(`confirmation-requested`)
+              markCut(`confirmation-requested`)
               holdRefetch = false
               refetchResponse.resolve()
             }
@@ -1895,7 +1918,7 @@ describe(`query collection ownership lifecycle`, () => {
                 observe(),
                 failure,
               )
-              localReach.reach(`confirmation-accepted`)
+              markCut(`confirmation-accepted`)
             }
             settleRelease.resolve()
           }
@@ -1904,9 +1927,9 @@ describe(`query collection ownership lifecycle`, () => {
             `Query handler settlement`,
           )
           checkMutationConfirmation(history, `settled`, atWaiter, failure)
-          localReach.reach(`settlement-waiter`)
+          markCut(`settlement-waiter`)
           checkMutationConfirmation(history, `settled`, observe(), failure)
-          localReach.reach(`settled`)
+          markCut(`settled`)
           if (confirmation === `none` && outcome !== `reject-before-write`) {
             // Backend success alone supplied no source confirmation. A later
             // explicit reader may refetch; the frozen settlement cut stays old.
@@ -1920,11 +1943,15 @@ describe(`query collection ownership lifecycle`, () => {
               observe(),
               failure,
             )
-            localReach.reach(`late-confirmed`)
+            markCut(`late-confirmed`)
             checkMutationConfirmation(history, `settled`, atWaiter, failure)
           }
-          localReach.assertReached()
-          mutationReach.reach(
+          if (!oracleReplayRequested())
+            for (const cut of requiredCuts)
+              expect(enteredCuts.has(cut), `query.mutation-cuts: ${cut}`).toBe(
+                true,
+              )
+          markMutationHistory(
             `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
           )
         }, [
@@ -1957,18 +1984,31 @@ describe(`query collection ownership lifecycle`, () => {
     const histories = ([`insert`, `update`, `delete`] as const).flatMap(
       (operation) => [false, true].map((reject) => ({ operation, reject })),
     )
-    const reach = createOracleReach(
-      `query.post-handler-application`,
+    // Count the same two public checkpoints for each finite CRUD/outcome cell.
+    const reach = new Map<string, number>(
       histories.flatMap((h) => [
-        `${h.operation}/${h.reject}/application-held`,
-        `${h.operation}/${h.reject}/applied-waiter`,
+        [`${h.operation}/${h.reject}/application-held`, 0] as const,
+        [`${h.operation}/${h.reject}/applied-waiter`, 0] as const,
       ]),
     )
+    const markApplicationCut = (state: string) => {
+      const count = reach.get(state)
+      if (count === undefined)
+        throw new Error(
+          `query.post-handler-application: undeclared reach state ${state}`,
+        )
+      reach.set(state, count + 1)
+    }
     afterAll(() => {
-      reach.assertReached()
+      if (!oracleReplayRequested())
+        for (const [state, count] of reach)
+          expect(
+            count,
+            `query.post-handler-application: ${state}`,
+          ).toBeGreaterThanOrEqual(1)
       console.info(
         `query.post-handler-application reach`,
-        Object.fromEntries(reach.counts()),
+        Object.fromEntries(reach),
       )
     })
     it.each([`early-receipt`, `partial-rows`, `stale-waiter`] as const)(
@@ -2011,7 +2051,6 @@ describe(`query collection ownership lifecycle`, () => {
       `waits for later application after handler $operation rejection:$reject`,
       async ({ operation, reject }) => {
         oracleRoute(`case`)
-        reach.beginHistory()
         const initial: Array<Item> = [
           { id: `peer`, category: `peer`, name: `Peer` },
           ...(operation === `insert`
@@ -2151,7 +2190,7 @@ describe(`query collection ownership lifecycle`, () => {
             encode(initial),
             encode(authoritative),
           )
-          reach.reach(`${operation}/${reject}/application-held`)
+          markApplicationCut(`${operation}/${reject}/application-held`)
           release.resolve()
           await atMutationCheckpoint(
             external,
@@ -2168,7 +2207,7 @@ describe(`query collection ownership lifecycle`, () => {
             encode(initial),
             encode(authoritative),
           )
-          reach.reach(`${operation}/${reject}/applied-waiter`)
+          markApplicationCut(`${operation}/${reject}/applied-waiter`)
         }, [
           () => release.resolve(),
           () =>
