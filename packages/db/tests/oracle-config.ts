@@ -255,6 +255,8 @@ const staticOracleProperties = [
   `electric.synthetic-batch-partition`,
   `electric.valid-batch-partition`,
   `ivm.index-refinement`,
+  `ivm.murmur-stream`,
+  `ivm.reduce-fast-path`,
   `offline.key-scheduler-fifo-ledger`,
   `offline.interruption-settlement`,
   `offline.disposal-handoff`,

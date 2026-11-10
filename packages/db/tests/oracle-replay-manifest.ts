@@ -25,6 +25,16 @@ const ownerGroups: ReadonlyArray<
     `logical-scheduling`,
   ],
   [
+    `db-ivm/tests/murmur-stream-oracle.property.test.ts`,
+    `ivm`,
+    `murmur-stream`,
+  ],
+  [
+    `db-ivm/tests/operators/reduce-fast-path-oracle.property.test.ts`,
+    `ivm`,
+    `reduce-fast-path`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -1318,6 +1328,9 @@ const replayTestNames = new Map([
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
   ],
+  [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
+  [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
+  [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],
   [`group-result-key.groups`, `group-result-key\\.groups > random seed`],
 ])
 
