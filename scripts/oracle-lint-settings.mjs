@@ -480,10 +480,6 @@ export const oracleLintSettings = {
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -494,10 +490,6 @@ export const oracleLintSettings = {
       {
         file: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,

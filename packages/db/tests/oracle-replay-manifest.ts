@@ -1125,6 +1125,24 @@ const replayTestNames = new Map([
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
+  ...ownerGroups
+    .filter(([, prefix]) => prefix === `pg-serializer`)
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
+  ...[
+    `electric.persisted-tag-history`,
+    `electric.bound-descriptor-history`,
+  ].map(
+    (property) =>
+      [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+  ),
   [
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
