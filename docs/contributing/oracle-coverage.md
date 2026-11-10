@@ -8026,8 +8026,12 @@ Only absence of both permits initial adoption; after the setting is removed,
 the gate's presence preserves an empty allowed set. Constructed histories cover
 an addition, an addition after an empty adopted baseline, an addition after the
 setting was removed, a removal, and initial adoption. Both 20-history campaigns
-run these same laws and constructions. The checker rejects an always-accept
-observation. Production mutants that always accept or allow a removed baseline
+run these same laws and constructions. A local association records each
+builder's declared states on every invocation. The shared check compares those
+declarations with actual state observations for seeded, generated, and shrunk
+constructed outputs; it does not depend on the pinned framework's seeded-only
+association. The checker rejects both an always-accept report and a trace that
+omits a required constructed state. Production mutants that always accept or allow a removed baseline
 to restart fail the named `only shrinks` law at `completed`, including direct
 seed/path replay.
 

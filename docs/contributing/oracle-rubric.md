@@ -310,10 +310,16 @@ presence of a preferred heading, class, comment template, or helper.
   does not have this collision.
   Repeated primitive values or shared objects can replace an earlier builder
   in the framework's history-to-builder map and bypass its state checks. Each
-  normal campaign runs every builder once. Confirm that every builder's named
-  states were checked, using missing-state controls, and verify the reported
-  counts meet N. Printed counts and additional random hits alone do not enforce
-  a minimum.
+  normal campaign checks one seed-derived construction from every builder.
+  Confirm every builder's named state checks with missing-state controls, and
+  verify that the reported counts meet N. These checks enforce the minimum.
+  The pinned framework also invokes builders during generated runs, but it
+  does not associate their fresh objects with their `enters` obligations.
+  The property MUST separately check each builder's generated outputs against
+  its named states, using the same production driver and state observations.
+  A missing-state control MUST show that this check rejects a generated
+  construction that omits a required state. Printed counts and additional
+  random hits alone do not enforce either obligation.
   Literal fixed histories do not count toward required reach. A passing run
   count does not satisfy this requirement.
   Existing files on the shrinking `legacyCampaigns` list retain their legacy

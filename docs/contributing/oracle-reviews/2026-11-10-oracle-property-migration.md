@@ -289,3 +289,79 @@ forms. External framework repair and whole-PR readiness are separate work.
 The final scoped source passed explicit ESLint, formatting, and changed-file
 oracle lint. No framework package, production gate, campaign law, or run budget
 changed in this follow-up.
+
+## Third review follow-up: generated constructions
+
+CodeRabbit review `5847211592`, inline `4528863611`, checked
+`e7fe57ea1320cb717f323fa8b291ff796e69f60b`. Its finding distinguishes the
+seed-derived constructed histories that enforce a campaign's minimum from
+fresh constructed histories produced during the generated run budget.
+
+An executable probe on the unchanged `e1fb504` package uses a record grammar
+`{ n: integer, constructed: boolean }`, seed `42`, and `runs: 100`. Its builder
+returns a fresh record with `constructed: true`. The production driver reports
+state `required` only when `n` equals the source record sampled at seed `42`
+(`n: 9`). A local `WeakSet` counts builder outputs without changing the
+production driver or framework semantics. The native campaign passes with
+reach `{required: 1}`, although 45 of the 46 executed builder outputs omit the
+state. The framework's history-to-builder map contains only the initial
+seed-derived object; the later fresh outputs carry no automatic obligation.
+
+A shared check that rejects a marked construction without the state reports
+law `constructed reach` at `completed`, seed `42`, path `2:0:0`, for
+`{n: 0, constructed: true}`. Making the same driver report the state for every
+constructed history passes with the same check and budget; none of the 46
+builder outputs misses it. Separately, suppressing the state on the initial
+seed-derived history fails the framework's existing constructed-state check at
+path `0`. The original minimum is enforced, while the claim about every
+generated construction needs an additional check.
+
+ORC-015 now states both obligations. The original seeded constructions still
+enforce the minimum. A conversion also checks builder outputs over generated
+inputs against actual state observations. This is a DB guidance correction;
+it does not claim to repair the external framework. The finite probe covers
+one object-valued builder, one state, one seeded campaign, and no state probes
+or primitive-history association.
+
+The gate oracle applies that requirement within its original grammar and
+20-history budgets. Each existing builder still returns a fresh object. A
+local `WeakMap` records its declared state obligations on every builder
+invocation, including generated and shrunk constructions. The model carries
+those declarations beside the independent membership report. The shared
+check compares them with the production driver's actual state observations.
+The map stores no production answer, does not modify the history language,
+and is rebuilt by the same builder calls during direct replay. Weak keys
+release histories after the framework releases them.
+
+A generated-only observation mutant preserves all eight initial seed-derived
+constructions, then drops the declared state observations for later builder
+outputs. Keeping the old permissive reach comparison passes this mutant.
+The repaired shared check rejects it with law `constructed reach` at
+`completed`, seed `20261110`, path `8:0:0:0:0:0`:
+
+```json
+{"adopted":true,"enforced":false,"base":[],"head":["packages/db/tests/a-oracle.test.ts"],"hook":"none","globalConfig":"plain"}
+```
+
+The required `addition` and `empty baseline addition` observations are
+missing. The report and exit-status comparison still passes, so its named
+failure isolates constructed reach. A permanent wrong-trace calibration
+removes a required state while retaining the completed report and requires
+this same check to reject it. Restoring the observations gives six passing
+tests, with both original 20-history campaigns. No new campaign, property ID,
+production gate change, or history field was introduced.
+
+The restored direct replay passes and its guard records one execution of one
+history for the exact property, seed, and path:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=scripts.legacy-campaign-baseline TANSTACK_DB_ORACLE_SEED=20261110 TANSTACK_DB_ORACLE_PATH=8:0:0:0:0:0 pnpm_config_verify_deps_before_run=false node --import tsx packages/db/tests/oracle-replay.ts --maxWorkers=2 --config scripts/oracle-scripts.vitest.config.mjs legacy-campaign-baseline
+```
+
+In the clean fixed-seed/random campaigns, the eight state counts are:
+`addition` 10/7, `adoption` 5/5, `empty baseline addition` 4/3,
+`inherited pre-commit hook` 10/10, `inherited prepare-commit-msg hook` 12/10,
+`removal` 7/4, `retired baseline addition` 4/8, and
+`strict global config without hooks` 5/7. These finite results establish the
+local check's sensitivity; they do not repair or certify upstream's general
+constructed-history association.

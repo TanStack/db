@@ -14,7 +14,9 @@
  * fixture commit; both must leave the gate's completed report unchanged.
  * The grammar also crosses those hooks with plain and strict CRLF global
  * configuration. Neither developer setting may decide fixture setup or the
- * gate report, including histories with no inherited hook.
+ * gate report, including histories with no inherited hook. Every constructed
+ * output also owes its declared state observations. The shared comparison
+ * enforces them for seeded, generated, and shrunk builder outputs.
  * It excludes duplicate entries and malformed settings, which the lint plugin
  * owns. It does not judge the lint rule's legacy-use classifier or changes to
  * an entry's reason.
@@ -47,6 +49,11 @@ const files = [
   `packages/db/tests/b-oracle.test.ts`,
   `packages/react-db/tests/a-oracle.test.tsx`,
 ]
+// The pinned framework associates only seeded constructions with their state
+// requirements. Record declarations on every builder call, including generated
+// and shrunk outputs. Fresh objects keep the association unambiguous; the
+// driver independently reports which states the actual CLI history entered.
+const constructionStates = new WeakMap()
 const historyArbitrary = fc.record({
   adopted: fc.boolean(),
   enforced: fc.boolean(),
@@ -71,7 +78,11 @@ function expectedReport(history) {
           )
           .sort()
       : []
-  return { status: added.length > 0 ? 1 : 0, added }
+  return {
+    status: added.length > 0 ? 1 : 0,
+    added,
+    requiredStates: constructionStates.get(history) ?? [],
+  }
 }
 
 function settings(entries) {
@@ -182,11 +193,27 @@ function drive(history, observe) {
 }
 
 function checkReport(_history, trace, expected) {
-  for (const { checkpoint, value } of trace) {
-    if (checkpoint === `completed`)
-      return differs(checkpoint, `only shrinks`, value, expected) ?? pass
-  }
-  return violation(`completed`, `the gate did not complete`, `only shrinks`)
+  const completed = trace.find(({ checkpoint }) => checkpoint === `completed`)
+  if (!completed)
+    return violation(`completed`, `the gate did not complete`, `only shrinks`)
+  const mismatch = differs(`completed`, `only shrinks`, completed.value, {
+    status: expected.status,
+    added: expected.added,
+  })
+  if (mismatch) return mismatch
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  const missing = expected.requiredStates.filter((state) => !reached.has(state))
+  return missing.length > 0
+    ? violation(
+        `completed`,
+        `constructed history did not enter ${missing.join(`, `)}`,
+        `constructed reach`,
+      )
+    : pass
 }
 
 oracleProperty({
@@ -269,7 +296,14 @@ oracleProperty({
         enters: [`inherited ${hook} hook`],
         build: (h) => ({ ...h, hook }),
       })),
-    ],
+    ].map((construction) => ({
+      ...construction,
+      build: (history) => {
+        const built = construction.build(history)
+        constructionStates.set(built, construction.enters)
+        return built
+      },
+    })),
     fixed: [
       {
         name: `removed baseline stays closed`,
@@ -288,6 +322,19 @@ oracleProperty({
   driver: drive,
   check: checkReport,
   calibrations: [
+    {
+      name: `omits a constructed history's required state`,
+      law: `constructed reach`,
+      corrupt: (trace, history) => {
+        const [required] = constructionStates.get(history) ?? []
+        return required === undefined
+          ? undefined
+          : trace.filter(
+              ({ checkpoint, value }) =>
+                checkpoint !== `reach` || value !== required,
+            )
+      },
+    },
     {
       name: `accepts an added legacy campaign`,
       law: `only shrinks`,
