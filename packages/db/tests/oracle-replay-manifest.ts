@@ -861,7 +861,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/join-result-key-oracle.property.test.ts`,
     `join-result-key`,
-    `pairs whole-source`,
+    `pairs whole-source whole-source-matrix`,
   ],
   [
     `db/tests/query/public-container-copy-oracle.test.ts`,
@@ -1327,6 +1327,8 @@ const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `join-result-key.pairs`,
+    `join-result-key.whole-source`,
     `load-subset.exact-completion`,
     `load-subset.exact-inflight`,
     `load-subset.rejected-waiter`,

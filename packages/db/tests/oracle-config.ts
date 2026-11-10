@@ -540,6 +540,7 @@ const staticOracleProperties = [
   `where-predicate.publication`,
   `join-result-key.pairs`,
   `join-result-key.whole-source`,
+  `join-result-key.whole-source-matrix`,
   `group-result-key.groups`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
