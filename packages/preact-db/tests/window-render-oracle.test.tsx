@@ -296,76 +296,88 @@ function checkRender(
   return pass
 }
 
-for (const remote of [false, true])
-  for (const keyed of [false, true])
-    for (const move of [`offset`, `limit`, `both`] as const) {
-      const id = `preact.window-render.${remote ? `on-demand` : `eager`}-${keyed ? `keyed` : `derived`}-${move}`
-      oracleProperty({
-        id,
-        law: {
-          statement: `A Preact window moves only after its render commits. A rejected render cannot move the committed Collection or acquire rows.`,
-          authority: `packages/db/tests/conformance/contract.ts query-identity and window-commit laws; maintainer decision 2026-10-30 (#2291).`,
-          limits: `Real Preact error-boundary rendering, eager or finite synchronous on-demand sources, derived or explicit keys, and finite offset/limit moves; no Suspense, concurrent scheduling, or asynchronous provider settlement.`,
-          owner: `Adapter-owned outer window moves`,
+// Literal IDs let the replay manifest discover every receiving cell directly.
+// The tuples retain the complete source × identity × window-move grammar.
+const renderProperties = [
+  [`preact.window-render.eager-derived-offset`, false, false, `offset`],
+  [`preact.window-render.eager-derived-limit`, false, false, `limit`],
+  [`preact.window-render.eager-derived-both`, false, false, `both`],
+  [`preact.window-render.eager-keyed-offset`, false, true, `offset`],
+  [`preact.window-render.eager-keyed-limit`, false, true, `limit`],
+  [`preact.window-render.eager-keyed-both`, false, true, `both`],
+  [`preact.window-render.on-demand-derived-offset`, true, false, `offset`],
+  [`preact.window-render.on-demand-derived-limit`, true, false, `limit`],
+  [`preact.window-render.on-demand-derived-both`, true, false, `both`],
+  [`preact.window-render.on-demand-keyed-offset`, true, true, `offset`],
+  [`preact.window-render.on-demand-keyed-limit`, true, true, `limit`],
+  [`preact.window-render.on-demand-keyed-both`, true, true, `both`],
+] as const
+for (const [id, remote, keyed, move] of renderProperties) {
+  oracleProperty({
+    id,
+    law: {
+      statement: `A Preact window moves only after its render commits. A rejected render cannot move the committed Collection or acquire rows.`,
+      authority: `packages/db/tests/conformance/contract.ts query-identity and window-commit laws; maintainer decision 2026-10-30 (#2291).`,
+      limits: `Real Preact error-boundary rendering, eager or finite synchronous on-demand sources, derived or explicit keys, and finite offset/limit moves; no Suspense, concurrent scheduling, or asynchronous provider settlement.`,
+      owner: `Adapter-owned outer window moves`,
+    },
+    histories: {
+      arbitrary: renderHistoryArbitrary,
+      runs: 6,
+      fixedSeeds: [2291],
+      states,
+      // Every legal history already performs both transitions. Keep all
+      // generated offsets and widths: required reach needs no literal page.
+      constructed: [
+        {
+          name: `commits one page and rejects the next`,
+          enters: states,
+          build: (history) => ({ ...history }),
         },
-        histories: {
-          arbitrary: renderHistoryArbitrary,
-          runs: 6,
-          fixedSeeds: [2291],
-          states,
-          // Every legal history already performs both transitions. Keep all
-          // generated offsets and widths: required reach needs no literal page.
-          constructed: [
+      ],
+      fixed: [
+        {
+          name: `retains the committed page after rejection`,
+          history: {
+            aborted: 2,
+            committed: 5,
+            limit: 2,
+            abortedLimit: 4,
+            committedLimit: 7,
+          },
+        },
+      ],
+    },
+    model: (history) => expectedRender(history, move),
+    driver: (history, observe) =>
+      driveRenderHistory(history, remote, keyed, move, observe),
+    check: checkRender,
+    calibrations:
+      move === `offset`
+        ? []
+        : [
             {
-              name: `commits one page and rejects the next`,
-              enters: states,
-              build: (history) => ({ ...history }),
+              name: `aborted render changes the committed width`,
+              law: `ordered window rows`,
+              corrupt: (trace, history) =>
+                trace.map((entry) =>
+                  entry.checkpoint === `aborted`
+                    ? {
+                        ...entry,
+                        value: {
+                          ...(entry.value as WindowObservation),
+                          rows: expectedRows({
+                            offset: move === `limit` ? 0 : history.committed,
+                            limit: history.abortedLimit,
+                          }),
+                        },
+                      }
+                    : entry,
+                ),
             },
           ],
-          fixed: [
-            {
-              name: `retains the committed page after rejection`,
-              history: {
-                aborted: 2,
-                committed: 5,
-                limit: 2,
-                abortedLimit: 4,
-                committedLimit: 7,
-              },
-            },
-          ],
-        },
-        model: (history) => expectedRender(history, move),
-        driver: (history, observe) =>
-          driveRenderHistory(history, remote, keyed, move, observe),
-        check: checkRender,
-        calibrations:
-          move === `offset`
-            ? []
-            : [
-                {
-                  name: `aborted render changes the committed width`,
-                  law: `ordered window rows`,
-                  corrupt: (trace, history) =>
-                    trace.map((entry) =>
-                      entry.checkpoint === `aborted`
-                        ? {
-                            ...entry,
-                            value: {
-                              ...(entry.value as WindowObservation),
-                              rows: expectedRows({
-                                offset:
-                                  move === `limit` ? 0 : history.committed,
-                                limit: history.abortedLimit,
-                              }),
-                            },
-                          }
-                        : entry,
-                    ),
-                },
-              ],
-      })
-    }
+  })
+}
 
 declareOracle({
   owns: [`src/useLiveQuery.ts#useLiveQuery`],
