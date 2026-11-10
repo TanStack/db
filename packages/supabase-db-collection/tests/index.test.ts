@@ -643,7 +643,9 @@ describe('PostgREST query generation', () => {
       await queryResult((q) =>
         q.from({ user: usersCollection }).orderBy(({ user }) => user.name),
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*&order=name.asc'])
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?select=*&order=name.asc.nullsfirst',
+      ])
     })
 
     test('explicit asc', async () => {
@@ -652,7 +654,9 @@ describe('PostgREST query generation', () => {
           .from({ user: usersCollection })
           .orderBy(({ user }) => user.name, 'asc'),
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*&order=name.asc'])
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?select=*&order=name.asc.nullsfirst',
+      ])
     })
 
     test('descending', async () => {
@@ -661,7 +665,9 @@ describe('PostgREST query generation', () => {
           .from({ user: usersCollection })
           .orderBy(({ user }) => user.name, 'desc'),
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*&order=name.desc'])
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?select=*&order=name.desc.nullsfirst',
+      ])
     })
 
     test('multi-column orderBy', async () => {
@@ -672,7 +678,7 @@ describe('PostgREST query generation', () => {
           .orderBy(({ user }) => user.id, 'desc'),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&order=name.asc,id.desc',
+        '/rest/v1/users?select=*&order=name.asc.nullsfirst,id.desc.nullsfirst',
       ])
     })
   })
@@ -686,7 +692,7 @@ describe('PostgREST query generation', () => {
           .limit(10),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&order=id.asc&limit=10',
+        '/rest/v1/users?select=*&order=id.asc.nullsfirst&limit=10',
       ])
     })
   })
@@ -701,7 +707,7 @@ describe('PostgREST query generation', () => {
           .offset(20),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&order=id.asc&limit=20&offset=20',
+        '/rest/v1/users?select=*&order=id.asc.nullsfirst&limit=20&offset=20',
       ])
     })
   })
@@ -774,7 +780,7 @@ describe('PostgREST query generation', () => {
           .limit(10),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&active=eq.true&order=name.asc&limit=10',
+        '/rest/v1/users?select=*&active=eq.true&order=name.asc.nullsfirst&limit=10',
       ])
     })
 
@@ -786,7 +792,7 @@ describe('PostgREST query generation', () => {
           .orderBy(({ user }) => user.name, 'desc'),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&active=eq.true&order=name.desc',
+        '/rest/v1/users?select=*&active=eq.true&order=name.desc.nullsfirst',
       ])
     })
 
@@ -799,7 +805,7 @@ describe('PostgREST query generation', () => {
           .limit(5),
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=*&id=gt.3&order=id.asc&limit=5',
+        '/rest/v1/users?select=*&id=gt.3&order=id.asc.nullsfirst&limit=5',
       ])
     })
 

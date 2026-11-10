@@ -121,7 +121,7 @@ describe('live infinite query (windowed) pagination', () => {
     // The first page is a plain ordered window (one peek row past the page)
     // plus core's boundary probe — no keyset cursor (`gt`) and no offset yet.
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc&limit=3', // window + 1 peek row
+      'select=*&order=id.asc.nullsfirst&limit=3', // window + 1 peek row
       'select=*&id=eq.3', // boundary probe (loadBoundary) settles the peek
     ])
   })
@@ -146,10 +146,10 @@ describe('live infinite query (windowed) pagination', () => {
     // request from the boundary (id 3): ordered, limited, and — crucially —
     // with no offset re-skipping rows. No request carries an offset.
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc&limit=3', // page 1: window + 1 peek row
+      'select=*&order=id.asc.nullsfirst&limit=3', // page 1: window + 1 peek row
       'select=*&id=eq.3', // boundary probe (loadBoundary) settles the peek
-      'select=*&order=id.asc&id=eq.3', // page 2: whereCurrent tie read
-      'select=*&order=id.asc&limit=2&id=gt.3', // page 2: whereFrom keyset read
+      'select=*&order=id.asc.nullsfirst&id=eq.3', // page 2: whereCurrent tie read
+      'select=*&order=id.asc.nullsfirst&limit=2&id=gt.3', // page 2: whereFrom keyset read
       'select=*&id=eq.5', // boundary probe for the next peek
     ])
   })
@@ -184,10 +184,10 @@ describe('live infinite query (windowed) pagination', () => {
     // the window path; see the module note. The adapter emits it regardless
     // because it honors the cursor contract.)
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=rank.asc&limit=3', // page 1: window + 1 peek row
+      'select=*&order=rank.asc.nullsfirst&limit=3', // page 1: window + 1 peek row
       'select=*&rank=eq.20', // boundary probe (loadBoundary): full tie class
-      'select=*&order=rank.asc&rank=eq.20', // page 2: whereCurrent tie read
-      'select=*&order=rank.asc&limit=1&rank=gt.20', // page 2: whereFrom keyset read
+      'select=*&order=rank.asc.nullsfirst&rank=eq.20', // page 2: whereCurrent tie read
+      'select=*&order=rank.asc.nullsfirst&limit=1&rank=gt.20', // page 2: whereFrom keyset read
       'select=*&rank=eq.30', // boundary probe for the next peek
     ])
   })
@@ -239,9 +239,9 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
     // and each later page advances the offset by the rows received, capped by
     // the rows still owed (the last page asks for just 1).
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc',
-      'select=*&order=id.asc&offset=2&limit=2',
-      'select=*&order=id.asc&offset=4&limit=1',
+      'select=*&order=id.asc.nullslast',
+      'select=*&order=id.asc.nullslast&offset=2&limit=2',
+      'select=*&order=id.asc.nullslast&offset=4&limit=1',
     ])
   })
 
@@ -265,8 +265,8 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
     ])
     // Two requests, not three: the count tells the loop it is done at offset 4.
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc',
-      'select=*&order=id.asc&offset=2&limit=2',
+      'select=*&order=id.asc.nullslast',
+      'select=*&order=id.asc.nullslast&offset=2&limit=2',
     ])
   })
 
@@ -281,8 +281,8 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
       3, 4, 5, 6,
     ])
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc&offset=2',
-      'select=*&order=id.asc&offset=4&limit=2',
+      'select=*&order=id.asc.nullslast&offset=2',
+      'select=*&order=id.asc.nullslast&offset=4&limit=2',
     ])
   })
 
@@ -291,7 +291,7 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
     const rows = await run(mockFetch, { orderBy: ORDER_BY })
 
     expect((rows as Array<{ id: number }>).map((r) => r.id)).toEqual([1, 2])
-    expect(getSearches(mockFetch)).toEqual(['select=*&order=id.asc'])
+    expect(getSearches(mockFetch)).toEqual(['select=*&order=id.asc.nullslast'])
   })
 
   test('the loop owns limit: a caller limit above the cap still pages', async () => {
@@ -301,8 +301,8 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
     // Exactly the caller's 3 rows, fetched across cap-sized pages.
     expect((rows as Array<{ id: number }>).map((r) => r.id)).toEqual([1, 2, 3])
     expect(getSearches(mockFetch)).toEqual([
-      'select=*&order=id.asc&limit=3',
-      'select=*&order=id.asc&limit=1&offset=2',
+      'select=*&order=id.asc.nullslast&limit=3',
+      'select=*&order=id.asc.nullslast&limit=1&offset=2',
     ])
   })
 
@@ -396,10 +396,10 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
       await readTied(mockFetch, ['id'])
 
       expect(getSearches(mockFetch)).toEqual([
-        'select=*&order=rank.asc',
-        'select=*&order=rank.asc,id.asc&offset=0&limit=2',
-        'select=*&order=rank.asc,id.asc&offset=2&limit=2',
-        'select=*&order=rank.asc,id.asc&offset=4&limit=2',
+        'select=*&order=rank.asc.nullslast',
+        'select=*&order=rank.asc.nullslast,id.asc&offset=0&limit=2',
+        'select=*&order=rank.asc.nullslast,id.asc&offset=2&limit=2',
+        'select=*&order=rank.asc.nullslast,id.asc&offset=4&limit=2',
       ])
     })
 
@@ -421,7 +421,7 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
 
       // `rank` is already sorted by, so only `id` is added.
       expect(getSearches(mockFetch)[1]).toBe(
-        'select=*&order=rank.asc,id.asc&offset=0&limit=2',
+        'select=*&order=rank.asc.nullslast,id.asc&offset=0&limit=2',
       )
     })
 
@@ -429,7 +429,9 @@ describe('db-max-rows paging loop (supabaseQueryFn)', () => {
       const mockFetch = makeTieShufflingFetch(TIED.slice(0, 2), 2)
       await readTied(mockFetch, ['id'])
 
-      expect(getSearches(mockFetch)).toEqual(['select=*&order=rank.asc'])
+      expect(getSearches(mockFetch)).toEqual([
+        'select=*&order=rank.asc.nullslast',
+      ])
     })
   })
 
