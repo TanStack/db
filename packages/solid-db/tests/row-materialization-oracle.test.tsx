@@ -1501,7 +1501,7 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
       createRoot((dispose) => {
         resources.defer(dispose)
         createRenderEffect(() => {
-          const current = container(query()[0]!)
+          const current = container(query()[0])
           observed = { callable: current.format, value: current.format?.() }
           reads++
         })
@@ -1518,7 +1518,7 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
           expectedCallable(history, version, signal(), choices, omitted),
         )
         oracleAssertion(`ordinary root stays stable`, () =>
-          expect(query()[0]!, `ordinary root stays stable`).toBe(root),
+          expect(query()[0], `ordinary root stays stable`).toBe(root),
         )
         oracleAssertion(`unchanged scalar neighbor stays quiet`, () =>
           expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(
@@ -1551,7 +1551,7 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
         }
         if (history.shape.startsWith(`shadow`))
           for (const fields of [
-            container(query()[0]!),
+            container(query()[0]),
             ...retained.map((saved) => container(saved.row)),
           ]) {
             oracleAssertion(`current and retained user shadow ownness`, () =>
@@ -1817,8 +1817,8 @@ async function runReservedFieldHistory(
           observed = query()[0]![history.key]
         })
         createRenderEffect(() => {
-          observedKeys = Object.keys(query()[0]!)
-          observedOwn = Object.hasOwn(query()[0]!, history.key)
+          observedKeys = Object.keys(query()[0])
+          observedOwn = Object.hasOwn(query()[0], history.key)
         })
         createRenderEffect(() => {
           void query()[0]!.unchanged
@@ -1860,7 +1860,7 @@ async function runReservedFieldHistory(
         )
         oracleAssertion(`current own user field`, () =>
           expect(
-            Object.hasOwn(query()[0]!, history.key),
+            Object.hasOwn(query()[0], history.key),
             `current own user field`,
           ).toBe(stage !== 3),
         )
@@ -1875,7 +1875,7 @@ async function runReservedFieldHistory(
         oracleAssertion(
           `expect(Object.getPrototypeOf(query()[0]!)).toBe(Object.prototype)`,
           () =>
-            expect(Object.getPrototypeOf(query()[0]!)).toBe(Object.prototype),
+            expect(Object.getPrototypeOf(query()[0])).toBe(Object.prototype),
         )
         oracleAssertion(
           `expect(Object.hasOwn(Object.prototype, 'value')).toBe(false)`,
@@ -1884,7 +1884,7 @@ async function runReservedFieldHistory(
         entered.add(`tracked-own-keys`)
         entered.add(`prototype-preserved`)
         oracleAssertion(`ordinary root identity`, () =>
-          expect(query()[0]!, `ordinary root identity`).toBe(root),
+          expect(query()[0], `ordinary root identity`).toBe(root),
         )
         oracleAssertion(`unchanged scalar neighbor stays quiet`, () =>
           expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(
