@@ -861,12 +861,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
     `ivm`,
-    `distinct-collisions`,
+    `distinct-collisions distinct-collisions-tuple`,
   ],
   [
     `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
     `ivm`,
-    `distinct-representatives`,
+    `distinct-representatives distinct-representatives-unit-split`,
   ],
   [
     `db/tests/query/distinct-collision-oracle.test.ts`,
@@ -1160,10 +1160,18 @@ const replayTestNames = new Map([
     `ivm.topk-negative-window-orderBy`,
     `Absolute-rank negative window oracle:.*orderBy.*random`,
   ],
-  [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
+  [`ivm.distinct-collisions`, `ivm\\.distinct-collisions > random seed`],
   [
     `ivm.distinct-representatives`,
-    `conserves full representative contributions.*random`,
+    `ivm\\.distinct-representatives > random seed`,
+  ],
+  [
+    `ivm.distinct-collisions-tuple`,
+    `ivm\\.distinct-collisions-tuple > random seed`,
+  ],
+  [
+    `ivm.distinct-representatives-unit-split`,
+    `ivm\\.distinct-representatives-unit-split > random seed`,
   ],
   [
     `includes.bucket-collisions`,

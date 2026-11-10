@@ -32,6 +32,20 @@ import type { Arbitrary } from 'fast-check'
  * row with the same key.
  */
 
+// Only a comparison mismatch has semantic metadata. Invalid input, graph,
+// scheduling, model and fixture failures retain their original error kind.
+export class OracleComparisonMismatch extends Error {
+  constructor(
+    message: string,
+    readonly law: string,
+    readonly checkpoint: string,
+    readonly actual: unknown,
+    readonly expected: unknown,
+  ) {
+    super(message)
+  }
+}
+
 export type Weighted<T> = Array<[T, number]>
 
 type StateEntry<T> = { value: T; weight: number }
@@ -218,10 +232,14 @@ function assertEqual<T>(
   const actualRows = normalized(actual)
   const expectedRows = normalized(expected)
   if (JSON.stringify(actualRows) !== JSON.stringify(expectedRows)) {
-    throw new Error(
+    throw new OracleComparisonMismatch(
       `${law}: ${kind} diverged at checkpoint ${checkpoint}\n` +
         `expected ${JSON.stringify(expectedRows)}\n` +
         `actual   ${JSON.stringify(actualRows)}`,
+      `${law}: ${kind}`,
+      String(checkpoint),
+      actualRows,
+      expectedRows,
     )
   }
 }
