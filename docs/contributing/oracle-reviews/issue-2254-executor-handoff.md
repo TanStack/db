@@ -1282,3 +1282,83 @@ Final normal review-boundary reach (24 generated plus 14 constructed histories p
 | deletion rejects empty | 3 | 3 |
 | peer after subscriber exception | 3 | 1 |
 | live offline predecessor | 19 | 20 |
+
+### Refreshed full-source audit and receiving configuration
+
+Run `954a142cffbb` audits implementation commit
+`248ff79229281fbf42f3a97aa8cb9a300ed86fe2`, production SHA-256
+`2f7299ec03b2a4f741c7ad485c3fdc09454ca1e8c08a2e3c8e46034f06e29b5a`.
+It supersedes `fd3da244acf0` for the current source. That earlier run and its
+298-operator totals apply only to hash `dff0f5…`, as recorded above.
+The command uses the same pinned merge base, seed 20261110, two contexts and
+complete `src/OfflineExecutor.ts` selection, with output directory
+`/private/tmp/evaluate-2254-gap-ten-review`. Production did not change during
+the run; normal Vitest and separate receiving transforms ran only after it exited.
+
+The raw inventory is **304 operators: 280 killed, 18 survived, five unreached,
+and one setup error**. Of the 280 assertion kills, 270 have named-law metadata
+and ten are untagged reproducible assertion routes. There are no production
+crashes, timeouts, exclusions or nondeterministic routes. Of 53 changed-line
+operators, 51 are killed and two survive. This is a **24-gap raw report**,
+not a zero-gap result or an all-changed-lines-killed claim.
+
+Every operator has a disposition. The twenty prior residuals match by stable
+key or unique function/operator/original/replacement; their source functions
+and authority analysis remain unchanged. The four additional raw residuals
+are two registration-work differences and two receiving-route mutations:
+
+| Current operators | Judgment and evidence |
+| --- | --- |
+| M45, M64, M65, M67, M74, M133, M150, M251 | Eight typed/call-path equivalences, with the prior bounded arguments retained. |
+| M84, M90, M92, M97, M102, M103, M125, M129, M131, M137, M186, M275 | Twelve previously adjudicated observable differences without a stronger accepted promise. The follower-read and partial-failed-initialization distinctions remain explicit. |
+| M203, M204 | Removing or weakening the nonempty-obligation guard repeats configuration reads and idempotent `Set.add` calls. Work counters or side-effecting getters distinguish this behavior. R08 removes that work, but the accepted API does not promise an exact configuration-read count or forbid repeated registration. These are observable work differences, not global equivalences or missing caller-settlement laws. |
+| M96, M100 | The package-local report records a setup error and a survivor, respectively. Both exact mutations fail the separate real QueryDB receiving comparison, as described below. |
+
+R06 moved the QueryDB registration out of the offline package. Its receiving
+comparison is therefore deliberately outside that package's local mutation
+discovery. M96 removes the connectivity barrier catch/finally chain; the raw
+offline route reports `storage fault` before a law assertion. M100 prevents
+the matching barrier field from clearing; the core projection permits a settled
+promise and survives. Neither raw outcome is relabeled as an assertion kill.
+
+Each captured source mutation is separately applied by an in-memory transform
+to the real QueryDB runner. Both fail
+`offline.executor-connectivity-query-db`, seed `20261110`, path `0`, at
+`batch completed` / `query refresh settlement`: expected `fulfilled`, observed
+`pending`. The history restores one transaction, delivers stale refetch data,
+then acknowledges the successful provider and durable deletion. These are named
+receiving assertion failures, not setup failures. The normal receiving campaign
+passes all five tests, with each of its four states reached 16 times per campaign.
+After these receiving checks, the remaining 22 raw residuals comprise eight
+bounded equivalences and fourteen differences without a stronger promise.
+No accepted-law counterexample remains identified by this finite audit.
+
+The normal Collections CI job exposed a separate configuration flaw introduced
+by relocation: QueryDB's static type-test collector selected this file but could
+not discover the tests dynamically registered through `oracleProperty`, reporting
+`No test suite found`. The earlier scratch configuration had bypassed that
+collector. The normal package command reproduced the failure locally; it also
+reported 39 source errors from unavailable local dependencies, whereas CI reported
+no type errors. The repair excludes only this runtime-only file from type-test
+discovery. It remains in the TypeScript program and in runtime discovery.
+The unchanged normal package command then passes all five receiving tests:
+
+```sh
+# From packages/query-db-collection
+pnpm exec vitest run tests/offline-executor-refresh-oracle.test.ts --maxWorkers=1
+```
+
+No model, history, observation, calibration, run budget or type assertion changes.
+The final pushed configuration still needs the superseding full Collections CI
+result; the targeted command alone does not establish a green whole-package run.
+
+CodeRabbit review `5847990356`, covering `248ff7922`, correctly identifies the
+coverage map's ambiguous attribution of the older mutation totals. The refreshed
+map now names the current run and source hash and preserves both raw receiving
+labels and the two changed-line survivors. Its suggestion to remove “final” from
+the final-outcome subscriber checkpoint would erase a meaningful timing limit;
+the American-English spelling suggestion is applied. The default docstring gate
+and optional generation controls duplicate earlier adjudicated suggestions.
+Optional Autofix and local CLI controls establish no new product requirement.
+The lossless scratch audit accounts for all eight substantive and optional items:
+two fixed, three refuted as defects or requirements, and three duplicates.
