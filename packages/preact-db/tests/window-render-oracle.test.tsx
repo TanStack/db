@@ -25,9 +25,9 @@ import {
   windowRows,
 } from '../../db/tests/conformance/window-history-oracle'
 import {
+  OracleCheckpointFailure,
   declareOracle,
   differs,
-  OracleCheckpointFailure,
   oracleProperty,
   pass,
   violation,
