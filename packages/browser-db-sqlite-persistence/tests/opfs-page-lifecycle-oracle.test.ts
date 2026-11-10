@@ -931,7 +931,7 @@ function registerFixedHistory<T>(
   judge: (history: T) => Promise<void>,
 ) {
   oracleProperty({
-    id: `${id}-fixed`,
+    id,
     law: lifecycleLaw,
     histories: examples.map(([history], index) => ({ history, index })),
     label: (entry) => String(entry.index),
@@ -957,7 +957,7 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 registerFixedHistory(
-  `opfs.page-lifecycle`,
+  `opfs.page-lifecycle-fixed`,
   pagehideExamples,
   runPagehideHistory,
 )
@@ -974,7 +974,7 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 registerFixedHistory(
-  `opfs.mixed-execute`,
+  `opfs.mixed-execute-fixed`,
   mixedExamples,
   runMixedExecuteHistory,
 )
@@ -991,7 +991,7 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 registerFixedHistory(
-  `opfs.terminal-event`,
+  `opfs.terminal-event-fixed`,
   terminalEventExamples,
   runTerminalEventHistory,
 )
@@ -1007,7 +1007,7 @@ oracleProperty({
     ),
   check: forwardAssertionJudgment,
 })
-registerFixedHistory(`opfs.close`, closeExamples, runCloseHistory)
+registerFixedHistory(`opfs.close-fixed`, closeExamples, runCloseHistory)
 oracleProperty({
   id: `opfs.failure-cleanup`,
   law: lifecycleLaw,
@@ -1020,4 +1020,8 @@ oracleProperty({
     ),
   check: forwardAssertionJudgment,
 })
-registerFixedHistory(`opfs.failure-cleanup`, failureExamples, runFailureHistory)
+registerFixedHistory(
+  `opfs.failure-cleanup-fixed`,
+  failureExamples,
+  runFailureHistory,
+)
