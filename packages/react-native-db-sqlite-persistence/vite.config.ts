@@ -13,6 +13,11 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`],
+      tsconfig: `./tsconfig.json`,
+      // oracleProperty registers its tests at runtime, beyond the static
+      // collector. The full project compiler still checks this file and
+      // reports its diagnostics as source errors.
+      exclude: [`tests/op-sqlite-driver-oracle.test.ts`],
     },
   },
 })

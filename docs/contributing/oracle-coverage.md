@@ -1993,7 +1993,13 @@ server/local behavior has independent function refs. On unchanged production,
 640 admission assertions fail and 1,526 tests pass, including six controls.
 Failures remain open until the deferred production repair. The shared immutable
 bound-options checker now receives Preact's six native histories as well as
-React's 12; six mutant in-place mutations are rejected. Svelte's actual
+React's 12; six mutant in-place mutations are rejected. The Preact receiver
+now registers these six exhaustive cases as `preact.bound-options` through
+`oracleProperty`. It snapshots Collection/getKey/schema reference relations
+and keeps the shared binding judgment, three rerenders, source publication,
+replacement keys and all six in-place-replacement calibrations. Each case
+requires every original observation cut and its recorded reach states; the
+finite command also checks determinism and takes no seed/path coordinates. Svelte's actual
 client-backed effect receives all 144 cached-option histories. All three native
 selectors pass. Portable first claims/failure/consumption are no longer merely
 proposed coverage. Remaining cache limits at that chunk were first registration
@@ -3983,6 +3989,17 @@ The post-merge review added three missing domains to existing owners:
   cross sparse-array length/holes and RegExp source/flags/position with equal
   controls, replacement order, hash consolidation, and actual retained graph
   output. Ordinary replacements also run without the global `File` constructor.
+  Its five `oracleProperty` campaigns preserve the original five fixed seeds
+  and 25 generated inputs per relation/path cell, and add equal-budget random
+  campaigns. Constructed histories measure replacement order, equal and unequal
+  versions, transient cancellation, collisions, File availability, shared
+  subtrees, unrelated getter reads, and long cancellation. The
+  [conversion evidence](oracle-reviews/2026-11-10-topk-batch-property-conversion.md)
+  records the same-seed mutation comparison and direct guarded replay.
+  The unrelated-payload campaign compares each source key's exact signed
+  contribution bag and source-row identity, as well as output length and zero
+  getter reads. A multiple-key constructed history and duplicate-key/omitted-key
+  calibration protect that distinction.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
@@ -4240,6 +4257,14 @@ is needed for native keyboard dispatch.
 
 ## Oracle tooling
 
+The converted TopK batch, OP-SQLite alias and Preact window-render owners check
+constructed-state observations in their shared comparisons as well as the
+framework's seeded checks. The pinned framework omits builder association for
+fresh generated constructions. Their [reach follow-up](oracle-reviews/2026-11-10-constructed-reach-followup.md)
+records generated-only omission controls, shared-check calibrations and the
+unchanged production paths and run budgets. The finite Preact bound-options
+owner already enforces its per-case cuts and reach directly.
+
 `scripts/run-budget-oracle.property.test.js` owns run-budget tracking
 (`scripts.run-budget`): every lowered budget, and every budget whose key is in
 no tracked oracle file at head, is reported. A budget belongs to the oracle
@@ -4259,10 +4284,14 @@ A budget that a helper computes at run time is not tracked either: the script
 reads the counts and keys written at a campaign's call, or in constants that the
 oracle file declares or imports. The op-sqlite alias campaigns in
       `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`
-(`op-sqlite.write-marker-aliases` and `op-sqlite.columnar-sql-aliases`, 50 runs
-each) register through `registerAliasOracle`, which builds its parameters from
-`readAliasOracleRuns()` and `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS`, so lowering
-them is not reported. On main the script instead counted the literal
+(`op-sqlite.write-marker-aliases`, `op-sqlite.result-carrier-equivalence`, and
+`op-sqlite.columnar-sql-aliases`, 50 base runs each) now register directly through
+`oracleProperty`. Their base run budget still comes from `readAliasOracleRuns()`
+and the existing `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS` override, so lowering that
+helper's runtime result is not reported. The framework applies the shared run
+multiplier once. The former 20-run checker shrink/replay calibration is unchanged
+in the ordinary `op-sqlite-driver.test.ts`; its move is reported as a removed
+oracle run budget, although normal package tests still execute all 20 attempts. On main the script instead counted the literal
 `oracleRandomParameters(50, …)` calls in a unit test of those parameters. That
 unit test now lives in `op-sqlite-driver.test.ts`, so the script reports both
 keys and the fixed seed 271828 as removed, although both campaigns still run in
@@ -4414,7 +4443,16 @@ witness.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
-config applies.
+config applies. An enumerated `oracleProperty` has status `enumerated-campaign`
+and a direct Vitest command selecting its finite cases, calibrations and
+determinism check. The command clears inherited replay coordinates because the
+cases have no campaign seed or shrink path. The guarded
+seed/path runner rejects that status before starting a child and supplies the
+direct command. A two-case receiving fixture verifies that the advertised
+command runs the selected property, excludes a similarly named neighbor and
+rejects a wrong value through the finite comparison. This does not add guarded
+execution witnesses or seed/path semantics to enumerated histories. Generated
+properties retain their existing guarded replay contract.
 
 ## Reusable-law backlog
 
@@ -4804,6 +4842,14 @@ a mutant wrong-answer control, and an explicit statement of remaining limits.
       otherwise minimally distinguishable results. Renaming a selected column to a
       structural-looking alias must not turn a data row into a write envelope.
       Owner: `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`.
+      Its three `oracleProperty` campaigns share the independent model and exact
+      row/key-order comparison in `op-sqlite-alias-oracle.ts`. Randomized
+      constructions reach every declared alias and all eight documented carrier
+      paths; the SQL campaign retains both real columnar and real direct-row
+      SQLite shim paths. The seed-165903 conversion reports contain the same 361
+      mutant keys and retain all 29 prior kills under named laws. The
+      [conversion record](oracle-reviews/2026-11-10-op-sqlite-oracle-property.md)
+      preserves the commands, reached states, and scope.
 - [x] **Carrier coexistence and representation symmetry.** Cross `rows`,
       `rawRows`, `columnNames`, and supported result containers, including legal
       coexistence. Equivalent array and object forms must agree on rows or on the
@@ -7450,7 +7496,7 @@ the retained Collection after the host settles. It controls demand settlement
 over already installed source rows; the core pagination owner continues to own
 source delivery, failures and ordered repair.
 
-The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. The page law now runs through client-backed React and Svelte drivers, and React Suspense both with and without a client (maintainer decision, 2026-11-03, issue #2345). DbClient is a driver mode, not a React exception; future client-backed adapters register the same histories and comparisons. Each mode receives direct/nested, applicable keyed/derived, pending, publication-callback, changed-plan and source-write histories. Every adapter also runs the independent-peer histories: equal queries yield distinct outputs; declarative and imperative moves preserve the peer page; source writes update both; retiring one leaves its peer usable. Before initial Suspense readiness, the pending comparison observes the actual fallback and absence of a successful result. It starts retention comparisons at the first successful return.
+The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Its 12 `oracleProperty` registrations preserve eager/on-demand sources, derived/keyed identity and offset/limit/combined moves. Each keeps the fixed regression, fixed campaign seed 2291 and six generated histories per campaign. A construction retains the generated page parameters because every legal history commits one move and rejects the next; each declared state reached seven non-fixed histories per campaign in the conversion run. The recorder snapshots ordered selected rows and public Collection identity relations before cleanup, then the unchanged shared comparison judges all three cuts. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. The page law now runs through client-backed React and Svelte drivers, and React Suspense both with and without a client (maintainer decision, 2026-11-03, issue #2345). DbClient is a driver mode, not a React exception; future client-backed adapters register the same histories and comparisons. Each mode receives direct/nested, applicable keyed/derived, pending, publication-callback, changed-plan and source-write histories. Every adapter also runs the independent-peer histories: equal queries yield distinct outputs; declarative and imperative moves preserve the peer page; source writes update both; retiring one leaves its peer usable. Before initial Suspense readiness, the pending comparison observes the actual fallback and absence of a successful result. It starts retention comparisons at the first successful return.
 
 The React render receiver crosses ordinary/Suspense hooks, provider/explicit-client/descriptor inputs, eager/on-demand sources, derived/keyed identities, and offset/limit/combined moves. A separate receiving schedule in that same file blocks a mounted replacement before its hook while a peer finishes the same preload, then resumes it. Its rows and identity use the shared page comparison; a missing exclusive-ownership check fails after the peer has rendered first. The [client page receiver](../../packages/react-db/tests/client-window-oracle.test.tsx) checks JSON-transported server preloads at the first browser hook render, a move before local readiness, local handoff, peer isolation, return to the first page, and replacement on a client switch over the same concrete source. Keyed preload identity includes the outer page. This receiver does not run hydrateRoot or a real Electric provider. Suspense retry work may remain unclaimed across discarded renders, but a successful binding takes exclusive ownership; returned query Collections are never shared implicitly. Supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts; no transported snapshot is retargeted. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
 
@@ -8055,3 +8101,28 @@ its own same-seed before/after gap comparison; this adoption does not supply
 that evidence. Gaps in changed functions close by a kill or an explicit
 maintainer allowance for their anchored gaps; a coverage-map entry alone does
 not close them.
+
+The reversed-index owner now registers generated reads through
+`reverse-index.reads` and its four existing large histories through the finite
+`reverse-index.large-reads` property. The independent order and filter-work
+judgments, 200-run fixed/random campaigns, and twelve declared states remain.
+Every fresh constructed history retains its reach obligations; incomplete
+traces preserve actual driver failures. The [conversion record](oracle-reviews/2026-11-10-reverse-index-property-conversion.md)
+binds the complete 49-site comparison and all 23 retained named order
+rejections. Its five survivors, fifteen unreached sites and six runtime
+crashes are unchanged gaps; this refactor claims no closure of them.
+
+The structural-hash graph and failed-getter-retry owners are now
+`ivm.hash-graph` and `ivm.hash-failure-retry` properties. Their arithmetic
+read-count and independent graph-topology/unfolding judgments retain the
+existing laws and 100/300-run budgets. Five retry states and nine graph states
+have constructed histories. Every builder invocation records its obligations;
+the shared check compares them with actual reach at a virtual completeness
+checkpoint that preserves interrupted driver errors. The
+[conversion record](oracle-reviews/2026-11-10-hash-property-conversion.md) and
+its companion JSON bind the final source blobs, all reach counts, generated
+failure replays, and late-error controls. A cold explicit-prefix seed-42
+comparison preserves all 144 prior semantic kills among 234 baseline sites,
+checking 148 selected stable keys with zero cache reuse. Production is
+unchanged. The wider baseline's 54 survivors, 22 unowned sites, 12 crashes,
+and 2 unreached sites remain gaps; this refactor claims no closure of them.

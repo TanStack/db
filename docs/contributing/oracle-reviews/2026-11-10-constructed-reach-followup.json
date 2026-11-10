@@ -1,0 +1,2785 @@
+{
+  "base": "9ef5794755deb114fb93c059ed4f082af947a727",
+  "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+  "sourceSha256": {
+    "packages/db-ivm/tests/operators/topk-batch-contract-oracle.test.ts": "27c02456693daaa836803fdb68d586576d7c62312be92ff495aeee9db8dcc4a8",
+    "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts": "e647c12f0faedbfb4b98318e97bf5804628d3b81ba7a06b473dee52c459c9ee6",
+    "packages/preact-db/tests/window-render-oracle.test.tsx": "bccb0a6c2a3019c690e9e9e23be3300776fbb2977ca91a063aaa133ffb26c2b7"
+  },
+  "reach": {
+    "ivm.topk-batch-relations": {
+      "fixed seed 409033": {
+        "add first": 13,
+        "equal versions": 27,
+        "forced collision": 27,
+        "ordinary batch": 27,
+        "replacement versions": 27,
+        "retract first": 14,
+        "transient cancellation": 27
+      },
+      "random seed": {
+        "add first": 15,
+        "equal versions": 27,
+        "forced collision": 27,
+        "ordinary batch": 27,
+        "replacement versions": 27,
+        "retract first": 12,
+        "transient cancellation": 27
+      }
+    },
+    "ivm.topk-batch-file-independent": {
+      "fixed seed 409039": {
+        "File absent": 27,
+        "File present": 27,
+        "add first": 11,
+        "retract first": 16
+      },
+      "random seed": {
+        "File absent": 27,
+        "File present": 27,
+        "add first": 15,
+        "retract first": 12
+      }
+    },
+    "ivm.topk-batch-shared-subtrees": {
+      "fixed seed 409034": {
+        "shared subtree comparison": 24
+      },
+      "random seed": {
+        "shared subtree comparison": 25
+      }
+    },
+    "ivm.topk-batch-unrelated-payloads": {
+      "fixed seed 409035": {
+        "multiple unrelated keys": 26,
+        "unrelated payload getters": 26
+      },
+      "random seed": {
+        "multiple unrelated keys": 26,
+        "unrelated payload getters": 26
+      }
+    },
+    "ivm.topk-batch-long-cancellation": {
+      "fixed seed 409037": {
+        "independently allocated cancellation": 26
+      },
+      "random seed": {
+        "independently allocated cancellation": 26
+      }
+    },
+    "op-sqlite.write-marker-aliases": {
+      "fixed seed 165903": {
+        "alias:changes": 35,
+        "alias:insertId": 31,
+        "alias:lastInsertRowId": 41,
+        "alias:rowsAffected": 35
+      },
+      "random seed": {
+        "alias:changes": 25,
+        "alias:insertId": 37,
+        "alias:lastInsertRowId": 38,
+        "alias:rowsAffected": 35
+      }
+    },
+    "op-sqlite.result-carrier-equivalence": {
+      "fixed seed 165903": {
+        "alias:another_value": 29,
+        "alias:changes": 32,
+        "alias:columnNames": 26,
+        "alias:insertId": 43,
+        "alias:lastInsertRowId": 36,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 28,
+        "alias:res": 34,
+        "alias:resultRows": 32,
+        "alias:results": 34,
+        "alias:rows": 36,
+        "alias:rowsAffected": 31,
+        "carrier:direct rows": 63,
+        "carrier:nested results": 63,
+        "carrier:raw rows": 63,
+        "carrier:resultRows": 63,
+        "carrier:rows": 63,
+        "carrier:rows and columns": 63,
+        "carrier:rows and raw rows": 63,
+        "carrier:statement results": 63
+      },
+      "random seed": {
+        "alias:another_value": 39,
+        "alias:changes": 29,
+        "alias:columnNames": 31,
+        "alias:insertId": 23,
+        "alias:lastInsertRowId": 30,
+        "alias:ordinary_name": 36,
+        "alias:rawRows": 32,
+        "alias:res": 28,
+        "alias:resultRows": 32,
+        "alias:results": 33,
+        "alias:rows": 31,
+        "alias:rowsAffected": 38,
+        "carrier:direct rows": 63,
+        "carrier:nested results": 63,
+        "carrier:raw rows": 63,
+        "carrier:resultRows": 63,
+        "carrier:rows": 63,
+        "carrier:rows and columns": 63,
+        "carrier:rows and raw rows": 63,
+        "carrier:statement results": 63
+      }
+    },
+    "op-sqlite.columnar-sql-aliases": {
+      "fixed seed 165903": {
+        "SQL columnar": 63,
+        "SQL direct rows": 63,
+        "alias:another_value": 29,
+        "alias:changes": 32,
+        "alias:columnNames": 26,
+        "alias:insertId": 43,
+        "alias:lastInsertRowId": 36,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 28,
+        "alias:res": 34,
+        "alias:resultRows": 32,
+        "alias:results": 34,
+        "alias:rows": 36,
+        "alias:rowsAffected": 31
+      },
+      "random seed": {
+        "SQL columnar": 63,
+        "SQL direct rows": 63,
+        "alias:another_value": 34,
+        "alias:changes": 33,
+        "alias:columnNames": 40,
+        "alias:insertId": 39,
+        "alias:lastInsertRowId": 37,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 40,
+        "alias:res": 38,
+        "alias:resultRows": 40,
+        "alias:results": 33,
+        "alias:rows": 35,
+        "alias:rowsAffected": 35
+      }
+    },
+    "preact.window-render.eager-derived-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-derived-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-derived-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    }
+  },
+  "experiments": [
+    {
+      "case": "old Preact empty trace",
+      "result": "calibration RED: shared check accepted no observations"
+    },
+    {
+      "case": "old Preact omitted reach",
+      "result": "calibration RED: shared check accepted trace without reach"
+    },
+    {
+      "case": "old TopK omitted reach",
+      "result": "5 calibration REDs: all shared checks accepted omitted reach"
+    },
+    {
+      "case": "old RN omitted reach",
+      "result": "3 calibration REDs: all shared checks accepted omitted reach"
+    },
+    {
+      "case": "TopK generated-only missing state",
+      "result": "RED named constructed reach at completed",
+      "seed": 409033,
+      "path": "2:0:0",
+      "oldCheckControl": "passed with same generated-only suppression"
+    },
+    {
+      "case": "RN generated-only missing state",
+      "result": "RED named constructed reach at query settled",
+      "seed": 165903,
+      "path": "4:0",
+      "oldCheckControl": "passed with same generated-only suppression"
+    },
+    {
+      "case": "repaired TopK default owner command",
+      "result": "27 pass, no type errors"
+    },
+    {
+      "case": "repaired Preact both integrated owner command",
+      "result": "93 pass, no type errors"
+    },
+    {
+      "case": "repaired RN default whole-package command",
+      "result": "306 pass, coverage/typechecking enabled, no type errors"
+    }
+  ],
+  "lintChanged": {
+    "exitCode": 1,
+    "reports": [
+      {
+        "file": "packages/preact-db/tests/window-render-oracle.test.tsx",
+        "key": "preact.window-render",
+        "removedBudget": 6,
+        "explanation": "Replaced by 12 separately registered cells, each retaining six runs."
+      },
+      {
+        "file": "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts",
+        "seed": 165903,
+        "removedBudget": 20,
+        "explanation": "Existing meta calibration moved unchanged to an ordinary driver test."
+      }
+    ],
+    "followupBudgetReduction": false,
+    "closeout": {
+      "head": "f1afd2e5ba69137fc7b13306bc2fa9738c43c390",
+      "exitCode": 1,
+      "onlyTheSameTwoBudgetReports": true,
+      "logSha256": "8ff85a21d33abee6e24990636a56e4ff0c378a189903b1cc1e38edde7cfe0918"
+    }
+  },
+  "failureFidelity": {
+    "reviewedHead": "d8a04010610db9cd1afbd04e271ae461fe5c3dbd",
+    "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+    "generatedInputSeed": 51719,
+    "properties": 20,
+    "nativeControls": 60,
+    "sourceChanged": false,
+    "command": "./node_modules/.bin/vitest run --config .cache/oracle-conversion-recovery/integrated-reach/fidelity/vitest.config.mjs --reporter=verbose",
+    "frameworkLoadedSha256": {
+      "node_modules/@tanstack/oracles/dist/esm/index.js": "733a0d550709980393f4b2e318d4eecabbb99305ce6597e4566a1e74b5a70212",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-property.js": "e7724f82a72e53c0456c9d2e40317ded27ab0a461fd03a3b8183048d13cfb493",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-config.js": "3c103c4adcb7afc785ef52b11bf29dad61054b60eac196cb0c525a44e54eef3b",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-route.js": "6ba478a0dde0adc198f8bccaddadeacc100cde69206e6a7ec3d198d758595606"
+    },
+    "durableArtifacts": {
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/fidelity.test.ts": "6f445ece7d6af9083ec2dd348c0774b614ae8028df610ada617fc64090b6ae2e",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/vitest.config.mjs": "16e15a8a0b5ce4330ca7418c0de90c041dc52a2c823ddc315bad64ac501bb8d7",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/unchanged-green.log": "b15ebe9c26e272e28fb3dad2d8cc972a482a2aee103aea04f61539f86e414888",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/results.json": "6f0d37ab20a556f4a44e9a4c1d905e8cfb1df8aee36adef545225369c5d12f9d"
+    },
+    "results": [
+      {
+        "property": "ivm.topk-batch-relations",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "same-key contributions",
+        "recordedSemanticCheckpoint": "plain key order/large=false/collision=false: batch",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 238,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-file-independent",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordinary replacement",
+        "recordedSemanticCheckpoint": "File available=true: retained rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 2,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-shared-subtrees",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "bounded shared-tree reads",
+        "recordedSemanticCheckpoint": "batch and leaf reads",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-unrelated-payloads",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "unread unrelated payloads",
+        "recordedSemanticCheckpoint": "batch and unrelated reads",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-long-cancellation",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "complete cancellation",
+        "recordedSemanticCheckpoint": "cancelled batch",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.write-marker-aliases",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "exact-alias-rows",
+        "recordedSemanticCheckpoint": "direct rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.result-carrier-equivalence",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "exact-alias-rows",
+        "recordedSemanticCheckpoint": "direct rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 8,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.columnar-sql-aliases",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "query-execution",
+        "recordedSemanticCheckpoint": "columnar query count",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      }
+    ]
+  },
+  "finalSourceMutationParity": {
+    "preact": {
+      "reviewedHead": "d8a04010610db9cd1afbd04e271ae461fe5c3dbd",
+      "originalComparison": "2026-11-10-preact-bound-options-oracle-conversion.json",
+      "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+      "source": "src/useLiveQuery.ts",
+      "package": "packages/preact-db",
+      "envPrefix": "TANSTACK_DB_ORACLE",
+      "seed": 2291,
+      "contexts": 1,
+      "sourceCensus": 48,
+      "selectedMutants": 22,
+      "priorKills": 18,
+      "reportSha256": "d5445681c3a609709da922cd367e9d29f0942962c4660c13d3c17adfb730543b",
+      "run": {
+        "id": "7119561cb3c3",
+        "inputs": "1 source files, 3 oracle files, 3 ordinary test files, 0 authored mutants, seed 2291, pool threads; a partial run (--only or --sample)"
+      },
+      "evidence": {
+        "reused": 0,
+        "computed": 51,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 0
+      },
+      "sourceSha256": {
+        "packages/preact-db/src/useLiveQuery.ts": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986",
+        "packages/preact-db/tests/window-render-oracle.test.tsx": "bccb0a6c2a3019c690e9e9e23be3300776fbb2977ca91a063aaa133ffb26c2b7",
+        "packages/preact-db/tests/bound-options-oracle.test.ts": "7dcd77a3bebaf22f560b602e12297978e98942ae008c319ecc164439adbe215b",
+        "packages/preact-db/tests/bound-schema-options-oracle.test.ts": "aa87b3344af7334270952ea89fd4e5aabf1930056eebca0617b4b229794f952b",
+        "packages/db/tests/oracle-config.ts": "3f32002cc7541b31c6e5c20d81b7d0cf52556e9c02e750a01da3989ac772341e",
+        "packages/db/tests/oracle-property.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded"
+      },
+      "nondeterministic": [],
+      "lostKills": [],
+      "wrongStableKeys": [],
+      "nonSemanticKills": [],
+      "selected": [
+        {
+          "id": "useLiveQuery.ts:M3",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )"
+        },
+        {
+          "id": "useLiveQuery.ts:M4",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )"
+        },
+        {
+          "id": "useLiveQuery.ts:M5",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M6",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3"
+        },
+        {
+          "id": "useLiveQuery.ts:M12",
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M14",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M16",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M18",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M19",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M20",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M21",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3"
+        },
+        {
+          "id": "useLiveQuery.ts:M22",
+          "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M25",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M27",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M28",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }"
+        },
+        {
+          "id": "useLiveQuery.ts:M29",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M33",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M35",
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }"
+        },
+        {
+          "id": "useLiveQuery.ts:M36",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )"
+        },
+        {
+          "id": "useLiveQuery.ts:M39",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )"
+        },
+        {
+          "id": "useLiveQuery.ts:M40",
+          "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )"
+        },
+        {
+          "id": "useLiveQuery.ts:M42",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )"
+        }
+      ],
+      "retainedKills": [
+        {
+          "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/queryKey"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/queryKey"
+          ]
+        }
+      ]
+    },
+    "topk": {
+      "baselineRevision": "9a5214f2801c2c7918f6fd21ac5add317559322a",
+      "finalFrozenHead": "f1afd2e5ba69137fc7b13306bc2fa9738c43c390",
+      "sameKeys": true,
+      "mutants": 47,
+      "beforeCounts": {
+        "crashed": 10,
+        "killed": 35,
+        "survived": 2
+      },
+      "afterCounts": {
+        "crashed": 10,
+        "killed": 35,
+        "survived": 2
+      },
+      "lostKills": [],
+      "changedOutcomes": [],
+      "sourceHashDrift": [],
+      "beforeReportSha256": "882e7a07faaf5260f9bf8388b3cb51da1b79469abf6c05fbf8380b78d4bf27d8",
+      "afterReportSha256": "d815c3b71a4e1201ab084a952f413643415a4d39aa137e46766d176f1c72f834",
+      "beforeRun": {
+        "id": "3cc829615ff4",
+        "inputs": "1 source files, 18 oracle files, 30 ordinary test files, 0 authored mutants, seed 42, pool threads"
+      },
+      "afterRun": {
+        "id": "6aaaaa85f93e",
+        "inputs": "1 source files, 18 oracle files, 31 ordinary test files, 0 authored mutants, seed 42, pool threads"
+      },
+      "beforeEvidence": {
+        "reused": 0,
+        "computed": 147,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 1
+      },
+      "afterEvidence": {
+        "reused": 0,
+        "computed": 146,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 1
+      },
+      "beforeNondeterministic": [],
+      "afterNondeterministic": [],
+      "results": [
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:for ( const [ value , weight ] of message . getInner ( ) ) { const entries = keyed . get ( value [ 0 ] ) if ( ! entries ) { keyed . set ( value [ 0 ] , [ [ value , weight ] ] ) continue } const previous = entries . find ( ( [ candidate ] ) => compareHashValues ( candidate [ 1 ] , value [ 1 ] , true ) , ) if ( previous ) previous [ 1 ] += weight else entries . push ( [ value , weight ] ) }",
+          "id": "operators/topKState.ts:M1",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-shared-subtrees > fixed seed 409034",
+            "ivm.topk-batch-shared-subtrees > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:const entries = keyed . get ( value [ 0 ] )",
+          "id": "operators/topKState.ts:M2",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-true:if ( ! entries ) { keyed . set ( value [ 0 ] , [ [ value , weight ] ] ) continue }",
+          "id": "operators/topKState.ts:M3",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-false:if ( ! entries ) { keyed . set ( value [ 0 ] , [ [ value , weight ] ] ) continue }",
+          "id": "operators/topKState.ts:M4",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-shared-subtrees > fixed seed 409034",
+            "ivm.topk-batch-shared-subtrees > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:drop-not:if ( ! entries ) { keyed . set ( value [ 0 ] , [ [ value , weight ] ] ) continue }",
+          "id": "operators/topKState.ts:M5",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-shared-subtrees > fixed seed 409034",
+            "ivm.topk-batch-shared-subtrees > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:delete-call:keyed . set ( value [ 0 ] , [ [ value , weight ] ] )",
+          "id": "operators/topKState.ts:M6",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:const previous = entries . find ( ( [ candidate ] ) => compareHashValues ( candidate [ 1 ] , value [ 1 ] , true ) , )",
+          "id": "operators/topKState.ts:M7",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:const previous = entries . find ( ( [ candidate ] ) => compareHashValues ( candidate [ 1 ] , value [ 1 ] , true ) , )~2",
+          "id": "operators/topKState.ts:M8",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:bool-flip:const previous = entries . find ( ( [ candidate ] ) => compareHashValues ( candidate [ 1 ] , value [ 1 ] , true ) , )",
+          "id": "operators/topKState.ts:M9",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "same-key contributions"
+          ],
+          "afterBy": [
+            "ivm.topk-batch-relations > fixed seed 409033"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-true:if ( previous ) previous [ 1 ] += weight else entries . push ( [ value , weight ] )",
+          "id": "operators/topKState.ts:M10",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-false:if ( previous ) previous [ 1 ] += weight else entries . push ( [ value , weight ] )",
+          "id": "operators/topKState.ts:M11",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:delete-call:entries . push ( [ value , weight ] )",
+          "id": "operators/topKState.ts:M12",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:for ( const entries of keyed . values ( ) ) for ( const entry of entries ) if ( entry [ 1 ] < 0 ) yield entry",
+          "id": "operators/topKState.ts:M13",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-shared-subtrees > fixed seed 409034",
+            "ivm.topk-batch-shared-subtrees > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-true:if ( entry [ 1 ] < 0 ) yield entry",
+          "id": "operators/topKState.ts:M14",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-false:if ( entry [ 1 ] < 0 ) yield entry",
+          "id": "operators/topKState.ts:M15",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:binary-swap:if ( entry [ 1 ] < 0 ) yield entry",
+          "id": "operators/topKState.ts:M16",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "same-key contributions"
+          ],
+          "afterBy": [
+            "ivm.topk-batch-relations > fixed seed 409033"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:value-undefined:for ( const entries of keyed . values ( ) ) for ( const entry of entries ) if ( entry [ 1 ] > 0 ) yield entry",
+          "id": "operators/topKState.ts:M17",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "ivm.topk-batch-relations > fixed seed 409033",
+            "ivm.topk-batch-relations > random seed",
+            "ivm.topk-batch-file-independent > fixed seed 409039",
+            "ivm.topk-batch-file-independent > random seed",
+            "ivm.topk-batch-shared-subtrees > fixed seed 409034",
+            "ivm.topk-batch-shared-subtrees > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed seed 409035",
+            "ivm.topk-batch-unrelated-payloads > random seed",
+            "ivm.topk-batch-unrelated-payloads > fixed history: each of two keys contributes its own replacement",
+            "ivm.topk-batch-long-cancellation > fixed seed 409037",
+            "ivm.topk-batch-long-cancellation > random seed",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-true:if ( entry [ 1 ] > 0 ) yield entry",
+          "id": "operators/topKState.ts:M18",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:if-false:if ( entry [ 1 ] > 0 ) yield entry",
+          "id": "operators/topKState.ts:M19",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#topKBatch:binary-swap:if ( entry [ 1 ] > 0 ) yield entry",
+          "id": "operators/topKState.ts:M20",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "same-key contributions"
+          ],
+          "afterBy": [
+            "ivm.topk-batch-relations > fixed seed 409033"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.isEmpty:binary-swap:return this . #multiplicities . size === 0",
+          "id": "operators/topKState.ts:M21",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:const oldMultiplicity = this . #multiplicities . get ( key ) ?? 0",
+          "id": "operators/topKState.ts:M22",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:value-undefined:const oldMultiplicity = this . #multiplicities . get ( key ) ?? 0",
+          "id": "operators/topKState.ts:M23",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-true:if ( multiplicity !== 0 ) { if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity ) }",
+          "id": "operators/topKState.ts:M24",
+          "before": "survived",
+          "after": "survived",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": []
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-false:if ( multiplicity !== 0 ) { if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity ) }",
+          "id": "operators/topKState.ts:M25",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:if ( multiplicity !== 0 ) { if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity ) }",
+          "id": "operators/topKState.ts:M26",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-true:if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity )",
+          "id": "operators/topKState.ts:M27",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-false:if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity )",
+          "id": "operators/topKState.ts:M28",
+          "before": "survived",
+          "after": "survived",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": []
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:if ( newMultiplicity === 0 ) this . #multiplicities . delete ( key ) else this . #multiplicities . set ( key , newMultiplicity )",
+          "id": "operators/topKState.ts:M29",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:delete-call:this . #multiplicities . delete ( key )",
+          "id": "operators/topKState.ts:M30",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:delete-call:this . #multiplicities . set ( key , newMultiplicity )",
+          "id": "operators/topKState.ts:M31",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-true:if ( oldMultiplicity > 0 !== newMultiplicity > 0 ) { const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] ) appendMove ( changes . moveIn , result , 1 ) appendMove ( changes . moveOut , result , - 1 ) }",
+          "id": "operators/topKState.ts:M32",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:if-false:if ( oldMultiplicity > 0 !== newMultiplicity > 0 ) { const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] ) appendMove ( changes . moveIn , result , 1 ) appendMove ( changes . moveOut , result , - 1 ) }",
+          "id": "operators/topKState.ts:M33",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:if ( oldMultiplicity > 0 !== newMultiplicity > 0 ) { const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] ) appendMove ( changes . moveIn , result , 1 ) appendMove ( changes . moveOut , result , - 1 ) }",
+          "id": "operators/topKState.ts:M34",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:if ( oldMultiplicity > 0 !== newMultiplicity > 0 ) { const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] ) appendMove ( changes . moveIn , result , 1 ) appendMove ( changes . moveOut , result , - 1 ) }~2",
+          "id": "operators/topKState.ts:M35",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:if ( oldMultiplicity > 0 !== newMultiplicity > 0 ) { const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] ) appendMove ( changes . moveIn , result , 1 ) appendMove ( changes . moveOut , result , - 1 ) }~3",
+          "id": "operators/topKState.ts:M36",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:binary-swap:const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] )",
+          "id": "operators/topKState.ts:M37",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:value-undefined:const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] )",
+          "id": "operators/topKState.ts:M38",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:value-undefined:const changes = newMultiplicity > 0 ? super . insert ( [ key , value ] ) : super . delete ( [ key , value ] )~2",
+          "id": "operators/topKState.ts:M39",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:delete-call:appendMove ( changes . moveIn , result , 1 )",
+          "id": "operators/topKState.ts:M40",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.processElement:delete-call:appendMove ( changes . moveOut , result , - 1 )",
+          "id": "operators/topKState.ts:M41",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.moveWindow:value-undefined:const changes = super . move ( options )",
+          "id": "operators/topKState.ts:M42",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.moveWindow:delete-call:appendMove ( value , result , 1 )",
+          "id": "operators/topKState.ts:M43",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#TopKState.moveWindow:delete-call:appendMove ( value , result , - 1 )",
+          "id": "operators/topKState.ts:M44",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#appendMove:if-true:if ( change ) { const [ [ key , value ] , index ] = change result . push ( [ [ key , [ value , index ] ] , weight ] ) }",
+          "id": "operators/topKState.ts:M45",
+          "before": "crashed",
+          "after": "crashed",
+          "beforeLaws": [],
+          "afterLaws": [],
+          "afterBy": [
+            "DBSP incrementalization laws > checks global ordering and window membership (fixed campaign)",
+            "DBSP incrementalization laws > checks global ordering and window membership (random campaign)",
+            "DBSP incrementalization laws > replays empty, duplicate, replacement, cancellation, and presence-flip cells",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)",
+            "Generated fractional grouped array windows > preserves cyclic payloads through replacements and fresh transients (seed undefined)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed 409032)",
+            "Generated fractional grouped array windows > matches outer-join replacements (seed undefined)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed 409031, collision true)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision false)",
+            "Generated fractional grouped array windows > matches a signed cumulative relation through keyed histories (seed undefined, collision true)",
+            "Operators > TopKWithFractionalIndex operator > should assign fractional indices to sorted elements",
+            "Operators > TopKWithFractionalIndex operator > should support duplicate ordering keys",
+            "Operators > TopKWithFractionalIndex operator > should handle limit and offset correctly",
+            "Operators > TopKWithFractionalIndex operator > should handle elements moving positions correctly",
+            "Operators > TopKWithFractionalIndex operator > should maintain lexicographic order through multiple updates",
+            "Operators > TopKWithFractionalIndex operator > should maintain correct order when cycling through multiple changes",
+            "Operators > TopKWithFractionalIndex operator > should handle insertion at the start of the sorted collection",
+            "Operators > TopKWithFractionalIndex operator > should handle multiple insertion at the start of the sorted collection",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: array > matches counted typed keys at every cut (random campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (fixed campaign)",
+            "Signed support and window oracle: grouped > matches counted typed keys at every cut (random campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: array > preserves demand bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves offset bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves width bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves partial bounds and demand (random campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (fixed campaign)",
+            "Numeric window oracle: grouped > preserves demand bounds and demand (random campaign)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: array > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: grouped > preserves rank intersections and source edits (random)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (fixed)",
+            "Absolute-rank negative window oracle: orderBy > preserves rank intersections and source edits (random)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#appendMove:if-false:if ( change ) { const [ [ key , value ] , index ] = change result . push ( [ [ key , [ value , index ] ] , weight ] ) }",
+          "id": "operators/topKState.ts:M46",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        },
+        {
+          "key": "src/operators/topKState.ts#appendMove:delete-call:result . push ( [ [ key , [ value , index ] ] , weight ] )",
+          "id": "operators/topKState.ts:M47",
+          "before": "killed",
+          "after": "killed",
+          "beforeLaws": [
+            "(unnamed)"
+          ],
+          "afterLaws": [
+            "(unnamed)"
+          ],
+          "afterBy": [
+            "Generated fractional array windows > preserves cyclic payloads through replacements and fresh transients (seed 409036)"
+          ]
+        }
+      ],
+      "ownerMembershipDrift": [],
+      "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+      "envPrefix": "TANSTACK_DB_ORACLE",
+      "seed": 42,
+      "contexts": 1,
+      "scope": "complete census of 47 mutants",
+      "baselineRecovery": "Fresh cold run from a full Git archive of 9a5214f28, with links to the installed e1 dependencies. The old finalized report was absent. This run recovers exact keys and reproduces its counts: 35 killed, 10 crashed, 2 survived.",
+      "baselineArchiveSha256": "ad0fb4afdfe39283c28545f429c2caf998b8010ff34d9650274acf7cf8d04edc",
+      "keyUniverseSha256": "48627c2d76b0ea7388e46948cbf8cf3a79a9ffaa3f769ee806ea96f191b5b65b",
+      "productionSha256": "9540bfe477cf4df4f2339ff7be97e17c3ec30ad6cb3a798c9f60b7f31d9bcc2d",
+      "originalOwnerSha256": "01f3b390eb2c5e06314f4db46717688ba0c1d931d738d87a45ae412ded3769fa",
+      "finalOwnerSha256": "27c02456693daaa836803fdb68d586576d7c62312be92ff495aeee9db8dcc4a8",
+      "finalSourceSha256": {
+        "node_modules/@tanstack/oracles/oracle-gaps/analysis.mjs": "79d97a43b5d9357e17a1a3f82c7b016e0607eca3d4422b4a39240d02e69089de",
+        "node_modules/@tanstack/oracles/oracle-gaps/args.mjs": "5781d60a999a9c8c6e7df2a1724b359abc365a6a728bec408eca4f042dd27b54",
+        "node_modules/@tanstack/oracles/oracle-gaps/authored.mjs": "2b190633ac3ea39d6ad614fded711a889d13da77ef39d6057af5fa6e9f18dbcb",
+        "node_modules/@tanstack/oracles/oracle-gaps/capture-setup.mjs": "60d94d09ea3a6d6f360734cff081619b1dca5d1a2ccc7e6fc12bebc610f00429",
+        "node_modules/@tanstack/oracles/oracle-gaps/check.mjs": "b750ac24396b54cc826596589f53d6c8fcda060063fa90e0fac5536d7528dc44",
+        "node_modules/@tanstack/oracles/oracle-gaps/classify.mjs": "809f52e995d024d906a94ae3167cb3a18b448b456e08e7e0a069d2dbdaae4eff",
+        "node_modules/@tanstack/oracles/oracle-gaps/daemon.mjs": "67e08f4143532406ae06c77123afc23f210edf21a21ed8835676fd8e6250a782",
+        "node_modules/@tanstack/oracles/oracle-gaps/evidence.mjs": "996424e67f31b611a32ef84e778331efb1a9915e3416f3c3777ebe97a21d9507",
+        "node_modules/@tanstack/oracles/oracle-gaps/index.mjs": "ed88db0f4ebc3cfdd5daacc7f4af781e2558a60f5ce763eefffbf5b17c97b0fa",
+        "node_modules/@tanstack/oracles/oracle-gaps/owners.mjs": "aa2e1dbda741e70d7ec8fba944541108de96c9bbf452a42ef4a6cc38df05b960",
+        "node_modules/@tanstack/oracles/oracle-gaps/report.mjs": "373741c0d9cd88b5e3ed5fc3f1f82a4d611e9622af726c9015796466d9906f3a",
+        "node_modules/@tanstack/oracles/oracle-gaps/schemata.mjs": "1439fc561aec1ecd58ea038ab17a446ff930e2d9054b6ba5ef8690be32e79d1e",
+        "node_modules/@tanstack/oracles/package.json": "20b03b5e1c3ebd7c2296499990f713978de6eec28691e75f96ea2e8bacf477e3",
+        "node_modules/@tanstack/oracles/src/oracle-property.ts": "579adcfad076c10731cdbd150d3ff8b4a161b8c7277aeb574ab7c357fcb4d507",
+        "package.json": "7b36a3d816e7c658bb20e0073f785822823acc0569ee7a9ec8b63a6eae022fed",
+        "packages/db-ivm/package.json": "874db181029a3c4f31da7530ecec4d026cd29ec49fba7a89a11df918d14c4c77",
+        "packages/db-ivm/src/d2.ts": "1afc8bf4a587ea281905333ba2a96a475b7799a08d67fcd10b7531ba1de8adb7",
+        "packages/db-ivm/src/graph.ts": "a46ce4fc6e9c9399fec7c77281cb056b216dba28d41a22e41ed5eb0c8f26fac0",
+        "packages/db-ivm/src/hashing/hash.ts": "3dc49b5a9c9ab2e7dd7c7c654b522b26daabdd9996013ef3a7a2ce86c2c07e30",
+        "packages/db-ivm/src/hashing/index.ts": "7c69736a3bed223bbafa1c387ffd352f544051ce786420bd9d0d82451c9bff43",
+        "packages/db-ivm/src/hashing/murmur.ts": "55b50358e37521654f70c206219a4c0bd276e5bde995c2272c934200f655e1ac",
+        "packages/db-ivm/src/hashing/temporal.ts": "e94abec5b31971ca1af6bc5e47de70c4f997c9b36cc665025ea9889be69b564a",
+        "packages/db-ivm/src/index.ts": "d8a1237d1cdf958354e458754ab3e340c04250dcdcb2f7cd67f7ee072e280647",
+        "packages/db-ivm/src/indexes.ts": "972d634e3e5faf9693ca93562e6b54a30ac1b5a00a5f95509534d5c74313105d",
+        "packages/db-ivm/src/multiset.ts": "e77dde2e76866142cf25b4e717cff68fdc759c5e1f51dc5ee36897e7414e8658",
+        "packages/db-ivm/src/operators/concat.ts": "157fc2807de482a3fecb56f51e5f1b2be49d613b6665cb3889abf7d01a8cd8ba",
+        "packages/db-ivm/src/operators/consolidate.ts": "37498a3aebbbb873fba4edd43bb96e55c4c36cf02289f077596d8022b2def64b",
+        "packages/db-ivm/src/operators/distinct.ts": "0ee97ed063dfee5fe8d6f19d8b906dd1e4319c1af1ddc45d0894118ef8e68aac",
+        "packages/db-ivm/src/operators/filter.ts": "de3359cc4d4bced50b793949e07766a0dd348be74953c5f4dff14909e7b399ec",
+        "packages/db-ivm/src/operators/groupBy.ts": "14629481a3f6014a259248b4fa610087ee69cba954cb80dbf4c700f3c2b5c166",
+        "packages/db-ivm/src/operators/groupedOrderBy.ts": "78e9d11ce6bd034c9c6730574a7793a3c13162bf7b0b3b7b9b2d1755ab0e7878",
+        "packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts": "265a7e0f48f84c6a892c2b7b262385474c33221e76296cf481b35ceba906ea56",
+        "packages/db-ivm/src/operators/index.ts": "8c6608f72bf98ae827a2f8cfcc21e886049649ac28a0745011fe854913677b1c",
+        "packages/db-ivm/src/operators/join.ts": "8f5f78fa973a94e8bd7a7b15991548a60cf25fafabd10722bd221818b4707b81",
+        "packages/db-ivm/src/operators/map.ts": "78c32b424fa143d3e6181a02ff020cbbacbd6d5abff1edac8468ccd75fe6d5b0",
+        "packages/db-ivm/src/operators/orderBy.ts": "d954f47bf857a4a889709435a4cbc3710cdad0032ba6fccbcb2c4f72cb1fa591",
+        "packages/db-ivm/src/operators/ordered-window.ts": "353d79ef5afbacd42e91cc004d7d993d1734ffb2cb06daa11c93be82cad5cb3e",
+        "packages/db-ivm/src/operators/output.ts": "e931418d4fbbc063f069ae1f223eaf2c8c7c47cb9a649bed2cb9afa78c5423fb",
+        "packages/db-ivm/src/operators/pipe.ts": "17e3ed788cfd5c3945211284c37399a9168e1e85609e6f939262444ad780856e",
+        "packages/db-ivm/src/operators/reduce.ts": "8137fcbd9a7802115d8a402aefe491eba2425da093a090b451ba08a30815d671",
+        "packages/db-ivm/src/operators/tap.ts": "2c7958b6ce81dadd00dfec62a04c2546f838d03e7650b25d8556a310067b492c",
+        "packages/db-ivm/src/operators/topKArray.ts": "6ca3b90114b88c85e1ab0cadcae4a9de01c9b85bf3353a845c82edd7c6164431",
+        "packages/db-ivm/src/operators/topKState.ts": "9540bfe477cf4df4f2339ff7be97e17c3ec30ad6cb3a798c9f60b7f31d9bcc2d",
+        "packages/db-ivm/src/operators/topKWithFractionalIndex.ts": "e7040b9561c472249e32de46baa9c2bf9d72ba7b63629714fc196d43c6667c90",
+        "packages/db-ivm/src/types.ts": "6e76bf3f2af58e171123b8cb6a647b8a6c9908d7377e27b01aa4bfc5c0ac022d",
+        "packages/db-ivm/src/unary-operator.ts": "c8bef95bd62ff9bb8fc0c445adc6df7749af4d59d43121549b94fe7f398d7682",
+        "packages/db-ivm/src/utils.ts": "2832e13444c5cebe32f7175b3bd4bfe554487687fe8ae9bea61012df36b460fc",
+        "packages/db-ivm/tests/d2-work.test.ts": "218abb5cd824b63dc3dab320f1f3241bb784823b298bf736493647e1bbc3cef0",
+        "packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts": "08362a474780ce73c8e48aeb34069ada2dce298ba0c82855dfacf4a9ce4e6646",
+        "packages/db-ivm/tests/distinct-incrementalization-oracle.ts": "3d89f1397f5df85afcc96223584039e60e60fe8773088a3edc512e9f72297cee",
+        "packages/db-ivm/tests/distinct-representative-oracle.property.test.ts": "7cfaa54defaa4dac7d77143283bd7c9785611045d388f74225441e23227d6a7a",
+        "packages/db-ivm/tests/graph.test.ts": "0566a85835a11ea6002a37edbc75ba9c21081543e4601789ebb94ed0ad9ac802",
+        "packages/db-ivm/tests/hash-collision-support.ts": "5712b77ea9b2201f6e9c9a8d2e9013f96fd25145c87f42917b38efe89c8a0b06",
+        "packages/db-ivm/tests/hash-failure-retry-oracle.property.test.ts": "189dcf3a274da842780d97357390d3a2deb9df1766407d6817c4d538ea755a30",
+        "packages/db-ivm/tests/hash-failure-retry.test.ts": "f1163ac40397b6f8bcfdafea198c355fadc2f61bcb1f87ab71cd9c94837712b7",
+        "packages/db-ivm/tests/hash-graph-calibration.test.ts": "8cf91ee0d48897862649b2f5b8b2e0327bf2fa032a712d0084811123c60c14c0",
+        "packages/db-ivm/tests/hash-graph-oracle.property.test.ts": "a57c0fab564ebd604cdf766bc40117f3b7ae34a7c546968d63d7dc0d6770b64b",
+        "packages/db-ivm/tests/hash-graph-shared-oracle.ts": "21985db517ee7f5c59452a8403d04fc0cdec45bb4fa0d0594de9dfc10df4f349",
+        "packages/db-ivm/tests/hash-graph.test.ts": "cb871c50754aded15d35449188e536fda1f00040c9830c10b43895edb6da081f",
+        "packages/db-ivm/tests/hash-identity-oracle.property.test.ts": "abfb5c2300d461c6a23d6f41e78d0fe1fff76c19c539a78a8d91a120e5877b0a",
+        "packages/db-ivm/tests/hash-identity.test.ts": "1e76e879fef5469d8677e2f6197eb4bf4aa36ac44eeb679e8663ccfe0934a475",
+        "packages/db-ivm/tests/hash-mixed-graph-oracle.property.test.ts": "ce8516f52c96061cc6d4d45e90705ded09fd2d446fc33fc50783d4a1e2c295b7",
+        "packages/db-ivm/tests/hash-oracle.property.test.ts": "301b10fdd238b8115423c7674bcf60c580ddb66736272940957ea02439e18a7b",
+        "packages/db-ivm/tests/hash-session-replay.test.ts": "ea10cf90af768cbee9423e7de48019109530aae9754a68e062f2fa3fba2afea2",
+        "packages/db-ivm/tests/hash-session.ts": "89c8fee92930a2849737ae5e3d1668c3cfca74e7c1e557fa1897f17b34838c5a",
+        "packages/db-ivm/tests/hash-support.ts": "a4d4db1ba6d6af83cb35d3032b03b1cc9a74e2e86f5fcd183435d25822cd4b3b",
+        "packages/db-ivm/tests/hash-work.test.ts": "4a1b80b8b43013ae5145849ce7fe93284bdf3b779dc74c3014759fe71e240c02",
+        "packages/db-ivm/tests/hash.bench.ts": "3800430afa1edebda0be6f68e9ee06d7ceb550fcfd1cb091f2404ec88c2dbed7",
+        "packages/db-ivm/tests/hash.test.ts": "47dd952f36d742e0dcfcc4b556105e485cd186b4fe11a471bea9e229c11a0a2b",
+        "packages/db-ivm/tests/incrementalization-law-oracle.property.test.ts": "8ec4b59e4183a6fc93d32b0f763d4ce119e6fd8395a93a6733ef66a4da795e2a",
+        "packages/db-ivm/tests/incrementalization-law-oracle.ts": "4a515ad98f52f8d1acce7f1a6a583fbf12b280effcdf620690c28892578ce33b",
+        "packages/db-ivm/tests/index-refinement-oracle.property.test.ts": "4486faca572dfc397675cdab44be82218d79214d65a49a009ad17963c77d0a36",
+        "packages/db-ivm/tests/indexes.test.ts": "21c63c82437d6d0b673f30c73fe835f65e52e209ed6b2f8d89e78c46f4b92180",
+        "packages/db-ivm/tests/multiset-consolidate-oracle.property.test.ts": "67d0fe983d19ac3664aa577e21ad69fc88e7fc7c528782e7d12a029d5c84817e",
+        "packages/db-ivm/tests/multiset-consolidate.test.ts": "dbc4079fd705f029b8f5723ef2356da7e333f0a162c315a2134a96cc33d3f206",
+        "packages/db-ivm/tests/multiset-support.ts": "4763386f17ccc9f78f767ebebc234eb4c78832f129cd57cb125e5963bbe5970c",
+        "packages/db-ivm/tests/multiset.test.ts": "2835e12c80a11bdde072e9dc0f7396e8aace25bf12d8ab925648b1966d7207bb",
+        "packages/db-ivm/tests/murmur-stream-oracle.property.test.ts": "66a924d2acffe6b3e9fdea4d1639622df6d89eaf6c6c5cf0fe1279d6fec99662",
+        "packages/db-ivm/tests/murmur-stream-reference-oracle.ts": "ba36419e5a3d4f311c1876b617591b22b27f21280aec8b66339ee707f08b84f2",
+        "packages/db-ivm/tests/operators/concat.test.ts": "f2d882c0616a0b3b99702a5ff328d8f7727db63dd5969fe8f1ffefe238a8d34c",
+        "packages/db-ivm/tests/operators/consolidate.test.ts": "3572ae93fd9463c1295639f08b5fedebe552d406f471b24d9ab37cc81d7b5ae4",
+        "packages/db-ivm/tests/operators/distinct.test.ts": "9234ae7b2a2f3e0841b79a1681f1af6821c7d5f76c1d3fcb3695cb36127195b0",
+        "packages/db-ivm/tests/operators/filter.test.ts": "e84159dad15a34cad39599ad2b8d262a9e90cd8288dd227639f2379bddd3b418",
+        "packages/db-ivm/tests/operators/groupBy.test.ts": "409d1c40790b7aaa5d4c9c7fa31af7eb5c6f73fee643f52e3f771be91d485919",
+        "packages/db-ivm/tests/operators/groupedOrderByWithFractionalIndex.test.ts": "773d90426baff2c9d39f491e215b64a228ea10f36324baa53326400b492663e4",
+        "packages/db-ivm/tests/operators/groupedTopKWithFractionalIndex.test.ts": "608f80cdcec5d2a792d9d0add1fb7ac790ec9503a22c718a42b61c79829b6bc9",
+        "packages/db-ivm/tests/operators/join-types.test.ts": "2c8f99fe2ecd23a49fa79815d73e8b74cb2d57a1c12b4ecc65b9a26450a6620f",
+        "packages/db-ivm/tests/operators/join.test-d.ts": "d6fbd2aaf59008800f27f2b6db94f100ff7a53ddd480e1cca2328559e9dcea68",
+        "packages/db-ivm/tests/operators/join.test.ts": "340b4555decfc2d4bc1659d87e5f669f458b500599d409dfe07a53496b9f4d92",
+        "packages/db-ivm/tests/operators/map.test.ts": "0290417c348a4d923478c82928051eaf508844c9479535b1c30d01cab6d3834f",
+        "packages/db-ivm/tests/operators/orderByWithFractionalIndex.test.ts": "ed0bad7835c07f033f719576514b4458a22cdc83ede4cd60ae5780e2cd92293e",
+        "packages/db-ivm/tests/operators/output.test.ts": "f8908d69a0c93cc84f55dd791f9c1736ce28d9e79c97f7924266319aa64ceb4f",
+        "packages/db-ivm/tests/operators/pipe.test.ts": "bba1a9d70edc03a0acc10b6b2f30c36d0f524d178ac8108c3e7f7985de3bf9e0",
+        "packages/db-ivm/tests/operators/reduce-fast-path-oracle.property.test.ts": "25743f12f6672e1792f44f0ecb32eca878eb6870d7a529b5f4d10ef946cabb31",
+        "packages/db-ivm/tests/operators/reduce.test.ts": "559e01698d848968f539a73143e27204022e1bf902868cfca57f793415d508af",
+        "packages/db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts": "414aa75340ad8d31ae0938d811832a295195d4de78c7e5243cf06fb59c569a11",
+        "packages/db-ivm/tests/operators/topKWithFractionalIndex.test.ts": "5eda4f0096c77c4ad7c28994df45ce9e64c5adca9b7efa8d6a3344e0b931ace2",
+        "packages/db-ivm/tests/operators/topk-batch-contract-oracle.test.ts": "27c02456693daaa836803fdb68d586576d7c62312be92ff495aeee9db8dcc4a8",
+        "packages/db-ivm/tests/operators/topk-batch.test.ts": "06c722def5caedaeb026fc0cb4698ff4ccece5d75b803aa5f0f006d18584af1a",
+        "packages/db-ivm/tests/operators/topk-relation-oracle.test.ts": "0caa17a0c89e9c6bbe2fa638d13f86d1c2b973ddddaafc68fd44807ae4f7b507",
+        "packages/db-ivm/tests/operators/topk-relation-oracle.ts": "37666899e520120eb67ba9be8f0f5f4dc00fdc794df3af446dbf52d8c0ec245d",
+        "packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts": "714edf9229ee052275068f865ec75e63dda33778325eca4c0f771cc439ca6b04",
+        "packages/db-ivm/tests/structural-identity-oracle.property.test.ts": "8dca171885973c1dc2ad381ce82ea6a67f8a6271ea35359a01894e3ce5eaf2d1",
+        "packages/db-ivm/tests/structural-identity.test.ts": "7f4e081aba817021f0754e16d3ce78617d097f87be340ef615856b500681220c",
+        "packages/db-ivm/tests/temporal-group-key-oracle.test.ts": "e1fc5ccf89eee5f4208e726fdf21d18250412c2f4b223b0a2d5f5286f33a5616",
+        "packages/db-ivm/tests/temporal-group-key.test.ts": "e28912353895489c00f52240b1ef0d3bcfbb1d176271d4509318a01e6a1ab086",
+        "packages/db-ivm/tests/test-utils.ts": "f488351369faf095d4d4554cefdbb285b02cd7c01d10df5b39815d698f0f7e57",
+        "packages/db-ivm/tests/utils.test.ts": "9a08bb99938e1013b5869a559621b537a5f4c28c953d5747c16c3162303ac3a5",
+        "packages/db-ivm/tsconfig.json": "94ae6c8862bb8f512bd1e775c6f9f863eb64052990b018f9431e3af642bca6e8",
+        "packages/db-ivm/vite.config.ts": "4298ed54f96aaced9ec90eaab8c66a9bc538854f02bfc788a9e01515dffcafa5",
+        "packages/db/tests/oracle-campaign.test.ts": "bc9a933180fb0ea3f1412c95780acec39673dcec6a1631910eb89106bdb3333a",
+        "packages/db/tests/oracle-campaign.ts": "754b04c17c041724611c4fcb2bc3c719bd9c8f526defd016d4d4d90d19225dbd",
+        "packages/db/tests/oracle-config.ts": "3f32002cc7541b31c6e5c20d81b7d0cf52556e9c02e750a01da3989ac772341e",
+        "packages/db/tests/oracle-declaration.ts": "43171d5c71763a99d6bfcf04a06ff1e3cd4735ec3af19a7214ddcc96c73ad76f",
+        "packages/db/tests/oracle-error-observation.ts": "96ed2e9c38c573b9d7277b6acb76afc8622cbf882038ea6f7bbfebcbaffe09dc",
+        "packages/db/tests/oracle-failure-fidelity.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded",
+        "packages/db/tests/oracle-property.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded",
+        "packages/db/tests/oracle-reach.test.ts": "ee7fee9b2fd0bf6a6dd3d3b55ea99471cbf02137def72b57a875cda0912e85b0",
+        "packages/db/tests/oracle-reach.ts": "f9b5f6387dc67685cd90924786d807d57865c5dcc0653d8520175c3afcaf4033",
+        "packages/db/tests/oracle-replay-manifest.ts": "2480ffa785828d8108be5591e9d6e6d47657a6fc9f673d80cb5deb3b135ec499",
+        "packages/db/tests/oracle-replay-witness.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded",
+        "packages/db/tests/oracle-replay.test.ts": "27408566fda6eecec86fb338b857e9aff5cd7f69e467a6331d7cb32d8aa8ba27",
+        "packages/db/tests/oracle-replay.ts": "c054644df67b500f7fb2a5f5ffaecbd4bbb852a61095d2f49537a18474788201",
+        "packages/preact-db/package.json": "cab29907f0eae808153ee8b9616b822856a761ddf61105c29cf3f923c35836f4",
+        "packages/preact-db/src/index.ts": "8ef5ef091efb150c75d083c57e1a43433a030831db67e8fa2dc03f480189ea09",
+        "packages/preact-db/src/useLiveInfiniteQuery.ts": "6d3f5b9c4bd323ea9da85fb21ffb0f063089c5a0ba57df8459cd3bc34cb011b3",
+        "packages/preact-db/src/useLiveQuery.ts": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986",
+        "packages/preact-db/tests/bound-options-oracle.test.ts": "7dcd77a3bebaf22f560b602e12297978e98942ae008c319ecc164439adbe215b",
+        "packages/preact-db/tests/bound-schema-options-oracle.test.ts": "aa87b3344af7334270952ea89fd4e5aabf1930056eebca0617b4b229794f952b",
+        "packages/preact-db/tests/conformance.test.ts": "ed1d43f55ddcbe6e4f1e8b9bbf581d99889e6f5c9a0c906b09763f92ed7c2652",
+        "packages/preact-db/tests/infinite-query-conformance.test.ts": "4b341705556f5129a408a918848837edc8261015e572f8b47093aee06ad8b5a4",
+        "packages/preact-db/tests/render-probe.ts": "b29d61c26d9b1e51225d3fef3fa1c485f5faf2e51dc1bf68fea56507ed80e5e4",
+        "packages/preact-db/tests/useLiveInfiniteQuery.test-d.ts": "193527b677994b1945461792f347c9b6b7f579a869d900e6c60b665b0323d0b7",
+        "packages/preact-db/tests/useLiveQuery.test-d.ts": "0291a9bdd4f4138fd4c0ff2f3b3435cdb68e680a83dcfe2f49c1a6b854729d61",
+        "packages/preact-db/tests/useLiveQuery.test.ts": "848d35bf89b65ddb96654d28bc2b1cee7d73fd5bc5d9ea9c629defbb203b3302",
+        "packages/preact-db/tests/window-render-oracle.test.tsx": "bccb0a6c2a3019c690e9e9e23be3300776fbb2977ca91a063aaa133ffb26c2b7",
+        "packages/preact-db/tsconfig.json": "7301a3ae5c050379be1b8b9c770f565e5f7951cc047b8d4b695424907f5e8800",
+        "packages/preact-db/vite.config.ts": "403df38ecc0d02cd13ce91e86fe69b808e6feeeced9e2bda00f829d9112d142e",
+        "packages/react-native-db-sqlite-persistence/package.json": "ccb39db06476bc782f64055685c3d036ef53baa6a97b5b06142601bc54ef0f4c",
+        "packages/react-native-db-sqlite-persistence/src/index.ts": "cc7018641d3c981bc9e5380378bacd4969a4b1c812329c7ca78b2aec2b93fef8",
+        "packages/react-native-db-sqlite-persistence/src/mobile-persistence.ts": "a0813520a56c3ceb94bbed2551653f4aa766f043f4f24126152f3e98fa22d554",
+        "packages/react-native-db-sqlite-persistence/src/op-sqlite-driver.ts": "366dc2de01058c8830d779f43002ee0c2141f1d36a910d993a1004103b8dcd77",
+        "packages/react-native-db-sqlite-persistence/src/react-native.ts": "bb4c833fbab68b7ef444043a38d9e54aa75344e478518c4ce236c253f09c97a9",
+        "packages/react-native-db-sqlite-persistence/tests/expo-sqlite-core-adapter-contract.test.ts": "dde71e41492ce61292cd7fe8d85cfb2e4995df0293fb58c6fd5667a378fa3c09",
+        "packages/react-native-db-sqlite-persistence/tests/fixtures/op-sqlite-provider-results.ts": "6ad8deede8768e2b7729da56cbeff0bc15bf43e56d03de704cb77b0c5cb092ab",
+        "packages/react-native-db-sqlite-persistence/tests/helpers/mobile-runtime-test-setup.ts": "056a187cd622166d0018f6300e2bb4188895a6897b756c4b66f4d2091ee38b3b",
+        "packages/react-native-db-sqlite-persistence/tests/helpers/op-sqlite-test-db.ts": "9723d25892c58abfb8d24c5d70c1a3015b1f812438e7bc1356a6fd8827666176",
+        "packages/react-native-db-sqlite-persistence/tests/mobile-runtime-persistence-contract.test.ts": "3d635d2a0c25ce1ba17fed664d28ce5717881f933ba73f38d82f62b4012e730f",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-alias-oracle.ts": "9f22d6fe85dd9490cf183922066880af2523a5b51a7d3a00d92fbccca1d864ba",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts": "e647c12f0faedbfb4b98318e97bf5804628d3b81ba7a06b473dee52c459c9ee6",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-support.ts": "caa006156ad710f5b0655f72b03854e039c13f48ac1702ef21c371ebfd8ea2d1",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver.test.ts": "92c174ebde1806e6c071a8ede95de2344c680f580634c1146abe8abc727f00c8",
+        "packages/react-native-db-sqlite-persistence/tests/react-native-persistence.test.ts": "449648881dd873b1f3b4f2caf36f4fd8e07fb1dbb95b6e7ccc5f03f55f66eac7",
+        "packages/react-native-db-sqlite-persistence/tests/react-native-sqlite-core-adapter-contract.test.ts": "cb9d7aa07ea09474ac38828968e2cd27bd66f9f405e319fac289ee4982a9844f",
+        "packages/react-native-db-sqlite-persistence/tsconfig.json": "2bc3f9811656ac26c2ecf85c2eb00726baba531085ad864137adf05522c46c3b",
+        "packages/react-native-db-sqlite-persistence/vite.config.ts": "8df25c43eb527b5895e715f3972cdebc81069f7e9a952fcd8dfd9f3baf90184f",
+        "pnpm-lock.yaml": "03a04b417c0c49fc122fbf529af2b03318b0da77b6a91b513fe067c354e5651a",
+        "scripts/oracle-lint-settings.mjs": "3d6446f327a9df9b282281bcea9ea5fc5acb68c972febaa8e79d13b35d88873f"
+      },
+      "frameworkLoadedSha256": {
+        "node_modules/@tanstack/oracles/dist/esm/oracle-property.js": "e7724f82a72e53c0456c9d2e40317ded27ab0a461fd03a3b8183048d13cfb493",
+        "node_modules/@tanstack/oracles/dist/esm/oracle-config.js": "3c103c4adcb7afc785ef52b11bf29dad61054b60eac196cb0c525a44e54eef3b",
+        "node_modules/@tanstack/oracles/dist/esm/index.js": "733a0d550709980393f4b2e318d4eecabbb99305ce6597e4566a1e74b5a70212"
+      },
+      "productionTree": {
+        "before": "965b7ce8b959864aa37e1b70d812c1fefefc8c27",
+        "after": "965b7ce8b959864aa37e1b70d812c1fefefc8c27"
+      }
+    },
+    "rn": {
+      "reviewedHead": "4eef544dce40383d1a3f24c194a8d8cc23704e65",
+      "originalComparison": "2026-11-10-op-sqlite-oracle-property.json",
+      "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+      "source": "src/op-sqlite-driver.ts",
+      "package": "packages/react-native-db-sqlite-persistence",
+      "envPrefix": "TANSTACK_DB_ORACLE",
+      "seed": 165903,
+      "contexts": 1,
+      "sourceCensus": 361,
+      "selectedMutants": 29,
+      "priorKills": 29,
+      "reportSha256": "bf0aeb2271e9d2ded034b1e30484255ab1b3310d3b33f824e3bbb78c86f8a710",
+      "run": {
+        "id": "842e92957247",
+        "inputs": "1 source files, 1 oracle files, 5 ordinary test files, 0 authored mutants, seed 165903, pool forks; a partial run (--only or --sample)"
+      },
+      "evidence": {
+        "reused": 0,
+        "computed": 32,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 0
+      },
+      "sourceSha256": {
+        "packages/react-native-db-sqlite-persistence/src/op-sqlite-driver.ts": "366dc2de01058c8830d779f43002ee0c2141f1d36a910d993a1004103b8dcd77",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts": "e647c12f0faedbfb4b98318e97bf5804628d3b81ba7a06b473dee52c459c9ee6",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-alias-oracle.ts": "9f22d6fe85dd9490cf183922066880af2523a5b51a7d3a00d92fbccca1d864ba",
+        "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-support.ts": "caa006156ad710f5b0655f72b03854e039c13f48ac1702ef21c371ebfd8ea2d1",
+        "packages/db/tests/oracle-config.ts": "3f32002cc7541b31c6e5c20d81b7d0cf52556e9c02e750a01da3989ac772341e",
+        "packages/db/tests/oracle-property.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded"
+      },
+      "nondeterministic": [],
+      "lostKills": [],
+      "wrongStableKeys": [],
+      "nonSemanticKills": [],
+      "selected": [
+        {
+          "id": "op-sqlite-driver.ts:M2",
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:if-true:if ( existing ) { return existing }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M4",
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:field-drop:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M5",
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:value-undefined:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M140",
+          "key": "src/op-sqlite-driver.ts#decodeColumnarRows:loop-false:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M141",
+          "key": "src/op-sqlite-driver.ts#decodeColumnarRows:binary-swap:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M181",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return rejectPositionalRows ( rows , sql )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M191",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:if-true:if ( columnarRows ) { return columnarRows }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M210",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return extractRowsFromStatementResult ( nestedResults [ 0 ] , sql , false )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M222",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M224",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M229",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M231",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M232",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M236",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M238",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M248",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( firstEntry , sql , false )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M253",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )~2"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M257",
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( result , sql , true )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M274",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executeMethod = resolveExecuteMethod ( this . database )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M275",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executionState = getDatabaseExecutionState ( this . database )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M283",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:if-true:if ( activeTransactionDriver ) { return activeTransactionDriver . query < T > ( sql , params ) }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M286",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return this . enqueue ( async ( ) => { const result = await this . execute ( sql , params ) return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T > } )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M287",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:const result = await this . execute ( sql , params )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M288",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T >"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M323",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.execute:value-undefined:const result = this . executeMethod . call ( this . database , sql , normalizedParams )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M325",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:const queuedOperation = this . executionState . queue . then ( operation , operation )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M326",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:this . executionState . queue = queuedOperation . then ( ( ) => undefined , ( ) => undefined , )"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M332",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:if-false:if ( ! asyncLocalStorageCtor ) { return null }"
+        },
+        {
+          "id": "op-sqlite-driver.ts:M333",
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:drop-not:if ( ! asyncLocalStorageCtor ) { return null }"
+        }
+      ],
+      "retainedKills": [
+        {
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:if-true:if ( existing ) { return existing }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:field-drop:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:value-undefined:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#decodeColumnarRows:loop-false:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#decodeColumnarRows:binary-swap:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return rejectPositionalRows ( rows , sql )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:if-true:if ( columnarRows ) { return columnarRows }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return extractRowsFromStatementResult ( nestedResults [ 0 ] , sql , false )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( firstEntry , sql , false )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )~2",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( result , sql , true )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.result-carrier-equivalence > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executeMethod = resolveExecuteMethod ( this . database )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executionState = getDatabaseExecutionState ( this . database )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:if-true:if ( activeTransactionDriver ) { return activeTransactionDriver . query < T > ( sql , params ) }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return this . enqueue ( async ( ) => { const result = await this . execute ( sql , params ) return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T > } )",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:const result = await this . execute ( sql , params )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T >",
+          "outcome": "killed",
+          "laws": [
+            "exact-alias-rows"
+          ],
+          "by": [
+            "op-sqlite.write-marker-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.execute:value-undefined:const result = this . executeMethod . call ( this . database , sql , normalizedParams )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:const queuedOperation = this . executionState . queue . then ( operation , operation )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:this . executionState . queue = queuedOperation . then ( ( ) => undefined , ( ) => undefined , )",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:if-false:if ( ! asyncLocalStorageCtor ) { return null }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        },
+        {
+          "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:drop-not:if ( ! asyncLocalStorageCtor ) { return null }",
+          "outcome": "killed",
+          "laws": [
+            "query-execution"
+          ],
+          "by": [
+            "op-sqlite.columnar-sql-aliases > fixed seed 165903"
+          ]
+        }
+      ]
+    }
+  }
+}

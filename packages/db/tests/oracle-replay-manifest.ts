@@ -2,8 +2,9 @@ import { registeredOracleProperties } from './oracle-config.js'
 
 /**
  * This manifest maps a replay name to the source file that can prove it ran.
- * It is a named replay portfolio, not a catalog of every DB law. Fixed cases,
- * work bounds, provider suites, and unnamed generated properties remain
+ * It is a named replay portfolio, not a catalog of every DB law. Enumerated
+ * properties name a direct case campaign, without seed/path coordinates. Work
+ * bounds, provider suites, and unnamed generated properties remain
  * separate campaign gates. An absent or statistics-only entry must not be
  * promoted to assertion evidence merely because a process exited cleanly.
  */
@@ -120,7 +121,30 @@ const ownerGroups: ReadonlyArray<
     `react`,
     `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
-  [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
+  [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
+  [
+    `preact-db/tests/bound-schema-options-oracle.test.ts`,
+    `preact`,
+    `bound-schema-options`,
+  ],
+  [
+    `preact-db/tests/window-render-oracle.test.tsx`,
+    `preact`,
+    [
+      `window-render.eager-derived-offset`,
+      `window-render.eager-derived-limit`,
+      `window-render.eager-derived-both`,
+      `window-render.eager-keyed-offset`,
+      `window-render.eager-keyed-limit`,
+      `window-render.eager-keyed-both`,
+      `window-render.on-demand-derived-offset`,
+      `window-render.on-demand-derived-limit`,
+      `window-render.on-demand-derived-both`,
+      `window-render.on-demand-keyed-offset`,
+      `window-render.on-demand-keyed-limit`,
+      `window-render.on-demand-keyed-both`,
+    ].join(` `),
+  ],
   [
     `react-db/tests/ssr-effects-oracle.test.ts`,
     `react`,
@@ -216,6 +240,11 @@ const ownerGroups: ReadonlyArray<
     `db/tests/replay-guard-calibration.fixture.test.ts`,
     `oracle-replay`,
     `calibration`,
+  ],
+  [
+    `db/tests/replay-enumerated-oracle.fixture.test.ts`,
+    `oracle-replay`,
+    `enumerated-calibration enumerated-calibration-neighbor`,
   ],
   [
     `db-ivm/tests/structural-identity-oracle.property.test.ts`,
@@ -613,7 +642,11 @@ const ownerGroups: ReadonlyArray<
     `includes-work`,
     `ordered-window`,
   ],
-  [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
+  [
+    `db/tests/reverse-index-oracle.property.test.ts`,
+    `reverse-index`,
+    `reads large-reads`,
+  ],
   [
     `db/tests/optimistic-history-oracle.property.test.ts`,
     `optimistic-history`,
@@ -820,6 +853,11 @@ const ownerGroups: ReadonlyArray<
     `distinct-collisions`,
   ],
   [
+    `db-ivm/tests/operators/topk-batch-contract-oracle.test.ts`,
+    `ivm`,
+    `topk-batch-relations topk-batch-file-independent topk-batch-shared-subtrees topk-batch-unrelated-payloads topk-batch-long-cancellation`,
+  ],
+  [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
     `topk-support-window topk-numeric-window topk-negative-window-array topk-negative-window-grouped topk-negative-window-orderBy`,
@@ -976,12 +1014,16 @@ export type OracleReplayManifestEntry = {
    * seed alone reproduces its history: `command` runs the owner directly
    * with TANSTACK_DB_ORACLE_SEED, which reseeds its random campaign. The
    * guarded runner, which witnesses a seed and path, rejects it.
+   * `enumerated-campaign` names an oracleProperty with finite histories. Its
+   * direct command selects that property's cases, calibrations and determinism
+   * check. It takes no replay coordinates; the guarded runner rejects it.
    */
   status:
     | `assertion`
     | `statistics-only`
     | `browser-replay`
     | `reseeded-campaign`
+    | `enumerated-campaign`
     | `no-named-owner`
   file?: string
   /** The module that names the property, when the owner file imports it. */
@@ -1034,7 +1076,54 @@ const replayTestNames = new Map([
     `live-query-observer.hydration-subset-handoff`,
     `seeded ready-subset handoff \\(fresh\\)`,
   ],
-  [`preact.window-render`, `window changes at Preact commit.*fresh`],
+  [
+    `preact.window-render.eager-derived-offset`,
+    `preact\\.window-render\\.eager-derived-offset > random seed`,
+  ],
+  [
+    `preact.window-render.eager-derived-limit`,
+    `preact\\.window-render\\.eager-derived-limit > random seed`,
+  ],
+  [
+    `preact.window-render.eager-derived-both`,
+    `preact\\.window-render\\.eager-derived-both > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-offset`,
+    `preact\\.window-render\\.eager-keyed-offset > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-limit`,
+    `preact\\.window-render\\.eager-keyed-limit > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-both`,
+    `preact\\.window-render\\.eager-keyed-both > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-offset`,
+    `preact\\.window-render\\.on-demand-derived-offset > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-limit`,
+    `preact\\.window-render\\.on-demand-derived-limit > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-both`,
+    `preact\\.window-render\\.on-demand-derived-both > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-offset`,
+    `preact\\.window-render\\.on-demand-keyed-offset > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-limit`,
+    `preact\\.window-render\\.on-demand-keyed-limit > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-both`,
+    `preact\\.window-render\\.on-demand-keyed-both > random seed`,
+  ],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
   [
     `ivm.topk-negative-window-array`,
@@ -1195,7 +1284,20 @@ const replayTestNames = new Map([
 // shrink path.
 const reseededProperties = new Set([`evaluators.like`])
 
+// Enumerated oracleProperty sources have no random campaign or shrink path.
+// Keep their literal registry names here; the owner groups still supply their
+// receiving files and any shared source module.
+const enumeratedProperties = new Set([
+  `reverse-index.large-reads`,
+  `preact.bound-options`,
+  `preact.bound-schema-options`,
+  `oracle-replay.enumerated-calibration`,
+  `oracle-replay.enumerated-calibration-neighbor`,
+])
+
 function directReplayTestName(property: string): string | undefined {
+  if (enumeratedProperties.has(property))
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (property.startsWith(`pagination.limit-admission-`)) {
     const suffix = property.slice(`pagination.limit-admission-`.length)
     const negative = suffix.endsWith(`-negative`)
@@ -1276,10 +1378,12 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
         ? `browser-replay`
         : reseededProperties.has(property)
           ? `reseeded-campaign`
-          : property.endsWith(`-statistics`) ||
-              property.endsWith(`.scenario-statistics`)
-            ? `statistics-only`
-            : `assertion`
+          : enumeratedProperties.has(property)
+            ? `enumerated-campaign`
+            : property.endsWith(`-statistics`) ||
+                property.endsWith(`.scenario-statistics`)
+              ? `statistics-only`
+              : `assertion`
   const outsidePackages = file?.startsWith(`packages/../`) === true
   // An owner outside packages/ replays from its own directory, with the
   // Vitest config that includes it there.
@@ -1289,13 +1393,19 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
     : file?.split(`/`).slice(0, 2).join(`/`)
   const outsideConfig =
     cwd === undefined ? undefined : outsideReplayConfigs.get(cwd)
+  const testNamePattern = directReplayTestName(property)
+  const config = outsidePackages
+    ? outsideConfig
+    : file === undefined
+      ? undefined
+      : ownerReplayConfigs.get(file)
   return {
     property,
     status,
     file,
     ...(sources.has(property) ? { source: sources.get(property) } : {}),
     cwd,
-    testNamePattern: directReplayTestName(property),
+    testNamePattern,
     command:
       file === undefined
         ? undefined
@@ -1303,9 +1413,11 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
           : status === `reseeded-campaign`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
-            : outsidePackages
-              ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
-              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
+            : status === `enumerated-campaign`
+              ? `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY pnpm exec vitest run ${config === undefined ? `` : `--config ${config} `}-t '${testNamePattern!.replaceAll(`'`, `'\\''`)}' ${outsidePackages ? file.split(`/`).pop() : file.split(`/`).slice(2).join(`/`)}`
+              : outsidePackages
+                ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
+                : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [
@@ -1313,11 +1425,13 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           ]
         : status === `reseeded-campaign`
           ? [`TANSTACK_DB_ORACLE_SEED`]
-          : [
-              `TANSTACK_DB_ORACLE_SEED`,
-              `TANSTACK_DB_ORACLE_PATH`,
-              `TANSTACK_DB_ORACLE_PROPERTY`,
-            ],
+          : status === `enumerated-campaign`
+            ? []
+            : [
+                `TANSTACK_DB_ORACLE_SEED`,
+                `TANSTACK_DB_ORACLE_PATH`,
+                `TANSTACK_DB_ORACLE_PROPERTY`,
+              ],
   }
 })
 
