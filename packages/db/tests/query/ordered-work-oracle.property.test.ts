@@ -1,5 +1,13 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -13,16 +21,20 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleFixedSeed,
-  oracleRandomParameters,
+  oracleProperty,
+  oracleReplayRequested,
   oracleRoute,
-  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import {
+  compareAt,
+  observeComparison,
+  recordedComparison,
+} from './ordered-comparison-oracle.js'
 import { receiveOrderedCompilerCacheHistory } from './ordered-compiler-cache-driver.js'
 import { receiveOrderedJoinedPlanHistory } from './ordered-joined-plan-driver.js'
 import {
@@ -550,9 +562,15 @@ async function assertConsumerParity(scenario: Scenario): Promise<void> {
     observeConsumer(`collection`, scenario),
     observeConsumer(`effect`, scenario),
   ])
-  expect(effect.rows).toEqual(collection.rows)
-  expect(effect.errors).toEqual(collection.errors)
-  expect(effect.live).toBe(collection.live)
+  compareAt(`ordered-work-oracle.property.test.ts:555`, () =>
+    expect(effect.rows).toEqual(collection.rows),
+  )
+  compareAt(`ordered-work-oracle.property.test.ts:556`, () =>
+    expect(effect.errors).toEqual(collection.errors),
+  )
+  compareAt(`ordered-work-oracle.property.test.ts:557`, () =>
+    expect(effect.live).toBe(collection.live),
+  )
   const semanticRequests = (requests: ReadonlyArray<RequestObservation>) =>
     requests.map(({ kind, hasCursor, limit, offset }) => ({
       kind,
@@ -564,8 +582,10 @@ async function assertConsumerParity(scenario: Scenario): Promise<void> {
       offset: hasCursor ? 0 : offset,
     }))
   if (effect.compareRequestTrace && collection.compareRequestTrace) {
-    expect(semanticRequests(effect.requests)).toEqual(
-      semanticRequests(collection.requests),
+    compareAt(`ordered-work-oracle.property.test.ts:569`, () =>
+      expect(semanticRequests(effect.requests)).toEqual(
+        semanticRequests(collection.requests),
+      ),
     )
   }
 }
@@ -3470,30 +3490,24 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
-  const { multiplier, ...replay } = readOracleRunConfig()
-  const runs = 20 * multiplier
-
-  const scenarioFixedSeed = oracleFixedSeed(17801, { numRuns: runs })
-  fcTest.prop([scenarioArbitrary], scenarioFixedSeed)(
-    `keeps rows, request traces, batches, errors, and liveness equal for a fixed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(scenarioFixedSeed))
-      await assertConsumerParity(scenario)
+  oracleProperty({
+    id: `ordered-work.consumer-parity`,
+    law: {
+      statement: `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      owner: `Ordered acquisition`,
     },
-  )
+    histories: { arbitrary: scenarioArbitrary, runs: 20, fixedSeeds: [17801] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  const scenarioCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.consumer-parity`,
-  )
-  fcTest.prop([scenarioArbitrary], scenarioCampaign)(
-    `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(scenarioCampaign))
-      await assertConsumerParity(scenario)
-    },
-  )
+        await assertConsumerParity(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 })
 
 /**
@@ -4207,7 +4221,7 @@ function expectEagerWindow(
 ): void {
   const expected = eagerWindow(rows, testCase)
   if (!isJoinedFilter(testCase) && testCase.filter !== `full-joined`) {
-    expect(actual, label).toEqual(expected)
+    compareAt(label, () => expect(actual, label).toEqual(expected))
     return
   }
   // `null` and `undefined` tie, so either may come first among nullish rows.
@@ -4217,8 +4231,12 @@ function expectEagerWindow(
       ? ((row.rank as number | null | undefined) ?? null)
       : `ineligible ${id}`
   }
-  expect(actual.map(rank), label).toEqual(expected.map(rank))
-  expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length)
+  compareAt(label, () =>
+    expect(actual.map(rank), label).toEqual(expected.map(rank)),
+  )
+  compareAt(`${label}: distinct rows`, () =>
+    expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length),
+  )
 }
 
 /**
@@ -5026,8 +5044,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       .sort(([left], [right]) => Number(left) - Number(right))
   const expectProviderLedger = (label: string) => {
     if (testCase.path !== `on-demand`) return
-    expect(ledgerRows(source.values()), `${label}: Collection rows`).toEqual(
-      ledgerRows(sent.values()),
+    compareAt(`ordered-work-oracle.property.test.ts:5032`, () =>
+      expect(ledgerRows(source.values()), `${label}: Collection rows`).toEqual(
+        ledgerRows(sent.values()),
+      ),
     )
     // While a load is in flight, a query may keep its last public snapshot.
     if (inFlight()) return
@@ -5099,8 +5119,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       )
     }
     expectProviderLedger(`initial`)
-    expect(runaway, `loading reached a fixed point at the initial load`).toBe(
-      false,
+    compareAt(`ordered-work-oracle.property.test.ts:5105`, () =>
+      expect(runaway, `loading reached a fixed point at the initial load`).toBe(
+        false,
+      ),
     )
     if (effect) {
       await flushPromises()
@@ -5143,10 +5165,12 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
             (row.rank as number | null) != null && !Number.isNaN(row.rank),
         )
       if (proven) {
-        expect(
-          fullSourceRequests,
-          `full-source requests by the initial load of a proven prefix`,
-        ).toBe(0)
+        compareAt(`ordered-work-oracle.property.test.ts:5149`, () =>
+          expect(
+            fullSourceRequests,
+            `full-source requests by the initial load of a proven prefix`,
+          ).toBe(0),
+        )
         // A bounded but oversized read also fails: each consumer (the query
         // and its Effect load separately) receives at most the prefix, its
         // boundary ties, and a refill, and never more distinct rows than the
@@ -5156,14 +5180,18 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           window,
         )
         for (const [consumer, consumerServed] of servedBy) {
-          expect(
-            consumerServed,
-            `rows one consumer is served by the initial load of a proven prefix`,
-          ).toBeLessThanOrEqual(consumerBound)
-          expect(
-            servedIdsBy.get(consumer)!.size,
-            `distinct rows one consumer is served by the initial load`,
-          ).toBeLessThanOrEqual(Math.min(consumerBound, rows.size))
+          compareAt(`ordered-work-oracle.property.test.ts:5162`, () =>
+            expect(
+              consumerServed,
+              `rows one consumer is served by the initial load of a proven prefix`,
+            ).toBeLessThanOrEqual(consumerBound),
+          )
+          compareAt(`ordered-work-oracle.property.test.ts:5166`, () =>
+            expect(
+              servedIdsBy.get(consumer)!.size,
+              `distinct rows one consumer is served by the initial load`,
+            ).toBeLessThanOrEqual(Math.min(consumerBound, rows.size)),
+          )
         }
       }
     }
@@ -5174,17 +5202,23 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     // On demand, the provider's transfer is bounded; the local snapshot
     // delivers every installed row, so read and delivered counts are not.
     if (initialBound !== undefined && testCase.path === `on-demand`) {
-      expect(served, `rows served by the initial load`).toBeLessThanOrEqual(
-        initialBound,
+      compareAt(`ordered-work-oracle.property.test.ts:5180`, () =>
+        expect(served, `rows served by the initial load`).toBeLessThanOrEqual(
+          initialBound,
+        ),
       )
     } else if (initialBound !== undefined) {
-      expect(read, `rows read by the initial load`).toBeLessThanOrEqual(
-        initialBound,
+      compareAt(`ordered-work-oracle.property.test.ts:5184`, () =>
+        expect(read, `rows read by the initial load`).toBeLessThanOrEqual(
+          initialBound,
+        ),
       )
-      expect(
-        delivered,
-        `rows delivered by the initial load`,
-      ).toBeLessThanOrEqual(initialBound)
+      compareAt(`ordered-work-oracle.property.test.ts:5187`, () =>
+        expect(
+          delivered,
+          `rows delivered by the initial load`,
+        ).toBeLessThanOrEqual(initialBound),
+      )
     }
     // While a load is in flight, a query may hold the window it showed at
     // the previous checkpoint. A window that changes shows only distinct rows
@@ -5202,12 +5236,16 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       const position = new Map(
         eagerOrder(ledger, windowCase).map((row, index) => [row.id, index]),
       )
-      expect(
-        shownIds.filter((rowId) => !position.has(rowId)),
-        `${label}: rows the ledger does not admit`,
-      ).toEqual([])
-      expect(new Set(shownIds).size, `${label}: distinct rows`).toBe(
-        shownIds.length,
+      compareAt(`ordered-work-oracle.property.test.ts:5208`, () =>
+        expect(
+          shownIds.filter((rowId) => !position.has(rowId)),
+          `${label}: rows the ledger does not admit`,
+        ).toEqual([]),
+      )
+      compareAt(`ordered-work-oracle.property.test.ts:5212`, () =>
+        expect(new Set(shownIds).size, `${label}: distinct rows`).toBe(
+          shownIds.length,
+        ),
       )
       for (const [index, rowId] of shownIds.slice(1).entries()) {
         const predecessor = shownIds[index]!
@@ -5216,10 +5254,12 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           ledger.get(predecessor)?.rank ?? null,
           ledger.get(rowId)?.rank ?? null,
         )
-        expect(
-          sameRank || position.get(predecessor)! < position.get(rowId)!,
-          `${label}: rows in query order`,
-        ).toBe(true)
+        compareAt(`ordered-work-oracle.property.test.ts:5222`, () =>
+          expect(
+            sameRank || position.get(predecessor)! < position.get(rowId)!,
+            `${label}: rows in query order`,
+          ).toBe(true),
+        )
       }
     }
     // Moves on a holding provider settle after `drain`.
@@ -5313,10 +5353,12 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           }
         }
         if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
-          expect(
-            fullSourceRequests,
-            `full-source requests after a signalling refetch at step ${step}`,
-          ).toBe(fullSourceBefore)
+          compareAt(`ordered-work-oracle.property.test.ts:5319`, () =>
+            expect(
+              fullSourceRequests,
+              `full-source requests after a signalling refetch at step ${step}`,
+            ).toBe(fullSourceBefore),
+          )
         }
       } else if (command.type === `move`) {
         shown = { ...testCase, offset: command.offset, limit: command.limit }
@@ -5355,10 +5397,12 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           await flushPromises()
         }
         // No load fails here, so every held move must settle successfully.
-        expect(
-          heldMoves.filter((move) => !move.settled || move.error),
-          `window moves unsettled or rejected after drain`,
-        ).toEqual([])
+        compareAt(`ordered-work-oracle.property.test.ts:5361`, () =>
+          expect(
+            heldMoves.filter((move) => !move.settled || move.error),
+            `window moves unsettled or rejected after drain`,
+          ).toEqual([]),
+        )
       } else if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -5438,24 +5482,31 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       // While a refetching provider lags the rows, the Collection holds an
       // older state, so the window is checked over the provider's ledger
       // until the next refetch.
-      expect(runaway, `loading reached a fixed point by step ${step}`).toBe(
-        false,
+      compareAt(`ordered-work-oracle.property.test.ts:5444`, () =>
+        expect(runaway, `loading reached a fixed point by step ${step}`).toBe(
+          false,
+        ),
       )
       if (changedInFlight()) caseHeldChanges++
       expectProviderLedger(`after step ${step}`)
       if (provenReportRequestsBefore !== undefined) {
         ignoredProvenReports++
-        expect(
-          (requestsBy.get(firstSubscription) ?? 0) - provenReportRequestsBefore,
-          `requests the first query issued for a report its own page proves, at step ${step}`,
-        ).toBe(0)
+        compareAt(`ordered-work-oracle.property.test.ts:5451`, () =>
+          expect(
+            (requestsBy.get(firstSubscription) ?? 0) -
+              provenReportRequestsBefore!,
+            `requests the first query issued for a report its own page proves, at step ${step}`,
+          ).toBe(0),
+        )
         provenReportRequestsBefore = undefined
         provenSinceOrderingChange = true
       }
-      expect(
-        repairAfterProvenReport,
-        `a repair the first query issued after a report its own page proved, by step ${step}`,
-      ).toBeUndefined()
+      compareAt(`ordered-work-oracle.property.test.ts:5458`, () =>
+        expect(
+          repairAfterProvenReport,
+          `a repair the first query issued after a report its own page proved, by step ${step}`,
+        ).toBeUndefined(),
+      )
       if (inFlight()) {
         expectInFlightWindow(
           visibleIds(),
@@ -5509,17 +5560,21 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       // step allows one more publication per provider request it made, and
       // only its last must show the final window.
       if (JSON.stringify(visibleIds()) !== visibleBefore) {
-        expect(
-          published.length,
-          `publications by step ${step}`,
-        ).toBeGreaterThan(0)
+        compareAt(`ordered-work-oracle.property.test.ts:5515`, () =>
+          expect(
+            published.length,
+            `publications by step ${step}`,
+          ).toBeGreaterThan(0),
+        )
       }
       const requests = providerRequests - requestsBefore
       const onDemand = requests > 0
-      expect(
-        published.length,
-        `publications by step ${step}`,
-      ).toBeLessThanOrEqual(commits + requests)
+      compareAt(`ordered-work-oracle.property.test.ts:5522`, () =>
+        expect(
+          published.length,
+          `publications by step ${step}`,
+        ).toBeLessThanOrEqual(commits + requests),
+      )
       for (const publishedWindow of lagging() || inFlight()
         ? []
         : commits === 1 && !onDemand
@@ -5543,8 +5598,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         // source four times, which no law here bounds.
         command.type !== `move`
       ) {
-        expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
-          Math.max(sizeBefore, rows.size),
+        compareAt(`ordered-work-oracle.property.test.ts:5549`, () =>
+          expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
+            Math.max(sizeBefore, rows.size),
+          ),
         )
       }
       // A NaN or null boundary cannot be expressed as a cursor
@@ -5559,26 +5616,41 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       // A bounded step makes at most two loads, each a page and its tie
       // request.
       if (bound !== undefined) {
-        expect(
-          requests,
-          `provider requests by step ${step}`,
-        ).toBeLessThanOrEqual(4)
+        compareAt(`ordered-work-oracle.property.test.ts:5565`, () =>
+          expect(
+            requests,
+            `provider requests by step ${step}`,
+          ).toBeLessThanOrEqual(4),
+        )
       }
       if (bound !== undefined && testCase.path === `on-demand`) {
-        expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
+        compareAt(`ordered-work-oracle.property.test.ts:5571`, () =>
+          expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(
+            bound,
+          ),
+        )
       } else if (bound !== undefined) {
-        expect(read, `rows read by step ${step}`).toBeLessThanOrEqual(bound)
-        expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
-          bound,
+        compareAt(`ordered-work-oracle.property.test.ts:5573`, () =>
+          expect(read, `rows read by step ${step}`).toBeLessThanOrEqual(bound),
+        )
+        compareAt(`ordered-work-oracle.property.test.ts:5574`, () =>
+          expect(
+            delivered,
+            `rows delivered by step ${step}`,
+          ).toBeLessThanOrEqual(bound),
         )
         // A bounded read walks the index; it never scans the source.
-        expect(
-          scanned,
-          `rows scanned by bounded step ${step}`,
-        ).toBeLessThanOrEqual(bound)
+        compareAt(`ordered-work-oracle.property.test.ts:5578`, () =>
+          expect(
+            scanned,
+            `rows scanned by bounded step ${step}`,
+          ).toBeLessThanOrEqual(bound),
+        )
       }
     }
-    expect(runaway, `loading reached a fixed point by the end`).toBe(false)
+    compareAt(`ordered-work-oracle.property.test.ts:5584`, () =>
+      expect(runaway, `loading reached a fixed point by the end`).toBe(false),
+    )
     return {
       heldChanges: caseHeldChanges,
       heldRequests: caseHeldRequests,
@@ -6443,7 +6515,7 @@ function optimisticWindowViolations(
 }
 
 describe(`eager indexed ordered windows`, () => {
-  const { multiplier, ...replay } = readOracleRunConfig()
+  const { multiplier } = readOracleRunConfig()
   const runs = 40 * multiplier
 
   it(`places null ranks first in an indexed descending window`, async () => {
@@ -7657,27 +7729,24 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
-  const eagerCaseFixedSeed = oracleFixedSeed(2044, { numRuns: runs })
-  fcTest.prop([eagerCase], eagerCaseFixedSeed)(
-    `keeps rows and per-change work bounded for a fixed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerCaseFixedSeed))
-      await checkEagerWindow(scenario)
+  oracleProperty({
+    id: `ordered-work.eager-indexed-window`,
+    law: {
+      statement: `keeps rows and per-change work bounded for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      owner: `Ordered acquisition`,
     },
-  )
+    histories: { arbitrary: eagerCase, runs: 40, fixedSeeds: [2044] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  const eagerCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.eager-indexed-window`,
-  )
-  fcTest.prop([eagerCase], eagerCaseCampaign)(
-    `keeps rows and per-change work bounded for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerCaseCampaign))
-      await checkEagerWindow(scenario)
-    },
-  )
+        await checkEagerWindow(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   // Reconstruction: the fixed-seed campaign reaches the premise. Sampling
   // its arbitrary with its seed and run count yields exactly the cases it
@@ -7725,29 +7794,28 @@ describe(`eager indexed ordered windows`, () => {
     expect(mixedNullGroup).toBeGreaterThanOrEqual(5)
   })
 
-  const eagerFullJoinCaseFixedSeed = oracleFixedSeed(FULL_JOIN_SEED, {
-    numRuns: runs,
-  })
-  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseFixedSeed)(
-    `keeps a full-join window to the first result rows for a fixed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerFullJoinCaseFixedSeed))
-      await checkEagerWindow(scenario)
+  oracleProperty({
+    id: `ordered-work.eager-full-join`,
+    law: {
+      statement: `keeps a full-join window to the first result rows for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      owner: `Ordered acquisition`,
     },
-  )
+    histories: {
+      arbitrary: eagerFullJoinCase,
+      runs: 40,
+      fixedSeeds: [FULL_JOIN_SEED],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  const eagerFullJoinCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.eager-full-join`,
-  )
-  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseCampaign)(
-    `keeps a full-join window to the first result rows for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerFullJoinCaseCampaign))
-      await checkEagerWindow(scenario)
-    },
-  )
+        await checkEagerWindow(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   // The fixed-seed held campaign and its reconstruction run in one test, so
   // the reach check always reads the cases that test just executed. Reach is
@@ -7755,40 +7823,41 @@ describe(`eager indexed ordered windows`, () => {
   // shrinking runs only after a failure, which ends the test first.
   // Reconstruction: the fixed campaign must reach the proven-report law, so
   // a loader that repairs every report fails it.
-  it(`starts no repair for reports a window's own first page proves for a fixed seed`, async () => {
-    const PROVEN_SEED = 2091
-    let proven = 0
-    const parameters = oracleFixedSeed(PROVEN_SEED, { numRuns: runs })
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
-        proven += (await runEagerWindow(testCase)).ignoredProvenReports
-      }),
-      parameters,
-    )
-    expect(proven, `reports a first page proved`).toBeGreaterThan(0)
-  })
-
-  it(`starts no repair for reports a window's own first page proves for a random or replayed seed`, async () => {
-    const options = oracleRandomParameters(
-      runs,
-      replay,
-      `ordered-work.eager-proven-report`,
-    )
-    const reach = createOracleReach(`ordered-work.eager-proven-report`, [
-      `ignoredProvenReports`,
-    ] as const)
-    oracleRoute(oracleRouteOf(options))
-    await fc.assert(
-      fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
-        reach.beginHistory()
-        const observed = await runEagerWindow(testCase)
-        if (observed.ignoredProvenReports > 0)
-          reach.reach(`ignoredProvenReports`)
-      }),
-      options,
-    )
-    reach.assertReached()
+  describe(`proven report campaign reach`, () => {
+    let reached = 0
+    beforeEach(() => {
+      reached = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        task.name !== `determinism` &&
+        task.result?.state !== `fail` &&
+        !oracleReplayRequested()
+      )
+        expect(reached, `reports a first page proved`).toBeGreaterThan(0)
+    })
+    oracleProperty({
+      id: `ordered-work.eager-proven-report`,
+      law: {
+        statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
+        authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+        limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
+        owner: `Ordered acquisition`,
+      },
+      histories: {
+        arbitrary: eagerProvenReportCase,
+        runs: 40,
+        fixedSeeds: [2091],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const observed = await runEagerWindow(history)
+          if (observed.ignoredProvenReports > 0) reached++
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
   })
 
   // The refetch law over unindexed joined windows behind a signalling
@@ -7810,101 +7879,122 @@ describe(`eager indexed ordered windows`, () => {
         ? testCase.initial.map((row) => ({ ...row, eligible: true }))
         : testCase.initial,
     }))
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`grows a short unindexed prefix instead of reading the full source after a signalling refetch (${campaign} campaign)`, async () => {
-      const property = `ordered-work.eager-unindexed-refetch`
-      const reach = createOracleReach(
-        property,
-        [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const,
-        { minimum: 5 },
-      )
-      const campaignParameters =
-        campaign === `fixed`
-          ? // This seed kills a loader that repairs every report with a
-            // full-source read; about half of seeds do.
-            oracleFixedSeed(2094, { numRuns: runs })
-          : oracleRandomParameters(runs, replay, property)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(eagerUnindexedRefetchCase, async (testCase) => {
-          reach.beginHistory()
-          const observed = await runEagerWindow(testCase)
-          for (const state of [
-            `unindexedRefetchChecks`,
-            `shortUnindexedRefills`,
-          ] as const) {
-            if (observed[state] > 0) reach.reach(state)
-          }
-        }),
-        campaignParameters,
-      )
-      reach.assertReached()
+  describe(`unindexed refetch campaign reach`, () => {
+    const states = [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const
+    let counts = new Map<(typeof states)[number], number>()
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
     })
-  }
+    afterEach(({ task }) => {
+      if (
+        task.name !== `determinism` &&
+        task.result?.state !== `fail` &&
+        !oracleReplayRequested()
+      )
+        for (const state of states)
+          expect(
+            counts.get(state),
+            `${state} history minimum`,
+          ).toBeGreaterThanOrEqual(5)
+    })
+    oracleProperty({
+      id: `ordered-work.eager-unindexed-refetch`,
+      law: {
+        statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
+        authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+        limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
+        owner: `Ordered acquisition`,
+      },
+      // Keep the existing seed and five-history minima, without changing the grammar.
+      histories: {
+        arbitrary: eagerUnindexedRefetchCase,
+        runs: 40,
+        fixedSeeds: [2094],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const observed = await runEagerWindow(history)
+          for (const state of states)
+            if (observed[state] > 0) counts.set(state, counts.get(state)! + 1)
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
-  it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
-    // Chosen for reach after nullish ranks joined the row generator.
+  describe(`held-load campaign reconstruction`, () => {
     const HELD_SEED = 2083
-    const heldReach = new Map<
+    let fixedCampaign = false
+    let heldReach = new Map<
       string,
       Awaited<ReturnType<typeof runEagerWindow>>
     >()
-    const runParameters = oracleFixedSeed(HELD_SEED, { numRuns: runs })
-    oracleRoute(oracleRouteOf(runParameters))
-    await fc.assert(
-      fc.asyncProperty(eagerHeldCase, async (testCase) => {
-        heldReach.set(fc.stringify(testCase), await runEagerWindow(testCase))
-      }),
-      runParameters,
-    )
-    // Reconstruction: sampling the arbitrary with the same seed and run
-    // count yields the executed cases.
-    const executed = new Set(
-      fc
-        .sample(eagerHeldCase, oracleFixedSeed(HELD_SEED, { numRuns: runs }))
-        .map((testCase) => fc.stringify(testCase)),
-    )
-    expect(
-      [...executed].filter((key) => !heldReach.has(key)),
-      `executed held cases without recorded reach`,
-    ).toEqual([])
-    const reach = [...executed].map((key) => heldReach.get(key)!)
-    // A case whose deletes refill from rows the query already holds issues
-    // no held request; at one times the run count, 33 of 40 cases issue one.
-    expect(
-      reach.filter((count) => count.heldRequests > 0).length,
-      `held cases that issue a held request`,
-    ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
-    expect(
-      reach.filter(
-        (count) => count.heldRequests > 0 && count.heldChanges === 0,
-      ),
-      `held cases with a held request but no in-flight change`,
-    ).toEqual([])
-    // `release-peer` aborts held requests: at one times the run count, a
-    // cooperative provider cancels 6 and a late provider answers 4 anyway.
-    expect(
-      reach.reduce((sum, count) => sum + count.cooperativeCancels, 0),
-      `held requests a cooperative provider cancelled`,
-    ).toBeGreaterThanOrEqual(3)
-    expect(
-      reach.reduce((sum, count) => sum + count.lateAnswers, 0),
-      `aborted held requests a late provider answered`,
-    ).toBeGreaterThanOrEqual(1)
+    beforeEach(({ task }) => {
+      fixedCampaign = task.name === `fixed seed ${HELD_SEED}`
+      heldReach = new Map()
+    })
+    afterEach(({ task }) => {
+      if (!fixedCampaign || task.result?.state === `fail`) return
+      // Reconstruction: sampling the arbitrary with the same seed and run
+      // count yields the executed cases.
+      const executed = new Set(
+        fc
+          .sample(eagerHeldCase, oracleFixedSeed(HELD_SEED, { numRuns: runs }))
+          .map((testCase) => fc.stringify(testCase)),
+      )
+      expect(
+        [...executed].filter((key) => !heldReach.has(key)),
+        `executed held cases without recorded reach`,
+      ).toEqual([])
+      const reach = [...executed].map((key) => heldReach.get(key)!)
+      // A case whose deletes refill from rows the query already holds issues
+      // no held request; at one times the run count, 33 of 40 cases issue one.
+      expect(
+        reach.filter((count) => count.heldRequests > 0).length,
+        `held cases that issue a held request`,
+      ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
+      expect(
+        reach.filter(
+          (count) => count.heldRequests > 0 && count.heldChanges === 0,
+        ),
+        `held cases with a held request but no in-flight change`,
+      ).toEqual([])
+      // `release-peer` aborts held requests: at one times the run count, a
+      // cooperative provider cancels 6 and a late provider answers 4 anyway.
+      expect(
+        reach.reduce((sum, count) => sum + count.cooperativeCancels, 0),
+        `held requests a cooperative provider cancelled`,
+      ).toBeGreaterThanOrEqual(3)
+      expect(
+        reach.reduce((sum, count) => sum + count.lateAnswers, 0),
+        `aborted held requests a late provider answered`,
+      ).toBeGreaterThanOrEqual(1)
+    })
+    oracleProperty({
+      id: `ordered-work.eager-held-load`,
+      law: {
+        statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
+        authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+        limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
+        owner: `Ordered acquisition`,
+      },
+      histories: {
+        arbitrary: eagerHeldCase,
+        runs: 40,
+        fixedSeeds: [HELD_SEED],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          if (fixedCampaign)
+            heldReach.set(fc.stringify(history), await runEagerWindow(history))
+          else await checkEagerWindow(history)
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
   })
-
-  const eagerHeldCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.eager-held-load`,
-  )
-  fcTest.prop([eagerHeldCase], eagerHeldCaseCampaign)(
-    `keeps a window whose loads answer between live changes for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerHeldCaseCampaign))
-      await checkEagerWindow(scenario)
-    },
-  )
 
   // A local null-ranked row can appear to fill the window while the settled
   // provider prefix ends before a better row. Held answers must not let that
@@ -7946,49 +8036,43 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  const eagerJoinedGapCaseFixedSeed = oracleFixedSeed(2063, { numRuns: runs })
-  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseFixedSeed)(
-    `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerJoinedGapCaseFixedSeed))
-      await checkEagerWindow(scenario)
+  oracleProperty({
+    id: `ordered-work.eager-joined-gap`,
+    law: {
+      statement: `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      owner: `Ordered acquisition`,
     },
-  )
+    histories: { arbitrary: eagerJoinedGapCase, runs: 40, fixedSeeds: [2063] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  const eagerJoinedGapCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.eager-joined-gap`,
-  )
-  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseCampaign)(
-    `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerJoinedGapCaseCampaign))
-      await checkEagerWindow(scenario)
-    },
-  )
+        await checkEagerWindow(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
-  const eagerJoinedCaseFixedSeed = oracleFixedSeed(2059, { numRuns: runs })
-  fcTest.prop([eagerJoinedCase], eagerJoinedCaseFixedSeed)(
-    `keeps a joined-filter window to the first eligible rows for a fixed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerJoinedCaseFixedSeed))
-      await checkEagerWindow(scenario)
+  oracleProperty({
+    id: `ordered-work.eager-joined-window`,
+    law: {
+      statement: `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      owner: `Ordered acquisition`,
     },
-  )
+    histories: { arbitrary: eagerJoinedCase, runs: 40, fixedSeeds: [2059] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  const eagerJoinedCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `ordered-work.eager-joined-window`,
-  )
-  fcTest.prop([eagerJoinedCase], eagerJoinedCaseCampaign)(
-    `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
-    async (scenario) => {
-      oracleRoute(oracleRouteOf(eagerJoinedCaseCampaign))
-      await checkEagerWindow(scenario)
-    },
-  )
+        await checkEagerWindow(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 })
 
 /**
@@ -8096,16 +8180,20 @@ const compilerCacheWindows = (
 const compilerWindowCuts = [`initial`, `moved`, `returned`] as const
 const compilerWindowKey = (history: (typeof compilerCacheWindows)[number]) =>
   JSON.stringify(history)
-const compilerWindowReach = createOracleReach(
-  `compiled ordered cache windows`,
+const compilerWindowCounts = new Map<string, number>(
   compilerCacheWindows.flatMap((history) =>
-    compilerWindowCuts.map((cut) => `${compilerWindowKey(history)}/${cut}`),
+    compilerWindowCuts.map(
+      (cut) => [`${compilerWindowKey(history)}/${cut}`, 0] as const,
+    ),
   ),
-  { replaying: false },
 )
 let compilerWindowEntered = false
 afterAll(() => {
-  if (compilerWindowEntered) compilerWindowReach.assertReached()
+  if (compilerWindowEntered)
+    expect(
+      [...compilerWindowCounts].filter(([, count]) => count < 1),
+      `compiled ordered cache windows`,
+    ).toEqual([])
 })
 declareOracle({
   model: [expectedInstalledWindow],
@@ -8116,7 +8204,7 @@ it.each(compilerCacheWindows)(
   async (history) => {
     oracleRoute(`case`)
     compilerWindowEntered = true
-    compilerWindowReach.beginHistory()
+    const entered = new Set<string>()
     const rows = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -8151,7 +8239,13 @@ it.each(compilerCacheWindows)(
         failures.push(error)
         traces.push({ cut, actual, expected })
       }
-      compilerWindowReach.reach(`${compilerWindowKey(history)}/${cut}`)
+      const state = `${compilerWindowKey(history)}/${cut}`
+      if (!compilerWindowCounts.has(state))
+        throw new Error(`Undeclared compiled window cut: ${state}`)
+      if (!entered.has(state)) {
+        entered.add(state)
+        compilerWindowCounts.set(state, compilerWindowCounts.get(state)! + 1)
+      }
     })
     if (failures.length)
       throw new AggregateError(
@@ -8227,24 +8321,36 @@ declareOracle({
   model: [expectedJoinedPlanWindow],
   grammar: [joinedPlanHistories],
 })
-const joinedPlanReach = createOracleReach(
-  `ordered joined plan publication`,
-  joinedPlanHistories.flatMap((history) => [
-    `${JSON.stringify(history)}/held`,
-    `${JSON.stringify(history)}/settled`,
-  ]),
-  { replaying: false },
+const joinedPlanCounts = new Map<string, number>(
+  joinedPlanHistories.flatMap((history) =>
+    [
+      `${JSON.stringify(history)}/held`,
+      `${JSON.stringify(history)}/settled`,
+    ].map((state) => [state, 0] as const),
+  ),
 )
 let joinedPlanEntered = false
 afterAll(() => {
-  if (joinedPlanEntered) joinedPlanReach.assertReached()
+  if (joinedPlanEntered)
+    expect(
+      [...joinedPlanCounts].filter(([, count]) => count < 1),
+      `ordered joined plan publication`,
+    ).toEqual([])
 })
 it.each(joinedPlanHistories)(
   `retains every joined dependency through ordered plans: %j`,
   async (history) => {
     oracleRoute(`case`)
     joinedPlanEntered = true
-    joinedPlanReach.beginHistory()
+    const entered = new Set<string>()
+    const reach = (state: string) => {
+      if (!joinedPlanCounts.has(state))
+        throw new Error(`Undeclared joined plan cut: ${state}`)
+      if (!entered.has(state)) {
+        entered.add(state)
+        joinedPlanCounts.set(state, joinedPlanCounts.get(state)! + 1)
+      }
+    }
     const failures: Array<unknown> = []
     const traces: Array<unknown> = []
     await receiveOrderedJoinedPlanHistory(history, (observation) => {
@@ -8270,9 +8376,9 @@ it.each(joinedPlanHistories)(
         traces.push({ ...observation, expected })
       }
       if (observation.cut === `held` && observation.pending > 0)
-        joinedPlanReach.reach(`${JSON.stringify(history)}/held`)
+        reach(`${JSON.stringify(history)}/held`)
       if (observation.cut === `settled` && observation.pending === 0)
-        joinedPlanReach.reach(`${JSON.stringify(history)}/settled`)
+        reach(`${JSON.stringify(history)}/settled`)
     })
     if (failures.length)
       throw new AggregateError(
