@@ -30,7 +30,7 @@ let sequence = 0
 export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory> =
   {
     scope: `collection`,
-    async create(persistence, history, id) {
+    async create(persistence, history, id, metadataTransform) {
       const database = await createRxDatabase<{
         rows: RxCollection<StartupRow>
       }>({
@@ -74,7 +74,7 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
         syncBatchSize: 2,
         syncMode: `eager`,
       })
-      const startup = trackStartupSync(options.sync)
+      const startup = trackStartupSync(options.sync, metadataTransform)
       const collection = createCollection(
         persistedCollectionOptions({
           ...options,
@@ -85,6 +85,7 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
       )
       return {
         collection,
+        syncOutcome: startup.syncOutcome,
         initialResult: startup.initialResult,
         firstSubmission: startup.firstSubmission,
         waitForRestore: startup.waitForRestore,

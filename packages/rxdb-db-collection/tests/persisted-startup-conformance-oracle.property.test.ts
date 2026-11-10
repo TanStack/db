@@ -24,5 +24,6 @@ describe(`persisted startup conformance: RxDB`, () => {
     adapter: rxdbStartupAdapter,
     histories: persistedStartupHistories,
     arbitrary: historyArb,
+    scopedStartupCommit: true,
   })
 })

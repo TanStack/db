@@ -1679,6 +1679,15 @@ export function queryCollectionOptions(
       )
       for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
+          // An eager result covers every row. A restored direct-write row has
+          // no owner or same-run write position; its omission is authoritative.
+          // Same-run direct writes keep their fetch-generation precedence.
+          if (
+            syncMode === `eager` &&
+            persistence !== null &&
+            !unownedDirectWritePositions.has(rowKey)
+          )
+            ownedRows.add(rowKey)
           continue
         }
 
@@ -2570,8 +2579,8 @@ export function queryCollectionOptions(
           ? queryCollectionSuccessfulFetchStarts.get(currentQuery)
           : undefined
       if (syncMode === `eager`) {
-        // A new complete snapshot replaces direct rows without subset owners.
-        // Hydrated rows with no claim are not necessarily this Query's rows.
+        // A later complete fetch also settles same-run ownerless direct rows.
+        // Restored ownerless rows are included in the hydrated baseline above.
         unownedDirectWritePositions.forEach((directPosition, key) => {
           if (
             currentSyncedItems.has(key) &&
@@ -2779,13 +2788,16 @@ export function queryCollectionOptions(
           } else if (
             !previouslyOwnedRows.has(key) &&
             (result.isFetchedAfterMount ||
+              (syncMode === `eager` &&
+                persistence !== null &&
+                directPosition === undefined) ||
               (directPosition !== undefined &&
                 cachedRemoteFetchStart !== undefined &&
                 cachedRemoteFetchStart > directPosition)) &&
             !deepEquals(currentSyncedItems.get(key), newItem)
           ) {
-            // A fetched row can first claim a directly inserted key. That
-            // claim also replaces the direct value with the server value.
+            // A result that first claims a restored peer row must apply its
+            // returned value too. Same-run direct rows retain fetch precedence.
             write({ type: `update`, value: newItem })
           }
           if (addsOwner || insertsRow) {

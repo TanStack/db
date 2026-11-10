@@ -4,7 +4,9 @@
  * replacement, even
  * when the result arrived before restore. A scoped source removes only its own
  * ownership; a peer's omitted row survives. A collection-wide source replaces
- * every row. Authority: the shared eager-source READY-3/PUB-7 replacement law,
+ * every row. An ownerless direct-write row omitted by a later complete,
+ * unbounded response is removed too (Query "Direct Writes and Query Sync").
+ * Authority: the shared eager-source READY-3/PUB-7 replacement law,
  * docs/collections/query-collection.md ("Direct Writes and Query Sync", "Initial
  * Data"), and persistence's durable acceptance contract. The maintainer chose
  * shared persistence conformance as this crossing's owner on 2026-11-09.
@@ -36,6 +38,8 @@ export type PersistedStartupHistory = {
   previous: number
   next: number
   peer: boolean
+  // Omit the source ownership edge; the independent peer edge may remain.
+  previousOwner?: `none`
   response: `before-restore` | `after-restore` | `after-deadline`
   mutation?: `persisting`
   initialRender?: `network-first`
@@ -178,12 +182,59 @@ export const withStartupMutations = <H extends PersistedStartupHistory>(
 ): Array<H> =>
   histories.flatMap((h) => [h, { ...h, mutation: `persisting` as const }])
 
-export const persistedStartupHistories = withStartupMutations(
-  baseStartupHistories.flatMap((h) => [
-    h,
-    withStartupRender(h, true, false),
-    withStartupRender(h, true, true),
-  ]),
+// Normalize only identical inputs. A persisting mutation remains a distinct
+// action even with no saved rows: it holds source publication until settlement.
+export const uniqueStartupHistories = <H extends PersistedStartupHistory>(
+  histories: Array<H>,
+): Array<H> => [
+  ...new Map(histories.map((h) => [JSON.stringify(h), h])).values(),
+]
+
+export const startupReachedStates = (
+  h: PersistedStartupHistory,
+): Array<string> => [
+  h.response === `before-restore`
+    ? `response-before-restore`
+    : `restore-before-response`,
+  ...(h.initialRender
+    ? [
+        h.response === `after-deadline`
+          ? `network-first-fallback`
+          : `network-first-source-result`,
+      ]
+    : []),
+  ...(h.mutation ? [`persisting-mutation`] : []),
+  ...(h.previous === 0 ? [`empty-baseline`] : []),
+  ...(h.next === 0 ? [`empty-result`] : []),
+  ...(h.next & h.previous ? [`overlapping-update`] : []),
+  ...(h.previous & ~h.next ? [`omitted-row`] : []),
+  ...(h.peer ? [`peer-owner`] : []),
+  ...(h.previousOwner === `none` &&
+  (h.peer ? (h.previous & (h.previous - 1)) !== 0 : h.previous !== 0)
+    ? [`ownerless-baseline`]
+    : []),
+]
+export const startupRequiredStates = (scope: StartupScope): Array<string> => [
+  `response-before-restore`,
+  `restore-before-response`,
+  `network-first-source-result`,
+  `network-first-fallback`,
+  `empty-result`,
+  `empty-baseline`,
+  `overlapping-update`,
+  `omitted-row`,
+  `persisting-mutation`,
+  ...(scope === `scoped` ? [`peer-owner`, `ownerless-baseline`] : []),
+]
+
+export const persistedStartupHistories = uniqueStartupHistories(
+  withStartupMutations(
+    baseStartupHistories.flatMap((h) => [
+      h,
+      withStartupRender(h, true, false),
+      withStartupRender(h, true, true),
+    ]),
+  ),
 )
 
 // Before any source result, timeout changes readiness only. Saved rows and
@@ -194,7 +245,18 @@ export function expectedStartupFallback(
   scope: StartupScope,
 ): StartupSnapshot {
   const saved = expectedPersistedStartup({ ...h, next: h.previous }, scope)
-  return { ...saved, rows: startupRows(h.previous, 1) }
+  return {
+    ...saved,
+    rows: startupRows(h.previous, 1),
+    ...(saved.owners && h.previousOwner === `none`
+      ? {
+          owners: saved.owners.map(([key, owners]): [string, Array<string>] => [
+            key,
+            owners.filter((owner) => owner !== `source`),
+          ]),
+        }
+      : {}),
+  }
 }
 export function persistedStartupFallbackViolations(
   h: PersistedStartupHistory,
@@ -287,6 +349,7 @@ declareOracle({
     persistedStartupRenderArb,
     withStartupRender,
     withStartupMutations,
+    uniqueStartupHistories,
     persistedStartupHistoryArb,
   ],
   check: [

@@ -360,3 +360,10 @@ three files. Its package typecheck also passes after the runner change.
 
 Final staged validation: `pnpm lint:changed`, ESLint on every changed TypeScript
 file, and `git diff --cached --check` pass. No run budget was lowered or removed.
+
+## Subsequent re-review
+
+The [re-review at head 1368594](2026-11-10-pr-2394-rereview.md) supersedes the
+current coverage claims with ownerless and peer-only provenance, measured browser
+reach, capability admission, nonvacuous scoped persistence-loss calibration, and
+resource cleanup. This record retains its historical test counts and verdicts.

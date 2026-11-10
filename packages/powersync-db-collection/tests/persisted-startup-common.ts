@@ -35,7 +35,7 @@ export function powerSyncStartupAdapterFor(
 ): PersistedStartupAdapter<PersistedStartupHistory> {
   return {
     scope: `collection`,
-    async create(persistence, history, id) {
+    async create(persistence, history, id, metadataTransform) {
       const { database, dispose } = await open(schema)
       await database.writeTransaction(async (tx) => {
         for (const row of startupRows(history.next, 2))
@@ -57,7 +57,7 @@ export function powerSyncStartupAdapterFor(
             pending = resolve
           }),
       })
-      const startup = trackStartupSync(options.sync)
+      const startup = trackStartupSync(options.sync, metadataTransform)
       const collection = createCollection(
         persistedCollectionOptions({
           ...options,
@@ -78,6 +78,7 @@ export function powerSyncStartupAdapterFor(
       }
       return {
         collection,
+        syncOutcome: startup.syncOutcome,
         initialResult: startup.initialResult,
         firstSubmission: startup.firstSubmission,
         waitForRestore: startup.waitForRestore,

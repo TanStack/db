@@ -5,6 +5,8 @@ import {
   PersistedStartupViolation,
   persistedStartupHistories,
   persistedStartupViolations,
+  startupReachedStates,
+  startupRequiredStates,
 } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import {
   isStartupRowRead,
@@ -24,6 +26,16 @@ import {
   createBrowserWASQLitePersistence,
   openBrowserWASQLiteOPFSDatabase,
 } from '../src'
+import {
+  capabilityHistories,
+  capabilityViolations,
+  observeCapability,
+} from '../../db-adapter-conformance/tests/persisted-capability-oracle'
+import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
+import {
+  removeStartupOPFSArtifacts,
+  startupOPFSArtifacts,
+} from './persisted-startup-opfs-cleanup'
 import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
@@ -33,6 +45,12 @@ export type StartupConformanceResult = {
     history: unknown
     violations: Array<string>
   }>
+  capabilities: Array<{
+    adapter: string
+    history: unknown
+    violations: Array<string>
+  }>
+  artifacts: Array<string>
   error?: string
 }
 declare global {
@@ -42,6 +60,8 @@ declare global {
 }
 async function run() {
   const results: StartupConformanceResult[`results`] = []
+  const capabilities: StartupConformanceResult[`capabilities`] = []
+  let artifacts: Array<string> = []
   let sequence = 0
   async function receive<H extends PersistedStartupHistory>(
     name: string,
@@ -51,19 +71,14 @@ async function run() {
     // This page has no Node oracle runner. Each completed history calls its
     // startup observer once; fail locally if any required receiving state is absent.
     const reach: Record<string, number> = Object.fromEntries(
-      [
-        `response-before-restore`,
-        `restore-before-response`,
-        `persisting-mutation`,
-        `empty-baseline`,
-      ].map((state) => [state, 0]),
+      startupRequiredStates(adapter.scope).map((state) => [state, 0]),
     )
     for (const history of histories) {
       const index = sequence++
-      const database = await openBrowserWASQLiteOPFSDatabase({
-        databaseName: `ps-${index}.sqlite`,
-      })
-      try {
+      const databaseName = `ps-${index}.sqlite`
+      await removeStartupOPFSArtifacts(databaseName)
+      const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })
+      await withOracleCleanup(async () => {
         let rowReads = 0
         const execute = database.execute.bind(database)
         database.execute = (sql, params) => {
@@ -79,13 +94,7 @@ async function run() {
             `startup-${index}`,
             () => rowReads,
             () => {
-              reach[
-                history.response === `before-restore`
-                  ? `response-before-restore`
-                  : `restore-before-response`
-              ]!++
-              if (history.mutation) reach[`persisting-mutation`]!++
-              if (history.previous === 0) reach[`empty-baseline`]!++
+              for (const state of startupReachedStates(history)) reach[state]!++
             },
           )
           results.push({
@@ -101,9 +110,10 @@ async function run() {
           if (!(error instanceof PersistedStartupViolation)) throw error
           results.push({ adapter: name, history, violations: error.violations })
         }
-      } finally {
-        await database.close?.()
-      }
+      }, [
+        () => database.close?.(),
+        () => removeStartupOPFSArtifacts(databaseName),
+      ])
     }
     for (const [state, count] of Object.entries(reach))
       if (!count) throw new Error(`${name}.opfs did not reach ${state}`)
@@ -124,10 +134,39 @@ async function run() {
       powerSyncBrowserStartupAdapter,
       persistedStartupHistories,
     )
-    window.__persistedStartupConformance = { results }
+    for (const [name, adapter] of [
+      [`rxdb`, rxdbStartupAdapter],
+      [`powersync`, powerSyncBrowserStartupAdapter],
+    ] as const) {
+      for (const history of capabilityHistories) {
+        const databaseName = `ps-${sequence++}.sqlite`
+        await removeStartupOPFSArtifacts(databaseName)
+        const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })
+        await withOracleCleanup(async () => {
+          const error = await observeCapability(
+            adapter,
+            createBrowserWASQLitePersistence({ database }),
+            history,
+            `capability-${sequence}`,
+          )
+          capabilities.push({
+            adapter: name,
+            history,
+            violations: capabilityViolations(history, error),
+          })
+        }, [
+          () => database.close?.(),
+          () => removeStartupOPFSArtifacts(databaseName),
+        ])
+      }
+    }
+    artifacts = await startupOPFSArtifacts()
+    window.__persistedStartupConformance = { results, capabilities, artifacts }
   } catch (error) {
     window.__persistedStartupConformance = {
       results,
+      capabilities,
+      artifacts,
       error:
         error instanceof Error
           ? `${error.stack} ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`

@@ -24,5 +24,6 @@ describe(`persisted startup conformance: PowerSync`, () => {
     adapter: powerSyncStartupAdapter,
     histories: persistedStartupHistories,
     arbitrary: historyArb,
+    scopedStartupCommit: true,
   })
 })

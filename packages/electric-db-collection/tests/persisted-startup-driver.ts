@@ -32,6 +32,9 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
       const requests: Array<Request> = []
       let available = false
       let offset = 0
+      // Shape handles must never be reused. The SDK keeps expired handles in
+      // localStorage, including across a browser reload with the same URL.
+      const shape = `startup-${crypto.randomUUID()}`
       const fetchClient: typeof fetch = (input, init) =>
         new Promise((resolve, reject) => {
           const signal = init?.signal
@@ -84,7 +87,7 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
               JSON.stringify([{ headers: { control: `must-refetch` } }]),
               {
                 status: 409,
-                headers: { 'electric-handle': `startup-${++offset}` },
+                headers: { 'electric-handle': `${shape}-${++offset}` },
               },
             ),
           )
@@ -108,7 +111,7 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
             ]),
             {
               headers: {
-                'electric-handle': `startup-${offset}`,
+                'electric-handle': `${shape}-${offset}`,
                 'electric-offset': `${offset}_0`,
                 'electric-cursor': String(offset),
                 'electric-up-to-date': `true`,

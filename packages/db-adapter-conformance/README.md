@@ -83,14 +83,19 @@ public/durable rows before refresh, public rows inside refresh fulfillment,
 durable rows after refresh, and a local-only reopen. It also shares the reload
 owner's one-row-read law. A scoped adapter checks exact source/peer ownership.
 
-Query receives the shared property with five cache/fetch origins and peer
-ownership. Convex, Electric, TrailBase, RxDB and PowerSync also receive it through
+Query receives the shared property with five cache/fetch origins, ownerless
+saved rows, peer ownership, and peer-only overlaps. Convex, Electric, TrailBase, RxDB and PowerSync also receive it through
 their installed SDK or controlled provider boundary. Chromium worker/OPFS runs
-46 Query histories and 30 histories for each other adapter. Every receiver
+116 Query histories and 26 histories for each other adapter. The browser repeats
+these histories in one profile and removes fixture-owned OPFS files. It also
+runs 22 protocol-admission histories for each of RxDB and PowerSync. Every receiver
 crosses ordinary and network-first rendering, empty and nonempty baselines,
 and a persisting optimistic transaction. RxDB and PowerSync prove source
 commit invocation before releasing a held restore; gate release alone does
-not count as response delivery.
+not count as response delivery. Both Node hosts also judge the independent
+persistence capability protocol through the real RxDB/PowerSync sync boundary.
+The persistence-loss calibration wraps hydration-scoped adapters, requires an
+actual dropped write, and fails if its clean candidate fails.
 
 ```sh
 pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts

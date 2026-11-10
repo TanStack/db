@@ -1,5 +1,10 @@
 import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
-import { or, whenSyncAccepted, withCollectionConfigFactory } from '@tanstack/db'
+import {
+  or,
+  validateSyncPersistenceCapability,
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -325,6 +330,10 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
+      const persistence =
+        params.metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(params.metadata.persistence)
       const {
         begin,
         write,
@@ -628,7 +637,7 @@ function createPowerSyncCollectionConfig<
               // Replace retained rows, including persisted rows whose restore
               // has not completed when this load starts.
               snapshot:
-                !!params.metadata?.persistence ||
+                persistence !== null ||
                 !collection._state.acceptedSyncedEntries().next().done,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,

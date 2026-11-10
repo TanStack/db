@@ -54,6 +54,7 @@ export interface PersistedStartupSource {
   refresh: () => Promise<unknown>
   dispose: () => unknown
   checkStartup?: () => Array<string>
+  syncOutcome?: Promise<{ error?: unknown }>
 }
 export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
   scope: StartupScope
@@ -63,6 +64,7 @@ export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
     persistence: PersistedCollectionPersistence,
     h: H,
     id: string,
+    metadataTransform?: (metadata: unknown) => unknown,
   ) => PersistedStartupSource | Promise<PersistedStartupSource>
 }
 // Observe the adapter's public sync boundary before persistence wraps it.
@@ -71,7 +73,12 @@ export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
 // cannot supply this checkpoint. This recorder supplies no writes or readiness.
 export function trackStartupSync<T extends object, K extends string | number>(
   sync: SyncConfig<T, K>,
+  metadataTransform: (metadata: unknown) => unknown = (metadata) => metadata,
 ) {
+  let recordSync!: (outcome: { error?: unknown }) => void
+  const syncOutcome = new Promise<{ error?: unknown }>((resolve) => {
+    recordSync = resolve
+  })
   let submit!: () => void
   const firstSubmission = new Promise<void>((resolve) => {
     submit = resolve
@@ -96,31 +103,42 @@ export function trackStartupSync<T extends object, K extends string | number>(
       hydrateBaseline = params.metadata?.persistence?.hydrateBaseline
       const receipts: Array<true | Promise<void>> = []
       let writes = 0
-      return sync.sync({
-        ...params,
-        write: (message) => {
-          params.write(message)
-          writes++
-        },
-        commit: (signal) => {
-          const receipt = params.commit(signal)
-          receipts.push(receipt)
-          committedRows += writes
-          writes = 0
-          committed = true
-          resolveCommit()
-          submit()
-          return receipt
-        },
-        markReady: () => {
-          params.markReady()
-          submit()
-          void Promise.all(receipts).then(() => resolve(), reject)
-        },
-      })
+      try {
+        const result = sync.sync({
+          ...params,
+          metadata: metadataTransform(
+            params.metadata,
+          ) as typeof params.metadata,
+          write: (message) => {
+            params.write(message)
+            writes++
+          },
+          commit: (signal) => {
+            const receipt = params.commit(signal)
+            receipts.push(receipt)
+            committedRows += writes
+            writes = 0
+            committed = true
+            resolveCommit()
+            submit()
+            return receipt
+          },
+          markReady: () => {
+            params.markReady()
+            submit()
+            void Promise.all(receipts).then(() => resolve(), reject)
+          },
+        })
+        recordSync({})
+        return result
+      } catch (error) {
+        recordSync({ error })
+        throw error
+      }
     },
   }
   return {
+    syncOutcome,
     sync: tracked,
     initialResult,
     firstCommit,

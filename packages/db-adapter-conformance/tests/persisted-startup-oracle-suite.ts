@@ -18,16 +18,18 @@ import {
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
-  PersistedStartupViolation,
   expectedPersistedStartup,
   expectedStartupFallback,
   persistedStartupCutViolations,
   persistedStartupFallbackViolations,
   persistedStartupViolations,
+  startupReachedStates,
+  startupRequiredStates,
 } from './persisted-startup-oracle'
 import { observePersistedStartup } from './persisted-startup-driver'
 import { createStartupHost } from './persisted-startup-host'
 import type { Arbitrary } from 'fast-check'
+import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { PersistedStartupHistory } from './persisted-startup-oracle'
 import type { PersistedStartupAdapter } from './persisted-startup-driver'
 
@@ -48,11 +50,13 @@ export function registerPersistedStartupConformance<
   arbitrary,
   origins = [],
   origin = () => undefined,
+  scopedStartupCommit = false,
 }: {
   property: string
   adapter: PersistedStartupAdapter<H>
   histories: Array<H>
   arbitrary: Arbitrary<H>
+  scopedStartupCommit?: boolean
   origins?: Array<string>
   origin?: (history: H) => string | undefined
 }) {
@@ -94,19 +98,7 @@ export function registerPersistedStartupConformance<
       persistedStartupCutViolations(h, adapter.scope, `startupDurable`, saved),
     ).not.toEqual([])
   })
-  const states = [
-    `response-before-restore`,
-    `restore-before-response`,
-    `network-first-source-result`,
-    `network-first-fallback`,
-    `empty-result`,
-    `empty-baseline`,
-    `overlapping-update`,
-    `omitted-row`,
-    `persisting-mutation`,
-    ...(adapter.scope === `scoped` ? [`peer-owner`] : []),
-    ...origins,
-  ]
+  const states = [...startupRequiredStates(adapter.scope), ...origins]
   for (const host of [`controlled`, `node-sqlite`] as const) {
     describe(`${property} through ${host}`, () => {
       const reach = createOracleReach(`${property}.${host}`, states)
@@ -129,25 +121,8 @@ export function registerPersistedStartupConformance<
             `startup-${host}-${sequence++}`,
             storage.readRowCount,
             () => {
-              historyReach.reach(
-                history.response === `before-restore`
-                  ? `response-before-restore`
-                  : `restore-before-response`,
-              )
-              if (history.initialRender)
-                historyReach.reach(
-                  history.response === `after-deadline`
-                    ? `network-first-fallback`
-                    : `network-first-source-result`,
-                )
-              if (history.mutation) historyReach.reach(`persisting-mutation`)
-              if (history.previous === 0) historyReach.reach(`empty-baseline`)
-              if (history.next === 0) historyReach.reach(`empty-result`)
-              if (history.next & history.previous)
-                historyReach.reach(`overlapping-update`)
-              if (history.previous & ~history.next)
-                historyReach.reach(`omitted-row`)
-              if (history.peer) historyReach.reach(`peer-owner`)
+              for (const state of startupReachedStates(history))
+                historyReach.reach(state)
               const responseOrigin = origin(history)
               if (responseOrigin) historyReach.reach(responseOrigin)
             },
@@ -163,70 +138,100 @@ export function registerPersistedStartupConformance<
       // A source that publishes after fallback but silently loses its durable
       // writes must fail before refresh can repair it. Seed and restore use the
       // real host; only the receiving source's persistence commits are dropped.
-      oracleReplayTest(it)(
-        `rejects lost source persistence after fallback`,
-        async () => {
-          oracleRoute(`calibration`)
-          const history = histories.find(
-            (h) => h.response === `after-deadline`,
-          )!
-          // Controlled storage models one Collection; use a fresh host for
-          // each candidate so the clean run cannot seed the corrupted run.
-          const clean = createStartupHost(host)
-          try {
-            await observePersistedStartup(
-              adapter,
-              clean.persistence,
-              clean.holdBaseline,
-              history,
-              `clean-persistence-${host}`,
-              clean.readRowCount,
-            )
-          } catch (error) {
-            // A broken clean trace is not a calibration candidate. The normal
-            // histories judge it; a second fault cannot calibrate that trace.
-            if (error instanceof PersistedStartupViolation) return
-            throw error
-          } finally {
-            clean.close()
-          }
-          const storage = createStartupHost(host)
-          try {
-            await expect(
-              observePersistedStartup(
-                {
-                  ...adapter,
-                  create: (persistence, h, id) =>
-                    adapter.create(
-                      {
-                        ...persistence,
-                        adapter: new Proxy(persistence.adapter, {
-                          get(target, key) {
-                            if (key === `applyCommittedTx`)
-                              return async () => {}
-                            const value: unknown = Reflect.get(target, key)
-                            return typeof value === `function`
-                              ? value.bind(target)
-                              : value
-                          },
-                        }),
-                      },
-                      h,
-                      id,
-                    ),
-                },
-                storage.persistence,
-                storage.holdBaseline,
+      for (const response of [`before-restore`, `after-deadline`] as const)
+        oracleReplayTest(it)(
+          `rejects lost source persistence with ${response}`,
+          async () => {
+            oracleRoute(`calibration`)
+            const history = histories.find((h) => h.response === response)!
+            // Controlled storage models one Collection; use a fresh host for
+            // each candidate so the clean run cannot seed the corrupted run.
+            const clean = createStartupHost(host)
+            try {
+              await observePersistedStartup(
+                adapter,
+                clean.persistence,
+                clean.holdBaseline,
                 history,
-                `lost-persistence-${host}`,
-                storage.readRowCount,
-              ),
-            ).rejects.toThrow(/startupDurable:/)
-          } finally {
-            storage.close()
-          }
-        },
-      )
+                `clean-persistence-${host}-${response}`,
+                clean.readRowCount,
+              )
+            } finally {
+              clean.close()
+            }
+            const storage = createStartupHost(host)
+            let dropped = 0
+            let scopedDrops = 0
+            const corrupt = (
+              subject: PersistenceAdapter,
+              inScope = false,
+            ): PersistenceAdapter =>
+              new Proxy(subject, {
+                get(target, key) {
+                  if (key === `applyCommittedTx`)
+                    return () => {
+                      dropped++
+                      if (inScope) scopedDrops++
+                      return Promise.resolve()
+                    }
+                  if (
+                    key === `runInHydrationScope` &&
+                    target.runInHydrationScope
+                  )
+                    return (
+                      task: Parameters<
+                        NonNullable<typeof target.runInHydrationScope>
+                      >[0],
+                    ) =>
+                      target.runInHydrationScope!((scoped) =>
+                        task(corrupt(scoped, true)),
+                      )
+                  const value: unknown = Reflect.get(target, key)
+                  return typeof value === `function`
+                    ? value.bind(target)
+                    : value
+                },
+              })
+            try {
+              await expect(
+                observePersistedStartup(
+                  {
+                    ...adapter,
+                    create: (persistence, h, id) =>
+                      adapter.create(
+                        {
+                          ...persistence,
+                          adapter: corrupt(persistence.adapter),
+                        },
+                        h,
+                        id,
+                      ),
+                  },
+                  storage.persistence,
+                  storage.holdBaseline,
+                  history,
+                  `lost-persistence-${host}-${response}`,
+                  storage.readRowCount,
+                ),
+              ).rejects.toThrow(/startupDurable:/)
+              expect(
+                dropped,
+                `fault must reach a source persistence commit`,
+              ).toBeGreaterThan(0)
+              if (
+                host === `node-sqlite` &&
+                response === `before-restore` &&
+                scopedStartupCommit
+              )
+                expect(
+                  scopedDrops,
+                  `fault must reach the hydration-scoped adapter`,
+                ).toBeGreaterThan(0)
+            } finally {
+              storage.close()
+            }
+          },
+        )
       oracleReplayTest(it).each(histories)(
         `reconciles persisted startup: %j`,
         async (history) => {

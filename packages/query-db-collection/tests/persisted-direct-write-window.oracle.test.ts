@@ -194,12 +194,15 @@ async function persisted(
   holder: Holder,
   keyCase: KeyCase,
   kind: StorageKind = `fake`,
+  dropFirstResult = false,
 ): Promise<
   Observation & {
     stored: Array<Row>
     timing: string
     waited: boolean
     commitsBeforeWrite: number
+    discardedWrites: number
+    readySignals: number
   }
 > {
   const { base, next } = scenario(keyCase)
@@ -305,6 +308,9 @@ async function persisted(
 
   const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
   let sourceCommits = 0
+  let discard = dropFirstResult
+  let discardedWrites = 0
+  let readySignals = 0
   const source = queryCollectionOptions<Row>({
     id,
     queryKey,
@@ -319,8 +325,17 @@ async function persisted(
     sync: (params) =>
       sourceSync({
         ...params,
+        write: (...args) => {
+          if (discard) discardedWrites++
+          else params.write(...args)
+        },
+        markReady: () => {
+          readySignals++
+          params.markReady()
+        },
         commit: (...args) => {
           sourceCommits++
+          discard = false
           return params.commit(...args)
         },
       }),
@@ -373,6 +388,8 @@ async function persisted(
       timing,
       waited,
       commitsBeforeWrite,
+      discardedWrites,
+      readySignals,
       visible: sortRows(collection.values()),
       cache: sortRows(queryClient.getQueryData(queryKey) ?? []),
       stored: await storage.storedRows(id),
@@ -396,8 +413,19 @@ async function compareWriteWithReference(
   holder: Holder,
   keyCase: KeyCase,
   kind: StorageKind = `fake`,
+  dropFirstResult = false,
 ): Promise<void> {
-  const actual = await persisted(op, holder, keyCase, kind)
+  const actual = await persisted(op, holder, keyCase, kind, dropFirstResult)
+  if (dropFirstResult) {
+    expect(
+      actual.discardedWrites,
+      `mutant must discard source rows`,
+    ).toBeGreaterThan(0)
+    expect(
+      actual.readySignals,
+      `mutant must report source readiness`,
+    ).toBeGreaterThan(0)
+  }
   if (holder !== `startup`)
     expect(
       actual.commitsBeforeWrite,
@@ -429,6 +457,19 @@ declareOracle({
     compareDuplicateInsert,
   ],
 })
+
+// A mutant that reports readiness but discards the first source transaction
+// commits its empty metadata transaction and must fail the same comparison.
+// Selecting its causal schedule
+// cannot excuse missing source rows at the final observation cut.
+for (const kind of [`fake`, `sqlite`] as const)
+  for (const op of ops)
+    it(`rejects a discarded first result for ${op} through ${kind}`, async () => {
+      oracleRoute(`calibration`)
+      await expect(
+        compareWriteWithReference(op, `startup`, `refetch-only`, kind, true),
+      ).rejects.toThrow(/reference/)
+    })
 
 describe(`persisted direct writes behind a waiting refetch`, () => {
   for (const holder of holders) {

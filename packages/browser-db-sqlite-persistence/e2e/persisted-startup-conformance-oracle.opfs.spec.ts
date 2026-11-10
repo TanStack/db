@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { queryStartupHistories } from '../../query-db-collection/tests/persisted-startup-driver'
 import { persistedStartupHistories } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
+import { capabilityHistories } from '../../db-adapter-conformance/tests/persisted-capability-oracle'
 import type { StartupConformanceResult } from './persisted-startup-conformance.opfs'
 
 // The page compares each cut with the shared model. Count each adapter's
@@ -21,13 +22,21 @@ function checkStartupConformance(result: StartupConformanceResult) {
     expect(
       result.results.filter((item) => item.adapter === adapter),
     ).toHaveLength(persistedStartupHistories.length)
+  for (const name of [`rxdb`, `powersync`])
+    expect(
+      result.capabilities.filter((item) => item.adapter === name),
+    ).toHaveLength(capabilityHistories.length)
+  expect(result.capabilities.flatMap(({ violations }) => violations)).toEqual(
+    [],
+  )
+  expect(result.artifacts).toEqual([])
   expect(result.results.flatMap(({ violations }) => violations)).toEqual([])
 }
 declareOracle({ check: [checkStartupConformance] })
 test(`complete source results replace persisted rows across OPFS startup`, async ({
   page,
 }) => {
-  test.setTimeout(180_000)
+  test.setTimeout(600_000)
   page.on(`console`, (message) =>
     console.info(`browser ${message.type()}: ${message.text()}`),
   )
@@ -42,4 +51,13 @@ test(`complete source results replace persisted rows across OPFS startup`, async
   )
   expect(errors).toEqual([])
   checkStartupConformance(result)
+  // Reuse the same origin and file names. Successful cleanup must keep the
+  // next run independent, rather than relying on a fresh browser profile.
+  await page.reload()
+  await page.waitForFunction(
+    () => window.__persistedStartupConformance !== undefined,
+  )
+  checkStartupConformance(
+    await page.evaluate(() => window.__persistedStartupConformance!),
+  )
 })

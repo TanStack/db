@@ -49,10 +49,21 @@ const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
   .map(({ membership, ...schedule }) => ({ ...membership, ...schedule }))
   .chain((h) =>
     fc
-      .tuple(persistedStartupRenderArb, fc.boolean(), fc.boolean())
-      .map(([network, fallback, mutation]) =>
+      .tuple(
+        persistedStartupRenderArb,
+        fc.boolean(),
+        fc.boolean(),
+        fc.boolean(),
+      )
+      .map(([network, fallback, mutation, ownerless]) =>
         withStartupRender(
-          { ...h, ...(mutation ? { mutation: `persisting` as const } : {}) },
+          {
+            ...h,
+            ...(mutation ? { mutation: `persisting` as const } : {}),
+            ...(ownerless && h.previous
+              ? { previousOwner: `none` as const }
+              : {}),
+          },
           network,
           fallback && h.origin === `fetch`,
         ),

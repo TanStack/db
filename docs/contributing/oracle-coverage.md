@@ -7772,8 +7772,28 @@ snapshots also check exact ownership at all four snapshot cuts. Startup checks
 the reload owner's one-full-row-read law before its own durable observation.
 Query's receiving driver preserves exact fetch-count and pending-fetch premises.
 The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
-runs forty-six Query histories and thirty complete-result histories for each of the
-other five adapters through the same composition and check on real worker/OPFS.
+runs 116 Query histories and 26 complete-result histories for each of the other
+five adapters through the same composition and check on real worker/OPFS. It
+repeats in the same browser profile, with file cleanup and separately enforced
+reach for network-first result/fallback, empty result/baseline, overlap, omission,
+mutation, and Query peers/ownerless baselines. Identical normalized histories are
+deduplicated; empty-baseline mutations still hold publication and remain distinct.
+Query crosses source-owned and ownerless saved provenance. Peer-only overlaps
+exercise every initial/cache origin. At fallback, ownerless rows retain their
+original absent source ownership. Complete results remove omitted ownerless rows
+and apply returned values even when a peer previously supplied the row.
+
+The independent [capability-admission owner](../../packages/db-adapter-conformance/tests/persisted-capability-oracle.ts)
+checks the cross-package SyncMetadataApi protocol. It enumerates nine required
+members with missing and false-valued corruptions, a missing capability field,
+and three legal forms (complete, explicit null, absent optional API). Real RxDB
+and PowerSync receive all 22 histories on controlled, Node SQLite and Chromium
+OPFS hosts. It checks invocation errors before source delivery and completes
+source startup for legal forms. It does not claim optional extension faults,
+on-demand acquisition results, or arbitrary malformed values. The shared startup
+calibration now fails on a bad clean candidate, counts injected persistence
+loss, and wraps hydration-scoped writes. RxDB/PowerSync must reach that scoped
+fault before restore release on real SQLite. See the [re-review evidence](oracle-reviews/2026-11-10-pr-2394-rereview.md).
 
 The original Query omission fails startup on both Node hosts and OPFS. Convex
 without its first-result truncate, a survivor in the bare eager-source grammar,

@@ -10,6 +10,7 @@ import { queryCollectionOptions } from '../src/query'
 import {
   sortedStartupRows,
   startupRows,
+  uniqueStartupHistories,
   withStartupMutations,
   withStartupRender,
 } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
@@ -98,14 +99,35 @@ const baseQueryStartupHistories: Array<QueryStartupHistory> = [
     peer: true,
     response: `before-restore`,
   },
+  ...(
+    [
+      `initial-disabled`,
+      `initial-pending`,
+      `cached-disabled`,
+      `cached-pending`,
+    ] as const
+  ).map((origin): QueryStartupHistory => ({
+    origin,
+    previous: 3,
+    next: 3,
+    peer: true,
+    response: `before-restore`,
+  })),
 ]
 
-export const queryStartupHistories = withStartupMutations(
-  baseQueryStartupHistories.flatMap((h) => [
-    h,
-    withStartupRender(h, true, false),
-    ...(h.origin === `fetch` ? [withStartupRender(h, true, true)] : []),
-  ]),
+export const queryStartupHistories = uniqueStartupHistories(
+  withStartupMutations(
+    baseQueryStartupHistories
+      .flatMap((h): Array<QueryStartupHistory> => [
+        h,
+        ...(h.previous ? [{ ...h, previousOwner: `none` as const }] : []),
+      ])
+      .flatMap((h) => [
+        h,
+        withStartupRender(h, true, false),
+        ...(h.origin === `fetch` ? [withStartupRender(h, true, true)] : []),
+      ]),
+  ),
 )
 
 type QueryMetadata =
@@ -121,7 +143,7 @@ export const queryStartupAdapter: PersistedStartupAdapter<QueryStartupHistory> =
     seedMetadata: (h, id, row) => ({
       queryCollection: {
         owners: {
-          [hashKey([id])]: true,
+          ...(h.previousOwner === `none` ? {} : { [hashKey([id])]: true }),
           ...(h.peer && row.id === startupRows(h.previous, 1)[0]!.id
             ? { peer: true }
             : {}),

@@ -7,7 +7,10 @@ import {
   rxStorageWriteErrorToRxError,
 } from 'rxdb/plugins/core'
 import DebugModule from 'debug'
-import { withCollectionConfigFactory } from '@tanstack/db'
+import {
+  validateSyncPersistenceCapability,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import { stripRxdbFields } from './helper'
 import type {
   FilledMangoQuery,
@@ -127,6 +130,10 @@ export function rxdbCollectionOptions(
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
+      const persistence =
+        params.metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(params.metadata.persistence)
 
       let initialFetchComplete = false
       async function initialFetch() {
@@ -142,7 +149,7 @@ export function rxdbCollectionOptions(
         // commit ordering with pending mutations.
         begin({
           snapshot:
-            !!params.metadata?.persistence ||
+            persistence !== null ||
             !collection._state.acceptedSyncedEntries().next().done,
         })
 
