@@ -610,6 +610,10 @@ const typeProperties = {
   core: `persisted-options.types.core`,
   browser: `persisted-options.types.browser`,
 } as const satisfies Record<Receiver, string>
+const fixedTypeProperties = {
+  core: `persisted-options.types.core-fixed`,
+  browser: `persisted-options.types.browser-fixed`,
+} as const satisfies Record<Receiver, string>
 const utilityProperties = {
   core: `persisted-options.utilities.core`,
   browser: `persisted-options.utilities.browser`,
@@ -817,7 +821,7 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
     timeout,
   })
   oracleProperty({
-    id: `${propertyName}-fixed`,
+    id: fixedTypeProperties[receiver],
     law: {
       statement: `Persistence wrapping preserves the retained consumer regression shapes through the same independent compiler judgment.`,
       authority: `The public persistence, schema, and virtual-row contracts stated above.`,

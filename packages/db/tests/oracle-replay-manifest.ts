@@ -23,11 +23,13 @@ const ownerGroups: ReadonlyArray<
     `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
     `persisted-options.types`,
     `core-fixed`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
   ],
   [
     `browser-db-sqlite-persistence/tests/persisted-options.test.ts`,
     `persisted-options.types`,
     `browser-fixed`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
   ],
   [
     `db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
