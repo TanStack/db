@@ -9,9 +9,8 @@ import {
 import { createDeferred } from '../src/deferred'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
-import { oracleRoute } from './oracle-config.js'
+import { oracleReplayRequested, oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils'
 import {
   cleanupError,
@@ -319,11 +318,19 @@ const dependentCleanupReachStates = [
 ] as const
 
 describe(`Collection cleanup with failing dependents oracle`, () => {
-  const reach = createOracleReach(
-    `collection-cleanup.dependents`,
-    dependentCleanupReachStates,
+  // The fixed product retains its original one-history minimum for each
+  // state, with each cell counted only once however often it enters one.
+  const counts = new Map<(typeof dependentCleanupReachStates)[number], number>(
+    dependentCleanupReachStates.map((state) => [state, 0]),
   )
-  afterAll(() => reach.assertReached())
+  afterAll(() => {
+    if (!oracleReplayRequested())
+      for (const state of dependentCleanupReachStates)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(1)
+  })
 
   it(`declares each cell of the dependents product once`, () => {
     oracleRoute(`case`)
@@ -338,7 +345,13 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
     `settles after every dependent and the source's own cleanup: $id`,
     async (cell) => {
       oracleRoute(`case`)
-      reach.beginHistory()
+      const entered = new Set<(typeof dependentCleanupReachStates)[number]>()
+      const enter = (state: (typeof dependentCleanupReachStates)[number]) => {
+        if (!entered.has(state)) {
+          entered.add(state)
+          counts.set(state, counts.get(state)! + 1)
+        }
+      }
       const expected = expectedDependentCleanup(cell)
       const gates = new Map<Gate, ReturnType<typeof createDeferred<void>>>()
       // Teardown's own cleanup must not wait on a gate nobody releases.
@@ -402,7 +415,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
       const teardown: Array<() => void> = []
       const markFailedWhileHeld = () => {
         if (holds(cell.adapter) && !adapterSettled) {
-          reach.reach(`dependent-failed-while-adapter-held`)
+          enter(`dependent-failed-while-adapter-held`)
         }
       }
       const register = (behavior: DependentEnd, index: 0 | 1) => {
@@ -425,7 +438,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
               thrown = true
               started[index] = true
               settled[index] = true
-              reach.reach(`dependent-end-threw`)
+              enter(`dependent-end-threw`)
               markFailedWhileHeld()
               throw failure(name)
             }),
@@ -447,7 +460,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
             }
             if (behavior === `throw`) {
               finish()
-              reach.reach(`dependent-end-threw`)
+              enter(`dependent-end-threw`)
               throw failure(name)
             }
             if (behavior === `reject`) {
@@ -511,14 +524,14 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
         await checkpoint(`after the call`)
         for (const name of expected.releases) {
           if (name === `adapter` && unreleased.size > 1) {
-            reach.reach(`held-dependent-outlasted-adapter`)
+            enter(`held-dependent-outlasted-adapter`)
           }
           if (
             name === `adapter` &&
             cell.adapter === `held-reject` &&
             failures.size > 0
           ) {
-            reach.reach(`adapter-rejected-after-dependent-failure`)
+            enter(`adapter-rejected-after-dependent-failure`)
           }
           gates.get(name)!.resolve()
           unreleased.delete(name)
