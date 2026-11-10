@@ -343,5 +343,598 @@
       }
     ],
     "followupBudgetReduction": false
+  },
+  "failureFidelity": {
+    "reviewedHead": "d8a04010610db9cd1afbd04e271ae461fe5c3dbd",
+    "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+    "generatedInputSeed": 51719,
+    "properties": 20,
+    "nativeControls": 60,
+    "sourceChanged": false,
+    "command": "./node_modules/.bin/vitest run --config .cache/oracle-conversion-recovery/integrated-reach/fidelity/vitest.config.mjs --reporter=verbose",
+    "frameworkLoadedSha256": {
+      "node_modules/@tanstack/oracles/dist/esm/index.js": "733a0d550709980393f4b2e318d4eecabbb99305ce6597e4566a1e74b5a70212",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-property.js": "e7724f82a72e53c0456c9d2e40317ded27ab0a461fd03a3b8183048d13cfb493",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-config.js": "3c103c4adcb7afc785ef52b11bf29dad61054b60eac196cb0c525a44e54eef3b",
+      "node_modules/@tanstack/oracles/dist/esm/oracle-route.js": "6ba478a0dde0adc198f8bccaddadeacc100cde69206e6a7ec3d198d758595606"
+    },
+    "durableArtifacts": {
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/fidelity.test.ts": "6f445ece7d6af9083ec2dd348c0774b614ae8028df610ada617fc64090b6ae2e",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/vitest.config.mjs": "16e15a8a0b5ce4330ca7418c0de90c041dc52a2c823ddc315bad64ac501bb8d7",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/unchanged-green.log": "b15ebe9c26e272e28fb3dad2d8cc972a482a2aee103aea04f61539f86e414888",
+      ".cache/oracle-conversion-recovery/integrated-reach/fidelity/results.json": "6f0d37ab20a556f4a44e9a4c1d905e8cfb1df8aee36adef545225369c5d12f9d"
+    },
+    "results": [
+      {
+        "property": "ivm.topk-batch-relations",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "same-key contributions",
+        "recordedSemanticCheckpoint": "plain key order/large=false/collision=false: batch",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 238,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-file-independent",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordinary replacement",
+        "recordedSemanticCheckpoint": "File available=true: retained rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 2,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-shared-subtrees",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "bounded shared-tree reads",
+        "recordedSemanticCheckpoint": "batch and leaf reads",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-unrelated-payloads",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "unread unrelated payloads",
+        "recordedSemanticCheckpoint": "batch and unrelated reads",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "ivm.topk-batch-long-cancellation",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "complete cancellation",
+        "recordedSemanticCheckpoint": "cancelled batch",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.write-marker-aliases",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "exact-alias-rows",
+        "recordedSemanticCheckpoint": "direct rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 1,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.result-carrier-equivalence",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "exact-alias-rows",
+        "recordedSemanticCheckpoint": "direct rows",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 8,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "op-sqlite.columnar-sql-aliases",
+        "missingLaw": "constructed reach",
+        "missingCheckpoint": "query settled",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "query-execution",
+        "recordedSemanticCheckpoint": "columnar query count",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-derived-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.eager-keyed-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-derived-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-offset",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-limit",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      },
+      {
+        "property": "preact.window-render.on-demand-keyed-both",
+        "missingLaw": "window render reach",
+        "missingCheckpoint": "render completed",
+        "exactSentinelRetained": true,
+        "cutPrefixSentinelRetained": true,
+        "recordedSemanticLaw": "ordered window rows",
+        "recordedSemanticCheckpoint": "initial",
+        "semanticViolationRetainedCause": true,
+        "productObservationCheckpointCount": 3,
+        "missingCheckpointRecorded": false
+      }
+    ]
+  },
+  "finalSourceMutationParity": {
+    "preact": {
+      "reviewedHead": "d8a04010610db9cd1afbd04e271ae461fe5c3dbd",
+      "originalComparison": "2026-11-10-preact-bound-options-oracle-conversion.json",
+      "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+      "source": "src/useLiveQuery.ts",
+      "package": "packages/preact-db",
+      "envPrefix": "TANSTACK_DB_ORACLE",
+      "seed": 2291,
+      "contexts": 1,
+      "sourceCensus": 48,
+      "selectedMutants": 22,
+      "priorKills": 18,
+      "reportSha256": "d5445681c3a609709da922cd367e9d29f0942962c4660c13d3c17adfb730543b",
+      "run": {
+        "id": "7119561cb3c3",
+        "inputs": "1 source files, 3 oracle files, 3 ordinary test files, 0 authored mutants, seed 2291, pool threads; a partial run (--only or --sample)"
+      },
+      "evidence": {
+        "reused": 0,
+        "computed": 51,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 0
+      },
+      "sourceSha256": {
+        "packages/preact-db/src/useLiveQuery.ts": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986",
+        "packages/preact-db/tests/window-render-oracle.test.tsx": "bccb0a6c2a3019c690e9e9e23be3300776fbb2977ca91a063aaa133ffb26c2b7",
+        "packages/preact-db/tests/bound-options-oracle.test.ts": "7dcd77a3bebaf22f560b602e12297978e98942ae008c319ecc164439adbe215b",
+        "packages/preact-db/tests/bound-schema-options-oracle.test.ts": "aa87b3344af7334270952ea89fd4e5aabf1930056eebca0617b4b229794f952b",
+        "packages/db/tests/oracle-config.ts": "3f32002cc7541b31c6e5c20d81b7d0cf52556e9c02e750a01da3989ac772341e",
+        "packages/db/tests/oracle-property.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded"
+      },
+      "nondeterministic": [],
+      "lostKills": [],
+      "wrongStableKeys": [],
+      "nonSemanticKills": [],
+      "selected": [
+        {
+          "id": "useLiveQuery.ts:M3",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )"
+        },
+        {
+          "id": "useLiveQuery.ts:M4",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )"
+        },
+        {
+          "id": "useLiveQuery.ts:M5",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M6",
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3"
+        },
+        {
+          "id": "useLiveQuery.ts:M12",
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M14",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M16",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M18",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M19",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M20",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M21",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3"
+        },
+        {
+          "id": "useLiveQuery.ts:M22",
+          "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M25",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }"
+        },
+        {
+          "id": "useLiveQuery.ts:M27",
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M28",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }"
+        },
+        {
+          "id": "useLiveQuery.ts:M29",
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2"
+        },
+        {
+          "id": "useLiveQuery.ts:M33",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )"
+        },
+        {
+          "id": "useLiveQuery.ts:M35",
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }"
+        },
+        {
+          "id": "useLiveQuery.ts:M36",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )"
+        },
+        {
+          "id": "useLiveQuery.ts:M39",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )"
+        },
+        {
+          "id": "useLiveQuery.ts:M40",
+          "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )"
+        },
+        {
+          "id": "useLiveQuery.ts:M42",
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )"
+        }
+      ],
+      "retainedKills": [
+        {
+          "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )",
+          "outcome": "killed",
+          "laws": [
+            "source update rows"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "outer window retains Collection"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "ordered window rows"
+          ],
+          "by": [
+            "preact.window-render.eager-derived-offset > fixed seed 2291"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/queryKey"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/query"
+          ]
+        },
+        {
+          "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )",
+          "outcome": "killed",
+          "laws": [
+            "(unnamed)",
+            "bound options"
+          ],
+          "by": [
+            "preact.bound-options > getKey/queryKey"
+          ]
+        }
+      ]
+    },
+    "topk": "pending",
+    "rn": "pending"
   }
 }

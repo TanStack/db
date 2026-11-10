@@ -39,9 +39,29 @@ Results: TopK 27 tests, Preact 93 tests, and the full OP-SQLite package 306 test
 
 ESLint, Prettier and `git diff --check` pass. `pnpm lint:changed` exits 1 with two branch budget reports: `preact.window-render` removed its old six-run key, and OP-SQLite removed the old 20-run meta calibration at seed 165903. The Preact key is replaced by 12 separately registered cells, each retaining six runs. The RN calibration moved unchanged to an ordinary driver test. These earlier conversion changes are explained in their owner reports; this follow-up lowers no budget.
 
-The finite bound-options check remains unchanged. The new requirements supplement the existing product judgments; they do not change row equality, alias key order, source reference identity or work-count expectations. Existing conversion mutation comparisons remain earlier evidence; no new final-source mutation census was run in this follow-up. Device/JSI execution, arbitrary framework schedules and changes to the external framework remain outside this bounded repair.
+The finite bound-options check remains unchanged. The new requirements supplement the existing product judgments; they do not change row equality, alias key order, source reference identity or work-count expectations. The final-source Preact comparison below supplements the earlier conversion evidence. Final-source TopK and RN mutation parity remain pending. Device/JSI execution, arbitrary framework schedules and changes to the external framework remain outside this bounded repair.
 
 The [companion evidence](2026-11-10-constructed-reach-followup.json) records the exact source hashes and every normal-run state count. The ignored worktree evidence directory additionally retains the commands, raw logs and temporary control sources.
+
+## Native failure-fidelity controls
+
+Review at `d8a04010610db9cd1afbd04e271ae461fe5c3dbd` challenged whether a missing constructed state could hide a later production-driver error. All three owners already use unrecorded completeness checkpoints: TopK `completed`, RN `query settled`, and Preact `render completed`. Their real production drivers never record those checkpoint names. No source repair was needed.
+
+An isolated Vitest control imports all 20 actual owner registrations: five TopK properties, three RN properties, and 12 Preact window cells. It uses each property's arbitrary, first constructed builder, model, production driver and shared check. Seed 51719 supplies one generated input per property. The control changes Vitest registration only, then invokes the native pinned framework's case callback in three modes:
+
+- The actual production driver records every product observation, suppresses reach records, then throws a sentinel error. The native framework rethrows that exact error object.
+- The same wrapper also omits the final product observation, then throws. The exact sentinel remains the failure.
+- The wrapper corrupts the first recorded product observation, suppresses reach records, then throws. The native framework reports the earlier semantic violation at that recorded checkpoint and retains the exact sentinel as its cause.
+
+All 60 controls pass with the unchanged owner sources. Each clean history also passes its shared comparison. These are failure-fidelity controls over observed traces, not production-mutant kills. The companion evidence records every property, checkpoint and result. Durable control source, configuration and raw output are under `.cache/oracle-conversion-recovery/integrated-reach/fidelity/` in the integration worktree.
+
+## Final-source Preact mutation parity
+
+The cold final-source run at the reviewed head above uses framework `e1fb504`, prefix `TANSTACK_DB_ORACLE`, seed 2291 and one context. It selects every one of the 18 prior killed stable keys from the committed bound-options comparison, plus four earlier same-anchor siblings. The siblings preserve the pinned CLI's stable-key suffix numbering in a filtered run.
+
+All 18 exact prior keys remain killed by product laws: `bound options`, `source update rows`, `ordered window rows` or `outer window retains Collection`. None relies solely on reach, framework checks or an unnamed verdict. The four selected siblings yield two survivors and two runtime crashes. The run has zero nondeterministic tests and no key mismatch. It computes 51 evidence units, reuses none, and cuts or reruns none. This is a prior-kill preservation run over 22 selected mutants from the full 48-mutant source census; it does not reclassify the omitted mutants.
+
+The final report SHA256 is `d5445681c3a609709da922cd367e9d29f0942962c4660c13d3c17adfb730543b`; run identity is `7119561cb3c3`. The companion evidence retains every selected ID/key pair and each prior kill's final laws.
 
 ## Rubric account
 
