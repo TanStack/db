@@ -172,10 +172,6 @@ export const oracleLintSettings = {
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

@@ -1354,6 +1354,12 @@ const replayTestNames = new Map([
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
+  ...[...registeredOracleProperties]
+    .filter((property) => property.startsWith(`electric.sdk-`))
+    .map(
+      (property) =>
+        [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+    ),
   [
     `electric-recovery.publication-stream-convergence`,
     `electric-recovery\\.publication-stream-convergence > random seed`,
