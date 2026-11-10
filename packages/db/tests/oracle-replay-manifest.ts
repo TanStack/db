@@ -646,7 +646,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `startup-generation source-progress`,
+    `startup-generation source-progress startup-corpus`,
   ],
   [
     `db/tests/query/compiler/group-by-pipeline-oracle.test.ts`,
@@ -773,13 +773,13 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
     `sqlite-persistence`,
-    `binding-capacity`,
+    `binding-capacity binding-capacity.corpus binding-capacity.transaction binding-capacity.root-limit binding-capacity.scalar-stress`,
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
     `sqlite-resume`,
-    `baseline-lineage`,
+    `baseline-lineage baseline-lineage.external-metadata baseline-lineage.calibration`,
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
   ],
   [
@@ -821,7 +821,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `managed-claim-read retired-storage`,
+    `managed-claim-read managed-claim-read.cases retired-storage retired-storage.cases`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
@@ -1358,6 +1358,26 @@ const replayTestNames = new Map([
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
   [
+    `sqlite-resume.retired-storage`,
+    `sqlite-resume\\.retired-storage > random seed`,
+  ],
+  [
+    `sqlite-resume.managed-claim-read`,
+    `sqlite-resume\\.managed-claim-read > random seed`,
+  ],
+  [
+    `sqlite-resume.startup-generation`,
+    `sqlite-resume\\.startup-generation > random seed`,
+  ],
+  [
+    `sqlite-resume.baseline-lineage`,
+    `sqlite-resume\\.baseline-lineage > random seed`,
+  ],
+  [
+    `sqlite-persistence.binding-capacity`,
+    `sqlite-persistence\\.binding-capacity > random seed`,
+  ],
+  [
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
@@ -1446,7 +1466,7 @@ const replayTestNames = new Map([
   [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [
     `sqlite-resume.source-progress`,
-    `preserves source progress evidence.*random or replayed`,
+    `sqlite-resume\\.source-progress > random seed`,
   ],
   [
     `browser.electric-source-prefix`,
@@ -1575,6 +1595,15 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `sqlite-resume.retired-storage.cases`,
+  `sqlite-resume.managed-claim-read.cases`,
+  `sqlite-resume.startup-corpus`,
+  `sqlite-resume.baseline-lineage.external-metadata`,
+  `sqlite-resume.baseline-lineage.calibration`,
+  `sqlite-persistence.binding-capacity.corpus`,
+  `sqlite-persistence.binding-capacity.transaction`,
+  `sqlite-persistence.binding-capacity.root-limit`,
+  `sqlite-persistence.binding-capacity.scalar-stress`,
   `solid.row-materialization`,
   `solid.native-parent-materialization`,
   `solid.descriptor-visibility`,

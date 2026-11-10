@@ -26,6 +26,7 @@ const config = defineConfig({
         `tests/persisted-reload-replacement-oracle.test.ts`,
         `tests/persisted-readiness-oracle.test.ts`,
         `tests/persisted-sync-problem-oracle.test.ts`,
+        `tests/sqlite-resume-snapshot-oracle.test.ts`,
         `tests/persisted-optimistic-history-oracle.property.test.ts`,
       ],
     },
