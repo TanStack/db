@@ -41,29 +41,29 @@ export type EagerReloadHistory = {
 // nonempty baseline; every next subset is legal, including empty and overlap.
 // Removing reload loses omissions from retained rows. Removing mutation loses
 // the ordinary-commit versus snapshot scheduling boundary on an empty baseline.
-export const eagerReloadHistoryArb: fc.Arbitrary<EagerReloadHistory> = fc
-  .oneof(
-    fc.record({
-      start: fc.constant(`fresh` as const),
-      previous: fc.constant(0),
-    }),
-    fc.record({
-      start: fc.constant(`reload` as const),
-      previous: fc.constant(0),
-    }),
-    fc.record({
-      start: fc.constant(`reload` as const),
-      previous: fc.integer({ min: 1, max: 7 }),
-    }),
-  )
-  .chain((prefix) =>
-    fc
-      .record({
-        next: fc.integer({ min: 0, max: 7 }),
-        mutation: fc.boolean(),
-      })
-      .map((suffix) => ({ ...prefix, ...suffix })),
-  )
+// Full records preserve the three equally weighted lanes and permit the
+// framework to validate/shrink fixed and constructed histories without context.
+const reloadSuffix = {
+  next: fc.integer({ min: 0, max: 7 }),
+  mutation: fc.boolean(),
+}
+export const eagerReloadHistoryArb: fc.Arbitrary<EagerReloadHistory> = fc.oneof(
+  fc.record({
+    start: fc.constant(`fresh` as const),
+    previous: fc.constant(0),
+    ...reloadSuffix,
+  }),
+  fc.record({
+    start: fc.constant(`reload` as const),
+    previous: fc.constant(0),
+    ...reloadSuffix,
+  }),
+  fc.record({
+    start: fc.constant(`reload` as const),
+    previous: fc.integer({ min: 1, max: 7 }),
+    ...reloadSuffix,
+  }),
+)
 
 export const eagerReloadHistories: Array<EagerReloadHistory> = [
   { start: `fresh` as const, previous: 0 },
@@ -124,26 +124,38 @@ export type EagerReloadObservation = {
   final: Array<StartupRow>
   error?: string
 }
+// The same pure row judgment supplies the browser checker and the framework.
+// It predicts only from authored source membership and the optimistic lane;
+// no commit count or observed production schedule enters this computation.
+export function eagerReloadModel(h: EagerReloadHistory) {
+  return {
+    initial: sortedStartupRows([
+      ...startupRows(h.previous, 1),
+      ...(h.mutation ? [{ id: `optimistic`, value: 99 }] : []),
+    ]),
+    source: expectedPersistedStartup(
+      {
+        previous: h.previous,
+        next: h.next,
+        peer: false,
+        response: `after-restore`,
+      },
+      `collection`,
+    ).rows,
+    retained: startupRows(h.previous, 1),
+    states: eagerReloadReached(h),
+  }
+}
 export function eagerReloadViolations(
   h: EagerReloadHistory,
   observed: EagerReloadObservation,
+  expected = eagerReloadModel(h),
 ): Array<string> {
   const violations: Array<string> = []
-  const initial = sortedStartupRows([
-    ...startupRows(h.previous, 1),
-    ...(h.mutation ? [{ id: `optimistic`, value: 99 }] : []),
-  ])
-  const expected = expectedPersistedStartup(
-    {
-      previous: h.previous,
-      next: h.next,
-      peer: false,
-      response: `after-restore`,
-    },
-    `collection`,
-  ).rows
+  const { initial, source: expectedRows, retained } = expected
   const equal = (a: unknown, b: unknown) =>
     JSON.stringify(a) === JSON.stringify(b)
+
   if (!equal(observed.before, initial)) violations.push(`before-source rows`)
   if (observed.beforeStatus !== (h.start === `reload` ? `ready` : `loading`))
     violations.push(`before-source status`)
@@ -152,7 +164,7 @@ export function eagerReloadViolations(
   if (observed.error !== undefined)
     violations.push(`source failed: ${observed.error}`)
   if (
-    observed.submittedRows < expected.length ||
+    observed.submittedRows < expectedRows.length ||
     observed.submittedCommits === 0
   )
     violations.push(`complete source submission not reached`)
@@ -171,9 +183,8 @@ export function eagerReloadViolations(
   const overlay = observed.atFulfillment.filter(
     (row) => row.id === `optimistic`,
   )
-  const retained = startupRows(h.previous, 1)
   if (
-    !equal(fulfillmentSource, expected) &&
+    !equal(fulfillmentSource, expectedRows) &&
     !(
       h.mutation &&
       !observed.mutationSettledBeforeFulfillment &&
@@ -192,10 +203,11 @@ export function eagerReloadViolations(
     overlay.length !== 1
   )
     violations.push(`pending optimistic overlay disappeared`)
-  if (!equal(observed.final, expected)) violations.push(`final rows`)
+  if (!equal(observed.final, expectedRows)) violations.push(`final rows`)
   return violations
 }
 declareOracle({
   grammar: [eagerReloadHistoryArb, eagerReloadHistories],
+  model: [eagerReloadModel],
   check: [eagerReloadViolations],
 })

@@ -7909,6 +7909,19 @@ Timeouts supply no behavioral rejection evidence. Startup latency/memory are
 measured separately in the [performance report](oracle-reviews/2026-11-10-persisted-startup-measurements.md).
 These additions preserve the startup comparisons and their limits above.
 
+The [framework integration record](oracle-reviews/2026-11-10-startup-framework-integration.md)
+and the [startup conversion record](oracle-reviews/2026-11-10-startup-property-conversion.md)
+track conversion of the five added/shared campaign files to `oracleProperty`,
+including randomized constructed histories, per-builder missing-state controls,
+unchanged base run budgets and direct replay. The post-conversion Chromium
+receiver passes all 226 added histories through the same judgments. The
+[Query conversion record](oracle-reviews/2026-11-10-query-oracle-property-conversion.md)
+preserves seven exact source-operator rejections and updated replay coordinates.
+Under the current ratchet, the four surviving operators above remain open gaps;
+the bounded-equivalence evidence grants no allowance. Legacy ownership-lifecycle
+and TrailBase owner conversions remain separate obligations before further
+production edits. No whole-PR readiness claim follows from these conversions.
+
 ## Adapter conformance: eager live sources (#2118)
 
 `packages/db-adapter-conformance/src/eager-live-source-oracle.ts` owns the

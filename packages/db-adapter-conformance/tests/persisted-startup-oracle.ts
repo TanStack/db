@@ -142,29 +142,33 @@ export function withStartupRender<H extends PersistedStartupHistory>(
         : h.response,
   }
 }
+// A direct record preserves the same finite language as the former chained
+// render grammar and also admits context-free fixed and constructed histories.
+// Cache-origin constraints remain in the receiving Query grammar.
 export const persistedStartupHistoryArb = (
   scope: StartupScope,
 ): fc.Arbitrary<PersistedStartupHistory> =>
   fc
-    .tuple(
-      persistedStartupMembershipArb(scope),
-      fc.boolean(),
-      fc.constantFrom(`before-restore` as const, `after-restore` as const),
-    )
-    .chain(([membership, mutation, response]) =>
-      fc
-        .tuple(persistedStartupRenderArb, fc.boolean())
-        .map(([network, fallback]) =>
-          withStartupRender(
-            {
-              ...membership,
-              response,
-              ...(mutation ? { mutation: `persisting` as const } : {}),
-            },
-            network,
-            fallback,
-          ),
+    .record(
+      {
+        previous: fc.integer({ min: 0, max: 7 }),
+        next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
+        peer: scope === `scoped` ? fc.boolean() : fc.constant(false),
+        response: fc.constantFrom(
+          `before-restore` as const,
+          `after-restore` as const,
+          `after-deadline` as const,
         ),
+        mutation: fc.constant(`persisting` as const),
+        initialRender: fc.constant(`network-first` as const),
+      },
+      { requiredKeys: [`previous`, `next`, `peer`, `response`] },
+    )
+    .filter(
+      (h) =>
+        (!h.peer || h.previous !== 0) &&
+        (h.response !== `after-deadline` ||
+          (h.initialRender === `network-first` && h.previous !== 0)),
     )
 
 // These are inputs to the same judgment as generated histories. Receivers may

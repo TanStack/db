@@ -276,6 +276,15 @@ const ownerGroups: ReadonlyArray<
         `db-adapter-conformance/tests/eager-reload-oracle-suite.ts`,
       ] as const,
   ),
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/persisted-capability-conformance-oracle.test.ts`,
+        `adapter.${adapter}.capability`,
+        `controlled node-sqlite`,
+        `db-adapter-conformance/tests/persisted-capability-oracle-suite.ts`,
+      ] as const,
+  ),
   [
     `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     `electric`,
@@ -1000,16 +1009,13 @@ export type OracleReplayManifestEntry = {
 const replayTestNames = new Map([
   [
     `query.persisted-write-precedence`,
-    `orders generated fetch/write histories \\(random\\)`,
+    `query\\.persisted-write-precedence.*random seed`,
   ],
   [
     `query.retained-scoped-hydration`,
-    `revalidates generated retained scopes \\(random\\)`,
+    `query\\.retained-scoped-hydration.*random seed`,
   ],
-  [
-    `query.cached-peer-claim`,
-    `orders generated cached peer claims \\(random\\)`,
-  ],
+  [`query.cached-peer-claim`, `query\\.cached-peer-claim.*random seed`],
   ...[`controlled`, `node-sqlite`].map(
     (host) =>
       [
@@ -1021,7 +1027,7 @@ const replayTestNames = new Map([
     (adapter) =>
       [
         `adapter.${adapter}.eager-reload`,
-        `reconciles generated reload histories \\(random\\)`,
+        `adapter\\.${adapter}\\.eager-reload.*random seed`,
       ] as const,
   ),
   ...[
@@ -1031,10 +1037,7 @@ const replayTestNames = new Map([
     ),
   ].map(
     (property) =>
-      [
-        property,
-        `reconciles generated startup histories \\(random\\)`,
-      ] as const,
+      [property, `${property.replaceAll(`.`, `\\.`)}.*random seed`] as const,
   ),
   [
     `scripts.legacy-campaign-baseline`,

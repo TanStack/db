@@ -260,17 +260,20 @@ export const cachedPeerClaimReached = (h: CachedPeerClaimHistory) => [
   ...(h.cached !== h.current ? [`different-cached-value`] : []),
   ...(h.current !== h.later ? [`later-value-change`] : []),
 ]
-export function cachedPeerClaimViolations(
-  h: CachedPeerClaimHistory,
-  actual: CachedPeerClaimObservation,
-): Array<string> {
-  const expected = {
+export function expectedCachedPeerClaim(h: CachedPeerClaimHistory) {
+  return {
     before: h.current,
     claimed: h.current,
     claimedDurable: h.current,
     refetched: h.later,
     refetchedDurable: h.later,
   }
+}
+export function cachedPeerClaimViolations(
+  h: CachedPeerClaimHistory,
+  actual: CachedPeerClaimObservation,
+): Array<string> {
+  const expected = expectedCachedPeerClaim(h)
   const violations: Array<string> = []
   for (const cut of [
     `before`,
@@ -286,6 +289,7 @@ export function cachedPeerClaimViolations(
   return violations
 }
 declareOracle({
+  model: [expectedCachedPeerClaim],
   grammar: [cachedPeerClaimHistoryArb, cachedPeerClaimHistories],
   check: [cachedPeerClaimViolations],
 })

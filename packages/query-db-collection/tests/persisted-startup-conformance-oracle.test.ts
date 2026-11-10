@@ -6,11 +6,6 @@
 import { describe } from 'vitest'
 import fc from 'fast-check'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  persistedStartupMembershipArb,
-  persistedStartupRenderArb,
-  withStartupRender,
-} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import {
   queryStartupAdapter,
@@ -18,56 +13,41 @@ import {
 } from './persisted-startup-driver'
 import type { QueryStartupHistory } from './persisted-startup-driver'
 
-const startupMembershipArb = persistedStartupMembershipArb(`scoped`)
+// The record states the same legal language as the former chained render
+// grammar. A cached/initial answer is already available before restore, while
+// only a held fetch can cross restore or reach network-first fallback. Optional
+// fields are absent when that action was not authored, matching fixed replays.
 const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
-  .oneof(
+  .record(
     {
-      weight: 3,
-      arbitrary: fc.record({
-        membership: startupMembershipArb,
-        origin: fc.constant(`fetch` as const),
-        response: fc.constantFrom(
-          `before-restore` as const,
-          `after-restore` as const,
-        ),
-      }),
-    },
-    {
-      weight: 4,
-      arbitrary: fc.record({
-        membership: startupMembershipArb,
-        origin: fc.constantFrom(
-          `initial-disabled` as const,
-          `initial-pending` as const,
-          `cached-disabled` as const,
-          `cached-pending` as const,
-        ),
-        response: fc.constant(`before-restore` as const),
-      }),
-    },
-  )
-  .map(({ membership, ...schedule }) => ({ ...membership, ...schedule }))
-  .chain((h) =>
-    fc
-      .tuple(
-        persistedStartupRenderArb,
-        fc.boolean(),
-        fc.boolean(),
-        fc.boolean(),
-      )
-      .map(([network, fallback, mutation, ownerless]) =>
-        withStartupRender(
-          {
-            ...h,
-            ...(mutation ? { mutation: `persisting` as const } : {}),
-            ...(ownerless && h.previous
-              ? { previousOwner: `none` as const }
-              : {}),
-          },
-          network,
-          fallback && h.origin === `fetch`,
-        ),
+      previous: fc.integer({ min: 0, max: 7 }),
+      next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
+      peer: fc.boolean(),
+      origin: fc.constantFrom(
+        `fetch` as const,
+        `initial-disabled` as const,
+        `initial-pending` as const,
+        `cached-disabled` as const,
+        `cached-pending` as const,
       ),
+      response: fc.constantFrom(
+        `before-restore` as const,
+        `after-restore` as const,
+        `after-deadline` as const,
+      ),
+      mutation: fc.constant(`persisting` as const),
+      previousOwner: fc.constant(`none` as const),
+      initialRender: fc.constant(`network-first` as const),
+    },
+    { requiredKeys: [`previous`, `next`, `peer`, `origin`, `response`] },
+  )
+  .filter(
+    (h) =>
+      (!h.peer || h.previous !== 0) &&
+      (h.previousOwner === undefined || h.previous !== 0) &&
+      (h.origin === `fetch` || h.response === `before-restore`) &&
+      (h.response !== `after-deadline` ||
+        (h.initialRender === `network-first` && h.previous !== 0)),
   )
 
 // The receiving path judges persisted startup through this adapter entry.

@@ -114,8 +114,27 @@ export type PrecedenceObservation = {
   heldRestore: boolean
   fetches: number
 }
-const values = (rows: Array<MergeRow<number>>) =>
+export const precedenceValues = (rows: Array<MergeRow<number>>) =>
   Object.fromEntries(rows.map((r) => [r.id, r.value]))
+/** The same independent overlay predicts each captured public/cache/durable cut. */
+export function expectedPersistedPrecedence(h: PrecedenceHistory) {
+  const writes = precedenceWrites(h)
+  const first = mergeDirectWritesOverFetch(
+    precedenceFetched,
+    h.phase === `before-fetch` ? [] : writes,
+  )
+  return {
+    afterWrite:
+      h.phase === `before-restore`
+        ? undefined
+        : mergeDirectWritesOverFetch(precedenceSaved, writes),
+    first,
+    firstDurable: first,
+    firstCache: h.shape === `raw` ? first : precedenceValues(precedenceFetched),
+    later: h.laterFetch ? precedenceValues(precedenceLater) : undefined,
+    laterDurable: h.laterFetch ? precedenceValues(precedenceLater) : undefined,
+  }
+}
 export function precedenceViolations(
   h: PrecedenceHistory,
   o: PrecedenceObservation,
@@ -128,37 +147,25 @@ export function precedenceViolations(
   ) => {
     if (
       !actual ||
-      JSON.stringify(Object.entries(values(actual)).sort()) !==
+      JSON.stringify(Object.entries(precedenceValues(actual)).sort()) !==
         JSON.stringify(Object.entries(expected).sort())
     )
       failures.push(
         `${cut}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
       )
   }
-  const writes = precedenceWrites(h)
+  const expected = expectedPersistedPrecedence(h)
   // With restore held, saved rows are not yet promised as a public base. Those
   // histories compare the first complete applied result and its durable state;
   // the other histories also compare the accepted write while the source waits.
   if (h.phase !== `before-restore`)
-    same(
-      `afterWrite`,
-      o.afterWrite,
-      mergeDirectWritesOverFetch(precedenceSaved, writes),
-    )
-  const first = mergeDirectWritesOverFetch(
-    precedenceFetched,
-    h.phase === `before-fetch` ? [] : writes,
-  )
-  same(`first`, o.first, first)
-  same(`firstDurable`, o.firstDurable, first)
-  same(
-    `firstCache`,
-    o.firstCache,
-    h.shape === `raw` ? first : values(precedenceFetched),
-  )
+    same(`afterWrite`, o.afterWrite, expected.afterWrite!)
+  same(`first`, o.first, expected.first)
+  same(`firstDurable`, o.firstDurable, expected.firstDurable)
+  same(`firstCache`, o.firstCache, expected.firstCache)
   if (h.laterFetch) {
-    same(`later`, o.later, values(precedenceLater))
-    same(`laterDurable`, o.laterDurable, values(precedenceLater))
+    same(`later`, o.later, expected.later!)
+    same(`laterDurable`, o.laterDurable, expected.laterDurable!)
   }
   if (h.phase === `during-baseline` && !o.heldScan)
     failures.push(`missing held baseline scan`)
@@ -194,7 +201,7 @@ export const precedenceReached = (h: PrecedenceHistory) => [
   ...(h.laterFetch ? [`later-fetch`] : []),
 ]
 declareOracle({
-  model: [mergeDirectWritesOverFetch],
+  model: [expectedPersistedPrecedence],
   grammar: [precedenceHistories],
   check: [precedenceViolations],
 })

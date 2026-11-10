@@ -73,9 +73,10 @@ function transformCapability(metadata: unknown, h: CapabilityHistory): unknown {
 export function capabilityViolations(
   h: CapabilityHistory,
   error: unknown,
+  mustAccept = capabilityMustAccept(h),
 ): Array<string> {
   const name = error instanceof Error ? error.name : undefined
-  if (capabilityMustAccept(h))
+  if (mustAccept)
     return error === undefined
       ? []
       : [`legal capability rejected: ${String(error)}`]

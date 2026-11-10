@@ -55,6 +55,7 @@ export async function observeCachedPeerClaim(
   h: CachedPeerClaimHistory,
   id: string,
   sourceFactory = queryCollectionOptions,
+  record?: (checkpoint: string, value: unknown) => void,
 ): Promise<CachedPeerClaimObservation> {
   const client = new QueryClient({
     defaultOptions: {
@@ -108,17 +109,28 @@ export async function observeCachedPeerClaim(
       })
     await collection._sync.loadSubset(broad)
     const before = collection.get(`shared`)?.value
+    record?.(`before`, before)
     if (h.cache === `manual`) client.setQueryData(narrowKey, [row(h.cached)])
     const claimed = await Promise.resolve(
       collection._sync.loadSubset(narrow),
-    ).then(() => collection.get(`shared`)?.value)
+    ).then(() => {
+      const value = collection.get(`shared`)?.value
+      record?.(`claimed`, value)
+      return value
+    })
     const claimedDurable = await durableValue()
+    record?.(`claimedDurable`, claimedDurable)
     const callsBeforeRefetch = calls
     const refetched = await Promise.resolve(
       collection._sync.loadSubset({ ...narrow, refetch: true }),
-    ).then(() => collection.get(`shared`)?.value)
+    ).then(() => {
+      const value = collection.get(`shared`)?.value
+      record?.(`refetched`, value)
+      return value
+    })
     const refetchedDurable = await durableValue()
-    return {
+    record?.(`refetchedDurable`, refetchedDurable)
+    const observed = {
       before,
       claimed,
       claimedDurable,
@@ -127,6 +139,8 @@ export async function observeCachedPeerClaim(
       callsBeforeRefetch,
       calls,
     }
+    record?.(`completed`, observed)
+    return observed
   }, [() => collection.cleanup(), () => client.clear()])
 }
 export async function observeRetainedScopedHydration(
@@ -134,6 +148,7 @@ export async function observeRetainedScopedHydration(
   h: ScopedHydrationHistory,
   id: string,
   sourceFactory = queryCollectionOptions,
+  record?: (checkpoint: string, value: unknown) => void,
 ): Promise<ScopedHydrationObservation> {
   const makeClient = () =>
     new QueryClient({
@@ -293,18 +308,29 @@ export async function observeRetainedScopedHydration(
   return withOracleCleanup(async () => {
     const firstLoad = Promise.resolve(
       collection._sync.loadSubset(firstDemand),
-    ).then(() => sortScopedRows(collection.values()))
+    ).then(() => {
+      const rows = sortScopedRows(collection.values())
+      record?.(`first`, rows)
+      return rows
+    })
     void firstLoad.catch(() => {})
     await untilStartup(() => fetches === 1)
     const pending = sortScopedRows(collection.values())
+    record?.(`pending`, pending)
     release()
     const first = await firstLoad
     const firstDurable = await durableRows!()
+    record?.(`firstDurable`, firstDurable)
     const second = await Promise.resolve(
       collection._sync.loadSubset(otherDemand),
-    ).then(() => sortScopedRows(collection.values()))
+    ).then(() => {
+      const rows = sortScopedRows(collection.values())
+      record?.(`second`, rows)
+      return rows
+    })
     const secondDurable = await durableRows!()
-    return {
+    record?.(`secondDurable`, secondDurable)
+    const observed = {
       pending,
       first,
       firstDurable,
@@ -315,5 +341,7 @@ export async function observeRetainedScopedHydration(
       hydrateCalls,
       scanCalls,
     }
+    record?.(`completed`, observed)
+    return observed
   }, [release, () => collection.cleanup(), () => client.clear()])
 }

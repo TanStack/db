@@ -98,3 +98,78 @@ replication, persisted durability, arbitrary concurrent mutations, every
 intermediate publication, or on-demand reload. The existing owners retain those
 contracts. Worker/OPFS startup coverage remains a neighboring persisted path;
 wrapping this receiver in persistence would mask the operand under judgment.
+
+## oracleProperty conversion after main merge
+
+Conversion base: `29de8a92e`, with exact installed `@tanstack/oracles` and ESLint
+plugin pin `e1fb504`. No production function changed. The shared reload and
+capability registrations now use `oracleProperty`; no legacy allowance was
+added. Existing Chromium receivers still import the same raw models and
+comparisons, and no observation cut or SDK path changed.
+
+The pure row computation was extracted as `eagerReloadModel`. The raw checker
+uses it by default, and the framework supplies that same model explicitly.
+The capability framework similarly uses the existing `capabilityMustAccept`
+model and passes its answer into the same raw admission checker. The capability
+source remains a complete finite enumeration of 22 histories on each of the
+controlled and Node SQLite hosts for each adapter. There is no new random
+capability campaign.
+
+The reload grammar retains the exact three equally weighted lanes, next masks
+0..7 and mutation boolean. Its former dependent `chain/map` could not validate
+any of the 24 external fixed histories with `canShrinkWithoutContext`; the
+flattened full-record grammar validates all 24. This changes generator
+representation, not legal histories. All 24 fixed histories stay. Each fixed
+seed 2367 and fresh-seed campaign keeps its 80-run budget.
+
+Eleven randomized constructed builders each require one original declared
+state. They constrain only the premise coordinates and retain the remaining
+generated membership/mutation coordinates. Each call returns a fresh object.
+A local WeakMap records each built history's required state; the same check
+requires that state from actual production-driver reach observations on both
+the framework's example constructions and its generated construction branch.
+This closes the pinned API's gap where generated map outputs lose their
+builder association. Each builder also has a missing-state calibration, which
+runs the real SDK driver and removes that state's observation before the same
+check. Literal fixed histories do not supply required generated reach.
+
+The first framework run passed 169 of 170 checks, including all row comparisons
+and capability cases. PowerSync's determinism check exposed a lawful schedule
+difference: on an empty reload, `markReady` after acceptance can fulfill before
+or after the external optimistic gate releases. One raw trace included the
+pending optimistic row at fulfillment, and the other did not after settlement.
+Both satisfy the unchanged accepted-versus-applied and overlay laws. Waiting
+unconditionally for `markReady` would instead deadlock RxDB's ordinary commit,
+which awaits visibility behind that optimistic transaction.
+
+The framework bridge therefore applies the unchanged raw law checker to every
+actual raw observation before serialization. Successful allowed schedules
+have one canonical checked record. Failed judgments retain every raw field,
+and the framework check reruns the same raw comparison against the same pure
+model before reporting them. This projection discards only differences the
+existing law already permits after they have been checked. The real SDK driver
+and raw browser comparisons remain unchanged. Five additional controls corrupt
+raw before-source rows, fulfillment rows, final rows, a pending optimistic
+overlay, and source acceptance before projection; each must still fail the raw
+comparison. The exact historical source mutants are also tested after this
+projection, so a canonical success cannot hide their stale rows.
+
+Post-conversion evidence is recorded under `.review-2367/reload-migration/`.
+The exact M9/M164 source copies still fail the same retained-row → empty-result
+fixed history (`previous: 1`, `next: 0`, no mutation) with stale `a` at
+fulfillment and final observation. See `exact-mutants-normalized.log`. The
+counterexample, law and captured raw diagnostics survive the conversion.
+Final conversion results:
+
+- `pnpm --config.verifyDepsBeforeRun=false exec vitest run packages/rxdb-db-collection/tests/eager-reload-conformance-oracle.property.test.ts packages/powersync-db-collection/tests/eager-reload-conformance-oracle.property.test.ts` passes **88 checks** (`green-normalized.log`). Each receiver retains 24 fixed histories and the 80-run fixed/fresh campaigns, and passes determinism plus all 17 calibrations: 11 builder-state omissions, five wrong raw answers before projection, and the original inverted-snapshot source declaration.
+- Each campaign runs its 11 seed-derived constructions in addition to 80 generated histories. Both fixed campaigns report the same positive counts: changed overlap 19, empty result 20, fresh 23, fresh-held 16, no mutation 37, omission 25, mutation 54, empty reload 32, empty-reload-held 14, retained reload 36, retained-reload-held 24. Both fresh campaigns also reach all 11 states; every required minimum remains one.
+- `pnpm --config.verifyDepsBeforeRun=false exec vitest run packages/rxdb-db-collection/tests/persisted-capability-conformance-oracle.test.ts packages/powersync-db-collection/tests/persisted-capability-conformance-oracle.test.ts` passes **92 checks** (`capability-green.log`): all 22 cases and determinism separately for each adapter and each of the two hosts.
+- Both registered reload properties pass guarded replay with seed 42/path 0, one actual property execution and one run. The replay selector now names the framework's `random seed` test. See `replay-rxdb.log` and `replay-powersync.log`.
+- The shared conformance package and both receiving packages pass `tsc --noEmit`; targeted ESLint and `pnpm --config.verifyDepsBeforeRun=false lint:changed` pass. See `types-normalized.log`, `receiver-types.log`, `lint-normalized.log`, and `lint-changed.log`.
+- Exact source-mutant command after conversion: `pnpm --config.verifyDepsBeforeRun=false exec vitest run --config .review-2367/reload-gaps/mutant.config.ts packages/rxdb-db-collection/tests/eager-reload-conformance-oracle.property.test.ts packages/powersync-db-collection/tests/eager-reload-conformance-oracle.property.test.ts -t 'fixed history:.*"previous":1,"next":0,"mutation":false'`. Both fail under law `complete eager result`, preserving the same raw stale-row witness as before conversion. This is the same historical operand-negation kill on each adapter, not an exception or equivalent-mutant allowance.
+
+The parent run retains the existing real Chromium receiving gate and owns the
+combined same-seed CLI comparison and final branch lint after the parallel
+conversions. Those broader checks are separate from the 180 passing receiver
+checks above. There are no pending edits to the models, drivers, suites, or
+source for this conversion.

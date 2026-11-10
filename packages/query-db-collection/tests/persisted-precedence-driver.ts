@@ -36,7 +36,7 @@ function gate() {
   return { promise, release }
 }
 const snapshot = (rows: Iterable<Row>) =>
-  Array.from(rows, (row) => ({ ...row })).sort((a, b) =>
+  Array.from(rows, ({ id, value }) => ({ id, value })).sort((a, b) =>
     a.id.localeCompare(b.id),
   )
 export async function observePersistedPrecedence(
@@ -44,6 +44,7 @@ export async function observePersistedPrecedence(
   h: PrecedenceHistory,
   id: string,
   holdBaseline?: (id: string) => HeldCall,
+  record?: (checkpoint: string, value: unknown) => void,
 ): Promise<PrecedenceObservation> {
   const queryHash = hashKey([id])
   const seed = createCollection(
@@ -233,6 +234,7 @@ export async function observePersistedPrecedence(
     await written
     const afterWrite =
       h.phase === `before-restore` ? undefined : snapshot(collection.values())
+    if (afterWrite) record?.(`afterWrite`, afterWrite)
     const firstFetch =
       h.phase === `before-fetch`
         ? collection.utils.refetch({ throwOnError: true })
@@ -244,17 +246,25 @@ export async function observePersistedPrecedence(
     await firstFetch
     await preload
     const first = snapshot(collection.values())
+    record?.(`first`, first)
     const firstDurable = await durable()
+    record?.(`firstDurable`, firstDurable)
     const firstCache = snapshot(decode(client.getQueryData<Response>([id])!))
+    record?.(`firstCache`, firstCache)
     let later: Array<Row> | undefined
     let laterDurable: Array<Row> | undefined
     if (h.laterFetch) {
       later = await collection.utils
         .refetch({ throwOnError: true })
-        .then(() => snapshot(collection.values()))
+        .then(() => {
+          const rows = snapshot(collection.values())
+          record?.(`later`, rows)
+          return rows
+        })
       laterDurable = await durable()
+      record?.(`laterDurable`, laterDurable)
     }
-    return {
+    const observed = {
       afterWrite,
       first,
       firstDurable,
@@ -266,6 +276,8 @@ export async function observePersistedPrecedence(
       heldRestore,
       fetches,
     }
+    record?.(`completed`, observed)
+    return observed
   }, [
     resultGate.release,
     scanGate.release,
