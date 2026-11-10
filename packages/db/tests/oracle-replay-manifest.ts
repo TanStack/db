@@ -746,6 +746,41 @@ const ownerGroups: ReadonlyArray<
     `interruption-settlement`,
   ],
   [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `disposal-handoff disposal-issued-handoff disposal-review-boundaries disposal-handoff-resources`,
+    `offline-transactions/tests/interruption-handoff-oracle.ts`,
+  ],
+  [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `settled-id-window`,
+    `offline-transactions/tests/settled-id-window-oracle.ts`,
+  ],
+  [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `executor-api executor-controls`,
+    `offline-transactions/tests/executor-api-oracle.ts`,
+  ],
+  [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `executor-coordination-lifecycle executor-connectivity-barrier`,
+    `offline-transactions/tests/executor-lifecycle-oracle.ts`,
+  ],
+  [
+    `query-db-collection/tests/offline-executor-refresh-oracle.test.ts`,
+    `offline`,
+    `executor-connectivity-query-db`,
+  ],
+  [
+    `offline-transactions/tests/executor-environment-oracle.property.test.ts`,
+    `offline`,
+    `executor-environment`,
+    `offline-transactions/tests/executor-environment-oracle.ts`,
+  ],
+  [
     `offline-transactions/tests/fifo-retry-oracle.property.test.ts`,
     `offline`,
     `fifo-retry`,
