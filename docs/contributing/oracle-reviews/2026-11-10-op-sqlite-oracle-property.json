@@ -1,0 +1,343 @@
+{
+  "baseCommit": "9a5214f2801c2c7918f6fd21ac5add317559322a",
+  "source": "packages/react-native-db-sqlite-persistence/src/op-sqlite-driver.ts",
+  "seed": 165903,
+  "contexts": 2,
+  "before": {
+    "path": "/tmp/oracle-persistence-op-sqlite-before/results.json",
+    "sha256": "67038c7daf08514e2835b8db9474d13d5cf13ec8f5625ab9182f5e3d4c021a3e",
+    "mutants": 361,
+    "killed": 29
+  },
+  "after": {
+    "path": "/tmp/oracle-persistence-op-sqlite-after-final/results.json",
+    "sha256": "d63634a0a3ce778c1c218fc8f564aa4c4fdd42eff0a5182d631963649a9050ee",
+    "mutants": 361,
+    "killed": 29
+  },
+  "sameKeys": true,
+  "keyUniverseSha256": "77e386cc19403a7e4cd06749baeb187b6a7c61b13e26adfb2d9d09ec077271f3",
+  "lostKills": [],
+  "retainedKills": [
+    {
+      "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:if-true:if ( existing ) { return existing }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:field-drop:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#getDatabaseExecutionState:value-undefined:const state : DatabaseExecutionState = { queue : Promise . resolve ( ) , nextSavepointId : 1 , transactionContextStoragePromise : null , }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#decodeColumnarRows:loop-false:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#decodeColumnarRows:binary-swap:for ( let index = 0 ; index < columnNames . length ; index ++ ) { const columnName = columnNames [ index ] ! if ( columnName === `__proto__` ) { Object . defineProperty ( row , columnName , { configurable : true , enumerable : true , value : rawRow [ index ] , writable : true , } ) } else { row [ columnName ] = rawRow [ index ] } }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return rejectPositionalRows ( rows , sql )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:if-true:if ( columnarRows ) { return columnarRows }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromStatementResult:value-undefined:return extractRowsFromStatementResult ( nestedResults [ 0 ] , sql , false )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( result . length === 0 ) { if ( arrayResultMode === `statement-results` ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return [ ] }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `rows` ) { return rejectPositionalRows ( result , sql ) }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:if-true:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:binary-swap:if ( arrayResultMode === `statement-results` ) { if ( ! isObjectRecord ( firstEntry ) ) { return unsupportedQueryResult ( sql , `statement-results mode requires an object statement envelope` , ) } if ( result . length !== 1 ) { return unsupportedQueryResult ( sql , `statement-result arrays must contain exactly one result` , ) } return extractRowsFromStatementResult ( firstEntry , sql , false ) }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( firstEntry , sql , false )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return rejectPositionalRows ( result , sql )~2",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#extractRowsFromExecuteResult:value-undefined:return extractRowsFromStatementResult ( result , sql , true )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executeMethod = resolveExecuteMethod ( this . database )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.constructor:value-undefined:this . executionState = getDatabaseExecutionState ( this . database )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:if-true:if ( activeTransactionDriver ) { return activeTransactionDriver . query < T > ( sql , params ) }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return this . enqueue ( async ( ) => { const result = await this . execute ( sql , params ) return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T > } )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:const result = await this . execute ( sql , params )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.query:value-undefined:return extractRowsFromExecuteResult ( result , sql , this . arrayResultMode , ) as ReadonlyArray < T >",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "exact-alias-rows"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.execute:value-undefined:const result = this . executeMethod . call ( this . database , sql , normalizedParams )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:const queuedOperation = this . executionState . queue . then ( operation , operation )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.enqueue:value-undefined:this . executionState . queue = queuedOperation . then ( ( ) => undefined , ( ) => undefined , )",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:if-false:if ( ! asyncLocalStorageCtor ) { return null }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    },
+    {
+      "key": "src/op-sqlite-driver.ts#OpSQLiteDriver.getTransactionContextStorage:drop-not:if ( ! asyncLocalStorageCtor ) { return null }",
+      "beforeOutcome": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterOutcome": "killed",
+      "afterLaws": [
+        "query-execution"
+      ]
+    }
+  ],
+  "implementationCommit": "366be721dc4d4910234f19f7805c42afadcff16b"
+}
