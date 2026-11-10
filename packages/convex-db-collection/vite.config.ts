@@ -8,6 +8,7 @@ const config = defineConfig({
     // Keep the framework's Vitest API in this package's active worker.
     server: { deps: { inline: [`@tanstack/oracles`] } },
     name: packageJson.name,
+    server: { deps: { inline: [`@tanstack/oracles`] } },
     include: [`tests/**/*.test.ts`],
     environment: `jsdom`,
     // Generated fixed/random campaigns include real Collection lifecycles.

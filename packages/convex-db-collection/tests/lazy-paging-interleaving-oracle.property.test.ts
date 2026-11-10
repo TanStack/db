@@ -18,12 +18,24 @@
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 // Owns no convex source: this grammar drives @tanstack/db Collection sync with its own SyncConfig, not the convex pager.
 declareOracle({})
@@ -168,10 +180,14 @@ async function runInterleaving(
     for (const owner of owners) receiptSets[owner]!.push(receipt)
     const application = () => {
       try {
-        expect(
-          values.every((fact) => source.base.has(fact)),
-          `receipt before base visibility`,
-        ).toBe(true)
+        oracleAssertion(
+          `lazy-paging-interleaving-oracle.property.test.ts:173:toBe`,
+          () =>
+            expect(
+              values.every((fact) => source.base.has(fact)),
+              `receipt before base visibility`,
+            ).toBe(true),
+        )
         model.apply(id)
         if (index !== undefined) applied.add(index)
       } catch (error) {
@@ -204,10 +220,14 @@ async function runInterleaving(
     if (failures.length) throw failures[0]
     // Independent provider facts also constrain the applied source base.
     for (const row of source.base.values())
-      expect(
-        row.id === `peer` || available.has(row.id),
-        `undelivered source fact`,
-      ).toBe(true)
+      oracleAssertion(
+        `lazy-paging-interleaving-oracle.property.test.ts:209:toBe`,
+        () =>
+          expect(
+            row.id === `peer` || available.has(row.id),
+            `undelivered source fact`,
+          ).toBe(true),
+      )
   }
   const act = async (action: Action) => {
     actionNumber++
@@ -316,9 +336,18 @@ async function runInterleaving(
       await release()
       await drain()
       checkpoint()
-      expect(outcomes.get(`a`)).toBe(`canceled`)
-      expect(outcomes.get(`c`)).toBe(`success`)
-      expect(outcomes.get(`peer`)).toBe(`success`)
+      oracleAssertion(
+        `lazy-paging-interleaving-oracle.property.test.ts:321:toBe`,
+        () => expect(outcomes.get(`a`)).toBe(`canceled`),
+      )
+      oracleAssertion(
+        `lazy-paging-interleaving-oracle.property.test.ts:322:toBe`,
+        () => expect(outcomes.get(`c`)).toBe(`success`),
+      )
+      oracleAssertion(
+        `lazy-paging-interleaving-oracle.property.test.ts:323:toBe`,
+        () => expect(outcomes.get(`peer`)).toBe(`success`),
+      )
       model.complete()
     },
     () => release(),
@@ -327,10 +356,77 @@ async function runInterleaving(
   return reaches
 }
 
-it(`generates legal response/receipt/application/cancellation interleavings`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_INTERLEAVING_ORACLE`,
-    [
+const convex_lazy_interleavingHistory = fc.record({
+  responses: fc.integer({ min: 1, max: 3 }),
+  batches: fc.integer({ min: 2, max: 3 }),
+  choices: fc.array(fc.nat({ max: 100 }), {
+    minLength: 1,
+    maxLength: 24,
+  }),
+  cancelAt: fc.integer({ min: 1, max: 3 }),
+  uncancelable: fc.boolean(),
+})
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_interleavingJudgment(
+  h: AssertionHistory<typeof convex_lazy_interleavingHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  await runInterleaving({
+    ...h,
+    responses: 3,
+    batches: 3,
+    constructive: true,
+    uncancelable: false,
+    cancelAt: 2,
+  })
+  const observed = await runInterleaving({
+    ...h,
+    responses: 3,
+    batches: 3,
+    constructive: true,
+    uncancelable: true,
+    cancelAt: 2,
+  })
+  const early = await runInterleaving({
+    ...h,
+    responses: 3,
+    batches: 3,
+    constructive: true,
+    uncancelable: true,
+    cancelAt: 1,
+  })
+  await runInterleaving({ ...h, constructive: false })
+  for (const state of [
+    `accept-before-last-response`,
+    `apply-before-next-accept`,
+    `abort-with-held-receipt`,
+    `peer-accept-after-abort`,
+    `uncancelable-accept-after-abort`,
+    `abort-with-only-inflight-work`,
+  ] as const) {
+    oracleAssertion(
+      `lazy-paging-interleaving-oracle.property.test.ts:380:toBe`,
+      () => expect(observed.has(state) || early.has(state)).toBe(true),
+    )
+    reach.reach(state)
+  }
+}
+
+oracleProperty({
+  id: `convex.lazy-interleaving`,
+  law: {
+    statement: `generates legal response/receipt/application/cancellation interleavings`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+    owner: `Convex collection integration`,
+  },
+  histories: {
+    arbitrary: convex_lazy_interleavingHistory,
+    runs: 60,
+    fixedSeeds: [20261027],
+    states: [
       `accept-before-last-response`,
       `apply-before-next-accept`,
       `abort-with-held-receipt`,
@@ -338,82 +434,55 @@ it(`generates legal response/receipt/application/cancellation interleavings`, as
       `uncancelable-accept-after-abort`,
       `abort-with-only-inflight-work`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            responses: fc.integer({ min: 1, max: 3 }),
-            batches: fc.integer({ min: 2, max: 3 }),
-            choices: fc.array(fc.nat({ max: 100 }), {
-              minLength: 1,
-              maxLength: 24,
-            }),
-            cancelAt: fc.integer({ min: 1, max: 3 }),
-            uncancelable: fc.boolean(),
-          }),
-          async (h) => {
-            reach.beginHistory()
-            await runInterleaving({
-              ...h,
-              responses: 3,
-              batches: 3,
-              constructive: true,
-              uncancelable: false,
-              cancelAt: 2,
-            })
-            const observed = await runInterleaving({
-              ...h,
-              responses: 3,
-              batches: 3,
-              constructive: true,
-              uncancelable: true,
-              cancelAt: 2,
-            })
-            const early = await runInterleaving({
-              ...h,
-              responses: 3,
-              batches: 3,
-              constructive: true,
-              uncancelable: true,
-              cancelAt: 1,
-            })
-            await runInterleaving({ ...h, constructive: false })
-            for (const state of [
-              `accept-before-last-response`,
-              `apply-before-next-accept`,
-              `abort-with-held-receipt`,
-              `peer-accept-after-abort`,
-              `uncancelable-accept-after-abort`,
-              `abort-with-only-inflight-work`,
-            ] as const) {
-              expect(observed.has(state) || early.has(state)).toBe(true)
-              reach.reach(state)
-            }
-          },
-        ),
-        { numRuns: oracleRuns(60), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [
+          `accept-before-last-response`,
+          `apply-before-next-accept`,
+          `abort-with-held-receipt`,
+          `peer-accept-after-abort`,
+          `uncancelable-accept-after-abort`,
+          `abort-with-only-inflight-work`,
+        ] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.lazy-interleaving`, plan, observe, () =>
+      convex_lazy_interleavingJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 60000,
+})
 
 it.each([`borrow-peer`, `first-only`, `premature-inflight-cancel`] as const)(
   `rejects %s under interleaving`,
   async (fault) => {
     oracleRoute(`calibration`)
-    await expect(
-      runInterleaving(
-        {
-          responses: 3,
-          batches: 3,
-          choices: [0],
-          cancelAt: fault === `premature-inflight-cancel` ? 1 : 2,
-          constructive: true,
-          uncancelable: true,
-        },
-        fault,
-      ),
-    ).rejects.toThrow(/receipt (law|model)/)
+    await oracleAssertion(
+      `lazy-paging-interleaving-oracle.property.test.ts:414:toThrow`,
+      () =>
+        expect(
+          runInterleaving(
+            {
+              responses: 3,
+              batches: 3,
+              choices: [0],
+              cancelAt: fault === `premature-inflight-cancel` ? 1 : 2,
+              constructive: true,
+              uncancelable: true,
+            },
+            fault,
+          ),
+        ).rejects.toThrow(/receipt (law|model)/),
+    )
   },
 )
 
@@ -424,9 +493,15 @@ it(`permits core fulfillment after abort once an uncancelable baseline applies`,
   model.initiate(`a`, `baseline`)
   model.abort(`a`)
   model.accept(`receipt`, [`v1`], [`a`])
-  expect(() => model.observe(`a`, `success`)).toThrow(`in-flight work`)
+  oracleAssertion(
+    `lazy-paging-interleaving-oracle.property.test.ts:437:toThrow`,
+    () => expect(() => model.observe(`a`, `success`)).toThrow(`in-flight work`),
+  )
   model.finish(`a`, `baseline`)
-  expect(() => model.observe(`a`, `success`)).toThrow(`receipt`)
+  oracleAssertion(
+    `lazy-paging-interleaving-oracle.property.test.ts:439:toThrow`,
+    () => expect(() => model.observe(`a`, `success`)).toThrow(`receipt`),
+  )
   model.apply(`receipt`)
   model.observe(`a`, `success`)
   model.complete()

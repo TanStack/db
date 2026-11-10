@@ -90,6 +90,101 @@ const ownerGroups: ReadonlyArray<
     `ordered-mutation-outcome`,
   ],
   [
+    `convex-db-collection/e2e/backend-oracle.test.ts`,
+    `convex.backend`,
+    `insert update delete`,
+  ],
+  [
+    `convex-db-collection/tests/values-oracle.property.test.ts`,
+    `convex`,
+    `values`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-app-write-oracle.test.ts`,
+    `convex`,
+    `lazy-app`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-boundary-oracle.test.ts`,
+    `convex`,
+    `boundary`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-concurrency-oracle.test.ts`,
+    `convex`,
+    `backend-concurrency`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-abort-replay-oracle.property.test.ts`,
+    `convex`,
+    `abort-replay`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-failure-history-oracle.property.test.ts`,
+    `convex`,
+    `lazy-failure-history`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-history-oracle.property.test.ts`,
+    `convex`,
+    `lazy-history lazy-suffix lazy-retention-calibration`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-interleaving-oracle.property.test.ts`,
+    `convex`,
+    `lazy-interleaving`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-load-outcome-oracle.property.test.ts`,
+    `convex`,
+    `load-outcome`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-native-receipt-oracle.property.test.ts`,
+    `convex`,
+    `lazy-native-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-oracle.property.test.ts`,
+    `convex`,
+    `lazy-values lazy-work lazy-publication lazy-lifecycle lazy-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-receipt-oracle.property.test.ts`,
+    `convex`,
+    `lazy-exact-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-revalidation-oracle.property.test.ts`,
+    `convex`,
+    `revalidation`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-version-oracle.property.test.ts`,
+    `convex`,
+    `lazy-version`,
+  ],
+  [
+    `convex-db-collection/tests/offline-oracle.property.test.ts`,
+    `convex`,
+    `offline offline-source offline-acceptance`,
+  ],
+  [
+    `convex-db-collection/tests/pagination-oracle.property.test.ts`,
+    `convex`,
+    `pagination-rows pagination-work pagination-bound`,
+  ],
+  [
+    `convex-db-collection/tests/snapshot-oracle.property.test.ts`,
+    `convex`,
+    `snapshot`,
+  ],
+  [
+    `convex-db-collection/tests/ownership-oracle.property.test.ts`,
+    `convex`,
+    `ownership`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -1588,6 +1683,22 @@ const outsideReplayConfigs = new Map([
  * runs only under its own config.
  */
 const ownerReplayConfigs = new Map([
+  [
+    `packages/convex-db-collection/e2e/backend-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-app-write-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-boundary-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-concurrency-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
   [
     `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
     `vitest.neon.config.ts`,

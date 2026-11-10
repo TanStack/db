@@ -25,10 +25,15 @@ import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import fc from 'fast-check'
-import { expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from '../tests/helpers'
 import { lazyRequest } from '../tests/lazy-paging-driver'
 import { assertLazySourceFacts } from '../tests/lazy-paging-model-oracle'
@@ -39,6 +44,12 @@ import type { LazyRow } from '../tests/lazy-paging-model-oracle'
 import type { ConvexCollectionClient } from '../src/index'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 type Task = { _id: string; clientId: string; rank: number; text: string }
 const seed = makeFunctionReference<`mutation`, { count: number }, null>(
@@ -333,14 +344,21 @@ async function receive(
   await withTestCleanup(
     async () => {
       await writer.mutation(seed, { count: h.size })
-      expect(normalize((await writer.query(all, {})).map(project))).toEqual(
-        authored(0),
-      )
+      {
+        const oracleObserved0 = await writer.query(all, {})
+        oracleAssertion(`lazy-concurrency-oracle.test.ts:338:toEqual`, () =>
+          expect(normalize(oracleObserved0.map(project))).toEqual(authored(0)),
+        )
+      }
       source.startSyncImmediate()
       const warm = load(`warm`, authored(0).slice(0, 1), 1)
       await waitFor(() => warm.outcome !== undefined)
-      expect(warm.outcome).toBe(`success`)
-      expect(source.base.size).toBeLessThan(h.size)
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:344:toBe`, () =>
+        expect(warm.outcome).toBe(`success`),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:345:toBeLessThan`, () =>
+        expect(source.base.size).toBeLessThan(h.size),
+      )
       hold()
       const controller = new AbortController()
       const a = load(`a`, authored(0), h.size, controller.signal)
@@ -363,12 +381,23 @@ async function receive(
       controller.abort()
       await turns()
       checkpoint()
-      expect(
-        a.outcome,
-        `backend canceled caller escaped held receipt`,
-      ).toBeUndefined()
-      expect(peer.outcome, `backend peer escaped held receipt`).toBeUndefined()
-      expect(batches.flatMap((batch) => batch.owners)).not.toContain(`cached`)
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:368:toBeUndefined`, () =>
+        expect(
+          a.outcome,
+          `backend canceled caller escaped held receipt`,
+        ).toBeUndefined(),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:372:toBeUndefined`, () =>
+        expect(
+          peer.outcome,
+          `backend peer escaped held receipt`,
+        ).toBeUndefined(),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:373:toContain`, () =>
+        expect(batches.flatMap((batch) => batch.owners)).not.toContain(
+          `cached`,
+        ),
+      )
       reaches.add(`real-canceled-held`)
       await drain()
       await waitFor(
@@ -377,9 +406,15 @@ async function receive(
           peer.outcome !== undefined &&
           cached.outcome !== undefined,
       )
-      expect(a.outcome).toBe(`canceled`)
-      expect(peer.outcome).toBe(`success`)
-      expect(cached.outcome).toBe(`success`)
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:382:toBe`, () =>
+        expect(a.outcome).toBe(`canceled`),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:383:toBe`, () =>
+        expect(peer.outcome).toBe(`success`),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:384:toBe`, () =>
+        expect(cached.outcome).toBe(`success`),
+      )
       receipts.complete()
       reaches.add(`real-cached-peer-drain`)
       versions.offer(authored(0))
@@ -390,9 +425,14 @@ async function receive(
       const acceptRevision = async (revision: number) => {
         const rows = authored(revision)
         versions.offer(rows)
-        expect(await writer.mutation(revise, { text: rows[0]!.text })).toBe(
-          h.size,
-        )
+        {
+          const oracleObserved1 = await writer.mutation(revise, {
+            text: rows[0]!.text,
+          })
+          oracleAssertion(`lazy-concurrency-oracle.test.ts:395:toBe`, () =>
+            expect(oracleObserved1).toBe(h.size),
+          )
+        }
         await waitFor(() =>
           rows.some((row) =>
             batches.some((batch) => batch.facts.includes(fact(row))),
@@ -402,10 +442,17 @@ async function receive(
       const before = batches.length
       await acceptRevision(1)
       await acceptRevision(2)
-      expect(batches.length - before).toBeGreaterThanOrEqual(2)
-      expect(batches.slice(before).every((batch) => batch.held)).toBe(true)
-      expect(normalize([...source.base.values()].map(project))).toEqual(
-        authored(0),
+      oracleAssertion(
+        `lazy-concurrency-oracle.test.ts:407:toBeGreaterThanOrEqual`,
+        () => expect(batches.length - before).toBeGreaterThanOrEqual(2),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:408:toBe`, () =>
+        expect(batches.slice(before).every((batch) => batch.held)).toBe(true),
+      )
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:409:toEqual`, () =>
+        expect(normalize([...source.base.values()].map(project))).toEqual(
+          authored(0),
+        ),
       )
       reaches.add(`real-two-revisions-held`)
       await drain()
@@ -416,21 +463,30 @@ async function receive(
       )
       observe()
       checkpoint()
-      expect(
-        callbackSnapshots.has(JSON.stringify(authored(2))),
-        `backend version: held revision never reached the publication callback`,
-      ).toBe(true)
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:421:toBe`, () =>
+        expect(
+          callbackSnapshots.has(JSON.stringify(authored(2))),
+          `backend version: held revision never reached the publication callback`,
+        ).toBe(true),
+      )
       gate.disconnect()
       const latest = h.supersede ? 4 : 3
       for (let revision = 3; revision <= latest; revision++) {
         const rows = authored(revision)
         versions.offer(rows)
-        expect(await writer.mutation(revise, { text: rows[0]!.text })).toBe(
-          h.size,
-        )
+        {
+          const oracleObserved2 = await writer.mutation(revise, {
+            text: rows[0]!.text,
+          })
+          oracleAssertion(`lazy-concurrency-oracle.test.ts:430:toBe`, () =>
+            expect(oracleObserved2).toBe(h.size),
+          )
+        }
       }
-      expect(normalize([...source.base.values()].map(project))).toEqual(
-        authored(2),
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:434:toEqual`, () =>
+        expect(normalize([...source.base.values()].map(project))).toEqual(
+          authored(2),
+        ),
       )
       gate.reconnect()
       await waitFor(
@@ -441,14 +497,24 @@ async function receive(
       observe()
       checkpoint()
       receipts.complete()
-      expect(
-        callbackSnapshots.has(JSON.stringify(authored(latest))),
-        `backend version: reconnected revision never reached the publication callback`,
-      ).toBe(true)
-      expect(normalize((await writer.query(all, {})).map(project))).toEqual(
-        authored(latest),
+      oracleAssertion(`lazy-concurrency-oracle.test.ts:446:toBe`, () =>
+        expect(
+          callbackSnapshots.has(JSON.stringify(authored(latest))),
+          `backend version: reconnected revision never reached the publication callback`,
+        ).toBe(true),
       )
-      expect(publicationRevisions.size).toBeGreaterThan(1)
+      {
+        const oracleObserved3 = await writer.query(all, {})
+        oracleAssertion(`lazy-concurrency-oracle.test.ts:450:toEqual`, () =>
+          expect(normalize(oracleObserved3.map(project))).toEqual(
+            authored(latest),
+          ),
+        )
+      }
+      oracleAssertion(
+        `lazy-concurrency-oracle.test.ts:453:toBeGreaterThan`,
+        () => expect(publicationRevisions.size).toBeGreaterThan(1),
+      )
       reaches.add(`real-monotone-publications`)
       reaches.add(`real-reconnect-latest`)
       console.info(
@@ -472,10 +538,66 @@ async function receive(
   return reaches
 }
 
-it(`receives receipt and version laws through both real SDKs and backend`, async () => {
-  await runOracleCampaign(
-    `CONVEX_BACKEND_CONCURRENCY_ORACLE`,
-    [
+const convex_backend_concurrencyHistory = fc.record({
+  size: fc.integer({ min: 7, max: 12 }),
+  pageSize: fc.integer({ min: 2, max: 4 }),
+  text: fc.string({ maxLength: 6 }),
+  supersede: fc.boolean(),
+})
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_backend_concurrencyJudgment(
+  h: AssertionHistory<typeof convex_backend_concurrencyHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const fault = process.env.CONVEX_BACKEND_CONCURRENCY_FAULT
+  if (fault !== undefined && fault !== `borrow-startup`)
+    throw new Error(`invalid backend concurrency fault`)
+  const errors: Array<unknown> = []
+  for (const kind of [`javascript`, `react`] as const) {
+    try {
+      const observed = await receive(h, kind, fault)
+      for (const state of [
+        `real-shared-held-receipt`,
+        `real-canceled-held`,
+        `real-cached-peer-drain`,
+        `real-two-revisions-held`,
+        `real-monotone-publications`,
+        `real-reconnect-latest`,
+      ] as const) {
+        oracleAssertion(`lazy-concurrency-oracle.test.ts:503:toBe`, () =>
+          expect(observed.has(state)).toBe(true),
+        )
+        reach.reach(state)
+      }
+      reach.reach(kind)
+    } catch (error) {
+      errors.push(error)
+      console.info(
+        `CONVEX_BACKEND_RECEIVER_FAILURE ${JSON.stringify({ kind, error: String(error) })}`,
+      )
+    }
+  }
+  if (errors.length)
+    throw new AggregateError(errors, `backend receiver comparison failures`, {
+      cause: errors[0],
+    })
+}
+
+oracleProperty({
+  id: `convex.backend-concurrency`,
+  law: {
+    statement: `receives receipt and version laws through both real SDKs and backend`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+    owner: `Convex collection integration`,
+  },
+  histories: {
+    arbitrary: convex_backend_concurrencyHistory,
+    runs: 4,
+    fixedSeeds: [20261028],
+    measured: [
       `real-shared-held-receipt`,
       `real-canceled-held`,
       `real-cached-peer-drain`,
@@ -485,53 +607,45 @@ it(`receives receipt and version laws through both real SDKs and backend`, async
       `javascript`,
       `react`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            size: fc.integer({ min: 7, max: 12 }),
-            pageSize: fc.integer({ min: 2, max: 4 }),
-            text: fc.string({ maxLength: 6 }),
-            supersede: fc.boolean(),
-          }),
-          async (h) => {
-            reach.beginHistory()
-            const fault = process.env.CONVEX_BACKEND_CONCURRENCY_FAULT
-            if (fault !== undefined && fault !== `borrow-startup`)
-              throw new Error(`invalid backend concurrency fault`)
-            const errors: Array<unknown> = []
-            for (const kind of [`javascript`, `react`] as const) {
-              try {
-                const observed = await receive(h, kind, fault)
-                for (const state of [
-                  `real-shared-held-receipt`,
-                  `real-canceled-held`,
-                  `real-cached-peer-drain`,
-                  `real-two-revisions-held`,
-                  `real-monotone-publications`,
-                  `real-reconnect-latest`,
-                ] as const) {
-                  expect(observed.has(state)).toBe(true)
-                  reach.reach(state)
-                }
-                reach.reach(kind)
-              } catch (error) {
-                errors.push(error)
-                console.info(
-                  `CONVEX_BACKEND_RECEIVER_FAILURE ${JSON.stringify({ kind, error: String(error) })}`,
-                )
-              }
-            }
-            if (errors.length)
-              throw new AggregateError(
-                errors,
-                `backend receiver comparison failures`,
-                { cause: errors[0] },
-              )
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  // Every old bundle already constructs all its required states. Preserve
+  // its small backend run budget by checking that same reach per bundle,
+  // instead of adding another complete backend bundle as a native constructor.
+  driver: async (plan, observe) => {
+    const reached = new Set<string>()
+    await recordAssertionJudgment(
+      `convex.backend-concurrency`,
+      plan,
+      observe,
+      async () => {
+        await convex_backend_concurrencyJudgment(plan.history, {
+          beginHistory: () => {},
+          reach: (state) => {
+            reached.add(state)
+            observe(`reach`, state)
           },
-        ),
-        { numRuns: oracleRuns(4), ...parameters },
-      ),
-    { fixedSeed: 20261028 },
-  )
-}, 120000)
+        })
+        oracleAssertion(`required state reach`, () =>
+          expect(
+            (
+              [
+                `real-shared-held-receipt`,
+                `real-canceled-held`,
+                `real-cached-peer-drain`,
+                `real-two-revisions-held`,
+                `real-monotone-publications`,
+                `real-reconnect-latest`,
+                `javascript`,
+                `react`,
+              ] as const
+            ).filter((state) => !reached.has(state)),
+          ).toEqual([]),
+        )
+      },
+    )
+  },
+  timeout: 120000,
+})

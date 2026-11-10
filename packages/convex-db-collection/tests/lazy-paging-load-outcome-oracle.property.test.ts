@@ -21,15 +21,27 @@
  */
 import { IR, createCollection, createLiveQueryCollection } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
-import { lazyOracleRuns } from './lazy-paging-campaign'
+import { lazyOracleBaseRuns } from './lazy-paging-campaign'
 import { expectedLazyRows } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 // Owns no convex source: this grammar drives @tanstack/db Collection and live queries with its own SyncConfig, not the convex pager.
 declareOracle({})
@@ -163,7 +175,10 @@ async function receive(
   ) => {
     await drain()
     if (failures.length) throw failures[0]
-    expect(read(), `load outcome law at ${name}`).toEqual(expected)
+    oracleAssertion(
+      `lazy-paging-load-outcome-oracle.property.test.ts:168:toEqual`,
+      () => expect(read(), `load outcome law at ${name}`).toEqual(expected),
+    )
     trace.push({
       checkpoint: name,
       rows: read().map((row) => ({ ...row })),
@@ -192,16 +207,33 @@ async function receive(
       const waiter = graph
         ? graph.utils.setWindow({ limit: h.count + 1 })
         : direct.pendingTruncateReplacement
-      expect(waiter).toBeInstanceOf(Promise)
+      oracleAssertion(
+        `lazy-paging-load-outcome-oracle.property.test.ts:197:toBeInstanceOf`,
+        () => expect(waiter).toBeInstanceOf(Promise),
+      )
       const result = Promise.allSettled([waiter])
-      expect(
-        await result,
-        `load outcome law: failed replay must reject with original error`,
-      ).toEqual([{ status: `rejected`, reason: failure }])
-      expect(failedCalls).toBeGreaterThan(0)
+      const observedResult = await result
+      oracleAssertion(
+        `lazy-paging-load-outcome-oracle.property.test.ts:199:toEqual`,
+        () =>
+          expect(
+            observedResult,
+            `load outcome law: failed replay must reject with original error`,
+          ).toEqual([{ status: `rejected`, reason: failure }]),
+      )
+      oracleAssertion(
+        `lazy-paging-load-outcome-oracle.property.test.ts:203:toBeGreaterThan`,
+        () => expect(failedCalls).toBeGreaterThan(0),
+      )
       if (!graph) {
-        expect(errors).toEqual([failure])
-        expect(direct.lastError).toBe(failure)
+        oracleAssertion(
+          `lazy-paging-load-outcome-oracle.property.test.ts:205:toEqual`,
+          () => expect(errors).toEqual([failure]),
+        )
+        oracleAssertion(
+          `lazy-paging-load-outcome-oracle.property.test.ts:206:toBe`,
+          () => expect(direct.lastError).toBe(failure),
+        )
       }
       await checkpoint(`failed`, rows(1), true)
       operations.begin()
@@ -224,34 +256,77 @@ async function receive(
     () => graph?.cleanup(),
     () => source.cleanup(),
   )
-  expect(resources.size, `load outcome law: leaked adapter resources`).toBe(0)
+  oracleAssertion(
+    `lazy-paging-load-outcome-oracle.property.test.ts:229:toBe`,
+    () =>
+      expect(resources.size, `load outcome law: leaked adapter resources`).toBe(
+        0,
+      ),
+  )
   return trace
 }
 
-it(`gives throw and rejection the same public replay failure and recovery`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LOAD_OUTCOME_ORACLE`,
-    [
+const convex_load_outcomeHistory = grammar
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_load_outcomeJudgment(
+  h: AssertionHistory<typeof convex_load_outcomeHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const consumer of [`direct`, `query`] as const) {
+    const thrown = await receive(h, `throw`, consumer)
+    const rejected = await receive(h, `reject`, consumer)
+    oracleAssertion(
+      `lazy-paging-load-outcome-oracle.property.test.ts:242:toEqual`,
+      () => expect(rejected, `throw/rejection metamorphic law`).toEqual(thrown),
+    )
+    reach.reach(`${consumer}-equivalence`)
+  }
+  reach.reach(`failed-publication-held`)
+  reach.reach(`retry-recovers`)
+}
+
+oracleProperty({
+  id: `convex.load-outcome`,
+  law: {
+    statement: `gives throw and rejection the same public replay failure and recovery`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+    owner: `Convex collection integration`,
+  },
+  histories: {
+    arbitrary: convex_load_outcomeHistory,
+    runs: lazyOracleBaseRuns(30),
+    fixedSeeds: [20261030],
+    states: [
       `direct-equivalence`,
       `query-equivalence`,
       `failed-publication-held`,
       `retry-recovers`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(grammar, async (h) => {
-          reach.beginHistory()
-          for (const consumer of [`direct`, `query`] as const) {
-            const thrown = await receive(h, `throw`, consumer)
-            const rejected = await receive(h, `reject`, consumer)
-            expect(rejected, `throw/rejection metamorphic law`).toEqual(thrown)
-            reach.reach(`${consumer}-equivalence`)
-          }
-          reach.reach(`failed-publication-held`)
-          reach.reach(`retry-recovers`)
-        }),
-        { numRuns: lazyOracleRuns(30), ...parameters },
-      ),
-    { fixedSeed: 20261030 },
-  )
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [
+          `direct-equivalence`,
+          `query-equivalence`,
+          `failed-publication-held`,
+          `retry-recovers`,
+        ] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.load-outcome`, plan, observe, () =>
+      convex_load_outcomeJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })

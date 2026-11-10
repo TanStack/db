@@ -34,15 +34,27 @@ import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { describe, expect, inject, it } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from '../tests/helpers'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { all, seed } from './backend-support'
 import type { Task } from './backend-support'
 import type { Value } from 'convex/values'
 import type { ConvexCollectionClient } from '../src/index'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 const write = makeFunctionReference<
   `mutation`,
@@ -74,12 +86,14 @@ async function expectMirrorsAllTasks(
   const actual = [...collection.values()]
     .map(({ clientId, text, rank }) => ({ clientId, text, rank }))
     .sort((a, b) => a.rank - b.rank)
-  expect(actual).toEqual(
-    expected.map(({ clientId, text, rank }) => ({
-      clientId,
-      text,
-      rank,
-    })),
+  oracleAssertion(`backend-oracle.test.ts:80:toEqual`, () =>
+    expect(actual).toEqual(
+      expected.map(({ clientId, text, rank }) => ({
+        clientId,
+        text,
+        rank,
+      })),
+    ),
   )
 }
 
@@ -154,7 +168,9 @@ describe.each([`javascript`, `react`] as const)(
           async () => {
             await client.mutation(seed, { count: 23 })
             await collection.preload()
-            expect(collection.size).toBe(23)
+            oracleAssertion(`backend-oracle.test.ts:160:toBe`, () =>
+              expect(collection.size).toBe(23),
+            )
             await check()
             for (const operation of [
               {
@@ -183,7 +199,10 @@ describe.each([`javascript`, `react`] as const)(
               await check()
             }
             if (functionName === `split`)
-              expect(splitResponses).toBeGreaterThan(0)
+              oracleAssertion(
+                `backend-oracle.test.ts:189:toBeGreaterThan`,
+                () => expect(splitResponses).toBeGreaterThan(0),
+              )
           },
           () => collection.cleanup(),
           () => client.close(),
@@ -272,62 +291,97 @@ async function durableHistory(
       const expected =
         operation === `delete` ? [] : [{ ...draft, payload: draft.payload }]
       const admitted = await run(`admit`, `durable`)
-      expect(admitted).not.toContain(`provider-call`)
+      oracleAssertion(`backend-oracle.test.ts:278:toContain`, () =>
+        expect(admitted).not.toContain(`provider-call`),
+      )
       // Read the actual admission record after SIGKILL, independently of the
       // replay child. A fresh key on replay cannot pass a receipt-count check.
       const records = (await readdir(directory)).filter((name) =>
         decodeURIComponent(name).startsWith(`tx:`),
       )
-      expect(records).toHaveLength(1)
+      oracleAssertion(`backend-oracle.test.ts:284:toHaveLength`, () =>
+        expect(records).toHaveLength(1),
+      )
       const durable: { idempotencyKey: unknown } = JSON.parse(
         await readFile(join(directory, records[0]!), `utf8`),
       )
-      expect(typeof durable.idempotencyKey).toBe(`string`)
-      expect(
-        (await client.query(all, {})).map(
-          ({ clientId, text, rank, payload }) => ({
-            clientId,
-            text,
-            rank,
-            payload,
-          }),
-        ),
-      ).toEqual(before)
+      oracleAssertion(`backend-oracle.test.ts:288:toBe`, () =>
+        expect(typeof durable.idempotencyKey).toBe(`string`),
+      )
+      {
+        const oracleObserved0 = await client.query(all, {})
+        oracleAssertion(`backend-oracle.test.ts:289:toEqual`, () =>
+          expect(
+            oracleObserved0.map(({ clientId, text, rank, payload }) => ({
+              clientId,
+              text,
+              rank,
+              payload,
+            })),
+          ).toEqual(before),
+        )
+      }
       reached(`disk-admission`)
       if (uncertain) {
-        expect(await run(`uncertain`, `server-accepted`)).toContain(
-          `provider-call`,
-        )
-        expect(
-          (await client.query(all, {})).map((row) => row.clientId),
-        ).toEqual(expected.map((row) => row.clientId))
+        {
+          const oracleObserved1 = await run(`uncertain`, `server-accepted`)
+          oracleAssertion(`backend-oracle.test.ts:301:toContain`, () =>
+            expect(oracleObserved1).toContain(`provider-call`),
+          )
+        }
+        {
+          const oracleObserved2 = await client.query(all, {})
+          oracleAssertion(`backend-oracle.test.ts:304:toEqual`, () =>
+            expect(oracleObserved2.map((row) => row.clientId)).toEqual(
+              expected.map((row) => row.clientId),
+            ),
+          )
+        }
         // Count the observed child checkpoint, not the generated intention to
         // lose a durable acknowledgement. run() waits for this exact stdout cut.
         reached(`uncertain-acknowledgement`)
       }
-      expect(await run(`replay`, `replayed`)).toContain(`provider-call`)
+      {
+        const oracleObserved3 = await run(`replay`, `replayed`)
+        oracleAssertion(`backend-oracle.test.ts:311:toContain`, () =>
+          expect(oracleObserved3).toContain(`provider-call`),
+        )
+      }
       const receipts = makeFunctionReference<
         `query`,
         {},
         Array<{ key: string }>
       >(`tasks:receipts`)
-      expect((await client.query(receipts, {})).map(({ key }) => key)).toEqual([
-        durable.idempotencyKey,
-      ])
+      {
+        const oracleObserved4 = await client.query(receipts, {})
+        oracleAssertion(`backend-oracle.test.ts:317:toEqual`, () =>
+          expect(oracleObserved4.map(({ key }) => key)).toEqual([
+            durable.idempotencyKey,
+          ]),
+        )
+      }
       const applicationCount = makeFunctionReference<`query`, {}, number>(
         `tasks:applicationCount`,
       )
-      expect(await client.query(applicationCount, {})).toBe(1)
-      expect(
-        (await client.query(all, {})).map(
-          ({ clientId, text, rank, payload }) => ({
-            clientId,
-            text,
-            rank,
-            payload,
-          }),
-        ),
-      ).toEqual(expected)
+      {
+        const oracleObserved5 = await client.query(applicationCount, {})
+        oracleAssertion(`backend-oracle.test.ts:323:toBe`, () =>
+          expect(oracleObserved5).toBe(1),
+        )
+      }
+      {
+        const oracleObserved6 = await client.query(all, {})
+        oracleAssertion(`backend-oracle.test.ts:324:toEqual`, () =>
+          expect(
+            oracleObserved6.map(({ clientId, text, rank, payload }) => ({
+              clientId,
+              text,
+              rank,
+              payload,
+            })),
+          ).toEqual(expected),
+        )
+      }
       reached(`replay`)
       if (!uncertain) reached(`known-acknowledgement`)
       // Native payload reach is credited only after the child has compared its
@@ -356,96 +410,153 @@ type DurableReachState =
   | `payload-special-float`
   | `payload-bytes`
 
-it.each([`insert`, `update`, `delete`] as const)(
-  `restores durable %s and deduplicates uncertain acknowledgements across generated process histories`,
-  async (operation) => {
-    const draft = (payload: fc.Arbitrary<Value | undefined>) =>
-      fc.record({
-        text:
-          operation === `delete`
-            ? fc.constant(`task 0`)
-            : fc.string({ maxLength: 12 }),
-        rank:
-          operation === `delete`
-            ? fc.constant(0)
-            : fc.integer({ min: -50, max: 50 }),
-        payload,
-      })
-    // A generated bundle constructively includes both acknowledgement cuts and
-    // every claimed native payload class. Values remain generated independently
-    // in each history. Six unconstrained choices could omit a required cut or
-    // payload class; increasing their random budget would only reduce that risk.
-    const payloads =
-      operation === `delete`
-        ? fc.tuple(draft(fc.constant(undefined)))
-        : fc.tuple(
-            draft(fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n })),
-            draft(fc.constantFrom(NaN, Infinity, -Infinity, -0)),
-            draft(
-              fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
-            ),
-          )
-    const histories = fc.record({
-      known: payloads,
-      uncertain: payloads,
-      uncertainFirst: fc.boolean(),
+const backendProperties = {
+  insert: `convex.backend.insert`,
+  update: `convex.backend.update`,
+  delete: `convex.backend.delete`,
+} as const
+for (const operation of [`insert`, `update`, `delete`] as const) {
+  const draft = (payload: fc.Arbitrary<Value | undefined>) =>
+    fc.record({
+      text:
+        operation === `delete`
+          ? fc.constant(`task 0`)
+          : fc.string({ maxLength: 12 }),
+      rank:
+        operation === `delete`
+          ? fc.constant(0)
+          : fc.integer({ min: -50, max: 50 }),
+      payload,
     })
-    const states: Array<DurableReachState> = [
-      `disk-admission`,
-      `replay`,
-      `known-acknowledgement`,
-      `uncertain-acknowledgement`,
-      ...(operation === `delete`
-        ? []
-        : ([
-            `payload-int64`,
-            `payload-special-float`,
-            `payload-bytes`,
-          ] as const)),
-    ]
-    // Each operation owns its replay grammar. One insert/update bundle contains
-    // six process histories; three delete bundles contain six too. Fixed and
-    // random campaigns therefore retain the same six-history budget per operation.
-    const replayPrefix = `CONVEX_BACKEND_${operation.toUpperCase()}_ORACLE`
-    await runOracleCampaign(
-      replayPrefix,
-      states,
-      async (reach, parameters) => {
-        const property = fc.asyncProperty(
-          histories,
-          async ({ known, uncertain, uncertainFirst }) => {
-            for (const lostAcknowledgement of [
-              uncertainFirst,
-              !uncertainFirst,
-            ]) {
-              // The two payload tuples have different lengths, so the loop
-              // reads either one as an array of its drafts.
-              const drafts: ReadonlyArray<(typeof known)[number]> =
-                lostAcknowledgement ? uncertain : known
-              for (const { text, rank, payload } of drafts) {
-                reach.beginHistory()
-                await durableHistory(
-                  {
-                    clientId: operation === `insert` ? `offline-created` : `0`,
-                    text,
-                    rank,
-                    ...(operation !== `delete` ? { payload } : {}),
-                  },
-                  lostAcknowledgement,
-                  operation,
-                  (state) => reach.reach(state),
+  // A generated bundle constructively includes both acknowledgement cuts and
+  // every claimed native payload class. Values remain generated independently
+  // in each history. Six unconstrained choices could omit a required cut or
+  // payload class; increasing their random budget would only reduce that risk.
+  const payloads =
+    operation === `delete`
+      ? fc.tuple(draft(fc.constant(undefined)))
+      : fc.tuple(
+          draft(fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n })),
+          draft(fc.constantFrom(NaN, Infinity, -Infinity, -0)),
+          draft(
+            fc.uint8Array({ maxLength: 12 }).map(
+              (bytes) => ({ __oracleBytes: [...bytes] }),
+              (recipe: unknown) => {
+                if (
+                  recipe === null ||
+                  typeof recipe !== `object` ||
+                  !(`__oracleBytes` in recipe) ||
+                  !Array.isArray(recipe.__oracleBytes) ||
+                  !recipe.__oracleBytes.every(
+                    (byte: unknown) =>
+                      typeof byte === `number` &&
+                      Number.isInteger(byte) &&
+                      byte >= 0 &&
+                      byte <= 255,
+                  )
                 )
-              }
-            }
-          },
+                  throw new Error(`not a byte recipe`)
+                return new Uint8Array(recipe.__oracleBytes)
+              },
+            ),
+          ),
         )
-        await fc.assert(property, {
-          numRuns: operation === `delete` ? 3 : 1,
-          ...parameters,
-        })
-      },
-      { fixedSeed: 20261022 },
-    )
-  },
-  120000,
-)
+  const histories = fc.record({
+    known: payloads,
+    uncertain: payloads,
+    uncertainFirst: fc.boolean(),
+  })
+  const states: Array<DurableReachState> = [
+    `disk-admission`,
+    `replay`,
+    `known-acknowledgement`,
+    `uncertain-acknowledgement`,
+    ...(operation === `delete`
+      ? []
+      : ([`payload-int64`, `payload-special-float`, `payload-bytes`] as const)),
+  ]
+  // Each operation owns its replay grammar. One insert/update bundle contains
+  // six process histories; three delete bundles contain six too. Fixed and
+  // random campaigns therefore retain the same six-history budget per operation.
+
+  // The existing durable helper retains the process lifecycle and independent
+  // durable-state judgment. Native registration only transports its assertion result.
+  async function checkDurableBundle(
+    { known, uncertain, uncertainFirst }: AssertionHistory<typeof histories>,
+    reach: AssertionReach,
+  ) {
+    for (const lostAcknowledgement of [uncertainFirst, !uncertainFirst]) {
+      // The two payload tuples have different lengths, so the loop
+      // reads either one as an array of its drafts.
+      const drafts: ReadonlyArray<(typeof known)[number]> = lostAcknowledgement
+        ? uncertain
+        : known
+      for (const { text, rank, payload } of drafts) {
+        reach.beginHistory()
+        await durableHistory(
+          {
+            clientId: operation === `insert` ? `offline-created` : `0`,
+            text,
+            rank,
+            ...(operation !== `delete`
+              ? {
+                  payload:
+                    payload !== null &&
+                    typeof payload === `object` &&
+                    `__oracleBytes` in payload
+                      ? new Uint8Array(payload.__oracleBytes as Array<number>)
+                          .buffer
+                      : payload,
+                }
+              : {}),
+          },
+          lostAcknowledgement,
+          operation,
+          (state) => reach.reach(state),
+        )
+      }
+    }
+  }
+  oracleProperty({
+    id: backendProperties[operation],
+    law: {
+      statement: `Durable ${operation} restores once across known and uncertain acknowledgement histories.`,
+      authority: `Existing Convex native-value and durable replay contract above; docs/contributing/oracle-coverage.md.`,
+      limits: `The unchanged isolated local backend and bounded process histories, through both installed SDKs; no new coverage claim.`,
+      owner: `Convex collection integration`,
+    },
+    histories: {
+      arbitrary: histories,
+      runs: operation === `delete` ? 3 : 1,
+      fixedSeeds: [20261022],
+      measured: states,
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    // Every old bundle already constructs all its required states. Preserve
+    // its small backend run budget by checking that same reach per bundle,
+    // instead of adding another complete backend bundle as a native constructor.
+    driver: async (plan, observe) => {
+      const reached = new Set<string>()
+      await recordAssertionJudgment(
+        `convex durable replay`,
+        plan,
+        observe,
+        async () => {
+          await checkDurableBundle(plan.history, {
+            beginHistory: () => {},
+            reach: (state) => {
+              reached.add(state)
+              observe(`reach`, state)
+            },
+          })
+          oracleAssertion(`required state reach`, () =>
+            expect(states.filter((state) => !reached.has(state))).toEqual([]),
+          )
+        },
+      )
+    },
+    timeout: 120000,
+  })
+}
