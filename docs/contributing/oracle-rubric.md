@@ -301,8 +301,14 @@ presence of a preferred heading, class, comment template, or helper.
   cited laws depend on, and MUST fail when generated histories reach a declared
   state fewer times than its stated minimum. Declare the states with
   `histories.states` in `oracleProperty` and supply `histories.constructed`
-  builders that splice them into generated histories. Literal fixed histories do not count
-  toward required reach. A passing run count does not satisfy this requirement.
+  builders that splice them into generated histories. The pinned API has no
+  numeric minimum option. Enforce a normal campaign minimum of N with at least
+  N randomized constructed builders that each list the state in `enters` and
+  reach it. Each normal campaign runs every builder once and fails a
+  construction that misses its states. Verify the reported counts meet N;
+  printed counts and additional random hits alone do not enforce a minimum.
+  Literal fixed histories do not count toward required reach. A passing run
+  count does not satisfy this requirement.
   Existing files on the shrinking `legacyCampaigns` list retain their legacy
   reach checks until conversion; new or converted campaigns use `oracleProperty`.
 - **Acceptance evidence:** The pull request reports each declared state and how

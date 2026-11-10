@@ -10,12 +10,20 @@
  * commits base, and runs the gate on the uncommitted head. It compares the
  * exact added files and exit status at process completion. The grammar varies
  * both sets, their order, the setting's presence, and the gate's presence at
- * base. It excludes duplicate entries and malformed settings, which the lint
- * plugin owns. It does not judge the lint rule's legacy-use classifier or
- * changes to an entry's reason.
+ * base. An inherited pre-commit or prepare-commit-msg hook would block the
+ * fixture commit; both must leave the gate's completed report unchanged.
+ * It excludes duplicate entries and malformed settings, which the lint plugin
+ * owns. It does not judge the lint rule's legacy-use classifier or changes to
+ * an entry's reason.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,6 +49,7 @@ const historyArbitrary = fc.record({
   enforced: fc.boolean(),
   base: fc.uniqueArray(fc.constantFrom(...files)),
   head: fc.uniqueArray(fc.constantFrom(...files)),
+  hook: fc.constantFrom(`none`, `pre-commit`, `prepare-commit-msg`),
 })
 
 // `adopted` maps to the setting's presence and `enforced` to the gate's presence
@@ -67,12 +76,31 @@ function settings(entries) {
 
 function drive(history, observe) {
   const directory = mkdtempSync(join(tmpdir(), `oracle-campaign-baseline-`))
+  const globalConfig = join(directory, `global.gitconfig`)
   const git = (...args) =>
-    execFileSync(`git`, args, { cwd: directory, stdio: `pipe` })
+    execFileSync(`git`, args, {
+      cwd: directory,
+      stdio: `pipe`,
+      env:
+        history.hook === `none`
+          ? process.env
+          : { ...process.env, GIT_CONFIG_GLOBAL: globalConfig },
+    })
   const settingsFile = join(directory, `scripts/oracle-lint-settings.mjs`)
   try {
     mkdirSync(join(directory, `scripts`))
     git(`init`, `-q`)
+    if (history.hook !== `none`) {
+      const hookDirectory = join(directory, `inherited-hooks`)
+      mkdirSync(hookDirectory)
+      const hook = join(hookDirectory, history.hook)
+      writeFileSync(
+        hook,
+        `#!/bin/sh\necho "blocking inherited hook" >&2\nexit 1\n`,
+      )
+      chmodSync(hook, 0o755)
+      git(`config`, `--file`, globalConfig, `core.hooksPath`, hookDirectory)
+    }
     writeFileSync(
       settingsFile,
       settings(history.adopted ? history.base : undefined),
@@ -90,6 +118,10 @@ function drive(history, observe) {
       `user.email=oracle@example.com`,
       `-c`,
       `commit.gpgsign=false`,
+      // This temporary commit establishes input data, so no developer hook
+      // may decide whether the gate's production path runs.
+      `-c`,
+      `core.hooksPath=${join(directory, `.no-hooks`)}`,
       `commit`,
       `-qm`,
       `base`,
@@ -105,6 +137,8 @@ function drive(history, observe) {
       status: result.status,
       ...JSON.parse(result.stdout),
     })
+    if (history.hook !== `none`)
+      observe(`reach`, `inherited ${history.hook} hook`)
     if (
       history.adopted &&
       history.head.some(
@@ -154,6 +188,8 @@ oracleProperty({
       `retired baseline addition`,
       `removal`,
       `adoption`,
+      `inherited pre-commit hook`,
+      `inherited prepare-commit-msg hook`,
     ],
     constructed: [
       {
@@ -203,11 +239,22 @@ oracleProperty({
         enters: [`adoption`],
         build: (h) => ({ ...h, adopted: false, enforced: false }),
       },
+      ...[`pre-commit`, `prepare-commit-msg`].map((hook) => ({
+        name: `inherited ${hook} hook`,
+        enters: [`inherited ${hook} hook`],
+        build: (h) => ({ ...h, hook }),
+      })),
     ],
     fixed: [
       {
         name: `removed baseline stays closed`,
-        history: { adopted: false, enforced: true, base: [], head: [files[0]] },
+        history: {
+          adopted: false,
+          enforced: true,
+          base: [],
+          head: [files[0]],
+          hook: `none`,
+        },
       },
     ],
   },
