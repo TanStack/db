@@ -1560,10 +1560,6 @@ const replayTestNames = new Map([
     `preserves retention across transaction phases.*seed undefined`,
   ],
   [
-    `ssr.stream-record-lifetime`,
-    `settles each record demand at its transport checkpoint.*random`,
-  ],
-  [
     `pooled-live-query.late-cleanup`,
     `releases late cleanup registration channels.*random`,
   ],
