@@ -986,20 +986,53 @@ describe(`draft revert oracle`, () => {
       checkHistory(history, trace, expected),
   })
 
-  for (const [id, arbitrary, runs] of [
-    [WRITE_HISTORY, historyArb, 400],
-    [NESTED_ROUND_TRIPS, nestedRoundTripArb, 200],
-    [CLASS_WRITES, classWriteArb, 200],
-    [PARTIAL_REVERTS, partialRevertArb, 200],
-  ] as const)
-    oracleProperty({
-      id,
-      law: revertLaw,
-      histories: { arbitrary, runs, fixedSeeds: [FIXED_SEED] },
-      model: historyExpectation,
-      driver: historyDriver,
-      check: checkHistory,
-    })
+  oracleProperty({
+    id: WRITE_HISTORY,
+    law: revertLaw,
+    histories: { arbitrary: historyArb, runs: 400, fixedSeeds: [FIXED_SEED] },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
+  })
+
+  oracleProperty({
+    id: NESTED_ROUND_TRIPS,
+    law: revertLaw,
+    histories: {
+      arbitrary: nestedRoundTripArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
+  })
+
+  oracleProperty({
+    id: CLASS_WRITES,
+    law: revertLaw,
+    histories: {
+      arbitrary: classWriteArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
+  })
+
+  oracleProperty({
+    id: PARTIAL_REVERTS,
+    law: revertLaw,
+    histories: {
+      arbitrary: partialRevertArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
+  })
 
   // Positive execution witness: the fixed campaign reaches each operation, a
   // partial revert (some change survives one revert), a full revert, and a
