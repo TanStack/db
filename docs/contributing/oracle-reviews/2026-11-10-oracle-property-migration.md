@@ -216,8 +216,8 @@ verified against that source and addressed without changing shipped behavior:
   grammar generates blocking pre-commit and prepare-commit-msg hooks. Before
   isolation the latter stopped fixture setup at seed `20261110`, path `0:0:0:0`;
   afterward all five gate tests and that exact replay pass without a global
-  Git-configuration workaround. Fixed/random campaigns reached the two hook
-  kinds 14/11 and 10/10 times. This RED is a fixture setup defect, not a named
+  Git-configuration workaround. Fixed-seed and random campaigns reached the two
+  hook kinds 14/11 and 10/10 times. This RED is a fixture setup defect, not a named
   product-law mutant kill.
 
 The three scoped repairs are committed in `b7f713f03`; explicit ESLint,
@@ -225,3 +225,67 @@ formatting, changed-file lint and normal commit hooks passed. The earlier gate
 mutation evidence remains bounded by the same membership model and CLI path.
 The runner clarification changes documentation only and does not claim that
 Playwright registration support has been implemented.
+
+## Second review follow-up
+
+CodeRabbit review `5846877275` checked `9b43e97ff602a159277fb8ba381b931f2e9192a0`.
+Both findings were reproduced against the unchanged `e1fb504` framework and
+fixture driver before their scoped corrections.
+
+The reach law requires every constructed builder to check each state it names.
+A two-builder API probe used `runs: 1`, fixed seed `42`, and disjoint `enters`
+claims, `earlier` and `later`. The production driver reported only `later`.
+Returning `false` from both builders passed with reach `{earlier: 0, later: 3}`.
+Returning one shared object from both builders produced the same false green.
+The framework's map kept only the later builder for the repeated history.
+
+Returning fresh objects instead rejected the missing `earlier` state at path
+`0`. Omitting only `later` rejected the later builder at path `1`. Reporting
+both states passed with reach `{earlier: 3, later: 3}`. Primitive histories can
+also remain safe: builders returning disjoint values `false` and `true` passed,
+and omitting the former's state failed at path `0`. ORC-015 now requires
+collision-free constructions and verification of every builder's state check.
+A single primitive-valued builder remains permitted. This corrects the
+instructions; it does not claim that the external framework defect is fixed.
+
+The Git fixture law requires developer global configuration to leave fixture
+setup and the gate's completed report unchanged. The existing membership model
+and `only shrinks` comparison remain independent of that configuration. The
+history grammar now crosses plain/strict CRLF global configuration with all
+three hook choices, including a constructed strict-config/no-hook history.
+Strict configuration sets both `core.autocrlf=true` and `core.safecrlf=true` in
+a temporary file; no developer configuration is changed.
+
+The extended grammar on the unchanged driver failed at seed `20261110`, path
+`5:0:0:0:0`, with empty base/head sets, no adoption or prior gate, `hook: none`,
+and strict CRLF configuration. `git add .` exited `128` because LF would be
+replaced by CRLF. This is a fixture setup failure, not a named product-law kill.
+The repair supplies the fixture's global configuration to every fixture Git
+command and the gate child process. Inherited hook controls remain, and fixture
+commits still use a local `core.hooksPath` override without bypassing hooks in
+the working repository.
+
+Verification, with at most two Vitest workers:
+
+```sh
+./node_modules/.bin/vitest run --config scripts/oracle-scripts.vitest.config.mjs scripts/legacy-campaign-baseline-oracle.property.test.js --maxWorkers=2
+TANSTACK_DB_ORACLE_PROPERTY=scripts.legacy-campaign-baseline TANSTACK_DB_ORACLE_SEED=20261110 TANSTACK_DB_ORACLE_PATH=5:0:0:0:0 ./node_modules/.bin/vitest run --config scripts/oracle-scripts.vitest.config.mjs scripts/legacy-campaign-baseline-oracle.property.test.js --maxWorkers=2
+```
+
+All five gate tests passed, and the direct RED-history replay passed. The
+fixed-seed/random campaigns reached strict global configuration without hooks
+5/6 times. They reached inherited pre-commit hooks 10/9 times and inherited
+prepare-commit-msg hooks 12/9 times. Both base run budgets remain 20. The shared
+always-accept calibration still rejects the wrong completed report.
+
+The two inline findings (`4528611050`, `4528611070`) are addressed within this
+PR's documentation and fixture scope. The additional prose comment is addressed
+with the precise term “fixed-seed and random campaigns.” The repeated generic
+docstring-coverage advisory names no missing explanation; it supplies no new
+finding beyond the earlier advisory. Remaining limits are the four-file
+membership domain, valid settings, and the two modeled global-configuration
+forms. External framework repair and whole-PR readiness are separate work.
+
+The final scoped source passed explicit ESLint, formatting, and changed-file
+oracle lint. No framework package, production gate, campaign law, or run budget
+changed in this follow-up.

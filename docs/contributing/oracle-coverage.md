@@ -8018,6 +8018,10 @@ uses membership in a four-file universe. The driver commits base settings in a
 temporary Git repository, writes head settings, runs the actual CLI, and
 compares the full additions report and exit status after process completion.
 The grammar also varies the setting's presence and the gate's presence at base.
+Fixture histories cross inherited pre-commit/prepare-commit-msg hooks with
+plain or strict CRLF global configuration. A constructed no-hook history with
+strict CRLF settings requires fixture setup and the completed gate report to
+remain independent of developer global configuration.
 Only absence of both permits initial adoption; after the setting is removed,
 the gate's presence preserves an empty allowed set. Constructed histories cover
 an addition, an addition after an empty adopted baseline, an addition after the

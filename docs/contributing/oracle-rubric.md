@@ -304,9 +304,16 @@ presence of a preferred heading, class, comment template, or helper.
   builders that splice them into generated histories. The pinned API has no
   numeric minimum option. Enforce a normal campaign minimum of N with at least
   N randomized constructed builders that each list the state in `enters` and
-  reach it. Each normal campaign runs every builder once and fails a
-  construction that misses its states. Verify the reported counts meet N;
-  printed counts and additional random hits alone do not enforce a minimum.
+  reach it. With multiple builders in the pinned API, their results MUST have
+  distinct object identities or provably disjoint primitive values. Prefer a
+  fresh object or array from each invocation. A single primitive-valued builder
+  does not have this collision.
+  Repeated primitive values or shared objects can replace an earlier builder
+  in the framework's history-to-builder map and bypass its state checks. Each
+  normal campaign runs every builder once. Confirm that every builder's named
+  states were checked, using missing-state controls, and verify the reported
+  counts meet N. Printed counts and additional random hits alone do not enforce
+  a minimum.
   Literal fixed histories do not count toward required reach. A passing run
   count does not satisfy this requirement.
   Existing files on the shrinking `legacyCampaigns` list retain their legacy

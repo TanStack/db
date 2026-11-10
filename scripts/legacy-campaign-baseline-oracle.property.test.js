@@ -12,6 +12,9 @@
  * both sets, their order, the setting's presence, and the gate's presence at
  * base. An inherited pre-commit or prepare-commit-msg hook would block the
  * fixture commit; both must leave the gate's completed report unchanged.
+ * The grammar also crosses those hooks with plain and strict CRLF global
+ * configuration. Neither developer setting may decide fixture setup or the
+ * gate report, including histories with no inherited hook.
  * It excludes duplicate entries and malformed settings, which the lint plugin
  * owns. It does not judge the lint rule's legacy-use classifier or changes to
  * an entry's reason.
@@ -50,6 +53,7 @@ const historyArbitrary = fc.record({
   base: fc.uniqueArray(fc.constantFrom(...files)),
   head: fc.uniqueArray(fc.constantFrom(...files)),
   hook: fc.constantFrom(`none`, `pre-commit`, `prepare-commit-msg`),
+  globalConfig: fc.constantFrom(`plain`, `strict CRLF`),
 })
 
 // `adopted` maps to the setting's presence and `enforced` to the gate's presence
@@ -77,17 +81,29 @@ function settings(entries) {
 function drive(history, observe) {
   const directory = mkdtempSync(join(tmpdir(), `oracle-campaign-baseline-`))
   const globalConfig = join(directory, `global.gitconfig`)
+  const inheritedConfig = join(directory, `inherited.gitconfig`)
+  const inheritedEnvironment = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: inheritedConfig,
+  }
+  const fixtureEnvironment = {
+    ...inheritedEnvironment,
+    GIT_CONFIG_GLOBAL: globalConfig,
+  }
   const git = (...args) =>
     execFileSync(`git`, args, {
       cwd: directory,
       stdio: `pipe`,
-      env:
-        history.hook === `none`
-          ? process.env
-          : { ...process.env, GIT_CONFIG_GLOBAL: globalConfig },
+      env: fixtureEnvironment,
     })
   const settingsFile = join(directory, `scripts/oracle-lint-settings.mjs`)
   try {
+    writeFileSync(
+      inheritedConfig,
+      history.globalConfig === `strict CRLF`
+        ? `[core]\n\tautocrlf = true\n\tsafecrlf = true\n`
+        : ``,
+    )
     mkdirSync(join(directory, `scripts`))
     git(`init`, `-q`)
     if (history.hook !== `none`) {
@@ -131,6 +147,7 @@ function drive(history, observe) {
       cwd: directory,
       encoding: `utf8`,
       timeout: 10_000,
+      env: fixtureEnvironment,
     })
     if (result.error) throw result.error
     observe(`completed`, {
@@ -139,6 +156,8 @@ function drive(history, observe) {
     })
     if (history.hook !== `none`)
       observe(`reach`, `inherited ${history.hook} hook`)
+    if (history.hook === `none` && history.globalConfig === `strict CRLF`)
+      observe(`reach`, `strict global config without hooks`)
     if (
       history.adopted &&
       history.head.some(
@@ -190,6 +209,7 @@ oracleProperty({
       `adoption`,
       `inherited pre-commit hook`,
       `inherited prepare-commit-msg hook`,
+      `strict global config without hooks`,
     ],
     constructed: [
       {
@@ -239,6 +259,11 @@ oracleProperty({
         enters: [`adoption`],
         build: (h) => ({ ...h, adopted: false, enforced: false }),
       },
+      {
+        name: `strict global config without hooks`,
+        enters: [`strict global config without hooks`],
+        build: (h) => ({ ...h, hook: `none`, globalConfig: `strict CRLF` }),
+      },
       ...[`pre-commit`, `prepare-commit-msg`].map((hook) => ({
         name: `inherited ${hook} hook`,
         enters: [`inherited ${hook} hook`],
@@ -254,6 +279,7 @@ oracleProperty({
           base: [],
           head: [files[0]],
           hook: `none`,
+          globalConfig: `plain`,
         },
       },
     ],
