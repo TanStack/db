@@ -1111,7 +1111,7 @@ const ownerGroups: ReadonlyArray<
   [
     `node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
     `sqlite-persistence`,
-    `expression-index bigint-roundtrip bigint-rejection`,
+    `expression-index bigint-roundtrip bigint-rejection expression-index.large-number expression-index.fixed-filter expression-index.native-identity expression-index.native-polarity`,
   ],
   [
     `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
@@ -1437,6 +1437,18 @@ const replayTestNames = new Map([
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
   [
+    `sqlite-persistence.expression-index`,
+    `sqlite-persistence\\.expression-index > random seed`,
+  ],
+  [
+    `sqlite-persistence.bigint-roundtrip`,
+    `sqlite-persistence\\.bigint-roundtrip > random seed`,
+  ],
+  [
+    `sqlite-persistence.bigint-rejection`,
+    `sqlite-persistence\\.bigint-rejection > random seed`,
+  ],
+  [
     `sqlite-resume.retired-storage`,
     `sqlite-resume\\.retired-storage > random seed`,
   ],
@@ -1658,6 +1670,10 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `sqlite-persistence.expression-index.large-number`,
+  `sqlite-persistence.expression-index.fixed-filter`,
+  `sqlite-persistence.expression-index.native-identity`,
+  `sqlite-persistence.expression-index.native-polarity`,
   `sqlite-resume.retired-storage.cases`,
   `sqlite-resume.managed-claim-read.cases`,
   `sqlite-resume.startup-corpus`,

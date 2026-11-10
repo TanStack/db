@@ -45,7 +45,7 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
+        reason: `All product campaigns use oracleProperty. Retain only the existing fast-check seed/run/path self-checks, grammar ablations, and SQL-fault shrink-and-replay controls: native calibrations do not expose their shrink coordinates.`,
       },
     ],
     replayWitnessModules: [`packages/db/tests/oracle-replay-witness.ts`],
