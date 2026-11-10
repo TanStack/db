@@ -309,6 +309,7 @@ const staticOracleProperties = [
   `pagination.ordered-window`,
   `pagination.pending-history`,
   `pagination.pending-mutation`,
+  `pagination.joined-window-failure`,
   `pagination.window-transition`,
   `persistence.retained-demand`,
   `subscription-replay.completion`,

@@ -1,22 +1,34 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { BTreeIndex } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { and, eq } from '../../src/query/builder/functions.js'
+import { and, eq, isUndefined, toArray } from '../../src/query/index.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
   oracleRandomParameters,
+  oracleReplayTest,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { cleanupAll } from './pagination-support.js'
+import {
+  checkRetainedWindowSnapshot,
+  referenceJoinedWindowRows,
+  referenceWindowRows,
+} from './pagination-window-publication-oracle.js'
+import type {
+  JoinedWindowRow,
+  PaginationWindow,
+} from './pagination-window-publication-oracle.js'
 import type { PageRow } from './pagination-support.js'
 import type {
   ChangeMessage,
@@ -114,11 +126,6 @@ type AdversarialOrderedRow = {
 type NullableCursorScenario = {
   rank: number
   direction: `asc` | `desc`
-}
-
-type PaginationWindow = {
-  offset: number
-  limit: number
 }
 
 type PaginationScenario = {
@@ -347,6 +354,33 @@ type PendingHistoryScenario = {
   firstRank: number
   secondRank: number
 }
+
+// This bounded extension changes the dependent-source schedule, not the value
+// model. referenceWindowRows still computes the baseline and retry windows.
+type JoinedWindowFailureScenario = {
+  rankOffset: number
+  rankStep: number
+  direction: `asc` | `desc`
+  initialLimit: number
+  pivotMarked: boolean
+  tailCount: number
+  tailMarked: boolean
+}
+type JoinedWindowFailureReach =
+  | `joined-window-held`
+  | `source-failure-handled`
+  | `failed-window-retained`
+  | `retry-published`
+  | `successful-window-published`
+const joinedWindowFailureScenarioArbitrary = fc.record({
+  rankOffset: fc.integer({ min: -10, max: 10 }),
+  rankStep: fc.integer({ min: 1, max: 10 }),
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  initialLimit: fc.integer({ min: 1, max: 2 }),
+  pivotMarked: fc.boolean(),
+  tailCount: fc.integer({ min: 2, max: 4 }),
+  tailMarked: fc.boolean(),
+})
 
 const initialRowsArbitrary = fc.array(
   fc.record({
@@ -603,32 +637,6 @@ function referenceWindow(
   return referenceWindowRows(rows, direction, window).map(({ id }) => id)
 }
 
-function referenceWindowRows(
-  rows: ReadonlyArray<PageRow>,
-  direction: `asc` | `desc`,
-  window: PaginationWindow,
-): Array<PageRow> {
-  return [...rows]
-    .sort((left, right) => {
-      // The public NaN contract places NaN after finite ranks in ascending
-      // order. The key breaks ties between equal ranks, including two NaNs.
-      const rankOrder = Number.isNaN(left.rank)
-        ? Number.isNaN(right.rank)
-          ? 0
-          : 1
-        : Number.isNaN(right.rank)
-          ? -1
-          : left.rank < right.rank
-            ? -1
-            : left.rank > right.rank
-              ? 1
-              : 0
-      return rankOrder * (direction === `asc` ? 1 : -1) || left.id - right.id
-    })
-    .slice(window.offset, window.offset + window.limit)
-    .map(({ id, rank }) => ({ id, rank }))
-}
-
 function expectWindowRows(
   actual: ReadonlyArray<PublicPageRow>,
   expected: ReadonlyArray<PublicPageRow>,
@@ -832,8 +840,14 @@ async function runPaginationScenario(
  * one history, and `referenceWindowRows` predicts each window from the rows.
  */
 declareOracle({
-  check: [runPaginationScenario, runMultiOrderScenario],
+  check: [
+    runPaginationScenario,
+    runMultiOrderScenario,
+    runJoinedWindowFailureScenario,
+    runJoinedWindowFailureFamily,
+  ],
   model: [referenceWindowRows, referenceMultiOrder],
+  grammar: [joinedWindowFailureScenarioArbitrary],
 })
 
 async function expectMultiOrderBoundaryMatches(): Promise<void> {
@@ -2385,6 +2399,382 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     for (const request of pending) request.deferred.resolve()
     await cleanupAll(live, source)
   }
+}
+
+/**
+ * Atomic window publication keeps the last complete window when a required
+ * joined acquisition fails, including while a child acquisition is pending.
+ * Authority: ARCHITECTURE.md, "Atomic window publication". The earlier
+ * failed-window mutation driver checks this with one ordered acquisition.
+ * This driver varies the missing dependent-source schedule with the same
+ * shared independent referenceJoinedWindowRows and retained-snapshot judgment.
+ *
+ * A settled prefix precedes one wider move. Its root page applies, then the
+ * anti-join and include each hold an original source-load promise for the new
+ * root. The grammar fails the anti-join before or after its child peer, or
+ * resolves both. Failure keeps the model's baseline until explicit retry.
+ * Callback capture never throws into production. Comparisons run after capture,
+ * so an invalid first callback remains evidence without changing error handling.
+ * These controlled adapters establish no QueryClient or backend behavior; the
+ * exact H02 QueryClient first-callback trace is the receiving witness.
+ */
+async function runJoinedWindowFailureScenario(
+  scenario: JoinedWindowFailureScenario,
+  schedule: `failure-first` | `peer-first` | `success`,
+  reach: (state: JoinedWindowFailureReach) => void,
+): Promise<void> {
+  const ranks = Array.from(
+    { length: scenario.initialLimit + scenario.tailCount },
+    (_, index) => scenario.rankOffset + index * scenario.rankStep,
+  )
+  const truth = ranks.map((rank, index) => ({ id: index + 1, rank }))
+  const ordered = referenceWindowRows(truth, scenario.direction, {
+    offset: 0,
+    limit: truth.length,
+  })
+  const pivot = ordered[scenario.initialLimit]!.id
+  const marked = ordered
+    .slice(scenario.initialLimit)
+    .filter((_, index) =>
+      index === 0 ? scenario.pivotMarked : scenario.tailMarked,
+    )
+    .map(({ id }) => ({ id, rowId: id }))
+  const children = truth.flatMap(({ id }) => [
+    { id: id * 100 + 1, parent: id },
+    { id: id * 100 + 2, parent: id },
+  ])
+  const baselineWindow = { offset: 0, limit: scenario.initialLimit }
+  const targetWindow = { offset: 0, limit: scenario.initialLimit + 1 }
+  const facts = {
+    roots: truth,
+    marked: marked.map(({ rowId }) => rowId),
+    children,
+  }
+  const baseline = referenceJoinedWindowRows(
+    facts,
+    scenario.direction,
+    baselineWindow,
+  )
+  const complete = referenceJoinedWindowRows(
+    facts,
+    scenario.direction,
+    targetWindow,
+  )
+  const roots = createConformingOrderedSource(
+    `pagination-joined-failure-roots-${collectionSequence++}`,
+    ordered,
+  )
+  type HeldLoad = {
+    options: LoadSubsetOptions
+    deferred: ReturnType<typeof createDeferred<void>>
+    receipt?: true | Promise<void>
+    outcome?: `fulfilled` | `rejected`
+    error?: unknown
+  }
+  let holding = false
+  const controlled = <Row extends { id: number }>(
+    name: string,
+    rows: ReadonlyArray<Row>,
+  ) => {
+    const pending: Array<HeldLoad> = []
+    const delivered = new Set<number>()
+    let apply!: (options: LoadSubsetOptions) => true | Promise<void>
+    const source = createCollection<Row>({
+      id: `pagination-joined-failure-${name}-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          apply = (options) => {
+            begin()
+            for (const row of rowsForLoadSubset(rows, options)) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: row })
+            }
+            return commit(options.signal)
+          }
+          return {
+            loadSubset: (options) => {
+              if (!holding) return apply(options)
+              const deferred = createDeferred<void>()
+              pending.push({ options, deferred })
+              return deferred.promise
+            },
+          }
+        },
+      },
+    })
+    // Observe the original core load return, not a replacement promise or a
+    // provider-resolution proxy. This wrapper changes no result or ownership.
+    const original = source._sync.loadSubset
+    source._sync.loadSubset = (options) => {
+      const receipt = original.call(source._sync, options)
+      const load = pending.find(
+        (entry) => entry.options === options && entry.receipt === undefined,
+      )
+      if (load) {
+        load.receipt = receipt
+        if (receipt === true) load.outcome = `fulfilled`
+        else
+          void receipt.then(
+            () => (load.outcome = `fulfilled`),
+            (error: unknown) => {
+              load.outcome = `rejected`
+              load.error = error
+            },
+          )
+      }
+      return receipt
+    }
+    return {
+      source,
+      pending,
+      async answer(load: HeldLoad) {
+        // A completed anti-join can retire this child demand. The provider
+        // then installs no request-scoped rows; core owns its obsolete outcome.
+        if (load.options.signal?.aborted) {
+          load.deferred.resolve()
+          return
+        }
+        await apply(load.options)
+        load.deferred.resolve()
+        await load.receipt
+      },
+      restore: () => {
+        source._sync.loadSubset = original
+      },
+    }
+  }
+  const filter = controlled(`filter`, marked)
+  const peer = controlled(`children`, children)
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: roots.source })
+      .leftJoin({ marker: filter.source }, ({ row, marker }) =>
+        eq(row.id, marker.rowId),
+      )
+      .where(({ marker }) => isUndefined(marker.rowId))
+      .orderBy(({ row }) => row.rank, scenario.direction)
+      .orderBy(({ row }) => row.id, `asc`)
+      .limit(scenario.initialLimit)
+      .select(({ row }) => ({
+        id: row.id,
+        rank: row.rank,
+        children: toArray(
+          q
+            .from({ child: peer.source })
+            .where(({ child }) => eq(child.parent, row.id))
+            .orderBy(({ child }) => child.id)
+            .select(({ child }) => child.id),
+        ),
+      })),
+  )
+  type Cut = {
+    boundary: `callback` | `checkpoint`
+    rows: Array<JoinedWindowRow>
+    window: ReturnType<typeof live.utils.getWindow>
+    afterFailureRequest: boolean
+  }
+  const cuts: Array<Cut> = []
+  let failureRequested = false
+  const capture = (boundary: Cut[`boundary`]) => {
+    const window = live.utils.getWindow()
+    cuts.push({
+      boundary,
+      rows: live.toArray.map(({ id, rank, children }) => ({
+        id,
+        rank,
+        children: [...children],
+      })),
+      window: window && { ...window },
+      afterFailureRequest: failureRequested,
+    })
+  }
+  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+  const checkRetained = () => {
+    capture(`checkpoint`)
+    for (const cut of cuts)
+      checkRetainedWindowSnapshot(
+        { rows: baseline, window: baselineWindow },
+        cut,
+        `primary ${cut.boundary}`,
+      )
+  }
+  const failure = new Error(`joined window source failed`)
+  let operation: true | Promise<void> | undefined
+  let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+  let operationError: unknown
+  let observedOperation: Promise<void> | undefined
+  const pendingLoad = (loads: Array<HeldLoad>) => {
+    const candidates = loads.filter(
+      (load) =>
+        load.receipt !== undefined &&
+        load.receipt !== true &&
+        load.outcome === undefined &&
+        !load.options.signal?.aborted,
+    )
+    expect(candidates, `one original live dependent load`).toHaveLength(1)
+    return candidates[0]!
+  }
+
+  return withHistoryCleanup(
+    async () => {
+      await live.preload()
+      expect(
+        live.toArray.map(({ id, rank, children }) => ({
+          id,
+          rank,
+          children: [...children],
+        })),
+      ).toStrictEqual(baseline)
+      subscription = live.subscribeChanges(() => capture(`callback`), {
+        includeInitialState: false,
+      })
+      holding = true
+      operation = live.utils.setWindow(targetWindow)
+      expect(operation).toBeInstanceOf(Promise)
+      observedOperation = Promise.resolve(operation).then(
+        () => {
+          outcome = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome = `rejected`
+          operationError = error
+        },
+      )
+      await flushPromises()
+      const failedLoad = pendingLoad(filter.pending)
+      const peerLoad = pendingLoad(peer.pending)
+      // Both actual demands must select the new root. A missing request or a
+      // broader batching path is an unreached premise, never cached coverage.
+      expect(
+        rowsForLoadSubset(
+          truth.map(({ id }) => ({ id, rowId: id })),
+          failedLoad.options,
+        ).map(({ rowId }) => rowId),
+        `exact failed demand`,
+      ).toStrictEqual([pivot])
+      expect(
+        rowsForLoadSubset(
+          truth.map(({ id }) => ({ id: id * 100 + 1, parent: id })),
+          peerLoad.options,
+        ).map(({ parent }) => parent),
+        `exact pending peer demand`,
+      ).toStrictEqual([pivot])
+      expect(outcome).toBe(`pending`)
+      reach(`joined-window-held`)
+      checkRetained()
+
+      if (schedule === `peer-first`) await peer.answer(peerLoad)
+      if (schedule !== `success`) {
+        failureRequested = true
+        failedLoad.deferred.reject(failure)
+        let rejected: unknown
+        try {
+          await failedLoad.receipt
+        } catch (error) {
+          rejected = error
+        }
+        expect(rejected, `original failed applied-load error`).toBe(failure)
+        await flushPromises()
+        expect(live.utils.lastSubsetError, `exact source failure handled`).toBe(
+          failure,
+        )
+        if (schedule === `failure-first`) {
+          const peerPending =
+            peerLoad.outcome === undefined && !peerLoad.options.signal?.aborted
+          const peerRetired =
+            peerLoad.options.signal?.aborted === true &&
+            peerLoad.outcome === `rejected` &&
+            peerLoad.error instanceof Error &&
+            peerLoad.error.name === `AbortError`
+          if (peerPending === peerRetired)
+            throw new Error(
+              `pagination instrument: failed-window peer is neither unambiguously pending nor observably retired`,
+            )
+        }
+        // Cancellation after failure is permitted. The removed pending-only
+        // reach was new and unrun; it would have imposed a no-cancel rule.
+        // Exact handling is the required checkpoint.
+        // The diagnostic below retains the narrower pending-peer RED premise.
+        reach(`source-failure-handled`)
+        // This is a diagnostic count, not a required GREEN reach: retaining
+        // an unchanged complete window need not emit any row callback.
+        const failureCallbacks = cuts.filter(
+          (cut) => cut.boundary === `callback` && cut.afterFailureRequest,
+        )
+        console.info(`pagination joined-window-failure callback checkpoint`, {
+          schedule,
+          failedScope: [pivot],
+          peerScope: [pivot],
+          sourceFailureApplied: rejected === failure,
+          peerPending: peerLoad.outcome === undefined,
+          peerAborted: peerLoad.options.signal?.aborted === true,
+          callbacks: failureCallbacks.length,
+          firstCallback: failureCallbacks[0],
+        })
+        checkRetained()
+        holding = false
+        if (schedule === `failure-first`) await peer.answer(peerLoad)
+        await observedOperation
+        expect(outcome).toBe(`rejected`)
+        expect(operationError).toBe(failure)
+        checkRetained()
+        reach(`failed-window-retained`)
+        cuts.length = 0
+        await live.utils.setWindow(targetWindow)
+        reach(`retry-published`)
+      } else {
+        holding = false
+        cuts.length = 0
+        await filter.answer(failedLoad)
+        await peer.answer(peerLoad)
+        await observedOperation
+        expect(outcome).toBe(`fulfilled`)
+        reach(`successful-window-published`)
+      }
+      expect(
+        live.toArray.map(({ id, rank, children }) => ({
+          id,
+          rank,
+          children: [...children],
+        })),
+      ).toStrictEqual(complete)
+      expect(live.utils.getWindow()).toStrictEqual(targetWindow)
+      if (!isDeepStrictEqual(baseline, complete))
+        expect(cuts.some(({ boundary }) => boundary === `callback`)).toBe(true)
+      for (const cut of cuts)
+        expect(
+          [baseline, complete],
+          `retry and success publish complete windows`,
+        ).toContainEqual(cut.rows)
+    },
+    () => [
+      () => subscription?.unsubscribe(),
+      () => live.cleanup(),
+      () => {
+        for (const load of [...filter.pending, ...peer.pending])
+          load.deferred.resolve()
+      },
+      () => observedOperation,
+      () => filter.restore(),
+      () => peer.restore(),
+      () => filter.source.cleanup(),
+      () => peer.source.cleanup(),
+      () => roots.source.cleanup(),
+    ],
+  )
+}
+
+async function runJoinedWindowFailureFamily(
+  scenario: JoinedWindowFailureScenario,
+  reach: (state: JoinedWindowFailureReach) => void,
+): Promise<void> {
+  for (const schedule of [`failure-first`, `peer-first`, `success`] as const)
+    await runJoinedWindowFailureScenario(scenario, schedule, reach)
 }
 
 async function runPendingHistoryScenario(
@@ -5147,6 +5537,84 @@ describe(`pagination recomputation oracle`, () => {
   it(
     `discovered trace: retries a rejected cursor after a source and window transition`,
     runRejectedCursorRetryAfterMutation,
+  )
+
+  // A translated/scaled finite source changes values without changing the
+  // process grammar. Each generated history reconstructs failure before a
+  // pending peer, the peer-first neighbor, and whole-window success. Removing
+  // either dependent source loses the failed-peer premise. The baseline width
+  // is 1..2; rank step is 1..10; the tail has 2..4 roots. Marker membership
+  // crosses the pivot and later tail independently, including an exhausted
+  // underfull result. Zero step and absent dependent demand are excluded.
+  // This preserves every pre-existing campaign and its run budget.
+  for (const campaign of [
+    {
+      name: `fixed seed`,
+      test: oracleReplayTest(fcTest),
+      parameters: { numRuns: transitionScenarioRuns, seed: 1665 },
+    },
+    {
+      name: `random or replayed seed`,
+      test: oracleReplayTest(fcTest, `pagination.joined-window-failure`),
+      parameters: oracleRandomParameters(
+        transitionScenarioRuns,
+        replay,
+        `pagination.joined-window-failure`,
+      ),
+    },
+  ]) {
+    describe(`joined window failure for a ${campaign.name}`, () => {
+      const reach = createOracleReach<JoinedWindowFailureReach>(
+        `pagination.joined-window-failure:${campaign.name}`,
+        [
+          `joined-window-held`,
+          `source-failure-handled`,
+          `failed-window-retained`,
+          `retry-published`,
+          `successful-window-published`,
+        ],
+      )
+      let started = false
+      afterAll(() => {
+        if (started) reach.assertReached()
+      })
+      campaign.test.prop(
+        [joinedWindowFailureScenarioArbitrary],
+        campaign.parameters,
+      )(
+        `retains complete windows across joined failure histories for a ${campaign.name}`,
+        async (scenario) => {
+          started = true
+          reach.beginHistory()
+          try {
+            await runJoinedWindowFailureFamily(scenario, reach.reach)
+          } finally {
+            console.info(`pagination joined-window-failure reach`, {
+              campaign: campaign.name,
+              counts: Object.fromEntries(reach.counts()),
+            })
+          }
+        },
+      )
+    })
+  }
+
+  oracleReplayTest(it)(
+    `retains the settled window when a joined load fails while its child peer waits`,
+    () =>
+      runJoinedWindowFailureScenario(
+        {
+          rankOffset: 10,
+          rankStep: 10,
+          direction: `asc`,
+          initialLimit: 2,
+          pivotMarked: true,
+          tailCount: 4,
+          tailMarked: true,
+        },
+        `failure-first`,
+        () => {},
+      ),
   )
 
   fcTest.prop([pendingHistoryScenarioArbitrary], {

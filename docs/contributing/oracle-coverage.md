@@ -738,7 +738,14 @@ owners.
 The virtual-row-fields owner
 (`packages/db/tests/query/virtual-row-fields-oracle.test.ts`) checks all four
 public fields on row roots and keeps inline values in their selected shape.
-Its finite 1,056-history attribution grammar crosses single/joined sources,
+The H02 queued-answer receiving instrument observes authored `id`, `rank` and
+`markers` payloads through one explicit row projection. Its raw snapshots and
+change payloads retain all four public virtual fields. The maintainer-directed
+observation correction on 2026-10-30 aligns that payload comparison with
+`VirtualRowProps`; it does not retire the metadata law. Temporal metadata
+coherence through the real QueryClient reload and event path remains a receiving
+gap for this virtual-row-fields owner; the H02 payload checks do not close it.
+That owner's finite 1,056-history attribution grammar crosses single/joined sources,
 structured projections/spreads and functional projections/spreads/direct
 source returns, and none/each/all reserved-field collisions. Each form crosses
 direct output, QueryRef depths one/two, joined and functional QueryRef
@@ -2391,6 +2398,22 @@ The following related oracles own distinct production paths or observation cuts:
   rechecks rows while bounding eager indexed and joined work.
   These finite matrices do not establish arbitrary overlapping optimistic
   histories, ties, or provider-specific cursor behavior.
+  The source-prepared `pagination.joined-window-failure` family adds held
+  anti-join and inline-child loads, failure-first/peer-first/success schedules,
+  and complete child contents through the nonregistering
+  `pagination-window-publication-oracle.ts` companion. The corresponding real
+  QueryClient receiving successors reuse its recomputation and retained-window
+  comparison, with raw callback/event recording before checkpoint comparisons.
+  The failure receiver ends at the first handled-failure/pre-peer-release
+  barrier and then cleans up; real-provider later settlement and retry remain
+  open under this pagination owner. Its successful neighbor must calibrate the
+  same recorder before any production repair. All successor reaches are
+  UNREACHED until exact-source admission and execution. The new, unrun
+  pending-only reach was replaced with `source-failure-handled`: a failed move
+  may retire its peer, so pending and observable AbortError retirement are
+  measured separately and owe the same retained snapshot. No campaign budget
+  was lowered. This preparation supplies no additional runtime coverage,
+  candidate-state, host-progress, metadata, or bug-class closure credit.
 - The [IR identity oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ir-stable-identity-oracle.test.ts)
   owns demand-key encoding in only two generated tests. The fixed demand-key cases live in [ir-stable-identity.test.ts](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ir-stable-identity.test.ts), not in this owner. The
   [load-subset oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-oracle.property.test.ts)
