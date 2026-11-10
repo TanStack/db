@@ -3,10 +3,11 @@
 // functions neither compute an expected product result nor replace that helper:
 // they pass its already-computed judgment to oracleProperty without changing
 // the observation cut or catching setup, production, or cleanup failures.
-import { pass } from './oracle-property'
+import { pass, violation } from './oracle-property'
 import type { Observation, Verdict } from './oracle-property'
 
 const comparisonFailures = new WeakMap<Error, string>()
+const judgments = new WeakMap<object, Verdict>()
 
 /** Mark only an assertion thrown by an authored comparison, then rethrow the
  * identical object. A production AssertionError outside this boundary is not
@@ -15,6 +16,13 @@ export function oracleAssertion<T>(checkpoint: string, compare: () => T): T {
   const failed = (error: unknown): never => {
     if (error instanceof Error && error.name === `AssertionError`)
       comparisonFailures.set(error, checkpoint)
+    else if (
+      error instanceof Error &&
+      error.name === `OracleCheckpointFailure` &&
+      error.cause instanceof Error &&
+      error.cause.name === `AssertionError`
+    )
+      comparisonFailures.set(error.cause, checkpoint)
     throw error
   }
   try {
@@ -58,6 +66,7 @@ function comparisonCheckpoint(
  * Original errors, causes and stacks remain attached without serialization. */
 export async function recordAssertionJudgment(
   law: string,
+  plan: object,
   observe: (checkpoint: string, value: unknown) => void,
   judge: () => void | Promise<void>,
 ): Promise<void> {
@@ -75,20 +84,32 @@ export async function recordAssertionJudgment(
       cause: error,
     }
   }
-  observe(`independent assertion judgment`, verdict)
+  judgments.set(plan, verdict)
+  // The framework requires data observations. Keep Error objects solely in the
+  // plan's WeakMap entry, preserving their identity without encoding them.
+  observe(
+    verdict.kind === `pass`
+      ? `independent assertion judgment`
+      : verdict.checkpoint,
+    { kind: verdict.kind },
+  )
 }
 
 /** The semantic reference remains in the named independent helper. The native
  * model retrieves its recorded judgment; it does not infer truth from product
  * observations. An interrupted driver has no judgment and keeps its error. */
 export function recordedAssertionJudgment(
-  _plan: unknown,
-  trace: ReadonlyArray<Observation>,
+  plan: object,
+  _trace: ReadonlyArray<Observation>,
 ): Verdict {
-  const judgment = trace.find(
-    (entry) => entry.checkpoint === `independent assertion judgment`,
+  return (
+    judgments.get(plan) ??
+    violation(
+      `independent assertion judgment`,
+      `the driver did not record its independent helper's judgment`,
+      `assertion judgment transport`,
+    )
   )
-  return judgment === undefined ? pass : (judgment.value as Verdict)
 }
 
 export function forwardAssertionJudgment(
