@@ -49,6 +49,22 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric adapter laws`, () => {
+  it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    `rejects an invalid matchHistoryLimit: %s`,
+    (matchHistoryLimit) => {
+      expect(() =>
+        electricCollectionOptions<OracleRow>({
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          getKey: (row) => row.id,
+          matchHistoryLimit,
+        }),
+      ).toThrow(`Expected a nonnegative integer matchHistoryLimit`)
+    },
+  )
+
   beforeEach(() => {
     resetElectricOracleMocks()
   })

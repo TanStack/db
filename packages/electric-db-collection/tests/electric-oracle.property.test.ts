@@ -5064,12 +5064,188 @@ oracleReplayTest(describe, queuedPresenceProperty)(
   },
 )
 
+/**
+ * Proposed matchHistoryLimit contract: late awaitMatch calls replay only the
+ * last N change/move messages of this sync run, before or after commit. Zero
+ * opts out of replay, not live matching. Already registered matches resolve
+ * only at commit; txid evidence and sync-run retirement are independent.
+ *
+ * The model recomputes a suffix of the delivered ledger, rather than sharing
+ * production buffers. The grammar crosses zero, bounded and default limits,
+ * their exact boundary and overflow, and all three sync modes. A midpoint
+ * commit mixes older committed and newer pending messages. Two late probes
+ * inspect public predicate visits around commit; a live waiter observes the
+ * same delivery without historical replay. This controls ShapeStream delivery,
+ * not a real Electric service, heap collection, or byte-bounded retention.
+ */
+const matchHistoryInputs = fc.record({
+  limit: fc.constantFrom<number | undefined>(undefined, 0, 1, 3),
+  overflow: fc.integer({ min: 0, max: 2 }),
+  txid: fc.integer({ min: 1, max: 10000 }),
+})
+type MatchHistoryInput = { limit: number | undefined; overflow: number; txid: number }
+
+function expectedMatchHistory(
+  input: MatchHistoryInput,
+  delivered: Array<number>,
+) {
+  const limit = input.limit ?? 1000
+  return limit === 0 ? [] : delivered.slice(-limit)
+}
+
+async function checkMatchHistory(input: MatchHistoryInput) {
+  const reach = createOracleReach(`electric.match-history.history`, [
+    `pending-replay`,
+    `committed-replay`,
+    `live-match`,
+    `refetch`,
+    `retirement`,
+  ])
+  reach.beginHistory()
+  for (const syncMode of [`eager`, `progressive`, `on-demand`] as const) {
+    const options = electricCollectionOptions<OracleRow>({
+      shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode,
+      matchHistoryLimit: input.limit,
+    })
+    // A descriptor can be copied and materialized again after its first owner.
+    for (const materialization of [0, 1]) {
+      resetElectricOracleMocks()
+      let subscriber!: (messages: Array<Message<OracleRow>>) => void
+      mockSubscribe.mockImplementationOnce((callback) => {
+        subscriber = callback
+        return vi.fn()
+      })
+      const collection = createCollection(
+        materialization === 0 ? options : { ...options },
+      )
+      const outcomes: Array<Promise<unknown>> = []
+      await withElectricCleanup(async () => {
+        subscriber([upToDate])
+        const count = Math.max(1, (input.limit ?? 1000) + input.overflow)
+        const delivered = Array.from({ length: count }, (_, index) => index + 1)
+        const expected = expectedMatchHistory(input, delivered)
+        let settled = false
+        const live = collection.utils
+          .awaitMatch(
+            (message) => `value` in message && message.value.id === count,
+          )
+          .then(() => {
+            settled = true
+            return true
+          })
+        outcomes.push(live.catch(() => undefined))
+        const split = Math.floor(delivered.length / 2)
+        if (split > 0) {
+          subscriber([
+            ...delivered
+              .slice(0, split)
+              .map((id) => change(`insert`, id, `row-${id}`)),
+            upToDate,
+          ])
+        }
+        subscriber(
+          delivered.slice(split).map((id) => change(`insert`, id, `row-${id}`)),
+        )
+        const probe = () => {
+          const seen: Array<number> = []
+          outcomes.push(
+            collection.utils
+              .awaitMatch((message) => {
+                if (`value` in message) seen.push(message.value.id)
+                return false
+              })
+              .catch(() => undefined),
+          )
+          return seen
+        }
+        expect(probe()).toEqual(expected)
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        reach.reach(`pending-replay`)
+        subscriber([
+          { headers: { control: `up-to-date`, txids: [input.txid] } },
+        ])
+        await expect(live).resolves.toBe(true)
+        expect(settled).toBe(true)
+        reach.reach(`live-match`)
+        expect(probe()).toEqual(expected)
+        expect([...collection.values()].map((row) => row.id)).toEqual(delivered)
+        reach.reach(`committed-replay`)
+        await expect(collection.utils.awaitTxId(input.txid)).resolves.toBe(true)
+        // A match from before must-refetch cannot acknowledge the new generation.
+        let replacementSettled = false
+        const replacement = collection.utils
+          .awaitMatch(
+            (message) => `value` in message && message.value.id === count + 1,
+          )
+          .then(() => {
+            replacementSettled = true
+            return true
+          })
+        outcomes.push(replacement.catch(() => undefined))
+        subscriber([change(`insert`, count + 1, `before-refetch`)])
+        subscriber([mustRefetch])
+        expect(probe()).toEqual([])
+        subscriber([upToDate])
+        await Promise.resolve()
+        expect(replacementSettled).toBe(false)
+        subscriber([change(`insert`, count + 1, `after-refetch`), upToDate])
+        await expect(replacement).resolves.toBe(true)
+        reach.reach(`refetch`)
+        // A throwing live predicate must reject even when replay is disabled.
+        const failure = new Error(`predicate failure`)
+        const broken = collection.utils.awaitMatch(() => {
+          throw failure
+        })
+        const brokenOutcome = expect(broken).rejects.toBe(failure)
+        subscriber([change(`update`, count + 1, `updated`)])
+        await brokenOutcome
+        const retired = collection.utils.awaitMatch(() => false)
+        const retiredOutcome = expect(retired).rejects.toThrow(`Stream aborted`)
+        await collection.cleanup()
+        await retiredOutcome
+        reach.reach(`retirement`)
+      }, [
+        () => collection.cleanup(),
+        async () => {
+          await Promise.all(outcomes)
+        },
+      ])
+    }
+  }
+  reach.assertReached()
+}
+
+describe(`bounded match history`, () => {
+  electricHistoryProperty(
+    `electric.match-history`,
+    `match replay follows its configured suffix without changing live acknowledgement`,
+    matchHistoryInputs,
+    12,
+    42731,
+    checkMatchHistory,
+    10000,
+    [
+      [{ limit: undefined, overflow: 0, txid: 1 }],
+      [{ limit: undefined, overflow: 1, txid: 1 }],
+      [{ limit: 0, overflow: 0, txid: 2 }],
+      [{ limit: 1, overflow: 0, txid: 3 }],
+      [{ limit: 1, overflow: 1, txid: 3 }],
+      [{ limit: 3, overflow: 2, txid: 4 }],
+    ],
+  )
+})
+
 // The checks run a history through production and compare each observation
 // with the model (or the authored snapshots they are given). The models are
 // independent folds of the same histories. The grammar generates the queued
 // presence and persistence interleaving campaigns.
 declareOracle({
   check: [
+    checkMatchHistory,
     checkMutationConfirmation,
     runProcessGrammar,
     runQueuedPresenceCampaign,
@@ -5084,6 +5260,7 @@ declareOracle({
     expectPersistenceInterleavingObservation,
   ],
   model: [
+    expectedMatchHistory,
     expectedSnapshots,
     recomputeCommittedRows,
     recomputedSnapshots,
@@ -5097,6 +5274,7 @@ declareOracle({
     expectedInitialMoveOutSnapshots,
   ],
   grammar: [
+    matchHistoryInputs,
     queuedPresenceArbitraries,
     persistenceInterleavingCampaignArbitrary,
   ],

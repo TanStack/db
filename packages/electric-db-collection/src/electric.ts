@@ -19,6 +19,7 @@ import {
 } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
+  InvalidMatchHistoryLimitError,
   StreamAbortedError,
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
@@ -355,6 +356,14 @@ export interface ElectricCollectionConfig<
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
   syncMode?: ElectricSyncMode
+  /**
+   * Maximum number of recent change/move messages replayed to a later
+   * awaitMatch call. Defaults to 1000; must be a nonnegative integer.
+   * Zero disables replay, including messages observed before a pending commit.
+   * Register awaitMatch before the operation when replay is disabled. Live
+   * predicates, commit acknowledgement and awaitTxId evidence are unchanged.
+   */
+  matchHistoryLimit?: number
 
   /**
    * Internal test hooks (for testing only)
@@ -959,7 +968,10 @@ class ElectricLifecycle<T extends Row<unknown>> {
   // The current run's failure: no evidence can arrive after it (EVID-2).
   private failure: { error: unknown } | undefined
 
-  constructor(private readonly collectionId?: string) {}
+  constructor(
+    private readonly collectionId: string | undefined,
+    private readonly matchHistoryLimit: number,
+  ) {}
 
   readonly utils: ElectricCollectionUtils<T> = {
     awaitTxId: (txId, timeout) => this.awaitTxId(txId, timeout),
@@ -1163,7 +1175,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       let overflow =
         this.matchBuffer.committedMessages.length +
         this.matchBuffer.pendingMessages.length -
-        1000
+        this.matchHistoryLimit
       if (overflow > 0) {
         const committedOverflow = Math.min(
           overflow,
@@ -1195,10 +1207,10 @@ class ElectricLifecycle<T extends Row<unknown>> {
   commitMatches(): void {
     this.matchBuffer.committedMessages.push(...this.matchBuffer.pendingMessages)
     this.matchBuffer.pendingMessages = []
-    if (this.matchBuffer.committedMessages.length > 1000) {
+    if (this.matchBuffer.committedMessages.length > this.matchHistoryLimit) {
       this.matchBuffer.committedMessages.splice(
         0,
-        this.matchBuffer.committedMessages.length - 1000,
+        this.matchBuffer.committedMessages.length - this.matchHistoryLimit,
       )
     }
     for (const [matchId, match] of this.pendingMatches) {
@@ -1263,7 +1275,14 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   utils: ElectricCollectionUtils<T>
   schema?: any
 } {
-  let descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+  const matchHistoryLimit = config.matchHistoryLimit ?? 1000
+  if (!Number.isInteger(matchHistoryLimit) || matchHistoryLimit < 0) {
+    throw new InvalidMatchHistoryLimitError(matchHistoryLimit, config.id)
+  }
+  let descriptorLifecycle = new ElectricLifecycle<T>(
+    config.id,
+    matchHistoryLimit,
+  )
   let utilityLifecycle = descriptorLifecycle
   const internalSyncMode = config.syncMode ?? `eager`
   const finalSyncMode =
@@ -1285,7 +1304,11 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     })
   const sync = createSync()
 
-  const { shapeOptions: _shapeOptions, ...restConfig } = config
+  const {
+    shapeOptions: _shapeOptions,
+    matchHistoryLimit: _matchHistoryLimit,
+    ...restConfig
+  } = config
 
   const utilityTemplate: ElectricCollectionUtils<T> = {
     awaitTxId,
@@ -1293,7 +1316,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   }
   const consumeDescriptorLifecycle = (): ElectricLifecycle<T> => {
     const lifecycle = descriptorLifecycle
-    descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+    descriptorLifecycle = new ElectricLifecycle<T>(config.id, matchHistoryLimit)
     utilityLifecycle = lifecycle
     return lifecycle
   }
