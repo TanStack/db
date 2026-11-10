@@ -206,6 +206,21 @@ const ownerGroups: ReadonlyArray<
     `react.descriptor-start-release`,
     `live infinite suspense`,
   ],
+  [
+    `react-db/tests/cache-first-registration-oracle.test.tsx`,
+    `react`,
+    `cache-first-registration`,
+  ],
+  [
+    `react-db/tests/suspense-local-options-oracle.test.tsx`,
+    `react`,
+    `suspense-local-options`,
+  ],
+  [
+    `react-db/tests/suspense-indexing-config-oracle.test.tsx`,
+    `react`,
+    `suspense-indexing-config`,
+  ],
   [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
     `preact-db/tests/bound-schema-options-oracle.test.ts`,
@@ -1429,6 +1444,9 @@ const enumeratedProperties = new Set([
   `svelte.descriptor-start-release`,
   `query.ordered-mutation-outcome`,
   `reverse-index.large-reads`,
+  `react.suspense-local-options`,
+  `react.suspense-indexing-config`,
+  `react.cache-first-registration`,
   `react.ssr-effects-react18-disabled`,
   `react.ssr-effects-current-disabled`,
   `react.ssr-runtime-ordinary.cases`,
