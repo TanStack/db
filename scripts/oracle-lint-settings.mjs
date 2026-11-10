@@ -144,10 +144,6 @@ export const oracleLintSettings = {
         reason: `campaign helper with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/flat-change-tracking-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/index-update-oracle.property.test.ts`,
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -178,10 +174,6 @@ export const oracleLintSettings = {
       {
         file: `packages/db/tests/production-error-messages-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/proxy-detachment-contract-oracle.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db/tests/proxy-revert-oracle.property.test.ts`,

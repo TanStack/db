@@ -112,6 +112,7 @@ const staticOracleProperties = [
   `notification-laws.query-publications`,
   `notification-laws.publication-histories`,
   `notification-laws.corrupt-prior-values`,
+  `proxy.ordinary-field-copies`,
   `proxy.json-data-keys`,
   `framework.react.window-history`,
   `framework.react.pending-window-history`,
