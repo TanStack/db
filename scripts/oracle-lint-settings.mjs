@@ -160,10 +160,6 @@ export const oracleLintSettings = {
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-ivm/tests/hash-mixed-graph-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-ivm/tests/hash-oracle.property.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
