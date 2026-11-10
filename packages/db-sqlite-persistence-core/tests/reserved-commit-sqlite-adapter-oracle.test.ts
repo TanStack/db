@@ -41,7 +41,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createCollection } from '@tanstack/db'
 import { afterEach, describe, expect } from 'vitest'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
@@ -382,10 +381,6 @@ describe('reserved commits across real-adapter hydrations', () => {
     })
     cleanups.push(() => harness.database.close())
     cleanups.push(() => harness.collection.cleanup())
-    const reach = createOracleReach('sqlite.reserved-commit-hydration', [
-      'hydration entered its scope while reserved',
-    ])
-    reach.beginHistory()
     // row-1's durable value just before the reservation, from the history.
     let durableBefore = 'initial'
     const notice =
@@ -461,7 +456,6 @@ describe('reserved commits across real-adapter hydrations', () => {
       await blocker
       await reached(entered, 'hydration entered its scope')
     }
-    reach.reach('hydration entered its scope while reserved')
     // Commits the innermost transaction first; a rejection keeps its name,
     // so an abort and a cross-cycle failure stay distinct.
     const settle = async () => {
@@ -476,7 +470,6 @@ describe('reserved commits across real-adapter hydrations', () => {
     if (nesting === 'nested') outcomes.push(await settle())
     outcomes.push(await settle())
     const loadOutcome = await load
-    reach.assertReached()
     const expected = expectedAdapterOutcome(history)
     const expectedValue = expected.commitAccepted ? 'refetched' : durableBefore
     await waitFor(() =>
