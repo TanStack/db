@@ -1287,10 +1287,6 @@ const replayTestNames = new Map([
     `settles each record demand at its transport checkpoint.*random`,
   ],
   [
-    `live-query-observer.hydration-error-timing`,
-    `publishes errors at their ownership checkpoint.*random`,
-  ],
-  [
     `live-query-observer.retained-snapshot`,
     `first reads match the capture-time rows.*random`,
   ],
@@ -1328,10 +1324,6 @@ const replayTestNames = new Map([
     `matches a live-query Collection's cleanup admission \\(random\\)`,
   ],
   [
-    `live-query-observer.partial-attach`,
-    `releases every acquired channel before retry.*random`,
-  ],
-  [
     `subscription-lifecycle.notification-error`,
     `acquires retained demand after replacement readiness.*random`,
   ],
@@ -1360,10 +1352,6 @@ const replayTestNames = new Map([
   [
     `svelte.ssr-runtime-errors`,
     `keeps runtime failures on their ordinary error surface.*random`,
-  ],
-  [
-    `live-query-observer.release-failure`,
-    `reattaches after reporting a release failure.*random`,
   ],
   [
     `structural-identity.equal-representations`,

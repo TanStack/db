@@ -272,10 +272,6 @@ export const oracleLintSettings = {
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/live-query-observer-history-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
