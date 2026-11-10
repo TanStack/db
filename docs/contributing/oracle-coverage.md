@@ -1210,6 +1210,30 @@ fixed collapse and the detail page; a child that takes over `setWindow` fails
 the rows law. Focused tests require a window inside a `from` or joined subquery
 not to answer `setWindow`.
 
+Its two joined work laws (unmatched links, and indexed join targets) also
+generate a join filter: none, a `where` on the links alone, or a `where` on the
+joined targets alone. The optimizer pushes each filter into a subquery over its
+own source, and the include must still filter the links by parent and load the
+targets by the kept links' join values, so the filter narrows each keyed read
+(live/ARCHITECTURE.md, Initial demand and Work). Both campaigns declare the
+three filter states with `createOracleReach` and run one fixed example per
+state; each state is reached by at least one fixed history in every run. On
+main the include parent-routed both filtered sources and scanned the target
+Collection: the target filter delivered 3 and examined 4 target rows at
+baseline where the keyed bound is 2 and 3, and one unmatched link with a link
+filter delivered 4 target rows where the bound is 2. Mutants that route the
+filtered target, or the filtered links, by parent fail the target and link
+states respectively. A focused test in
+`packages/db/tests/query/lazy-join-source-where.test.ts` replays the on-demand
+report: each `loadSubset` the lazy side receives names the join keys. The
+owner does not generate subqueries that read a parent value, filters on both
+sides at once, or `fn.where()` filters, which remain parent-routed. Only a
+focused test in the same file shows that a joined subquery whose `where` reads
+the parent stays parent-routed: a mutant that drops that check returns empty
+child arrays there, and the existing include suites (637 tests) pass it. A
+generated parent-reading subquery dimension in the cross-formulation owner
+would close that gap.
+
 Recorded limit (#2151): while an index-backed parent top-K refills within one
 graph run (a held row moved out, a tie group loaded at the window edge, a
 forward window move), it can briefly hold a row outside the window it shows once
