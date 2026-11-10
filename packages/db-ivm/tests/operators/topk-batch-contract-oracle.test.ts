@@ -1,4 +1,20 @@
-import { afterEach, expect, it, vi } from 'vitest'
+/**
+ * Same-key batches consolidate equal row values, retract old versions before
+ * adding replacements, and retain the correct row in an ordered graph. The
+ * authored value relations below state equivalence independently of hashing.
+ * They include signed-zero replacements and reference-valued leaves.
+ *
+ * Every history executes every original relation/path cell. The old fixed
+ * campaign used the same (n, retractFirst) seed in every cell; 25 histories here
+ * therefore still supply 25 generated inputs to each cell, beside the added
+ * random campaign. The four other original seeds retain separate properties.
+ *
+ * Plans hold rich input values and their source references. Observations use
+ * source labels, signed weights, counts, and getter reads, so serialization
+ * cannot replace an identity comparison with deep equality. The claim remains
+ * at direct topKBatch return and the original graph-drain checkpoints.
+ */
+import { vi } from 'vitest'
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { MultiSet } from '../../src/multiset.js'
@@ -7,21 +23,18 @@ import { registerOpaqueHash } from '../../src/hashing/hash.js'
 import { topKBatch } from '../../src/operators/topKState.js'
 import { D2 } from '../../src/d2.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
-import {
-  oracleFixedSeed,
-  oracleRoute,
-  oracleRouteOf,
-} from '../../../db/tests/oracle-config.js'
 import { output } from '../../src/operators/index.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration'
+import {
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../../db/tests/oracle-property.js'
+import type { Observation, Verdict } from '../../../db/tests/oracle-property.js'
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/operators/topKState.ts#topKBatch`],
-})
-
-afterEach(() => vi.restoreAllMocks())
+// Keep the existing ownership entry and its package-local reference tree.
+declareOracle({ owns: [`src/operators/topKState.ts#topKBatch`] })
 
 // Each constructor states a relation independently of hashing. Cross that
 // relation with natural/forced collisions and fresh enclosing row allocations.
@@ -195,138 +208,383 @@ const valueRelations: Array<{
   },
 ]
 
-it.each(
-  valueRelations.flatMap((relation) =>
-    [
-      [false, false],
-      [true, false],
-      [true, true],
-    ].map(([largeGroup, collision]) => ({
-      ...relation,
-      largeGroup,
-      collision,
-    })),
-  ),
-)(
-  `preserves $name cancellation (large group $largeGroup, collision $collision)`,
-  ({ pair, largeGroup, collision }) => {
-    if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
-    const parameters = oracleFixedSeed(409033, { numRuns: 25 })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: 254 }),
-        fc.boolean(),
-        (n, retractFirst) => {
-          const [left, right, equivalent] = pair(n)
-          const before: [number, { value: unknown }] = [1, { value: left }]
-          const after: [number, { value: unknown }] = [1, { value: right }]
-          const transient: [number, { value: unknown }] = [
-            1,
-            { value: Symbol() },
-          ]
-          const messages = [
-            new MultiSet([[after, 1]]),
-            ...(largeGroup
-              ? [
-                  new MultiSet([
-                    [transient, 1],
-                    [transient, -1],
-                  ]),
-                ]
-              : []),
-            new MultiSet([[before, -1]]),
-          ]
-          if (retractFirst) messages.reverse()
-          const actual = [...topKBatch(messages)]
-          if (equivalent) expect(actual).toEqual([])
-          else {
-            expect(actual).toHaveLength(2)
-            expect(actual[0]![0]).toBe(before)
-            expect(actual[0]![1]).toBe(-1)
-            expect(actual[1]![0]).toBe(after)
-            expect(actual[1]![1]).toBe(1)
-          }
-          // A correct helper alone does not prove the ordered graph retains the
-          // replacement. Keep raw signed output; never erase a missed retraction.
-          const graph = new D2()
-          const input = graph.newInput<typeof before>()
-          const retained = new Map<(typeof before)[1], number>()
-          input.pipe(
-            topKWithFractionalIndex(() => 0, { limit: 1 }),
-            output((message) => {
-              for (const [[, [row]], weight] of message.getInner())
-                retained.set(row, (retained.get(row) ?? 0) + weight)
-            }),
-          )
-          graph.finalize()
-          input.sendData(new MultiSet([[before, 1]]))
-          graph.run()
-          for (const message of messages) input.sendData(message)
-          graph.run()
-          const live = [...retained].filter(([, weight]) => weight !== 0)
-          expect(live).toHaveLength(1)
-          expect(live[0]![0]).toBe(equivalent ? before[1] : after[1])
-          expect(live[0]![1]).toBe(1)
-        },
-      ),
-      parameters,
-    )
-    if (collision) expect(hashing.hash).not.toHaveBeenCalled()
-  },
-)
+type Observe = (checkpoint: string, value: unknown) => void
+type ExpectedObservation = { checkpoint: string; value: unknown }
+type RowLabel = `before` | `after` | `transient` | `other`
+type Payload = { value: unknown }
+type InputRow = [number, Payload]
+type MatrixHistory = { n: number; retractFirst: boolean }
+type Cell = {
+  name: string
+  equivalent: boolean
+  largeGroup: boolean
+  collision: boolean
+  before: InputRow
+  after: InputRow
+  transient: InputRow
+}
+type MatrixPlan = { retractFirst: boolean; cells: Array<Cell> }
 
-it.each([true, false])(
-  `replaces ordinary rows with File available=%s`,
-  (available) => {
-    const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
-    if (!available) Reflect.deleteProperty(globalThis, `File`)
-    try {
-      const parameters = oracleFixedSeed(409039, { numRuns: 25 })
-      oracleRoute(oracleRouteOf(parameters))
-      fc.assert(
-        fc.property(fc.integer(), fc.boolean(), (rank, retractFirst) => {
-          const graph = new D2()
-          const input = graph.newInput<[number, { rank: number }]>()
-          const rows = new Map<object, number>()
-          input.pipe(
-            topKWithFractionalIndex((a, b) => a.rank - b.rank, { limit: 1 }),
-            output((message) => {
-              for (const [[, [row]], weight] of message.getInner())
-                rows.set(row, (rows.get(row) ?? 0) + weight)
-            }),
-          )
-          graph.finalize()
-          const before = { rank }
-          const after = { rank: rank + 1 }
-          input.sendData(new MultiSet([[[1, before], 1]]))
-          graph.run()
-          const changes: Array<[[number, typeof before], number]> = [
-            [[1, after], 1],
-            [[1, before], -1],
-          ]
-          if (retractFirst) changes.reverse()
-          input.sendData(new MultiSet(changes))
-          graph.run()
-          const live = [...rows].filter(([, weight]) => weight !== 0)
-          expect(live).toHaveLength(1)
-          expect(live[0]![0]).toBe(after)
-          expect(live[0]![1]).toBe(1)
-        }),
-        parameters,
+const authority = `topKBatch's existing cancellation/replacement contract and oracle-coverage.md, Ordered relations and BTree; signed-zero decision 2026-11-02.`
+const limits = `The original authored relation families, controlled forced-hash collisions, direct batch return and finite graph drains. No provider scheduling or new value-identity policy.`
+
+// Compare observations in order and require every promised checkpoint. Reach
+// markers carry no product answer. Extra or missing observations fail the check.
+// Each matrix/path checkpoint has a distinct name. If production throws before
+// that checkpoint, its missing result cannot name an earlier recorded result.
+// Product exceptions propagate, so a crash cannot masquerade as a law verdict.
+function checkTrace(
+  trace: ReadonlyArray<Observation>,
+  expected: ReadonlyArray<ExpectedObservation>,
+  law: string,
+): Verdict {
+  let at = 0
+  for (const actual of trace) {
+    if (actual.checkpoint === `reach`) continue
+    const owed = expected[at++]
+    if (owed === undefined)
+      return violation(
+        actual.checkpoint,
+        `an unpromised result was observed`,
+        law,
       )
+    const mismatch = differs(actual.checkpoint, law, actual, owed)
+    if (mismatch) return mismatch
+  }
+  return at === expected.length
+    ? pass
+    : violation(expected[at]!.checkpoint, `the result was not observed`, law)
+}
+
+// Realization uses the authored constructor's equivalence bit, never a
+// production equality function. Registering an opaque handle prepares the
+// production input; it does not decide the expected contribution.
+function matrixPlan(history: MatrixHistory): MatrixPlan {
+  return {
+    retractFirst: history.retractFirst,
+    cells: valueRelations.flatMap(({ name, pair }) =>
+      [
+        [false, false],
+        [true, false],
+        [true, true],
+      ].map(([largeGroup, collision]) => {
+        const [left, right, equivalent] = pair(history.n)
+        return {
+          name: `${name}/large=${largeGroup}/collision=${collision}`,
+          equivalent,
+          largeGroup: largeGroup!,
+          collision: collision!,
+          before: [1, { value: left }],
+          after: [1, { value: right }],
+          transient: [1, { value: Symbol() }],
+        }
+      }),
+    ),
+  }
+}
+
+function expectedMatrix(plan: MatrixPlan): Array<ExpectedObservation> {
+  return plan.cells.flatMap((cell) => [
+    {
+      checkpoint: `${cell.name}: batch`,
+      value: {
+        cell: cell.name,
+        entries: cell.equivalent
+          ? []
+          : [
+              { row: `before`, weight: -1 },
+              { row: `after`, weight: 1 },
+            ],
+      },
+    },
+    {
+      checkpoint: `${cell.name}: retained rows`,
+      value: {
+        cell: cell.name,
+        rows: [{ row: cell.equivalent ? `before` : `after`, weight: 1 }],
+      },
+    },
+    ...(cell.collision
+      ? [
+          {
+            checkpoint: `${cell.name}: hash calls`,
+            value: { cell: cell.name, calls: 0 },
+          },
+        ]
+      : []),
+  ])
+}
+
+function inputLabel(value: unknown, cell: Cell): RowLabel {
+  if (value === cell.before) return `before`
+  if (value === cell.after) return `after`
+  if (value === cell.transient) return `transient`
+  return `other`
+}
+
+function payloadLabel(value: unknown, before: object, after: object): RowLabel {
+  return value === before ? `before` : value === after ? `after` : `other`
+}
+
+function driveMatrix(
+  plan: MatrixPlan,
+  observe: Observe,
+  omitRetraction = false,
+) {
+  for (const cell of plan.cells) {
+    const spy = cell.collision
+      ? vi.spyOn(hashing, `hash`).mockReturnValue(7)
+      : undefined
+    try {
+      const messages = [
+        new MultiSet([[cell.after, 1]]),
+        ...(cell.largeGroup
+          ? [
+              new MultiSet([
+                [cell.transient, 1],
+                [cell.transient, -1],
+              ]),
+            ]
+          : []),
+        new MultiSet([[cell.before, -1]]),
+      ]
+      if (plan.retractFirst) messages.reverse()
+      const entries = [...topKBatch(messages)].map(([row, weight]) => ({
+        row: inputLabel(row, cell),
+        weight,
+      }))
+      observe(`${cell.name}: batch`, {
+        cell: cell.name,
+        entries:
+          omitRetraction && !cell.equivalent
+            ? entries.filter(({ weight }) => weight >= 0)
+            : entries,
+      })
+
+      // Preserve the original raw signed output accumulation and source-row
+      // identity check after the graph drains. Zero weights alone disappear.
+      const graph = new D2()
+      const input = graph.newInput<InputRow>()
+      const retained = new Map<Payload, number>()
+      input.pipe(
+        topKWithFractionalIndex(() => 0, { limit: 1 }),
+        output((message) => {
+          for (const [[, [row]], weight] of message.getInner())
+            retained.set(row, (retained.get(row) ?? 0) + weight)
+        }),
+      )
+      graph.finalize()
+      input.sendData(new MultiSet([[cell.before, 1]]))
+      graph.run()
+      for (const message of messages) input.sendData(message)
+      graph.run()
+      observe(`${cell.name}: retained rows`, {
+        cell: cell.name,
+        rows: [...retained]
+          .filter(([, weight]) => weight !== 0)
+          .map(([row, weight]) => ({
+            row: payloadLabel(row, cell.before[1], cell.after[1]),
+            weight,
+          })),
+      })
+      if (spy)
+        observe(`${cell.name}: hash calls`, {
+          cell: cell.name,
+          calls: spy.mock.calls.length,
+        })
+      observe(`reach`, plan.retractFirst ? `retract first` : `add first`)
+      observe(
+        `reach`,
+        cell.equivalent ? `equal versions` : `replacement versions`,
+      )
+      observe(
+        `reach`,
+        cell.largeGroup ? `transient cancellation` : `ordinary batch`,
+      )
+      if (cell.collision) observe(`reach`, `forced collision`)
     } finally {
-      if (descriptor) Object.defineProperty(globalThis, `File`, descriptor)
+      spy?.mockRestore()
+    }
+  }
+}
+
+oracleProperty({
+  id: `ivm.topk-batch-relations`,
+  law: {
+    statement: `Equal versions cancel; unequal versions retract before insertion; the ordered graph retains the exact owed source row with unit weight, and forced collisions use no hash call.`,
+    authority,
+    limits,
+    owner: `Ordered relations and BTree`,
+  },
+  histories: {
+    arbitrary: fc.record({
+      n: fc.integer({ min: 0, max: 254 }),
+      retractFirst: fc.boolean(),
+    }),
+    runs: 25,
+    fixedSeeds: [409033],
+    states: [
+      `retract first`,
+      `add first`,
+      `equal versions`,
+      `replacement versions`,
+      `transient cancellation`,
+      `ordinary batch`,
+      `forced collision`,
+    ],
+    constructed: [
+      {
+        name: `retractions arrive first`,
+        enters: [
+          `retract first`,
+          `equal versions`,
+          `replacement versions`,
+          `transient cancellation`,
+          `ordinary batch`,
+          `forced collision`,
+        ],
+        build: (history) => ({ ...history, retractFirst: true }),
+      },
+      {
+        name: `additions arrive first`,
+        enters: [`add first`],
+        build: (history) => ({ ...history, retractFirst: false }),
+      },
+    ],
+  },
+  resolve: matrixPlan,
+  model: expectedMatrix,
+  driver: driveMatrix,
+  check: (_plan, trace, expected) =>
+    checkTrace(trace, expected, `same-key contributions`),
+  calibrations: [
+    {
+      name: `drops replacement retractions`,
+      law: `same-key contributions`,
+      driver: (plan, observe) => driveMatrix(plan, observe, true),
+    },
+  ],
+})
+
+const ordinaryRowHistory = fc.record({
+  rank: fc.integer(),
+  retractFirst: fc.boolean(),
+})
+oracleProperty({
+  id: `ivm.topk-batch-file-independent`,
+  law: {
+    statement: `An ordinary row replacement retains the exact new row with unit weight with File present or absent.`,
+    authority,
+    limits,
+    owner: `Ordered relations and BTree`,
+  },
+  histories: {
+    arbitrary: ordinaryRowHistory,
+    runs: 25,
+    fixedSeeds: [409039],
+    states: [`File present`, `File absent`, `retract first`, `add first`],
+    constructed: [
+      {
+        name: `retractions first`,
+        enters: [`File present`, `File absent`, `retract first`],
+        build: (history) => ({ ...history, retractFirst: true }),
+      },
+      {
+        name: `additions first`,
+        enters: [`add first`],
+        build: (history) => ({ ...history, retractFirst: false }),
+      },
+    ],
+  },
+  model: () =>
+    [true, false].map((available) => ({
+      checkpoint: `File available=${available}: retained rows`,
+      value: { available, rows: [{ row: `after`, weight: 1 }] },
+    })),
+  driver: ({ rank, retractFirst }, observe) => {
+    for (const available of [true, false]) {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
+      if (!available) Reflect.deleteProperty(globalThis, `File`)
+      try {
+        const graph = new D2()
+        const input = graph.newInput<[number, { rank: number }]>()
+        const retained = new Map<object, number>()
+        input.pipe(
+          topKWithFractionalIndex((a, b) => a.rank - b.rank, { limit: 1 }),
+          output((message) => {
+            for (const [[, [row]], weight] of message.getInner())
+              retained.set(row, (retained.get(row) ?? 0) + weight)
+          }),
+        )
+        graph.finalize()
+        const before = { rank }
+        const after = { rank: rank + 1 }
+        input.sendData(new MultiSet([[[1, before], 1]]))
+        graph.run()
+        const changes: Array<[[number, typeof before], number]> = [
+          [[1, after], 1],
+          [[1, before], -1],
+        ]
+        if (retractFirst) changes.reverse()
+        input.sendData(new MultiSet(changes))
+        graph.run()
+        observe(`File available=${available}: retained rows`, {
+          available,
+          rows: [...retained]
+            .filter(([, weight]) => weight !== 0)
+            .map(([row, weight]) => ({
+              row: payloadLabel(row, before, after),
+              weight,
+            })),
+        })
+        observe(
+          `reach`,
+          typeof File === `function` ? `File present` : `File absent`,
+        )
+        observe(`reach`, retractFirst ? `retract first` : `add first`)
+      } finally {
+        if (descriptor) Object.defineProperty(globalThis, `File`, descriptor)
+      }
     }
   },
-)
+  check: (_history, trace, expected) =>
+    checkTrace(trace, expected, `ordinary replacement`),
+  calibrations: [
+    {
+      name: `omits the replacement observation`,
+      law: `ordinary replacement`,
+      corrupt: () => [],
+    },
+  ],
+})
 
-it(`compares shared subtrees without expanding every path`, () => {
-  vi.spyOn(hashing, `hash`).mockReturnValue(7)
-  const campaignParameters = oracleFixedSeed(409034, { numRuns: 25 })
-  oracleRoute(oracleRouteOf(campaignParameters))
-  fc.assert(
-    fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {
+oracleProperty({
+  id: `ivm.topk-batch-shared-subtrees`,
+  law: {
+    statement: `Equal shared subtrees cancel with exactly one leaf read per input tree.`,
+    authority,
+    limits,
+    owner: `Ordered relations and BTree`,
+  },
+  histories: {
+    arbitrary: fc.integer({ min: 0, max: 20 }),
+    runs: 25,
+    fixedSeeds: [409034],
+    states: [`shared subtree comparison`],
+    constructed: [
+      {
+        name: `shared siblings`,
+        enters: [`shared subtree comparison`],
+        build: (depth) => Math.max(1, depth),
+      },
+    ],
+  },
+  model: () => [
+    { checkpoint: `batch and leaf reads`, value: { length: 0, reads: 2 } },
+  ],
+  driver: (depth, observe) => {
+    const spy = vi.spyOn(hashing, `hash`).mockReturnValue(7)
+    try {
       let reads = 0
       function tree(): object {
         let node: object = {
@@ -347,50 +605,120 @@ it(`compares shared subtrees without expanding every path`, () => {
           ]),
         ]),
       ]
-      expect(actual).toEqual([])
-      expect(reads).toBe(2)
-    }),
-    campaignParameters,
-  )
+      observe(`batch and leaf reads`, { length: actual.length, reads })
+      if (depth > 0) observe(`reach`, `shared subtree comparison`)
+    } finally {
+      spy.mockRestore()
+    }
+  },
+  check: (_depth, trace, expected) =>
+    checkTrace(trace, expected, `bounded shared-tree reads`),
+  calibrations: [
+    {
+      name: `omits the leaf-read result`,
+      law: `bounded shared-tree reads`,
+      corrupt: () => [],
+    },
+  ],
 })
 
-it(`short-circuits replacements without hashing unrelated payloads`, () => {
-  const runParameters = oracleFixedSeed(409035, { numRuns: 25 })
-  oracleRoute(oracleRouteOf(runParameters))
-  fc.assert(
-    fc.property(fc.integer({ min: 1, max: 100 }), (count) => {
-      let reads = 0
-      const make = (rank: number) => ({
-        rank,
-        get unrelated() {
-          reads++
-          return new Array(100).fill(rank)
-        },
-      })
-      const batch: Array<[[number, ReturnType<typeof make>], number]> = []
-      for (let key = 0; key < count; key++) {
-        batch.push([[key, make(1)], 1], [[key, make(0)], -1])
-      }
-      expect([...topKBatch([new MultiSet(batch)])]).toHaveLength(count * 2)
-      expect(reads).toBe(0)
-    }),
-    runParameters,
-  )
+oracleProperty({
+  id: `ivm.topk-batch-unrelated-payloads`,
+  law: {
+    statement: `Unrelated replacement payload getters are not read and each source key emits its retraction and insertion.`,
+    authority,
+    limits,
+    owner: `Ordered relations and BTree`,
+  },
+  histories: {
+    arbitrary: fc.integer({ min: 1, max: 100 }),
+    runs: 25,
+    fixedSeeds: [409035],
+    states: [`unrelated payload getters`],
+    constructed: [
+      {
+        name: `generated unrelated getters`,
+        enters: [`unrelated payload getters`],
+        build: (count) => count,
+      },
+    ],
+  },
+  model: (count) => [
+    {
+      checkpoint: `batch and unrelated reads`,
+      value: { length: count * 2, reads: 0 },
+    },
+  ],
+  driver: (count, observe) => {
+    let reads = 0
+    const make = (rank: number) => ({
+      rank,
+      get unrelated() {
+        reads++
+        return new Array(100).fill(rank)
+      },
+    })
+    const batch: Array<[[number, ReturnType<typeof make>], number]> = []
+    for (let key = 0; key < count; key++)
+      batch.push([[key, make(1)], 1], [[key, make(0)], -1])
+    observe(`batch and unrelated reads`, {
+      length: [...topKBatch([new MultiSet(batch)])].length,
+      reads,
+    })
+    observe(`reach`, `unrelated payload getters`)
+  },
+  check: (_count, trace, expected) =>
+    checkTrace(trace, expected, `unread unrelated payloads`),
+  calibrations: [
+    {
+      name: `omits the unrelated-read result`,
+      law: `unread unrelated payloads`,
+      corrupt: () => [],
+    },
+  ],
 })
 
-it(`cancels long same-key histories with independently allocated values`, () => {
-  const parameters = oracleFixedSeed(409037, { numRuns: 25 })
-  oracleRoute(oracleRouteOf(parameters))
-  fc.assert(
-    fc.property(fc.integer({ min: 10, max: 150 }), (count) => {
-      const make = (value: number) => ({ value })
-      const changes: Array<[[number, ReturnType<typeof make>], number]> = []
-      for (let value = 0; value < count; value++)
-        changes.push([[1, make(value)], 1])
-      for (let value = count - 1; value >= 0; value--)
-        changes.push([[1, make(value)], -1])
-      expect([...topKBatch([new MultiSet(changes)])]).toEqual([])
-    }),
-    parameters,
-  )
+oracleProperty({
+  id: `ivm.topk-batch-long-cancellation`,
+  law: {
+    statement: `Long same-key histories cancel independently allocated equal values completely.`,
+    authority,
+    limits,
+    owner: `Ordered relations and BTree`,
+  },
+  histories: {
+    arbitrary: fc.integer({ min: 10, max: 150 }),
+    runs: 25,
+    fixedSeeds: [409037],
+    states: [`independently allocated cancellation`],
+    constructed: [
+      {
+        name: `generated cancelling history`,
+        enters: [`independently allocated cancellation`],
+        build: (count) => count,
+      },
+    ],
+  },
+  model: () => [{ checkpoint: `cancelled batch`, value: { length: 0 } }],
+  driver: (count, observe) => {
+    const make = (value: number) => ({ value })
+    const changes: Array<[[number, ReturnType<typeof make>], number]> = []
+    for (let value = 0; value < count; value++)
+      changes.push([[1, make(value)], 1])
+    for (let value = count - 1; value >= 0; value--)
+      changes.push([[1, make(value)], -1])
+    observe(`cancelled batch`, {
+      length: [...topKBatch([new MultiSet(changes)])].length,
+    })
+    observe(`reach`, `independently allocated cancellation`)
+  },
+  check: (_count, trace, expected) =>
+    checkTrace(trace, expected, `complete cancellation`),
+  calibrations: [
+    {
+      name: `omits the cancellation result`,
+      law: `complete cancellation`,
+      corrupt: () => [],
+    },
+  ],
 })

@@ -808,6 +808,11 @@ const ownerGroups: ReadonlyArray<
     `distinct-collisions`,
   ],
   [
+    `db-ivm/tests/operators/topk-batch-contract-oracle.test.ts`,
+    `ivm`,
+    `topk-batch-relations topk-batch-file-independent topk-batch-shared-subtrees topk-batch-unrelated-payloads topk-batch-long-cancellation`,
+  ],
+  [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
     `topk-support-window topk-numeric-window topk-negative-window-array topk-negative-window-grouped topk-negative-window-orderBy`,

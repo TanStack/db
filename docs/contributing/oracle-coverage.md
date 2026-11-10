@@ -3983,6 +3983,13 @@ The post-merge review added three missing domains to existing owners:
   cross sparse-array length/holes and RegExp source/flags/position with equal
   controls, replacement order, hash consolidation, and actual retained graph
   output. Ordinary replacements also run without the global `File` constructor.
+  Its five `oracleProperty` campaigns preserve the original five fixed seeds
+  and 25 generated inputs per relation/path cell, and add equal-budget random
+  campaigns. Constructed histories measure replacement order, equal and unequal
+  versions, transient cancellation, collisions, File availability, shared
+  subtrees, unrelated getter reads, and long cancellation. The
+  [conversion evidence](oracle-reviews/2026-11-10-topk-batch-property-conversion.md)
+  records the same-seed mutation comparison and direct guarded replay.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
