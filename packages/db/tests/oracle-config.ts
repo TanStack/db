@@ -12,6 +12,9 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `sqlite.reserved-commit-hydration`,
+  `sqlite-persistence.boolean-arity-fixed`,
+
   `opfs.page-lifecycle-fixed`,
   `opfs.mixed-execute-fixed`,
   `opfs.terminal-event-fixed`,

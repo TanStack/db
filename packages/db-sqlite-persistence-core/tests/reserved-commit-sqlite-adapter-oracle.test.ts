@@ -40,7 +40,7 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import { createCollection } from '@tanstack/db'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect } from 'vitest'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
@@ -50,7 +50,14 @@ import {
   eagerStorageTarget,
   persistedCollectionOptions,
 } from '../src'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+
 import type { ProtocolEnvelope, SQLiteDriver, TxCommitted } from '../src'
 import type { SyncConfig } from '@tanstack/db'
 import type { SQLInputValue } from 'node:sqlite'
@@ -231,7 +238,9 @@ const openPeerTabHarness = async ({
   const start = async () => {
     await collection.preload()
     await waitFor(() =>
-      expect(collection.get('row-1')).toMatchObject({ value: 'initial' }),
+      oracleAssertion('existing comparison at 236', () =>
+        expect(collection.get('row-1')).toMatchObject({ value: 'initial' }),
+      ),
     )
   }
   /** Commits a row change from the peer tab into the shared database and returns its broadcast notice. */
@@ -471,17 +480,21 @@ describe('reserved commits across real-adapter hydrations', () => {
     const expected = expectedAdapterOutcome(history)
     const expectedValue = expected.commitAccepted ? 'refetched' : durableBefore
     await waitFor(() =>
-      expect(harness.collection.get('row-1')).toMatchObject({
-        value: expectedValue,
-      }),
+      oracleAssertion('existing comparison at 476', () =>
+        expect(harness.collection.get('row-1')).toMatchObject({
+          value: expectedValue,
+        }),
+      ),
     )
     // A subset load that waited runs after the reservation and succeeds.
-    expect({
-      outcomes,
-      nestedRow: harness.collection.get('row-2')?.value,
-      status: harness.collection.status,
-      loadOutcome,
-    }).toEqual(expected.observation)
+    oracleAssertion('existing comparison at 481', () =>
+      expect({
+        outcomes,
+        nestedRow: harness.collection.get('row-2')?.value,
+        status: harness.collection.status,
+        loadOutcome,
+      }).toEqual(expected.observation),
+    )
   }
   declareOracle({
     owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
@@ -489,11 +502,23 @@ describe('reserved commits across real-adapter hydrations', () => {
     model: [expectedAdapterOutcome],
     grammar: [adapterHistories],
   })
-  it.each(adapterHistories)(
-    'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $nesting, $ending)',
-    (...args: Parameters<typeof runAdapterHistory>) => {
-      oracleRoute(`case`)
-      return runAdapterHistory(...args)
+  oracleProperty({
+    id: `sqlite.reserved-commit-hydration`,
+    law: {
+      statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
+      authority: `The existing contract and authority stated beside this oracle's model.`,
+      limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+      owner: `SQLite persistence`,
     },
-  )
+    histories: adapterHistories,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
+        runAdapterHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    label: (history) =>
+      `${history.route}, ${history.timing}, ${history.nesting}, ${history.ending}`,
+  })
 })
