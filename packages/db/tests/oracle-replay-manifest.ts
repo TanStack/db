@@ -109,7 +109,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
     `live-query-observer`,
-    `hydration-subset-handoff`,
+    `hydration-subset-handoff.granular hydration-subset-handoff.wholesale`,
   ],
   [
     `react-db/tests/window-render-oracle.test.tsx`,
@@ -1089,10 +1089,6 @@ const replayTestNames = new Map([
   [`svelte.client-window`, `Svelte client page identity.*fresh`],
   [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
   [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
-  [
-    `live-query-observer.hydration-subset-handoff`,
-    `seeded ready-subset handoff \\(fresh\\)`,
-  ],
   [
     `preact.window-render.eager-derived-offset`,
     `preact\\.window-render\\.eager-derived-offset > random seed`,
