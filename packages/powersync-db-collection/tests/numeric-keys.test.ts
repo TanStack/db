@@ -82,6 +82,24 @@ function createNumericCollection(
 }
 
 describe(`numeric collection keys`, () => {
+  it.each([`007`, `9007199254740993`])(
+    `rejects a stored ID that cannot round-trip as a numeric key (%s)`,
+    async (id) => {
+      const { db } = await createDatabase()
+      await db.execute(
+        `INSERT INTO products (id, name, category) VALUES (?, 'D', 'invalid')`,
+        [id],
+      )
+      const collection = createNumericCollection(db, `on-demand`)
+      await expect(
+        Promise.resolve(
+          collection._sync.loadSubset({ where: categoryEquals(`invalid`) }),
+        ),
+      ).rejects.toThrow(/canonical safe integer/)
+      expect(collection.size).toBe(0)
+    },
+  )
+
   it(`syncs and writes rows keyed by a deserialized number`, async () => {
     const { db, errors } = await createDatabase()
     const collection = createNumericCollection(db, `eager`)

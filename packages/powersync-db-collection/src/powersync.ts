@@ -279,6 +279,16 @@ function createPowerSyncCollectionConfig<
     const validationSchema = deserializationSchema || schema
     const validation = validationSchema[`~standard`].validate(value)
     if (`value` in validation) {
+      const id = (validation.value as { id?: unknown }).id
+      if (
+        typeof id === `number` &&
+        (!Number.isSafeInteger(id) || String(id) !== value.id)
+      ) {
+        const message = `A numeric PowerSync id must round-trip as a canonical safe integer`
+        database.logger.log({ level: LogLevels.error, message })
+        onDeserializationError?.({ issues: [{ path: [`id`], message }] })
+        throw new Error(message)
+      }
       return validation.value
     } else if (`issues` in validation) {
       const issueMessage = `Failed to validate incoming data for ${viewName}. Issues: ${validation.issues.map((issue) => `${issue.path} - ${issue.message}`)}`
@@ -531,13 +541,12 @@ function createPowerSyncCollectionConfig<
         }
 
         try {
-          begin()
           const operations = await context.getAll<TriggerDiffRecord>(
             `SELECT * FROM ${trackedTableName} ORDER BY operation_id ASC`,
           )
           const pendingOperations: Array<PendingOperation> = []
 
-          for (const op of operations) {
+          const changes = operations.map((op) => {
             const { id, operation, timestamp, value } = op
             const parsedValue = deserializeSyncRow({
               id,
@@ -550,18 +559,20 @@ function createPowerSyncCollectionConfig<
                     ...JSON.parse(op.previous_value),
                   })
                 : undefined
-            write({
-              type: mapOperation(operation),
-              value: parsedValue,
-              previousValue: parsedPreviousValue,
-            })
             pendingOperations.push({
               id,
               operation,
               timestamp,
               tableName: viewName,
             })
-          }
+            return {
+              type: mapOperation(operation),
+              value: parsedValue,
+              previousValue: parsedPreviousValue,
+            }
+          })
+          begin()
+          for (const change of changes) write(change)
 
           // clear the current operations
           await context.execute(`DELETE FROM ${trackedTableName}`)
@@ -1194,6 +1205,9 @@ function createPowerSyncCollectionConfig<
     const { id } = record as { id?: unknown }
     if (typeof id !== `string` && typeof id !== `number`) {
       throw new Error(`Record must have a string or number id field`)
+    }
+    if (typeof id === `number` && !Number.isSafeInteger(id)) {
+      throw new Error(`A numeric PowerSync id must be a safe integer`)
     }
     return id as PowerSyncKey
   }

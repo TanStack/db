@@ -424,7 +424,7 @@ const products = createCollection(
 products.get(5)
 ```
 
-Updates and deletes write the key back as text. The PowerSync service converts integer `id` columns to text the same way when it syncs them.
+Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
 
 ### Optimistic Updates
 
