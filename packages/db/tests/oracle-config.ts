@@ -117,6 +117,7 @@ const staticOracleProperties = [
   `react.window-render`,
   `react.window-retry-ownership`,
   `preact.bound-options`,
+  `preact.bound-schema-options`,
   `preact.window-render.eager-derived-offset`,
   `preact.window-render.eager-derived-limit`,
   `preact.window-render.eager-derived-both`,

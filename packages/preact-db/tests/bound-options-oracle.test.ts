@@ -265,7 +265,7 @@ oracleProperty({
   calibrations: boundOptionHistories.map((binding) => ({
     name: `in-place replacement ${binding.option}/${binding.identity}`,
     law: `bound options`,
-    corrupt: (trace, history) =>
+    corrupt: (trace, history: History) =>
       history.option !== binding.option || history.identity !== binding.identity
         ? undefined
         : trace.map((entry) =>

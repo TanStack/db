@@ -123,6 +123,11 @@ const ownerGroups: ReadonlyArray<
   ],
   [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
+    `preact-db/tests/bound-schema-options-oracle.test.ts`,
+    `preact`,
+    `bound-schema-options`,
+  ],
+  [
     `preact-db/tests/window-render-oracle.test.tsx`,
     `preact`,
     [
@@ -1245,6 +1250,7 @@ const reseededProperties = new Set([`evaluators.like`])
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
   `preact.bound-options`,
+  `preact.bound-schema-options`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
 ])
