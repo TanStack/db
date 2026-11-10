@@ -212,6 +212,22 @@ const ownerGroups: ReadonlyArray<
     `ownership`,
   ],
   [
+    `browser-db-sqlite-persistence/tests/browser-coordinator-oracle.test.ts`,
+    `browser-coordinator`,
+    `mutation-delivery adapter-routing disposal collection-release retry-retention`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
+    `browser-coordinator`,
+    `remote-lease routing`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
+    `browser`,
+    `shared-driver-fairness`,
+  ],
+
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -1723,6 +1739,16 @@ const nativeReactProperties = new Set([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (
+    property.startsWith(`browser-coordinator.`) ||
+    [
+      `browser.shared-driver-fairness`,
+      `browser.electric-source-prefix`,
+      `browser.multi-tab-reserved-history`,
+    ].includes(property)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
+
   // Includes registrations now use the framework's canonical campaign name.
   if (
     property.startsWith(`includes.matrix.`) ||

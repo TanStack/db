@@ -24,26 +24,6 @@ export const oracleLintSettings = {
     // Frozen migration baseline: remove entries as their files convert. Never add one.
     legacyCampaigns: [
       {
-        file: `packages/browser-db-sqlite-persistence/e2e/electric-source-prefix-oracle.opfs.spec.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/browser-db-sqlite-persistence/tests/browser-coordinator-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

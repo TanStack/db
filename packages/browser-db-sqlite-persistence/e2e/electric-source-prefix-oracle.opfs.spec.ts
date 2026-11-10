@@ -10,7 +10,7 @@
 import { expect, test } from '@playwright/test'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { sourceHeadViolation } from '../tests/electric-convergence-oracle'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { requiredBrowserObservations } from '../tests/browser-required-observations'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import type { Page } from '@playwright/test'
@@ -99,7 +99,7 @@ for (const cell of cells) {
     context,
   }) => {
     oracleRoute(`case`)
-    const reach = createOracleReach(
+    const reach = requiredBrowserObservations(
       `browser.electric-source-prefix.opfs`,
       [
         `held earlier SDK response`,
