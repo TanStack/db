@@ -45,13 +45,40 @@ for the shortcuts listed below and report each one. Pick the path with this in
 mind: a shortcut does not finish the task sooner. It moves the work into
 review, where it costs more.
 
+### The oracle migration and gap ratchet
+
+Every bug fix or feature converts its owning oracles to `oracleProperty` and
+closes gaps in the production functions that it changes. Scope follows the
+changed functions: an oracle need not own every function in a touched file.
+Use `docs/contributing/oracle-coverage.md` to find the owners.
+
+`oracleProperty` is the only campaign API for new or converted oracles. The
+`legacyCampaigns` entries in `scripts/oracle-lint-settings.mjs` temporarily
+permit the listed files to keep their old campaigns. The list may only shrink.
+CI runs `scripts/check-legacy-oracle-campaigns.mjs` through `pnpm lint:oracles`
+to reject additions relative to the merge-base. Remove a file's entry when it
+converts. Remove the vendored compatibility helpers when their last caller
+converts.
+
+A conversion preserves laws, law statements, declared states, and run budgets.
+Replace literal-example reach with constructed histories that keep randomness.
+Run gap reports before and after with the same seed and compare stable mutant
+keys: every mutant killed before must still be killed after.
+
+A gap in a changed function remains open until the oracle kills the mutant or
+the maintainer grants an allowance for its anchored gaps. Recording it in the
+coverage map does not close it. Equivalent-mutant and unobservable-effect
+claims grant no exit. Remove dead code. A retired law must leave its kills
+covered by another law, or the production code it judged must change.
+
 ### The oracle-first path
 
 1. State the law and its authority.
 2. Extend the oracle so that generated histories reach the state where the law
-   matters. Declare that state with
-   [`createOracleReach`](packages/db/tests/oracle-reach.ts), and show that the
-   generated histories reach it.
+   matters. Declare that state in `histories.states` of `oracleProperty`. Supply
+   `histories.constructed` builders that splice it into generated histories.
+   Show that both campaigns reach it. Literal fixed histories do not count
+   toward required reach.
 3. Run the oracle against the unchanged production code. It fails: this is the
    RED result, and it proves that the oracle sees the defect.
 4. Change production. The oracle gives immediate feedback on each attempt,
@@ -110,8 +137,9 @@ is not ready:
   placed in an oracle file. A fixed regression must run through the shared
   model, production driver, and comparison without its own expected answer.
 - **"Pre-existing" as a dismissal:** a reachable counterexample that an agent
-  labels as older than the change, but does not fix, record in the coverage map
-  with its trace, or bring to the maintainer for a decision.
+  labels as older than the change, but does not fix or bring to the maintainer
+  for an explicit allowance. Recording its trace in the coverage map does not
+  close the gap.
 - **No mutant:** a closure claim without a mutant that fails the oracle.
 
 ### The evidence block
@@ -636,10 +664,11 @@ separate oracle owner when another boundary needs a different model. Show that
 the check fails on the original implementation or a mutant at the
 intended checkpoint, then passes with the fix.
 
-At closeout, state what the evidence covers. Record remaining in-scope histories
-or paths in the oracle coverage map with an oracle owner and needed witness. A
-reachable in-scope counterexample keeps the class open. Passing random runs is
-not a universal proof. A bug-fix pull request is not ready while a known
+At closeout, state what the evidence covers. Close gaps in changed functions
+with an oracle kill or an explicit maintainer allowance for the anchored gaps.
+A coverage-map entry supplies context but does not satisfy this obligation.
+A reachable in-scope counterexample without an allowance keeps the class open.
+Passing random runs is not a universal proof. A bug-fix pull request is not ready while a known
 in-scope part of the declared bug class remains open.
 
 Every bug-fix pull request must show how it evaluated and closed the declared

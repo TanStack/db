@@ -299,10 +299,12 @@ presence of a preferred heading, class, comment template, or helper.
   bug-class repair.
 - **Obligation:** The property MUST declare the states that its changed or
   cited laws depend on, and MUST fail when generated histories reach a declared
-  state fewer times than its stated minimum. Use
-  [`createOracleReach`](../../packages/db/tests/oracle-reach.ts) or an
-  equivalent counter that fails the property. A passing run count does not
-  satisfy this requirement.
+  state fewer times than its stated minimum. Declare the states with
+  `histories.states` in `oracleProperty` and supply `histories.constructed`
+  builders that splice them into generated histories. Literal fixed histories do not count
+  toward required reach. A passing run count does not satisfy this requirement.
+  Existing files on the shrinking `legacyCampaigns` list retain their legacy
+  reach checks until conversion; new or converted campaigns use `oracleProperty`.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.
