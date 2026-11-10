@@ -6,6 +6,9 @@ export default defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`],
+      // oracleProperty registers runtime tests that the type-test collector
+      // cannot discover. The file remains in the TypeScript program.
+      exclude: [`tests/offline-executor-refresh-oracle.test.ts`],
     },
   },
 })
