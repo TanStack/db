@@ -157,6 +157,8 @@ const staticOracleProperties = [
   `react.ssr-effects-current-suspense-explicit`,
   `react.ssr-effects-current-standalone`,
   `react.ssr-effects-current-supplied`,
+  `react.ssr-effects-react18-disabled`,
+  `react.ssr-effects-current-disabled`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,

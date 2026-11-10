@@ -170,6 +170,7 @@ const ownerGroups: ReadonlyArray<
       `ssr-effects-current-ordinary-provider ssr-effects-current-ordinary-explicit`,
       `ssr-effects-current-suspense-provider ssr-effects-current-suspense-explicit`,
       `ssr-effects-current-standalone ssr-effects-current-supplied`,
+      `ssr-effects-react18-disabled ssr-effects-current-disabled`,
     ].join(` `),
   ],
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
@@ -1311,6 +1312,8 @@ const reseededProperties = new Set<string>()
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
   `reverse-index.large-reads`,
+  `react.ssr-effects-react18-disabled`,
+  `react.ssr-effects-current-disabled`,
   `react.ssr-runtime-ordinary.cases`,
   `react.ssr-runtime-infinite.cases`,
   `react.descriptor-start-release.live`,
