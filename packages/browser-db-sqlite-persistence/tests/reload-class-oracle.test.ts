@@ -142,10 +142,40 @@ function check(
     : violation(`reload`, violations.join(`; `), `reload work and rows`)
 }
 
+// The full SQL recorder includes generated cache/claim IDs, table-name hashes,
+// clock readings, and host statement interleavings. Their exact spelling and
+// timing are not reload laws. Judge the unchanged raw record with the shared
+// independent model and comparison at the same reload checkpoint, then expose
+// that complete judgment to the native runner. This preserves every existing
+// count, identity relation, ordering check, and bounded-settlement comparison
+// without making the determinism check compare incidental host details.
+async function driveReload(
+  history: ReloadHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const observed = await observeReload(nodeBrowserHost(), history)
+  observe(
+    `reload`,
+    check(history, [{ checkpoint: `reload`, value: observed }], model(history)),
+  )
+}
+
+function checkRecordedReload(
+  _history: ReloadHistory,
+  trace: ReadonlyArray<Observation>,
+  _expected: ReturnType<typeof model>,
+): Verdict {
+  return (
+    (trace.find((entry) => entry.checkpoint === `reload`)?.value as
+      Verdict | undefined) ??
+    violation(`reload`, `reload observation is missing`, `reload work and rows`)
+  )
+}
+
 declareOracle({
   owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
   model: [model],
-  check: [check],
+  check: [check, checkRecordedReload],
   grammar: [reloadHistoryArb],
 })
 
@@ -163,10 +193,8 @@ oracleProperty({
     fixedSeeds: [2204],
   },
   model,
-  driver: async (history, observe) => {
-    observe(`reload`, await observeReload(nodeBrowserHost(), history))
-  },
-  check,
+  driver: driveReload,
+  check: checkRecordedReload,
   timeout: 300_000,
 })
 
@@ -183,9 +211,7 @@ oracleProperty({
   label: (entry) => entry.name,
   resolve: (entry) => entry.history,
   model,
-  driver: async (history, observe) => {
-    observe(`reload`, await observeReload(nodeBrowserHost(), history))
-  },
-  check,
+  driver: driveReload,
+  check: checkRecordedReload,
   timeout: 30_000,
 })
