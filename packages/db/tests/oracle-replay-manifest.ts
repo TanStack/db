@@ -235,7 +235,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/declared-reach-oracle.property.test.ts`,
     `oracle`,
-    `declared-reach`,
+    `declared-reach declared-reach-examples`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -512,7 +512,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/SortedMap-oracle.test.ts`,
     `sorted-map`,
-    `key ascending descending`,
+    `key ascending descending regressions reach-calibration`,
   ],
   [
     `db/tests/replay-guard-calibration.fixture.test.ts`,
@@ -1458,7 +1458,7 @@ const replayTestNames = new Map([
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
-  [`oracle.declared-reach`, `reach ledgers refine the declared reach model`],
+  [`oracle.declared-reach`, `oracle\\.declared-reach > random seed`],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1685,6 +1685,9 @@ const enumeratedProperties = new Set([
   `svelte.cache-options`,
   `svelte.descriptor-start-release`,
   `query.ordered-mutation-outcome`,
+  `oracle.declared-reach-examples`,
+  `sorted-map.regressions`,
+  `sorted-map.reach-calibration`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
   `scripts.publish-command`,
