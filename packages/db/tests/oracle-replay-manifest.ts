@@ -212,6 +212,11 @@ const ownerGroups: ReadonlyArray<
     `live infinite suspense`,
   ],
   [
+    `react-db/tests/source-id-reuse-oracle.test.tsx`,
+    `react`,
+    `source-id-inline-options source-id-deferred-release`,
+  ],
+  [
     `react-db/tests/cache-first-registration-oracle.test.tsx`,
     `react`,
     `cache-first-registration`,
@@ -1221,15 +1226,11 @@ const replayTestNames = new Map([
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,
   ],
-  [`react.window-render`, `window changes at React commit.*fresh`],
-  [`react.window-retry-ownership`, `retry ownership/.*fresh`],
-  [`react.client-window`, `client page identity.*fresh`],
   [`svelte.client-window`, `svelte\\.client-window > random seed`],
   [
     `svelte.client-window-recovery`,
     `svelte\\.client-window-recovery > random seed`,
   ],
-  [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
   [
     `preact.window-render.eager-derived-offset`,
     `preact\\.window-render\\.eager-derived-offset > random seed`,
@@ -1370,22 +1371,6 @@ const replayTestNames = new Map([
     `subscription-lifecycle.notification-error`,
     `acquires retained demand after replacement readiness.*random`,
   ],
-  [
-    `react.descriptor-error-surface`,
-    `error-surface after descriptor failure.*random`,
-  ],
-  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
-  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
-  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
-  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
-  [
-    `react.ssr-runtime-ordinary`,
-    `ordinary preserves runtime error hydration views.*random`,
-  ],
-  [
-    `react.ssr-runtime-infinite`,
-    `infinite preserves runtime error hydration views.*random`,
-  ],
   [`svelte.ssr-snapshot`, `svelte\\.ssr-snapshot > random seed`],
   [`svelte.ssr-handoff`, `svelte\\.ssr-handoff > random seed`],
   [
@@ -1455,6 +1440,8 @@ const enumeratedProperties = new Set([
   `react.suspense-local-options`,
   `react.suspense-indexing-config`,
   `react.cache-first-registration`,
+  `react.source-id-inline-options`,
+  `react.source-id-deferred-release`,
   `react.ssr-effects-react18-disabled`,
   `react.ssr-effects-current-disabled`,
   `react.ssr-runtime-ordinary.cases`,
@@ -1471,6 +1458,25 @@ const enumeratedProperties = new Set([
   `preact.bound-schema-options`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
+])
+
+// These converted receivers register the framework's native campaign names.
+// Their old hand-written campaign titles no longer select the random replay.
+const nativeReactProperties = new Set([
+  `react.client-window`,
+  `react.window-render`,
+  `react.window-retry-ownership`,
+  `react.suspense-retry-history`,
+  `react.suspense-replacement-history`,
+  `react.suspense-preload-restart-history`,
+  `react.suspense-siblings`,
+  `react.descriptor-error-surface`,
+  `react.descriptor-ownership`,
+  `react.ssr-ordinary`,
+  `react.ssr-infinite`,
+  `react.ssr-stream-cut`,
+  `react.ssr-runtime-ordinary`,
+  `react.ssr-runtime-infinite`,
 ])
 
 function directReplayTestName(property: string): string | undefined {
@@ -1519,12 +1525,11 @@ function directReplayTestName(property: string): string | undefined {
         return `immutable query key histories \\(fresh\\)`
     }
   }
-  if (property.startsWith(`react.ssr-effects-`)) {
-    const [runtime, ...path] = property
-      .slice(`react.ssr-effects-`.length)
-      .split(`-`)
-    return `${runtime} ${path.join(`-`)} renders without client layout diagnostics \\(random\\)`
-  }
+  if (
+    nativeReactProperties.has(property) ||
+    property.startsWith(`react.ssr-effects-`)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
   if (property === `replay.ordered-failed-replay`)

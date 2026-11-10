@@ -155,6 +155,8 @@ const staticOracleProperties = [
   `react.cache-options.suspense-render`,
   `react.cache-options.server-render`,
   `react.cache-first-registration`,
+  `react.source-id-inline-options`,
+  `react.source-id-deferred-release`,
   `react.suspense-local-options`,
   `react.suspense-indexing-config`,
   `react.descriptor-start-release.live`,
