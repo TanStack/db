@@ -137,10 +137,13 @@ export const supabaseCollectionOptions = <TSchema extends StandardSchemaV1>({
 
   type TItem = StandardSchemaV1.InferOutput<TSchema>
 
-  // Derive the collection key from the configured key columns. The values are
-  // always joined into a string, so a single numeric `id` of 6 becomes `'6'`.
+  // Derive the collection key from the configured key columns. A single column
+  // keeps its string form (`6` becomes `'6'`). Composite keys encode each
+  // value's string form as a JSON array, so distinct tuples cannot share a key
+  // the way `'-'` joining let `['a-b', 'c']` and `['a', 'b-c']` do.
   const getKey = (item: TItem): string | number => {
-    return keys.map((key) => item[key]).join('-')
+    const values = keys.map((key) => `${item[key] ?? ``}`)
+    return values.length === 1 ? values[0]! : JSON.stringify(values)
   }
 
   const conversions = { parse, serialize } as ColumnConversions
