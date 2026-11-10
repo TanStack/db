@@ -112,7 +112,8 @@ one-full-wrapper-row-read guarantee remains checked. No throughput or elapsed
 startup regression magnitude has been measured.
 
 The glossary's snapshot-transaction contract explicitly permits replacement of
-all synced rows. These adapters do not promise bounded startup source batches or
+all synced rows. The `syncBatchSize` option still bounds each source read. It does not bound
+total buffering across a complete snapshot. These adapters do not promise
 preservation of per-row metadata across that replacement. The previously reviewed
 startup budgets still pass: one full wrapper row read, skipped complete setup,
 and hydration fairness. The added clear and PowerSync batch retention are real
