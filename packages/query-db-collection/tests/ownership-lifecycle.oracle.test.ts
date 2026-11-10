@@ -5224,101 +5224,160 @@ describe(`query collection ownership lifecycle`, () => {
   it.each(reacquisitionHistories)(
     `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peers $peers, rows $rows)`,
     async (history) => {
-      const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
-      const detail = categorySubset(`detail`)
-      const peerSubsets = [
-        categorySubset(`list`),
-        {
-          where: new IR.Func(`in`, [
-            new IR.PropRef([`category`]),
-            new IR.Value([`peer`, `shared`]),
-          ]),
-        },
-      ].slice(0, history.peers)
-      const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
-      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-      const persistence = createDeferred<void>()
-      const refetch = createDeferred<Array<Item>>()
-      void refetch.promise.catch(() => undefined)
-      const { collection, queryFn } = createOwnershipFixture({
-        id,
-        results: [leaseResult, ...peerSubsets.map(() => [shared])],
-        staleTime: history.staleTime,
-      })
-      queryFn.mockImplementationOnce(() => refetch.promise)
-      const settleRefetch = () => {
-        if (history.refetch === `rejects`)
-          refetch.reject(new Error(`refetch failed`))
-        else
-          refetch.resolve(
-            history.refetch === `empty`
-              ? []
-              : leaseResult.map((item) => ({ ...item })),
-          )
-      }
-      const settleTurn = async () => {
-        for (let turn = 0; turn < 3; turn++)
-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      }
-      const mutation = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-
-      await collection._sync.loadSubset(detail)
-      for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
-      mutation.mutate(() => collection.insert(blocker))
-      cleanups.push(async () => {
-        persistence.resolve()
-        refetch.reject(new Error(`cleanup`))
-        await mutation.when(`settled`).catch(() => undefined)
-      })
-
-      // The release's sync transaction is accepted but held behind the blocker.
-      const pendingBefore = collection._state.pendingSyncedTransactions.length
-      collection._sync.unloadSubset(detail)
-      await vi.waitFor(() =>
-        expect(
-          collection._state.pendingSyncedTransactions.length,
-        ).toBeGreaterThan(pendingBefore),
+      // Reach records these existing real-QueryClient cuts per finite history.
+      // The owner/result model and every product comparison stay unchanged.
+      const reach = createOracleReach(
+        `query.reacquisition-neighbor`,
+        [
+          `older-release-held`,
+          `cached-reacquisition-held`,
+          `older-release-published`,
+          history.staleTime === 0
+            ? `refetch-outcome-settled`
+            : `fresh-cache-without-refetch`,
+          `all-peers-released`,
+          `final-lease-released`,
+        ],
+        { replaying: false },
       )
-      const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
-      void reacquired.catch(() => undefined)
-      await settleTurn()
-      const held = rows(collection)
+      reach.beginHistory()
+      try {
+        const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
+        const detail = categorySubset(`detail`)
+        const peerSubsets = [
+          categorySubset(`list`),
+          {
+            where: new IR.Func(`in`, [
+              new IR.PropRef([`category`]),
+              new IR.Value([`peer`, `shared`]),
+            ]),
+          },
+        ].slice(0, history.peers)
+        const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
+        const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+        const persistence = createDeferred<void>()
+        const refetch = createDeferred<Array<Item>>()
+        void refetch.promise.catch(() => undefined)
+        const { collection, queryClient, queryFn } = createOwnershipFixture({
+          id,
+          results: [leaseResult, ...peerSubsets.map(() => [shared])],
+          staleTime: history.staleTime,
+        })
+        queryFn.mockImplementationOnce(() => refetch.promise)
+        const settleRefetch = () => {
+          if (history.refetch === `rejects`)
+            refetch.reject(new Error(`refetch failed`))
+          else
+            refetch.resolve(
+              history.refetch === `empty`
+                ? []
+                : leaseResult.map((item) => ({ ...item })),
+            )
+        }
+        const settleTurn = async () => {
+          for (let turn = 0; turn < 3; turn++)
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        }
+        const mutation = createTransaction({
+          mutationFn: () => persistence.promise,
+        })
 
-      if (history.settles === `while-held`) {
-        settleRefetch()
+        await collection._sync.loadSubset(detail)
+        const detailQueries = queryClient.getQueryCache().getAll()
+        if (detailQueries.length !== 1)
+          throw new Error(`exact cached detail Query premise not reached`)
+        const cachedDetailQuery = detailQueries[0]!
+        for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
+        mutation.mutate(() => collection.insert(blocker))
+        cleanups.push(async () => {
+          persistence.resolve()
+          refetch.reject(new Error(`cleanup`))
+          await mutation.when(`settled`).catch(() => undefined)
+        })
+
+        // The release's sync transaction is accepted but held behind the blocker.
+        const pendingBefore = collection._state.pendingSyncedTransactions.length
+        collection._sync.unloadSubset(detail)
+        await vi.waitFor(() =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBefore),
+        )
+        reach.reach(`older-release-held`)
+        const cachedBefore =
+          queryClient.getQueryCache().getAll().includes(cachedDetailQuery) &&
+          cachedDetailQuery.state.status === `success` &&
+          Array.isArray(cachedDetailQuery.state.data) &&
+          cachedDetailQuery.state.data.some(
+            (item: Item) => item.id === shared.id,
+          )
+        if (!cachedBefore)
+          throw new Error(`cached reacquisition premise not reached`)
+        const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+        void reacquired.catch(() => undefined)
         await settleTurn()
-      }
-      persistence.resolve()
-      await mutation.when(`settled`)
-      await settleTurn()
-      const published = rows(collection)
+        const held = rows(collection)
+        reach.reach(`cached-reacquisition-held`)
 
-      if (history.settles === `after-publication`) {
-        settleRefetch()
+        if (history.settles === `while-held`) {
+          settleRefetch()
+          await settleTurn()
+        }
+        persistence.resolve()
+        await mutation.when(`settled`)
         await settleTurn()
-      }
-      await reacquired.catch(() => undefined)
-      const settled = rows(collection)
+        const published = rows(collection)
+        reach.reach(`older-release-published`)
 
-      for (const peer of peerSubsets) {
-        collection._sync.unloadSubset(peer)
+        if (history.settles === `after-publication`) {
+          settleRefetch()
+          await settleTurn()
+        }
+        await reacquired.catch(() => undefined)
+        const settled = rows(collection)
+        if (!queryClient.getQueryCache().getAll().includes(cachedDetailQuery))
+          throw new Error(`same physical cached detail Query no longer current`)
+        const expectedCalls =
+          1 + history.peers + (history.staleTime === 0 ? 1 : 0)
+        if (
+          queryFn.mock.calls.length !== expectedCalls ||
+          cachedDetailQuery.state.fetchStatus !== `idle`
+        )
+          throw new Error(`fresh-cache/refetch-settlement premise not reached`)
+        reach.reach(
+          history.staleTime === 0
+            ? `refetch-outcome-settled`
+            : `fresh-cache-without-refetch`,
+        )
+
+        for (const peer of peerSubsets) {
+          collection._sync.unloadSubset(peer)
+          await settleTurn()
+        }
+        const peerReleased = rows(collection)
+        reach.reach(`all-peers-released`)
+
+        collection._sync.unloadSubset(detail)
         await settleTurn()
+
+        expect({
+          held,
+          published,
+          settled,
+          peerReleased,
+          released: rows(collection),
+          queryCalls: queryFn.mock.calls.length,
+        }).toEqual(modelReacquisition(history))
+        reach.reach(`final-lease-released`)
+        reach.assertReached()
+      } finally {
+        console.info(`H02 ownership neighbor reach`, {
+          sourceModule: import.meta.url,
+          testName: expect.getState().currentTestName,
+          history,
+          counts: Object.fromEntries(reach.counts()),
+        })
       }
-      const peerReleased = rows(collection)
-
-      collection._sync.unloadSubset(detail)
-      await settleTurn()
-
-      expect({
-        held,
-        published,
-        settled,
-        peerReleased,
-        released: rows(collection),
-        queryCalls: queryFn.mock.calls.length,
-      }).toEqual(modelReacquisition(history))
     },
   )
 
