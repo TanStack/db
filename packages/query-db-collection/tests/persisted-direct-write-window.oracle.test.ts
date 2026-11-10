@@ -65,7 +65,10 @@ import type { Op, Row, StorageKind } from './persisted-direct-write-support'
  *   write is held, so a later direct write waits for that earlier commit.
  *
  * The production driver records source commits before the direct write. That
- * causal order selects the reference schedule, never its expected row values.
+ * causal order selects the reference schedule, never its expected row values
+ * or write outcome. Commit invocation is an input event to this differential
+ * law. Cache success is not that event. Requiring a commit in `startup` would
+ * impose an ordering that the direct-write contract does not promise.
  * With no earlier commit, the reference holds its first result until after the
  * direct write. An early update/delete can then reject because no row is loaded
  * (query-collection.md, "Individual Write Operations"). Both committed holders

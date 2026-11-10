@@ -2,7 +2,7 @@
 
 Review base: `736b167ec196f878288f631aff4e82180d9827a5`.
 This amendment extends the [prior Query/Convex evidence](2026-11-09-issue-2367.md#shared-persistence-conformance-migration-2026-11-09).
-The shared [persisted-startup oracle](../../../packages/db-adapter-conformance/src/persisted-startup-oracle.ts)
+The shared [persisted-startup oracle](../../../packages/db-adapter-conformance/tests/persisted-startup-oracle.ts)
 keeps its law, independent set model, history grammar, comparisons and 80-history
 run budget. Four receiving adapters now join Query and Convex. The earlier
 statement that they were optional remaining work was incomplete: the public

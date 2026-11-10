@@ -14,10 +14,10 @@ import { convexCollectionOptions } from '../src'
 import {
   sortedStartupRows,
   startupRows,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { ConvexProvider, rowsQuery } from './conformance-driver'
-import type { PersistedStartupHistory } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 export const convexStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory> =
@@ -62,6 +62,8 @@ export const convexStartupAdapter: PersistedStartupAdapter<PersistedStartupHisto
       return {
         collection,
         initialResult: startup.initialResult,
+        firstSubmission: startup.firstSubmission,
+        waitForRestore: startup.waitForRestore,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

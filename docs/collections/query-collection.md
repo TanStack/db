@@ -303,9 +303,13 @@ If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequ
 
 Eager Query Collections support TanStack Query's `initialData` and
 `initialDataUpdatedAt` options. Initial data has the original Query response
-shape, is stored in the Query cache, and is immediately materialized as
-normalized collection rows. TanStack Query uses `initialDataUpdatedAt` together
-with `staleTime` to decide whether to fetch.
+shape and is stored in the Query cache. Without persistence, it is immediately
+materialized as normalized collection rows. A persisted Collection first loads
+its durable baseline, then reconciles the initial data and its query ownership.
+With the default initial-render strategy, await `preload()` before reading the
+reconciled result. Network-first rendering can expose saved rows at its deadline
+while source reconciliation continues. TanStack Query uses
+`initialDataUpdatedAt` together with `staleTime` to decide whether to fetch.
 
 ```typescript
 const serverRenderedAt = Date.now()

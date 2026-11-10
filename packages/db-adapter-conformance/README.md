@@ -68,7 +68,7 @@ from `packages/db/tests/oracle-reach.ts`.
 
 ## Persisted startup conformance
 
-`src/persisted-startup-oracle.ts` owns complete-result replacement across a
+`tests/persisted-startup-oracle.ts` owns complete-result replacement across a
 persisted restore. It applies to both push adapters and client-cache adapters.
 The bare eager-source family does not generate persisted rows. Replacement
 uses the same READY-3/PUB-7 judgment, with scope-local ownership for sources
@@ -83,10 +83,14 @@ public/durable rows before refresh, public rows inside refresh fulfillment,
 durable rows after refresh, and a local-only reopen. It also shares the reload
 owner's one-row-read law. A scoped adapter checks exact source/peer ownership.
 
-Query receives the shared property with its five cache/fetch origins and peer
-scope. Convex receives it over the real SDK and controlled socket. Both run
-under their package's `test:oracles` command. Chromium OPFS receives eight Query
-and four Convex histories through the same model, composition, and comparison:
+Query receives the shared property with five cache/fetch origins and peer
+ownership. Convex, Electric, TrailBase, RxDB and PowerSync also receive it through
+their installed SDK or controlled provider boundary. Chromium worker/OPFS runs
+46 Query histories and 30 histories for each other adapter. Every receiver
+crosses ordinary and network-first rendering, empty and nonempty baselines,
+and a persisting optimistic transaction. RxDB and PowerSync prove source
+commit invocation before releasing a held restore; gate release alone does
+not count as response delivery.
 
 ```sh
 pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts

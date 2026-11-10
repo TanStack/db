@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { queryStartupHistories } from '../../query-db-collection/tests/persisted-startup-driver'
-import { persistedStartupHistories } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import { persistedStartupHistories } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { StartupConformanceResult } from './persisted-startup-conformance.opfs'
 
 // The page compares each cut with the shared model. Count each adapter's
@@ -27,6 +27,7 @@ declareOracle({ check: [checkStartupConformance] })
 test(`complete source results replace persisted rows across OPFS startup`, async ({
   page,
 }) => {
+  test.setTimeout(180_000)
   page.on(`console`, (message) =>
     console.info(`browser ${message.type()}: ${message.text()}`),
   )

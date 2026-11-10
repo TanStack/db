@@ -5104,7 +5104,7 @@ native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
 late (its fallback throttle), so the contract's before-wait checkpoint sits at
 450 ms.
 
-The readiness fixture does not retain writes. The [shared adapter startup owner](../../packages/db-adapter-conformance/src/persisted-startup-oracle.ts)
+The readiness fixture does not retain writes. The [shared adapter startup owner](../../packages/db-adapter-conformance/tests/persisted-startup-oracle.ts)
 receives the network-first contract on all six eager adapters. It compares
 saved rows and durable state while the source is held past the deadline, then
 the first complete source result and its durability before refresh, plus reopen.
@@ -7730,7 +7730,7 @@ See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention
 
 ## Adapter conformance: persisted startup (#2367)
 
-The [shared persistence owner](../../packages/db-adapter-conformance/src/persisted-startup-oracle.ts)
+The [shared persistence owner](../../packages/db-adapter-conformance/tests/persisted-startup-oracle.ts)
 judges complete source replacement across persisted restore. A collection-wide
 source replaces every row. A scoped source removes only its old ownership;
 an omitted row with a surviving peer stays. Authority: READY-3/PUB-7, the Query
@@ -7752,7 +7752,7 @@ Each uses the same
 [composition driver](../../packages/db-adapter-conformance/tests/persisted-startup-driver.ts),
 judgment, controlled storage, and real Node SQLite hosts. Per host, fixed and
 random campaigns each run 80 generated histories with separate enforced reach.
-Histories cross nonempty prior subsets of three keys, any next subset weighted
+Histories cross empty and nonempty prior subsets of three keys, any next subset weighted
 toward empty, changed overlap values, and response before/after persisted
 restore. A generated initial-render axis enables network-first and crosses
 source responses before the deadline with a source held past it. Every adapter,
@@ -7772,7 +7772,7 @@ snapshots also check exact ownership at all four snapshot cuts. Startup checks
 the reload owner's one-full-row-read law before its own durable observation.
 Query's receiving driver preserves exact fetch-count and pending-fetch premises.
 The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
-runs twenty Query histories and twelve complete-result histories for each of the
+runs forty-six Query histories and thirty complete-result histories for each of the
 other five adapters through the same composition and check on real worker/OPFS.
 
 The original Query omission fails startup on both Node hosts and OPFS. Convex
@@ -7794,8 +7794,11 @@ and OPFS files are retired after receiving parity; Query-specific ownership
 laws and the unrelated direct-write/failure-fidelity repairs remain.
 
 Limits: eager startup, three string keys and numeric values, one persistence
-instance, one source scope plus an optional persisted peer, and no mutation
-during the initial fetch. No on-demand window,
+instance, one source scope plus an optional persisted peer, and a disjoint optimistic
+insert held across the first source commit. Its settlement precedes the first
+complete-result comparison. Source commits and persisted restore can both be
+accepted while that transaction holds their application. Arbitrary mutation
+contents and overlapping optimistic transactions remain outside this grammar. No on-demand window,
 concurrent tab writer, arbitrary metadata namespace, failed-I/O, or every
 intermediate-publication claim. Electric's resumed delta-only streams belong to
 its recovery owner; a fresh full shape supplies this family's replacement
@@ -7804,7 +7807,8 @@ and PowerSync sources supply no remote-replication claim. See
 [migration status](../../packages/db-adapter-conformance/MIGRATION.md),
 [original evidence](oracle-reviews/2026-11-09-issue-2367.md) and the
 [all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md) and
-[network-first evidence](oracle-reviews/2026-11-10-network-first-startup.md).
+[network-first evidence](oracle-reviews/2026-11-10-network-first-startup.md), and
+[external-review amendment](oracle-reviews/2026-11-10-pr-2394-external-review.md).
 
 The [diff-focused gap CLI audit](oracle-reviews/2026-11-10-startup-gap-cli.md)
 records mutation evidence separately from startup conformance. Open receiving

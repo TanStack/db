@@ -10,7 +10,7 @@ import {
   persistedStartupMembershipArb,
   persistedStartupRenderArb,
   withStartupRender,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import {
   queryStartupAdapter,
@@ -49,9 +49,13 @@ const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
   .map(({ membership, ...schedule }) => ({ ...membership, ...schedule }))
   .chain((h) =>
     fc
-      .tuple(persistedStartupRenderArb, fc.boolean())
-      .map(([network, fallback]) =>
-        withStartupRender(h, network, fallback && h.origin === `fetch`),
+      .tuple(persistedStartupRenderArb, fc.boolean(), fc.boolean())
+      .map(([network, fallback, mutation]) =>
+        withStartupRender(
+          { ...h, ...(mutation ? { mutation: `persisting` as const } : {}) },
+          network,
+          fallback && h.origin === `fetch`,
+        ),
       ),
   )
 

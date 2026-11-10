@@ -14,7 +14,7 @@ import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src
 import {
   sortedStartupRows,
   startupRows,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import {
   startupInitialRender,
   trackStartupSync,
@@ -22,7 +22,7 @@ import {
 } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { powerSyncCollectionOptions } from '../src'
 import type { CommonPowerSyncDatabase } from '@powersync/common'
-import type { PersistedStartupHistory } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 const schema = new Schema({ rows: new Table({ value: column.integer }) })
@@ -45,11 +45,11 @@ export function powerSyncStartupAdapterFor(
           ])
       })
       let pending: (() => void) | undefined
-      let available = false
       const options = powerSyncCollectionOptions({
         id,
         database,
         table: schema.props.rows,
+        syncBatchSize: 1,
         schema: rowSchema,
         onDeserializationError: () => {},
         onLoad: () =>
@@ -66,19 +66,24 @@ export function powerSyncStartupAdapterFor(
           persistence,
         }),
       )
+      const responseAvailable = () =>
+        startup.hasCommitted() &&
+        startup.committedRowCount() >= startupRows(history.next, 2).length
       const deliver = async () => {
         await untilStartup(() => pending !== undefined)
         const release = pending!
         pending = undefined
-        available = true
         release()
+        await untilStartup(responseAvailable)
       }
       return {
         collection,
         initialResult: startup.initialResult,
+        firstSubmission: startup.firstSubmission,
+        waitForRestore: startup.waitForRestore,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
-        responseAvailable: () => available,
+        responseAvailable,
         refresh: async () => {
           const reloaded = collection.reload()
           await deliver()

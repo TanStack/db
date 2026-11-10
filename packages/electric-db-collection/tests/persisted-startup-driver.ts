@@ -11,7 +11,7 @@ import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src
 import {
   sortedStartupRows,
   startupRows,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import {
   startupInitialRender,
   trackStartupSync,
@@ -21,7 +21,7 @@ import { electricCollectionOptions } from '../src/electric'
 import type {
   PersistedStartupHistory,
   StartupRow,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 type Request = { url: URL; respond: (response: Response) => void }
@@ -125,6 +125,8 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
       return {
         collection,
         initialResult: startup.initialResult,
+        firstSubmission: startup.firstSubmission,
+        waitForRestore: startup.waitForRestore,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

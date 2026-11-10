@@ -11,6 +11,9 @@ The same interpreter runs a fixed corpus and generated histories.
 ## Laws and scope
 
 - Published inserts, updates and deletes agree with the model after each event.
+- The optional `SyncParams.metadata` API can be absent. Generated lifecycle
+  histories cross absence and presence without changing the row or lifecycle
+  law. An advertised API must still forward its `persistence` field intact.
 - Eager startup waits for its list; on-demand startup does not claim to load
   rows.
 - A list starts only after the change subscription is established, in both

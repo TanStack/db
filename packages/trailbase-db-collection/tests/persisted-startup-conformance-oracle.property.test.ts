@@ -7,7 +7,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   persistedStartupHistories,
   persistedStartupHistoryArb,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import { trailBaseStartupAdapter } from './persisted-startup-driver'
 

@@ -187,9 +187,10 @@ export function trailBaseCollectionOptions<
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
-      const persistence = validateSyncPersistenceCapability(
-        params.metadata?.persistence,
-      )
+      const persistence =
+        params.metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(params.metadata.persistence)
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {

@@ -10,8 +10,9 @@ import { queryCollectionOptions } from '../src/query'
 import {
   sortedStartupRows,
   startupRows,
+  withStartupMutations,
   withStartupRender,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import {
   startupInitialRender,
   trackStartupSync,
@@ -22,7 +23,7 @@ import type {
   PersistedStartupHistory,
   StartupRow,
   StartupSnapshot,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 export type QueryStartupHistory = PersistedStartupHistory & {
@@ -34,6 +35,13 @@ export type QueryStartupHistory = PersistedStartupHistory & {
     | `cached-pending`
 }
 const baseQueryStartupHistories: Array<QueryStartupHistory> = [
+  {
+    origin: `fetch`,
+    previous: 0,
+    next: 7,
+    peer: false,
+    response: `before-restore`,
+  },
   {
     origin: `fetch`,
     previous: 1,
@@ -92,11 +100,13 @@ const baseQueryStartupHistories: Array<QueryStartupHistory> = [
   },
 ]
 
-export const queryStartupHistories = baseQueryStartupHistories.flatMap((h) => [
-  h,
-  withStartupRender(h, true, false),
-  ...(h.origin === `fetch` ? [withStartupRender(h, true, true)] : []),
-])
+export const queryStartupHistories = withStartupMutations(
+  baseQueryStartupHistories.flatMap((h) => [
+    h,
+    withStartupRender(h, true, false),
+    ...(h.origin === `fetch` ? [withStartupRender(h, true, true)] : []),
+  ]),
+)
 
 type QueryMetadata =
   { queryCollection?: { owners?: Record<string, true> } } | undefined
@@ -182,6 +192,8 @@ export const queryStartupAdapter: PersistedStartupAdapter<QueryStartupHistory> =
       return {
         collection,
         initialResult: startup.initialResult,
+        firstSubmission: startup.firstSubmission,
+        waitForRestore: startup.waitForRestore,
         snapshot,
         deliver: async () => {
           if (h.origin === `fetch`) {

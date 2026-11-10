@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it, vi } from 'vitest'
+import { afterAll, expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import {
   oracleFixedSeed,
@@ -8,6 +8,7 @@ import {
   oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
@@ -66,6 +67,7 @@ type SyncRunPlan =
     }
 type Scenario = {
   mode: `eager` | `on-demand`
+  metadata?: `absent`
   syncRuns: Array<SyncRunPlan>
 }
 
@@ -76,9 +78,11 @@ type Scenario = {
  * The model never reads adapter bookkeeping, pending transactions or caches.
  */
 async function checkLifecycle(
-  { mode, syncRuns }: Scenario,
+  { mode, syncRuns, metadata }: Scenario,
   providerFault?: `list` | `set` | `buffered`,
+  metadataReach?: ReturnType<typeof createOracleReach>,
 ) {
+  metadataReach?.beginHistory()
   const api = new MockRecordApi<Row>()
   let current = source()
   api.subscribe.mockImplementation(() => current.subscription.promise)
@@ -102,20 +106,35 @@ async function checkLifecycle(
   const intervals = vi.spyOn(globalThis, `setInterval`)
   const cleared = vi.spyOn(globalThis, `clearInterval`)
   process.on(`unhandledRejection`, onUnhandled)
-  const collection = createCollection(
-    trailBaseCollectionOptions({
-      recordApi: api,
-      getKey: (row: Row) => row.id,
-      syncMode: mode,
-      parse: {
-        value: (value) => {
-          if (value === invalidValue) throw failure
-          return value
-        },
+  const options = trailBaseCollectionOptions({
+    recordApi: api,
+    getKey: (row: Row) => row.id,
+    syncMode: mode,
+    parse: {
+      value: (value) => {
+        if (value === invalidValue) throw failure
+        return value
       },
-      serialize: {},
-    }),
-  )
+    },
+    serialize: {},
+  })
+  // SyncParams.metadata is optional. A receiving wrapper may omit the whole
+  // API; an advertised API must still forward its persistence field intact.
+  const collection = createCollection({
+    ...options,
+    sync: {
+      ...options.sync,
+      sync: (params) => {
+        metadataReach?.reach(
+          metadata === `absent` ? `metadata-absent` : `metadata-present`,
+        )
+        return options.sync.sync({
+          ...params,
+          ...(metadata === `absent` ? { metadata: undefined } : {}),
+        })
+      },
+    },
+  })
   let expected = new Map<number, Row>()
   // Model entries come only from command scalars. Provider objects may be
   // changed before parse without changing any expected row.
@@ -399,6 +418,7 @@ const syncRunArb: fc.Arbitrary<SyncRunPlan> = fc.oneof(
   }),
 )
 const scenarioArb = fc.record({
+  metadata: fc.option(fc.constant(`absent` as const), { nil: undefined }),
   mode: fc.constantFrom(`eager` as const, `on-demand` as const),
   syncRuns: fc.array(syncRunArb, {
     minLength: 1,
@@ -441,6 +461,17 @@ const corpus: Array<{
     syncRuns: [{ kind }, live(`close`)],
   })),
 ]
+it.each([`eager`, `on-demand`] as const)(
+  `preserves lifecycle without a metadata API: %s`,
+  (mode) => {
+    oracleRoute(`fixed history`)
+    return checkLifecycle({
+      mode,
+      metadata: `absent`,
+      syncRuns: [live(`close`)],
+    })
+  },
+)
 it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
@@ -477,12 +508,33 @@ it.each([`list`, `set`, `buffered`] as const)(
     })
   },
 )
+const metadataCampaigns = new Set<string>()
+const metadataReaches = {
+  fixed: createOracleReach(`trailbase.lifecycle.metadata.fixed`, [
+    `metadata-absent`,
+    `metadata-present`,
+  ]),
+  random: createOracleReach(`trailbase.lifecycle.metadata.random`, [
+    `metadata-absent`,
+    `metadata-present`,
+  ]),
+}
+afterAll(() => {
+  for (const [campaign, reach] of Object.entries(metadataReaches)) {
+    if (!metadataCampaigns.has(campaign)) continue
+    reach.assertReached()
+    process.stdout.write(
+      `trailbase.lifecycle.metadata.${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+    )
+  }
+})
 const scenarioFixedSeed = oracleFixedSeed(714_203, { numRuns: oracleRuns(50) })
 fcTest.prop([scenarioArb], scenarioFixedSeed)(
   `matches generated lifecycle histories with a fixed seed`,
   (scenario) => {
     oracleRoute(oracleRouteOf(scenarioFixedSeed))
-    return checkLifecycle(scenario)
+    metadataCampaigns.add(`fixed`)
+    return checkLifecycle(scenario, undefined, metadataReaches.fixed)
   },
 )
 const scenarioCampaign = oraclePropertyOptions(50, `trailbase.lifecycle`)
@@ -490,7 +542,8 @@ fcTest.prop([scenarioArb], scenarioCampaign)(
   `matches generated lifecycle histories with a random or replayed seed`,
   (scenario) => {
     oracleRoute(oracleRouteOf(scenarioCampaign))
-    return checkLifecycle(scenario)
+    metadataCampaigns.add(`random`)
+    return checkLifecycle(scenario, undefined, metadataReaches.random)
   },
 )
 

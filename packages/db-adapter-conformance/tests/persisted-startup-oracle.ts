@@ -22,8 +22,11 @@
  *
  * Limits: three string keys, numeric values, one eager persisted sync run and
  * local-only reopen. No on-demand windows, concurrent writers, failed I/O, or
- * intermediate-publication claim. Drivers and host controls live in
- * ../tests/persisted-startup-driver.ts and persisted-startup-host.ts.
+ * intermediate-publication claim. A disjoint optimistic insert can persist
+ * across restore and the first source commit. After its settlement, that
+ * unconfirmed insert drops (optimistic-history-oracle.ts); replacement has
+ * the same set answer. The mutation axis changes scheduling, not that answer. Drivers and host controls live in
+ * persisted-startup-driver.ts and persisted-startup-host.ts.
  */
 import fc from 'fast-check'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -34,6 +37,7 @@ export type PersistedStartupHistory = {
   next: number
   peer: boolean
   response: `before-restore` | `after-restore` | `after-deadline`
+  mutation?: `persisting`
   initialRender?: `network-first`
 }
 export type StartupRow = { id: string; value: number }
@@ -96,18 +100,26 @@ export function expectedPersistedStartup(
   }
 }
 
-// Nonempty durable baselines and any next subset include omissions, an empty
+// Empty and nonempty durable baselines and any next subset include omissions, an empty
 // answer, equal membership, and changed values on overlap. Dropping the timing
 // axis loses the startup race; dropping peers admits a scoped global truncate.
 // A cached result is already available, so its receiving grammar restricts it
 // to before-restore. Duplicate keys and collection-wide peers are not legal.
 export const persistedStartupMembershipArb = (scope: StartupScope) =>
-  fc.record({
-    previous: fc.integer({ min: 1, max: 7 }),
-    next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
-    peer: scope === `scoped` ? fc.boolean() : fc.constant(false),
-  })
-// A deadline fallback is legal only with network-first enabled and a held
+  fc.oneof(
+    fc.record({
+      previous: fc.constant(0),
+      next: fc.integer({ min: 0, max: 7 }),
+      peer: fc.constant(false),
+    }),
+    fc.record({
+      previous: fc.integer({ min: 1, max: 7 }),
+      next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
+      peer: scope === `scoped` ? fc.boolean() : fc.constant(false),
+    }),
+  )
+// A deadline fallback requires a nonempty saved baseline (empty restore stays
+// loading), network-first enabled, and a held
 // source result. Ordinary responses retain both restore orders. The deadline's
 // exact threshold belongs to the persisted-readiness oracle; here zero expires
 // the wait while the source is held, and 60 seconds keeps it pending otherwise.
@@ -120,7 +132,10 @@ export function withStartupRender<H extends PersistedStartupHistory>(
   return {
     ...h,
     ...(networkFirst ? { initialRender: `network-first` as const } : {}),
-    response: networkFirst && fallback ? `after-deadline` : h.response,
+    response:
+      networkFirst && fallback && h.previous !== 0
+        ? `after-deadline`
+        : h.response,
   }
 }
 export const persistedStartupHistoryArb = (
@@ -129,30 +144,47 @@ export const persistedStartupHistoryArb = (
   fc
     .tuple(
       persistedStartupMembershipArb(scope),
+      fc.boolean(),
       fc.constantFrom(`before-restore` as const, `after-restore` as const),
     )
-    .chain(([membership, response]) =>
+    .chain(([membership, mutation, response]) =>
       fc
         .tuple(persistedStartupRenderArb, fc.boolean())
         .map(([network, fallback]) =>
-          withStartupRender({ ...membership, response }, network, fallback),
+          withStartupRender(
+            {
+              ...membership,
+              response,
+              ...(mutation ? { mutation: `persisting` as const } : {}),
+            },
+            network,
+            fallback,
+          ),
         ),
     )
 
 // These are inputs to the same judgment as generated histories. Receivers may
 // add adapter-specific origins, but never supply hand-written expected answers.
 const baseStartupHistories: Array<PersistedStartupHistory> = [
+  { previous: 0, next: 7, peer: false, response: `before-restore` },
   { previous: 1, next: 2, peer: false, response: `before-restore` },
   { previous: 1, next: 0, peer: false, response: `before-restore` },
   { previous: 3, next: 6, peer: false, response: `before-restore` },
   { previous: 3, next: 6, peer: false, response: `after-restore` },
 ]
 
-export const persistedStartupHistories = baseStartupHistories.flatMap((h) => [
-  h,
-  withStartupRender(h, true, false),
-  withStartupRender(h, true, true),
-])
+export const withStartupMutations = <H extends PersistedStartupHistory>(
+  histories: Array<H>,
+): Array<H> =>
+  histories.flatMap((h) => [h, { ...h, mutation: `persisting` as const }])
+
+export const persistedStartupHistories = withStartupMutations(
+  baseStartupHistories.flatMap((h) => [
+    h,
+    withStartupRender(h, true, false),
+    withStartupRender(h, true, true),
+  ]),
+)
 
 // Before any source result, timeout changes readiness only. Saved rows and
 // ownership must survive intact, both publicly and durably. Reusing replacement
@@ -254,6 +286,7 @@ declareOracle({
     persistedStartupMembershipArb,
     persistedStartupRenderArb,
     withStartupRender,
+    withStartupMutations,
     persistedStartupHistoryArb,
   ],
   check: [

@@ -17,13 +17,13 @@ import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src
 import {
   sortedStartupRows,
   startupRows,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { rxdbCollectionOptions } from '../src/rxdb'
 import type { RxCollection } from 'rxdb/plugins/core'
 import type {
   PersistedStartupHistory,
   StartupRow,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 let sequence = 0
@@ -56,7 +56,6 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
       if (inserted.error.length)
         throw new Error(`RxDB startup fixture failed to store source rows`)
       let release!: () => void
-      let available = false
       const response = new Promise<void>((resolve) => {
         release = resolve
       })
@@ -87,13 +86,14 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
       return {
         collection,
         initialResult: startup.initialResult,
+        firstSubmission: startup.firstSubmission,
+        waitForRestore: startup.waitForRestore,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
-        deliver: () => {
-          available = true
+        deliver: async () => {
           release()
-          return Promise.resolve()
+          await startup.firstCommit
         },
-        responseAvailable: () => available,
+        responseAvailable: startup.hasCommitted,
         refresh: () => collection.reload(),
         dispose: async () => {
           release()

@@ -7,7 +7,7 @@
  * Then compare before any refresh, inside
  * refresh fulfillment, after its durable read, and after a local-only reopen.
  */
-import { createCollection } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import {
@@ -18,7 +18,7 @@ import {
   persistedStartupViolations,
   sortedStartupRows,
   startupRows,
-} from '../src/persisted-startup-oracle'
+} from './persisted-startup-oracle'
 import type { SyncConfig } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 import type { HeldCall } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
@@ -28,7 +28,7 @@ import type {
   StartupRow,
   StartupScope,
   StartupSnapshot,
-} from '../src/persisted-startup-oracle'
+} from './persisted-startup-oracle'
 
 export function isStartupRowRead(sql: string): boolean {
   return sql
@@ -41,10 +41,13 @@ export interface PersistedStartupSource {
   collection: {
     preload: () => Promise<void>
     cleanup: () => Promise<void>
+    insert: (row: StartupRow) => unknown
     readonly size: number
     values: () => IterableIterator<StartupRow>
   }
   initialResult: Promise<void>
+  firstSubmission: Promise<void>
+  waitForRestore: () => Promise<void>
   snapshot: () => StartupSnapshot
   deliver: () => Promise<void>
   responseAvailable: () => boolean
@@ -69,6 +72,17 @@ export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
 export function trackStartupSync<T extends object, K extends string | number>(
   sync: SyncConfig<T, K>,
 ) {
+  let submit!: () => void
+  const firstSubmission = new Promise<void>((resolve) => {
+    submit = resolve
+  })
+  let hydrateBaseline: (() => Promise<void>) | undefined
+  let committedRows = 0
+  let committed = false
+  let resolveCommit!: () => void
+  const firstCommit = new Promise<void>((resolve) => {
+    resolveCommit = resolve
+  })
   let resolve!: () => void
   let reject!: (error: unknown) => void
   const initialResult = new Promise<void>((yes, no) => {
@@ -79,22 +93,46 @@ export function trackStartupSync<T extends object, K extends string | number>(
   const tracked: SyncConfig<T, K> = {
     ...sync,
     sync: (params) => {
+      hydrateBaseline = params.metadata?.persistence?.hydrateBaseline
       const receipts: Array<true | Promise<void>> = []
+      let writes = 0
       return sync.sync({
         ...params,
+        write: (message) => {
+          params.write(message)
+          writes++
+        },
         commit: (signal) => {
           const receipt = params.commit(signal)
           receipts.push(receipt)
+          committedRows += writes
+          writes = 0
+          committed = true
+          resolveCommit()
+          submit()
           return receipt
         },
         markReady: () => {
           params.markReady()
+          submit()
           void Promise.all(receipts).then(() => resolve(), reject)
         },
       })
     },
   }
-  return { sync: tracked, initialResult }
+  return {
+    sync: tracked,
+    initialResult,
+    firstCommit,
+    firstSubmission,
+    hasCommitted: () => committed,
+    committedRowCount: () => committedRows,
+    waitForRestore: async () => {
+      if (!hydrateBaseline)
+        throw new Error(`Persisted receiver has no baseline capability`)
+      await hydrateBaseline()
+    },
+  }
 }
 export function startupInitialRender(h: PersistedStartupHistory) {
   return h.initialRender
@@ -151,6 +189,8 @@ export async function observePersistedStartup<
   const initialReadCount = readRowCount()
   const hold = holdBaseline(id)
   let source: PersistedStartupSource | undefined
+  let settleMutation: (() => void) | undefined
+  let mutationSettled: Promise<unknown> | undefined
   return withOracleCleanup(async () => {
     source = await adapter.create(persistence, h, id)
     const current = source
@@ -192,9 +232,34 @@ export async function observePersistedStartup<
       }
     }
     let observationReads = 0
+    const holdMutation = async () => {
+      if (!h.mutation) return
+      let entered!: () => void
+      const started = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const pending = new Promise<void>((resolve) => {
+        settleMutation = resolve
+      })
+      const tx = createTransaction<StartupRow>({
+        autoCommit: false,
+        mutationFn: () => {
+          entered()
+          return pending
+        },
+      })
+      tx.mutate(() => {
+        current.collection.insert({ id: `local`, value: 9 })
+      })
+      mutationSettled = tx.commit()
+      await started
+    }
     const ready = current.collection.preload()
     await untilStartup(hold.isHeld)
-    if (h.response === `before-restore`) await current.deliver()
+    if (h.response === `before-restore`) {
+      await holdMutation()
+      await current.deliver()
+    }
     await startupTurn()
     const responseBeforeRestore = current.responseAvailable() && hold.isHeld()
     hold.release()
@@ -223,14 +288,25 @@ export async function observePersistedStartup<
         fallbackDurable,
       )
       rejectViolations(durableViolations)
+      await holdMutation()
       await current.deliver()
     }
     if (h.response === `after-restore`) {
-      await untilStartup(() => current.collection.size > 0)
+      await current.waitForRestore()
+      await holdMutation()
       await current.deliver()
     }
+    if (h.mutation) {
+      // Commit invocation (or an empty source's markReady) precedes applied
+      // settlement. Waiting for its receipt
+      // here would wait for the very optimistic transaction this driver holds.
+      await current.firstSubmission
+      settleMutation!()
+      await mutationSettled
+    }
     await ready
-    if (h.response === `after-deadline`) await current.initialResult
+    if (h.response === `after-deadline` || h.mutation)
+      await current.initialResult
     const startup = current.snapshot()
     if (responseBeforeRestore !== (h.response === `before-restore`))
       throw new Error(`Startup response/restore premise was not reached`)
@@ -283,5 +359,9 @@ export async function observePersistedStartup<
       rejectViolations(violations)
       return observation
     }, [() => reopened.cleanup()])
-  }, [() => hold.uninstall(), () => source?.dispose()])
+  }, [
+    () => settleMutation?.(),
+    () => hold.uninstall(),
+    () => source?.dispose(),
+  ])
 }

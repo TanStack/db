@@ -1,9 +1,19 @@
+import { resolve } from 'node:path'
 import { defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import packageJson from './package.json'
 
 const config = defineConfig({
   test: {
+    // Shared persistence drivers and this adapter must use one transaction stack.
+    alias: {
+      '@tanstack/db': resolve(import.meta.dirname, `../db/src`),
+      '@tanstack/db-ivm': resolve(import.meta.dirname, `../db-ivm/src`),
+      '@tanstack/db-sqlite-persistence-core': resolve(
+        import.meta.dirname,
+        `../db-sqlite-persistence-core/src`,
+      ),
+    },
     name: packageJson.name,
     dir: `./tests`,
     environment: `jsdom`,

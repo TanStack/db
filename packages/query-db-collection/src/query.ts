@@ -1674,8 +1674,8 @@ export function queryCollectionOptions(
 
       const ownedRows = new Set<string | number>()
       const hydratedOwners = Array.from(
-        collection._state.syncedData.keys(),
-        (rowKey) => [rowKey, getPersistedOwners(rowKey)] as const,
+        collection._state.acceptedSyncedEntries(),
+        ([rowKey]) => [rowKey, getPersistedOwners(rowKey)] as const,
       )
       for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
@@ -2897,7 +2897,8 @@ export function queryCollectionOptions(
         selectedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
       // Eager restore already owns the complete row read and its key evidence.
-      // Await that publication before diffing, rather than scanning it again.
+      // Await its acceptance before diffing, rather than scanning it again.
+      // A persisting optimistic transaction can still hold its application.
       const useHydratedBaseline =
         syncMode === `eager` &&
         !retainedQueriesPendingRevalidation.has(hashedQueryKey)

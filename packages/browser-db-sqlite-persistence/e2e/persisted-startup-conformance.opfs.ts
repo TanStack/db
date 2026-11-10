@@ -5,7 +5,7 @@ import {
   PersistedStartupViolation,
   persistedStartupHistories,
   persistedStartupViolations,
-} from '../../db-adapter-conformance/src/persisted-startup-oracle'
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import {
   isStartupRowRead,
   observePersistedStartup,
@@ -24,7 +24,7 @@ import {
   createBrowserWASQLitePersistence,
   openBrowserWASQLiteOPFSDatabase,
 } from '../src'
-import type { PersistedStartupHistory } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
 export type StartupConformanceResult = {
@@ -48,6 +48,16 @@ async function run() {
     adapter: PersistedStartupAdapter<H>,
     histories: Array<H>,
   ) {
+    // This page has no Node oracle runner. Each completed history calls its
+    // startup observer once; fail locally if any required receiving state is absent.
+    const reach: Record<string, number> = Object.fromEntries(
+      [
+        `response-before-restore`,
+        `restore-before-response`,
+        `persisting-mutation`,
+        `empty-baseline`,
+      ].map((state) => [state, 0]),
+    )
     for (const history of histories) {
       const index = sequence++
       const database = await openBrowserWASQLiteOPFSDatabase({
@@ -68,6 +78,15 @@ async function run() {
             history,
             `startup-${index}`,
             () => rowReads,
+            () => {
+              reach[
+                history.response === `before-restore`
+                  ? `response-before-restore`
+                  : `restore-before-response`
+              ]!++
+              if (history.mutation) reach[`persisting-mutation`]!++
+              if (history.previous === 0) reach[`empty-baseline`]!++
+            },
           )
           results.push({
             adapter: name,
@@ -86,6 +105,9 @@ async function run() {
         await database.close?.()
       }
     }
+    for (const [state, count] of Object.entries(reach))
+      if (!count) throw new Error(`${name}.opfs did not reach ${state}`)
+    console.info(`${name}.opfs ${JSON.stringify(reach)}`)
   }
   try {
     await receive(`query`, queryStartupAdapter, queryStartupHistories)

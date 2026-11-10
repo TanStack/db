@@ -24,11 +24,11 @@ import {
   persistedStartupCutViolations,
   persistedStartupFallbackViolations,
   persistedStartupViolations,
-} from '../src/persisted-startup-oracle'
+} from './persisted-startup-oracle'
 import { observePersistedStartup } from './persisted-startup-driver'
 import { createStartupHost } from './persisted-startup-host'
 import type { Arbitrary } from 'fast-check'
-import type { PersistedStartupHistory } from '../src/persisted-startup-oracle'
+import type { PersistedStartupHistory } from './persisted-startup-oracle'
 import type { PersistedStartupAdapter } from './persisted-startup-driver'
 
 declareOracle({
@@ -79,7 +79,7 @@ export function registerPersistedStartupConformance<
   oracleReplayTest(it)(`rejects a lost persisted fallback`, () => {
     oracleRoute(`calibration`)
     const h = {
-      ...histories[0]!,
+      ...histories.find((history) => history.previous !== 0)!,
       initialRender: `network-first` as const,
       response: `after-deadline` as const,
     }
@@ -100,8 +100,10 @@ export function registerPersistedStartupConformance<
     `network-first-source-result`,
     `network-first-fallback`,
     `empty-result`,
+    `empty-baseline`,
     `overlapping-update`,
     `omitted-row`,
+    `persisting-mutation`,
     ...(adapter.scope === `scoped` ? [`peer-owner`] : []),
     ...origins,
   ]
@@ -138,6 +140,8 @@ export function registerPersistedStartupConformance<
                     ? `network-first-fallback`
                     : `network-first-source-result`,
                 )
+              if (history.mutation) historyReach.reach(`persisting-mutation`)
+              if (history.previous === 0) historyReach.reach(`empty-baseline`)
               if (history.next === 0) historyReach.reach(`empty-result`)
               if (history.next & history.previous)
                 historyReach.reach(`overlapping-update`)
