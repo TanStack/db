@@ -1993,7 +1993,13 @@ server/local behavior has independent function refs. On unchanged production,
 640 admission assertions fail and 1,526 tests pass, including six controls.
 Failures remain open until the deferred production repair. The shared immutable
 bound-options checker now receives Preact's six native histories as well as
-React's 12; six mutant in-place mutations are rejected. Svelte's actual
+React's 12; six mutant in-place mutations are rejected. The Preact receiver
+now registers these six exhaustive cases as `preact.bound-options` through
+`oracleProperty`. It snapshots Collection/getKey/schema reference relations
+and keeps the shared binding judgment, three rerenders, source publication,
+replacement keys and all six in-place-replacement calibrations. Each case
+requires every original observation cut and its recorded reach states; the
+finite command also checks determinism and takes no seed/path coordinates. Svelte's actual
 client-backed effect receives all 144 cached-option histories. All three native
 selectors pass. Portable first claims/failure/consumption are no longer merely
 proposed coverage. Remaining cache limits at that chunk were first registration

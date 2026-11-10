@@ -121,6 +121,7 @@ const ownerGroups: ReadonlyArray<
     `react`,
     `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
+  [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
     `preact-db/tests/window-render-oracle.test.tsx`,
     `preact`,
@@ -1243,6 +1244,7 @@ const reseededProperties = new Set([`evaluators.like`])
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `preact.bound-options`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
 ])
