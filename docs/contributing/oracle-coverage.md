@@ -4375,7 +4375,7 @@ commit `fe532f4` in `packages/db/tests/oracle-reach.ts` and
 `packages/db/tests/oracle-campaign.ts`. Their generated self-oracle is again
 `packages/db/tests/declared-reach-oracle.property.test.ts`
 (`oracle.declared-reach`), with the compatibility examples in
-`oracle-reach.test.ts` and `oracle-campaign.test.ts`. The generated model,
+`legacy-reach.test.ts` and `legacy-campaign.test.ts`. The generated model,
 ledger grammar, comparisons, and 200-run budget are preserved; its imports and
 environment names use DB's configuration. These files judge the transitional
 helpers only. The current framework's `oracleProperty` laws and constructed
