@@ -59,7 +59,15 @@ export function registerPersistedStartupConformance<
   origins?: Array<string>
   origin?: (history: H) => string | undefined
 }) {
-  const states = [...startupRequiredStates(adapter.scope), ...origins]
+  const states = [
+    ...startupRequiredStates(
+      adapter.scope,
+      histories.some((h) => h.batchSize !== undefined),
+      histories.some((h) => h.singleSourceCommit),
+      histories.some((h) => h.sourceKeys),
+    ),
+    ...origins,
+  ]
   // The pinned framework remembers required states only for seed examples.
   // Keep the same obligations on every fresh generated or shrunk construction.
   // They describe its inputs, never production's expected rows.
@@ -115,6 +123,36 @@ export function registerPersistedStartupConformance<
           case `persisting-mutation`:
             history.mutation = `persisting`
             break
+          case `source-below-batch`:
+            history.batchSize = 2
+            history.next &= key
+            break
+          case `source-at-batch`:
+            history.batchSize = 1
+            history.next = key
+            break
+          case `source-above-batch`:
+            history.batchSize = 2
+            history.next = 7
+            break
+          case `omissions-above-batch`:
+            history.batchSize = 2
+            history.previous = 7
+            history.next = 0
+            break
+          case `paged-single-source`:
+            history.singleSourceCommit = true
+            history.next = 7
+            break
+          case `omissions-above-read-batch`:
+            history.singleSourceCommit = true
+            history.previous = 7
+            history.next = 0
+            break
+          case `source-key-transform`:
+            history.sourceKeys = `prefixed`
+            history.next |= key
+            break
         }
         if (
           state.startsWith(`network-first-`) ||
@@ -126,6 +164,7 @@ export function registerPersistedStartupConformance<
           history.peer = false
           delete history.previousOwner
         }
+        if (history.next === 0) delete history.sourceKeys
         constructionStates.set(history, [state])
         return history
       },
@@ -196,7 +235,9 @@ export function registerPersistedStartupConformance<
             violations.join(`\n`),
             violations[0]?.startsWith(`startupDurable:`)
               ? `startup durability`
-              : `persisted startup`,
+              : violations[0]?.startsWith(`startup batching:`)
+                ? `startup batching`
+                : `persisted startup`,
           )
         }
         const completed = trace.find(
@@ -219,7 +260,9 @@ export function registerPersistedStartupConformance<
             violations.join(`\n`),
             violations[0]?.startsWith(`startupDurable:`)
               ? `startup durability`
-              : `persisted startup`,
+              : violations[0]?.startsWith(`startup batching:`)
+                ? `startup batching`
+                : `persisted startup`,
           )
         const reached = new Set(
           trace
@@ -320,8 +363,8 @@ export function registerPersistedStartupConformance<
       oracleProperty({
         id: property,
         law: {
-          statement: `A complete eager source result replaces its persisted baseline and is durable before later refresh; network-first fallback preserves the saved snapshot.`,
-          authority: `READY-3/PUB-7; docs/collections/query-collection.md, Direct Writes and Query Sync and Initial Data; glossary, network-first initial render; maintainer shared-owner decision 2026-11-09.`,
+          statement: `A complete eager source result replaces its persisted baseline and is durable before later refresh; network-first fallback preserves the saved snapshot. Opted-in receivers preserve ordinary startup commits without a full replacement.`,
+          authority: `READY-3/PUB-7; docs/collections/query-collection.md, Direct Writes and Query Sync and Initial Data; glossary, network-first initial render; maintainer shared-owner decision 2026-11-09 and batching decision 2026-11-10.`,
           owner: `Adapter conformance: persisted startup (#2367)`,
           limits: `Three string keys, eager startup, one source plus an optional peer, a disjoint persisting mutation, local-only reopen; no concurrent writers, failed I/O, on-demand windows, or intermediate-publication claim.`,
         },
@@ -342,6 +385,42 @@ export function registerPersistedStartupConformance<
         driver: drive,
         check,
         calibrations: [
+          ...(histories.some(
+            (h) => h.batchSize !== undefined || h.singleSourceCommit,
+          )
+            ? [
+                {
+                  name: `replaces the ordinary initial commit with an explicit truncate`,
+                  law: `startup batching`,
+                  corrupt: (trace: ReadonlyArray<Observation>, history: H) =>
+                    history.batchSize === undefined &&
+                    !history.singleSourceCommit
+                      ? undefined
+                      : trace.map((entry) => {
+                          if (entry.checkpoint !== `completed`) return entry
+                          const observation =
+                            entry.value as PersistedStartupObservation
+                          return {
+                            ...entry,
+                            value: {
+                              ...observation,
+                              sourceTransactions:
+                                observation.sourceTransactions?.map(
+                                  (tx, index) =>
+                                    index === 0
+                                      ? {
+                                          ...tx,
+                                          snapshot: false,
+                                          truncate: true,
+                                        }
+                                      : tx,
+                                ),
+                            },
+                          }
+                        }),
+                },
+              ]
+            : []),
           ...states.map((state) => ({
             name: `omits constructed ${state}`,
             law: `constructed reach`,

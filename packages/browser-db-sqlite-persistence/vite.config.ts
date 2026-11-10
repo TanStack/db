@@ -1,12 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { defineConfig, mergeConfig } from 'vitest/config'
+import { configDefaults, defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import packageJson from './package.json'
 import type { Plugin } from 'vite'
 
 const waSqliteWasmImport = `@journeyapps/wa-sqlite/dist/wa-sqlite.wasm?url&no-inline`
 const waSqliteWasmModule = `\0tanstack-wa-sqlite-wasm-url`
+const adapterBrowserTests = [
+  `tests/trailbase-hydration-oracle.test.ts`,
+  `tests/trailbase-eager-live-source-oracle.test.ts`,
+  `tests/trailbase-browser-fidelity.test.ts`,
+  `tests/query-rejected-write-cutoff-browser-fidelity.test.ts`,
+  `tests/persisted-baseline-lifecycle-oracle.test.ts`,
+]
 
 function packageWaSqliteWasm(): Plugin {
   return {
@@ -93,11 +100,14 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
+    // These properties launch real Chromium in the dedicated browser CI group.
+    exclude: [...configDefaults.exclude, ...adapterBrowserTests],
     environment: `node`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+      exclude: adapterBrowserTests,
     },
   },
 })

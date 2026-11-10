@@ -2735,9 +2735,8 @@ export function queryCollectionOptions(
         }
 
         previouslyOwnedRows.forEach((key) => {
-          const oldItem = shouldUsePersistedBaseline
-            ? persistedBaseline.get(key)?.value
-            : currentSyncedItems.get(key)
+          const oldItem =
+            persistedBaseline?.get(key)?.value ?? currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const directPosition = unownedDirectWritePositions.get(key)

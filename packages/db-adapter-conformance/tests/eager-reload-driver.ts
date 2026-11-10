@@ -35,6 +35,18 @@ export type EagerReloadAdapter = {
   open: (initial: Array<StartupRow>, id: string) => Promise<EagerReloadSDK>
 }
 
+// With no optimistic transaction, the external gate's release order has no
+// contract meaning. Canonicalize only that absent-mutation fact; every observed
+// mutation=true flag remains available to the unchanged raw judgment.
+export function projectEagerReloadObservation(
+  history: EagerReloadHistory,
+  observed: EagerReloadObservation,
+): EagerReloadObservation {
+  return history.mutation
+    ? observed
+    : { ...observed, mutationReleasedBeforeFulfillment: false }
+}
+
 export async function observeEagerReload(
   adapter: EagerReloadAdapter,
   h: EagerReloadHistory,
@@ -145,7 +157,7 @@ export async function observeEagerReload(
     await pending
     await Promise.all(receipts.map(whenSyncAccepted))
     await Promise.all(receipts)
-    return {
+    return projectEagerReloadObservation(h, {
       before,
       beforeStatus,
       settledBeforeSource,
@@ -157,6 +169,6 @@ export async function observeEagerReload(
       mutationSettledBeforeFulfillment,
       final: sortedStartupRows(collection.values()),
       ...(error === undefined ? {} : { error }),
-    }
+    })
   }, [() => releaseMutation(), () => collection.cleanup(), () => sdk.dispose()])
 }

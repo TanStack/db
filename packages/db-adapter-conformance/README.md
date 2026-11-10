@@ -59,12 +59,14 @@ Implement `EagerLiveSourceDriver`:
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
 Declare only the capabilities your adapter supports; the grammar generates
-only the steps they allow. Then run `eagerLiveSourceProperty(driver, reach)`
-with `fc.assert`. `reach` is a `ReachCounter` (`beginHistory`, `reach`);
-count the states `reachStatesFor(driver)` lists and fail the run when one
-was reached fewer than five times, so histories that miss a state the laws
-need do not pass silently. The in-repo campaigns use `createOracleReach`
-from `packages/db/tests/oracle-reach.ts`.
+only the steps they allow. New and converted receivers register through
+`oracleProperty`. The shared `tests/eager-live-source-oracle-suite.ts` registers
+the fixed and fresh campaigns, with randomized constructed histories for every
+required state. Each campaign requires at least five constructions per state
+and checks generated constructions separately. RxDB, PowerSync and TrailBase
+use this path; their conversion preserves the existing laws and budgets.
+See the [conversion evidence](../../docs/contributing/oracle-reviews/2026-11-10-eager-source-primary-conversions.md).
+Remaining legacy receivers keep their listed compatibility path until conversion.
 
 ## Persisted startup conformance
 
@@ -86,7 +88,8 @@ owner's one-row-read law. A scoped adapter checks exact source/peer ownership.
 Query receives the shared property with five cache/fetch origins, ownerless
 saved rows, peer ownership, and peer-only overlaps. Convex, Electric, TrailBase, RxDB and PowerSync also receive it through
 their installed SDK or controlled provider boundary. Chromium worker/OPFS runs
-116 Query histories and 26 histories for each other adapter. The browser repeats
+116 Query histories, 104 PowerSync histories, 32 RxDB histories and 26 histories
+for each of Convex, Electric and TrailBase. The browser repeats
 these histories in one profile and removes fixture-owned OPFS files. It also
 runs 22 protocol-admission histories for each of RxDB and PowerSync. Every receiver
 crosses ordinary and network-first rendering, empty and nonempty baselines,
@@ -96,6 +99,20 @@ not count as response delivery. Both Node hosts also judge the independent
 persistence capability protocol through the real RxDB/PowerSync sync boundary.
 The persistence-loss calibration wraps hydration-scoped adapters, requires an
 actual dropped write, and fails if its clean candidate fails.
+
+PowerSync's first persisted startup keeps source commits bounded by
+`syncBatchSize`; RxDB keeps its existing full-load source commit. After
+hydration, both delete only saved omissions in bounded commits. The work
+judgment rejects startup snapshot replacement and truncate, excess source
+writes and excess deletes. PowerSync also crosses provider IDs transformed
+by deserialization. Retained nonempty reloads keep atomic snapshots.
+See the [batching evidence](../../docs/contributing/oracle-reviews/2026-11-10-persisted-startup-batching.md).
+
+`tests/persisted-baseline-lifecycle-oracle.ts` separately judges cleanup,
+reload and terminal source failure while the hydration continuation is held.
+RxDB and PowerSync receive it on controlled persistence, Node SQLite and actual
+Chromium worker/OPFS, using the same model and comparison. See the
+[lifecycle evidence](../../docs/contributing/oracle-reviews/2026-11-10-persisted-baseline-lifecycle.md).
 
 Package-local RxDB/PowerSync registrations also invoke the shared capability
 suite, so package-scoped test discovery and mutation audits include the protocol

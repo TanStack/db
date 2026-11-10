@@ -28,6 +28,7 @@ import type {
   StartupRow,
   StartupScope,
   StartupSnapshot,
+  StartupSyncTransaction,
 } from './persisted-startup-oracle'
 
 export function isStartupRowRead(sql: string): boolean {
@@ -55,6 +56,7 @@ export interface PersistedStartupSource {
   dispose: () => unknown
   checkStartup?: () => Array<string>
   syncOutcome?: Promise<{ error?: unknown }>
+  sourceTransactions?: () => ReadonlyArray<StartupSyncTransaction>
 }
 export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
   scope: StartupScope
@@ -86,6 +88,9 @@ export function trackStartupSync<T extends object, K extends string | number>(
   let hydrateBaseline: (() => Promise<void>) | undefined
   let committedRows = 0
   let committed = false
+  const sourceTransactions: Array<StartupSyncTransaction> = []
+  let sourceTransaction: StartupSyncTransaction | undefined
+  let recordingInitialResult = true
   let resolveCommit!: () => void
   const firstCommit = new Promise<void>((resolve) => {
     resolveCommit = resolve
@@ -109,12 +114,34 @@ export function trackStartupSync<T extends object, K extends string | number>(
           metadata: metadataTransform(
             params.metadata,
           ) as typeof params.metadata,
+          begin: (options) => {
+            params.begin(options)
+            sourceTransaction = recordingInitialResult
+              ? {
+                  snapshot: options?.snapshot === true,
+                  truncate: false,
+                  rowWrites: 0,
+                  deleteWrites: 0,
+                }
+              : undefined
+          },
+          truncate: (options) => {
+            params.truncate(options)
+            if (sourceTransaction) sourceTransaction.truncate = true
+          },
           write: (message) => {
             params.write(message)
+            if (sourceTransaction) {
+              if (message.type === `delete`) sourceTransaction.deleteWrites++
+              else sourceTransaction.rowWrites++
+            }
             writes++
           },
           commit: (signal) => {
             const receipt = params.commit(signal)
+            if (sourceTransaction)
+              sourceTransactions.push({ ...sourceTransaction })
+            sourceTransaction = undefined
             receipts.push(receipt)
             committedRows += writes
             writes = 0
@@ -125,6 +152,7 @@ export function trackStartupSync<T extends object, K extends string | number>(
           },
           markReady: () => {
             params.markReady()
+            recordingInitialResult = false
             submit()
             void Promise.all(receipts).then(() => resolve(), reject)
           },
@@ -145,6 +173,7 @@ export function trackStartupSync<T extends object, K extends string | number>(
     firstSubmission,
     hasCommitted: () => committed,
     committedRowCount: () => committedRows,
+    sourceTransactions: () => sourceTransactions.map((tx) => ({ ...tx })),
     waitForRestore: async () => {
       if (!hydrateBaseline)
         throw new Error(`Persisted receiver has no baseline capability`)
@@ -332,6 +361,7 @@ export async function observePersistedStartup<
     assertCut(`startup`, startup)
     // Work is captured before the observation's own durable read.
     const startupRowReads = readRowCount() - initialReadCount - observationReads
+    const sourceTransactions = current.sourceTransactions?.()
     const premiseViolations = [
       ...persistedStartupPremiseViolations(h, {
         responseBeforeRestore,
@@ -362,6 +392,7 @@ export async function observePersistedStartup<
       const observation = {
         responseBeforeRestore,
         startupRowReads,
+        ...(sourceTransactions ? { sourceTransactions } : {}),
         ...(fallback ? { fallback, fallbackDurable } : {}),
         startup,
         startupDurable,

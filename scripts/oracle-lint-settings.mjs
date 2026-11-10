@@ -636,10 +636,6 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/query-db-collection/tests/cursor-pagination-oracle.integration.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -661,10 +657,6 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/query-db-collection/tests/optimistic-ordered-refetch-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
@@ -724,10 +716,6 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -754,14 +742,6 @@ export const oracleLintSettings = {
       {
         file: `packages/svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/trailbase-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `scripts/lint-scope-oracle.property.test.js`,

@@ -5,13 +5,13 @@
 import { describe } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
-  persistedStartupHistories,
   persistedStartupHistoryArb,
+  persistedStartupSingleCommitHistories,
 } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import { rxdbStartupAdapter } from './persisted-startup-driver'
 
-const historyArb = persistedStartupHistoryArb(`collection`)
+const historyArb = persistedStartupHistoryArb(`collection`, false, true)
 // The receiving path judges persisted startup through this adapter entry.
 // The shared model owns replacement; this list lets the gap CLI credit it.
 declareOracle({
@@ -22,7 +22,7 @@ describe(`persisted startup conformance: RxDB`, () => {
   registerPersistedStartupConformance({
     property: `adapter.rxdb.persisted-startup`,
     adapter: rxdbStartupAdapter,
-    histories: persistedStartupHistories,
+    histories: persistedStartupSingleCommitHistories,
     arbitrary: historyArb,
     scopedStartupCommit: true,
   })

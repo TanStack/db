@@ -640,6 +640,36 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           'electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}',
         )
+      } else if (
+        /^adapter\.(rxdb|powersync)\.capability\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        const [, adapter, , host] = entry.property.split(`.`)
+        expect([`rxdb`, `powersync`]).toContain(adapter)
+        expect([`controlled`, `node-sqlite`]).toContain(host)
+        expect(source).toContain('id: `adapter.${name}.capability.${host}`')
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
+        )
+        const receivingSource = readFileSync(
+          resolve(repositoryDirectory, entry.file),
+          `utf8`,
+        )
+        expect(receivingSource).toContain(
+          `registerCapabilityConformance(\`${adapter}\`,`,
+        )
+      } else if (
+        /^trailbase\.lifecycle\.persisted-hydration\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        expect(source).toContain(
+          '`trailbase.lifecycle.persisted-hydration.${host}`',
+        )
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
+        )
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
           .slice(`react.ssr-effects-`.length)

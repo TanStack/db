@@ -1,9 +1,11 @@
 // Chromium OPFS receives the same shared startup comparison as both Node
-// hosts. The real QueryClient and Convex SDK supply their adapter boundaries;
-// this page supplies only actual worker/OPFS storage and result reporting.
+// hosts. Each adapter supplies its real SDK or controlled provider boundary;
+// this page supplies actual worker/OPFS storage and result reporting.
 import {
   PersistedStartupViolation,
+  persistedStartupBatchHistories,
   persistedStartupHistories,
+  persistedStartupSingleCommitHistories,
   persistedStartupViolations,
   startupReachedStates,
   startupRequiredStates,
@@ -71,7 +73,12 @@ async function run() {
     // This page has no Node oracle runner. Each completed history calls its
     // startup observer once; fail locally if any required receiving state is absent.
     const reach: Record<string, number> = Object.fromEntries(
-      startupRequiredStates(adapter.scope).map((state) => [state, 0]),
+      startupRequiredStates(
+        adapter.scope,
+        histories.some((h) => h.batchSize !== undefined),
+        histories.some((h) => h.singleSourceCommit),
+        histories.some((h) => h.sourceKeys),
+      ).map((state) => [state, 0]),
     )
     for (const history of histories) {
       const index = sequence++
@@ -128,11 +135,15 @@ async function run() {
       trailBaseStartupAdapter,
       persistedStartupHistories,
     )
-    await receive(`rxdb`, rxdbStartupAdapter, persistedStartupHistories)
+    await receive(
+      `rxdb`,
+      rxdbStartupAdapter,
+      persistedStartupSingleCommitHistories,
+    )
     await receive(
       `powersync`,
       powerSyncBrowserStartupAdapter,
-      persistedStartupHistories,
+      persistedStartupBatchHistories,
     )
     for (const [name, adapter] of [
       [`rxdb`, rxdbStartupAdapter],

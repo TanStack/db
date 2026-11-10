@@ -16,6 +16,9 @@
  * source response, saved rows and ownership stay intact. Authority: the glossary's
  * network-first initial-render contract and persisted-readiness oracle. That
  * owner retains empty/failed restore, remote-failure, and exact deadline laws.
+ * Opted-in PowerSync/RxDB receivers also preserve ordinary first-startup
+ * commits without full replacement (maintainer decision, 2026-11-10).
+ * PowerSync payload batches are bounded; total memory and elapsed time are not.
  *
  * The model abstracts source scopes to `source` and `peer`. These are ownership
  * edges, not subscriptions or provider identities. Whole-Collection adapters
@@ -43,6 +46,18 @@ export type PersistedStartupHistory = {
   response: `before-restore` | `after-restore` | `after-deadline`
   mutation?: `persisting`
   initialRender?: `network-first`
+  /** The initial source and omission commits retain this configured row bound. */
+  batchSize?: 1 | 2
+  /** RxDB retains its existing one full-load commit, followed by omissions. */
+  singleSourceCommit?: true
+  /** PowerSync provider IDs can deserialize to the same model Collection keys. */
+  sourceKeys?: `prefixed`
+}
+export type StartupSyncTransaction = {
+  snapshot: boolean
+  truncate: boolean
+  rowWrites: number
+  deleteWrites: number
 }
 export type StartupRow = { id: string; value: number }
 export type StartupScope = `collection` | `scoped`
@@ -60,6 +75,45 @@ export type PersistedStartupObservation = {
   refresh: StartupSnapshot
   durable: StartupSnapshot
   reopened: Array<StartupRow>
+  sourceTransactions?: ReadonlyArray<StartupSyncTransaction>
+}
+
+// Maintainer decision 2026-11-10: preserve PowerSync's existing startup batch
+// commits and RxDB's one full-load commit without adding a full replacement.
+// This receiving opt-in does not impose an elapsed-time/heap threshold or
+// progressive publication on retained reloads. Each ordinary initial source
+// commit, including an omission-only commit, writes at most the configured B
+// rows. Source writes and omission deletes cannot exceed their input counts;
+// an implementation may skip equal rows. The existing set judgment, rather
+// than a required work count, rejects missing changes at every public/durable cut.
+export function persistedStartupBatchViolations(
+  h: PersistedStartupHistory,
+  transactions: ReadonlyArray<StartupSyncTransaction> | undefined,
+): Array<string> {
+  if (h.batchSize === undefined && !h.singleSourceCommit) return []
+  const batchSize = h.batchSize
+  if (transactions === undefined)
+    return [`startup batching: source transaction observations are missing`]
+  const violations: Array<string> = []
+  const rows = startupRows(h.next, 2).length
+  const omitted = startupRows(h.previous & ~h.next, 1).length
+  if (transactions.some((tx) => tx.snapshot || tx.truncate))
+    violations.push(`startup batching: initial source selected replacement`)
+  if (
+    batchSize !== undefined &&
+    transactions.some((tx) => tx.rowWrites + tx.deleteWrites > batchSize)
+  )
+    violations.push(`startup batching: a commit exceeded ${batchSize} rows`)
+  if (
+    h.singleSourceCommit &&
+    transactions.filter((tx) => tx.rowWrites > 0).length > 1
+  )
+    violations.push(`startup batching: the single source commit was split`)
+  if (transactions.reduce((n, tx) => n + tx.rowWrites, 0) > rows)
+    violations.push(`startup batching: source row writes exceeded N`)
+  if (transactions.reduce((n, tx) => n + tx.deleteWrites, 0) > omitted)
+    violations.push(`startup batching: deletes exceeded saved omissions`)
+  return violations
 }
 
 export const startupRows = (mask: number, value: number): Array<StartupRow> =>
@@ -147,6 +201,9 @@ export function withStartupRender<H extends PersistedStartupHistory>(
 // Cache-origin constraints remain in the receiving Query grammar.
 export const persistedStartupHistoryArb = (
   scope: StartupScope,
+  batching = false,
+  singleSourceCommit = false,
+  sourceKeys = false,
 ): fc.Arbitrary<PersistedStartupHistory> =>
   fc
     .record(
@@ -161,11 +218,28 @@ export const persistedStartupHistoryArb = (
         ),
         mutation: fc.constant(`persisting` as const),
         initialRender: fc.constant(`network-first` as const),
+        ...(batching
+          ? { batchSize: fc.constantFrom(1 as const, 2 as const) }
+          : {}),
+        ...(singleSourceCommit
+          ? { singleSourceCommit: fc.constant(true as const) }
+          : {}),
+        ...(sourceKeys ? { sourceKeys: fc.constant(`prefixed` as const) } : {}),
       },
-      { requiredKeys: [`previous`, `next`, `peer`, `response`] },
+      {
+        requiredKeys: [
+          `previous`,
+          `next`,
+          `peer`,
+          `response`,
+          ...(batching ? [`batchSize` as const] : []),
+          ...(singleSourceCommit ? [`singleSourceCommit` as const] : []),
+        ],
+      },
     )
     .filter(
       (h) =>
+        (!h.sourceKeys || h.next !== 0) &&
         (!h.peer || h.previous !== 0) &&
         (h.response !== `after-deadline` ||
           (h.initialRender === `network-first` && h.previous !== 0)),
@@ -217,8 +291,32 @@ export const startupReachedStates = (
   (h.peer ? (h.previous & (h.previous - 1)) !== 0 : h.previous !== 0)
     ? [`ownerless-baseline`]
     : []),
+  ...(h.batchSize === undefined
+    ? []
+    : [
+        startupRows(h.next, 2).length < h.batchSize
+          ? `source-below-batch`
+          : startupRows(h.next, 2).length === h.batchSize
+            ? `source-at-batch`
+            : `source-above-batch`,
+        ...(startupRows(h.previous & ~h.next, 1).length > h.batchSize
+          ? [`omissions-above-batch`]
+          : []),
+      ]),
+  ...(h.singleSourceCommit && startupRows(h.next, 2).length > 2
+    ? [`paged-single-source`]
+    : []),
+  ...(h.singleSourceCommit && startupRows(h.previous & ~h.next, 1).length > 2
+    ? [`omissions-above-read-batch`]
+    : []),
+  ...(h.sourceKeys && h.next !== 0 ? [`source-key-transform`] : []),
 ]
-export const startupRequiredStates = (scope: StartupScope): Array<string> => [
+export const startupRequiredStates = (
+  scope: StartupScope,
+  batching = false,
+  singleSourceCommit = false,
+  sourceKeys = false,
+): Array<string> => [
   `response-before-restore`,
   `restore-before-response`,
   `network-first-source-result`,
@@ -229,6 +327,18 @@ export const startupRequiredStates = (scope: StartupScope): Array<string> => [
   `omitted-row`,
   `persisting-mutation`,
   ...(scope === `scoped` ? [`peer-owner`, `ownerless-baseline`] : []),
+  ...(batching
+    ? [
+        `source-below-batch`,
+        `source-at-batch`,
+        `source-above-batch`,
+        `omissions-above-batch`,
+      ]
+    : []),
+  ...(singleSourceCommit
+    ? [`paged-single-source`, `omissions-above-read-batch`]
+    : []),
+  ...(sourceKeys ? [`source-key-transform`] : []),
 ]
 
 export const persistedStartupHistories = uniqueStartupHistories(
@@ -240,6 +350,46 @@ export const persistedStartupHistories = uniqueStartupHistories(
     ]),
   ),
 )
+
+// Three saved omissions distinguish a safe omission sweep from one that skips
+// a later key when applying a deletion changes the iterator's backing map.
+const multipleOmissionHistories = withStartupMutations([
+  {
+    previous: 7,
+    next: 0,
+    peer: false,
+    response: `before-restore` as const,
+  },
+  { previous: 7, next: 0, peer: false, response: `after-restore` as const },
+  {
+    previous: 7,
+    next: 0,
+    peer: false,
+    response: `after-deadline` as const,
+    initialRender: `network-first` as const,
+  },
+])
+
+// B=1 and B=2 distinguish below/at/above the source commit boundary. A saved
+// three-row/empty-source history also needs more than one omission commit.
+export const persistedStartupBatchHistories = uniqueStartupHistories(
+  [...persistedStartupHistories, ...multipleOmissionHistories].flatMap((h) =>
+    [1 as const, 2 as const].flatMap((batchSize) => [
+      { ...h, batchSize },
+      ...(h.next !== 0
+        ? [{ ...h, batchSize, sourceKeys: `prefixed` as const }]
+        : []),
+    ]),
+  ),
+)
+
+export const persistedStartupSingleCommitHistories = [
+  ...persistedStartupHistories,
+  ...multipleOmissionHistories,
+].map((h) => ({
+  ...h,
+  singleSourceCommit: true as const,
+}))
 
 // Before any source result, timeout changes readiness only. Saved rows and
 // ownership must survive intact, both publicly and durably. Reusing replacement
@@ -324,7 +474,10 @@ export function persistedStartupViolations(
   scope: StartupScope,
   observation: PersistedStartupObservation,
 ): Array<string> {
-  const violations = persistedStartupPremiseViolations(h, observation)
+  const violations = [
+    ...persistedStartupPremiseViolations(h, observation),
+    ...persistedStartupBatchViolations(h, observation.sourceTransactions),
+  ]
   for (const cut of [`fallback`, `fallbackDurable`] as const)
     violations.push(
       ...persistedStartupFallbackViolations(h, scope, cut, observation[cut]),
@@ -361,5 +514,6 @@ declareOracle({
     persistedStartupCutViolations,
     persistedStartupPremiseViolations,
     persistedStartupViolations,
+    persistedStartupBatchViolations,
   ],
 })

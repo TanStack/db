@@ -135,6 +135,9 @@ export function rxdbCollectionOptions(
           ? null
           : validateSyncPersistenceCapability(params.metadata.persistence)
 
+      const replacesRetainedRows =
+        collection.health.reloading &&
+        !collection._state.acceptedSyncedEntries().next().done
       let initialFetchComplete = false
       async function initialFetch() {
         /**
@@ -144,13 +147,15 @@ export function rxdbCollectionOptions(
          */
         let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
-        // Replace retained rows, including a persisted baseline whose restore
-        // has not completed. An empty, unwrapped Collection keeps ordinary
-        // commit ordering with pending mutations.
+        // Retained reloads replace atomically. First persisted startup keeps
+        // its one ordinary source commit and deletes only restored omissions.
+        const listed =
+          persistence && !replacesRetainedRows ? new Set<string>() : undefined
         begin({
           snapshot:
-            persistence !== null ||
-            !collection._state.acceptedSyncedEntries().next().done,
+            persistence === null
+              ? !collection._state.acceptedSyncedEntries().next().done
+              : replacesRetainedRows,
         })
 
         while (!initialFetchComplete) {
@@ -193,6 +198,7 @@ export function rxdbCollectionOptions(
             query,
           )
           const result = await rxCollection.storageInstance.query(preparedQuery)
+          if (isStopped()) return
           const docs = result.documents
 
           cursor = lastOfArray(docs)
@@ -202,13 +208,36 @@ export function rxdbCollectionOptions(
           }
 
           docs.forEach((d) => {
+            listed?.add(getKey(d))
             write({
               type: `insert`,
               value: stripRxdbFields(clone(d)),
             })
           })
         }
-        await commit()
+        const firstApplied = commit()
+        if (firstApplied !== true) void firstApplied.catch(() => undefined)
+        const applied: Array<true | Promise<void>> = [firstApplied]
+        if (listed && persistence) {
+          await persistence.hydrateBaseline()
+          if (isStopped()) return
+          // Copy omitted keys before committing: synchronous application can
+          // change the accepted-row iterator's backing map. Buffered RxDB live
+          // changes still apply after this initial result.
+          const gone: Array<string> = []
+          for (const [key] of collection._state.acceptedSyncedEntries()) {
+            if (!listed.has(key)) gone.push(key)
+          }
+          for (let first = 0; first < gone.length; first += syncBatchSize) {
+            begin()
+            for (const key of gone.slice(first, first + syncBatchSize))
+              write({ type: `delete`, key })
+            const receipt = commit()
+            if (receipt !== true) void receipt.catch(() => undefined)
+            applied.push(receipt)
+          }
+        }
+        await Promise.all(applied)
       }
 
       type WriteMessage = Parameters<typeof write>[0]
@@ -225,6 +254,7 @@ export function rxdbCollectionOptions(
       }
 
       let sub: Subscription | undefined
+      const isStopped = () => sub?.closed !== false
       function stopOngoingFetch() {
         buffer.length = 0
         if (!sub) return
@@ -268,11 +298,10 @@ export function rxdbCollectionOptions(
       }
 
       async function start() {
-        const isCleanedUp = () => collection.status === `cleaned-up`
-
         startOngoingFetch()
+        if (isStopped()) return
         await initialFetch()
-        if (isCleanedUp()) {
+        if (isStopped()) {
           return
         }
 
@@ -286,7 +315,7 @@ export function rxdbCollectionOptions(
           begin()
           for (const msg of pending) write(msg)
           await commit()
-          if (isCleanedUp()) {
+          if (isStopped()) {
             return
           }
         }

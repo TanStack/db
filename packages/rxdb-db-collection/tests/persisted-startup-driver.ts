@@ -88,6 +88,7 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
         syncOutcome: startup.syncOutcome,
         initialResult: startup.initialResult,
         firstSubmission: startup.firstSubmission,
+        sourceTransactions: startup.sourceTransactions,
         waitForRestore: startup.waitForRestore,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver: async () => {

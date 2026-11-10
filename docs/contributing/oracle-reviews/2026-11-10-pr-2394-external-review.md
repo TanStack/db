@@ -179,6 +179,18 @@ case was correct. The review also found real costs and stale documentation.
 Its admission-contract, package-consumer, and wrapper-centralization conclusions
 were overstated, and running no tests left important distinctions unverified.
 
+## Subsequent batching repair
+
+The R4/R5 cost classification above records the reviewed snapshot implementation.
+The maintainer subsequently required preservation of ordinary startup commits.
+The [batching extension](2026-11-10-persisted-startup-batching.md) adds a separate
+deterministic work judgment, demonstrates RED before edits on both Node hosts
+and actual Chromium/OPFS, then preserves PowerSync batch commits and RxDB's
+existing source commit. Both adapters reconcile only saved omissions after
+hydration. Retained nonempty reloads keep atomic snapshots. This supersedes
+the forced-snapshot startup implementation, while preserving the historical
+finding and measurements. It does not introduce a total-memory bound.
+
 The review accounting and authorized repairs are complete. Whole-PR readiness
 is not assessed here. The prior gap CLI audit remains incomplete, and the final
 amendment still needs CI verification. No elapsed-time performance claim follows

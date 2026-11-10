@@ -43,7 +43,7 @@ The same interpreter runs a fixed corpus and generated histories.
   an event touched. Every page row is written as a full-row `update`, which
   creates a missing row and replaces a held one, so a page never collides with
   an event that core accepted but still holds. The page-event grammar enumerates
-  15 histories: eager startup or an on-demand load; an update, delete, or
+  28 histories: eager startup or an on-demand load; an update, delete, or
   insert; committed before the list call (on-demand only), while the page is in
   flight, or after it applies. It compares the Collection's rows with the
   service after the page settles and after a later change. A generated grammar
@@ -51,7 +51,7 @@ The same interpreter runs a fixed corpus and generated histories.
   pages of 256, cursor or offset paging, one or two overlapping on-demand loads,
   and up to four inserts, updates, and deletes among page releases. After every
   step a changed key holds the service's value; after the history drains, every
-  returned or changed key does. Four fixed histories cover an update between
+  returned or changed key does. Five fixed histories cover an insert and its update in transit, an update between
   pages, an update then a delete during a page, overlapping loads around an
   update, and offset paging with two updates. After the history drains, the
   Collection holds exactly the rows that a page returned or an event touched and
@@ -133,9 +133,10 @@ The same interpreter runs a fixed corpus and generated histories.
 
 Histories contain one to three Collection sync runs, eager/on-demand modes,
 delayed startup and list resolve/reject, zero to eight row edits, five stream
-endings, and immediate versus settled cleanup. Thirty-two fixed histories cover
-the boundaries; ordinary runs add 50 histories from a fixed-seed campaign and 50
-from a random campaign, with shrinking. Additional controls cover rejecting late
+endings, and immediate versus settled cleanup. Thirty-two corpus histories and four additional fixed histories cover
+the boundaries and metadata absence. Ordinary runs retain a 50-history fixed-seed
+campaign and a 50-history random campaign, with shrinking, plus thirteen
+randomized constructed histories per campaign. Additional controls cover rejecting late
 cancellation in both modes and mutate provider-owned list, event, and buffered
 rows before parsing. Model rows derive separately from command scalars, so
 provider mutation cannot change the answer.
@@ -154,6 +155,35 @@ separately. The lifecycle production driver calls the core subset boundary; the
 early-demand grammar also drives a real live query. Service-backed E2E coverage
 remains separate.
 
+## Framework conversion and enforced reach
+
+`oracleProperty` now registers the lifecycle and page/event campaigns. Their
+run budgets and fixed seeds remain 50 / 714203 and 40 / 205917. The finite
+`trailbase.lifecycle.boundaries` property runs all 51 existing boundary histories:
+16 early-demand, 28 single-page race, four held-page, two stream-end and one
+fresh-run history. All 36 lifecycle and five page/event fixed histories remain.
+
+The authored service and independent Maps still compute row truth. The
+production driver transports those reference facts separately from public
+observations. `lifecycle-judgment-oracle.ts` applies the reusable relations at
+every original cut. It keeps exact startup-error and resource identity through
+opaque tokens. Reports and detached rejections keep append-only events and
+opaque reason identity, including DOMException, class instances and symbols;
+this law forbids any such event, regardless of its reason's value.
+
+The lifecycle grammar declares thirteen required states; the page/event grammar
+declares seven. Each has a randomized constructed builder that returns a fresh
+object. A WeakMap retains each generated construction's required states, so
+ordinary generated outputs have the same obligation as named constructions.
+Missing-state controls exercise each builder. Separate generated-only controls
+use outputs that differ from every named fixed-seed construction.
+
+The grammar now reconstructs absent metadata fields, rejecting late cancellation
+and independently allocated page command objects. The page mapper has a guarded
+inverse. These changes expand reconstruction without removing an old history.
+The complete same-seed mutation retention gate remains required before claiming
+that this pure framework conversion retained every previous kill.
+
 ## Run and replay
 
 Run from `packages/trailbase-db-collection`:
@@ -166,11 +196,11 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles --coverage.enabled=false
 For a failing random campaign, use its reported seed and shrink path:
 
 ```sh
-TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false -t 'random or replayed'
+TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false -t 'trailbase.lifecycle.*random seed'
 ```
 
-Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` and `-t 'generated page
-histories with a random or replayed seed'` for the page-event grammar.
+Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` and
+`-t 'trailbase.page-event.*random seed'` for the page-event grammar.
 
 Replace the example seed/path with the failure's values. The guarded runner
 requires a witness that the named property executed with this seed and path;

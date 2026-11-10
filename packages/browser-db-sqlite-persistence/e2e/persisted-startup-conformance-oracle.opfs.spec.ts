@@ -1,7 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { queryStartupHistories } from '../../query-db-collection/tests/persisted-startup-driver'
-import { persistedStartupHistories } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
+import {
+  persistedStartupBatchHistories,
+  persistedStartupHistories,
+  persistedStartupSingleCommitHistories,
+} from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { capabilityHistories } from '../../db-adapter-conformance/tests/persisted-capability-oracle'
 import type { StartupConformanceResult } from './persisted-startup-conformance.opfs'
 
@@ -12,16 +16,16 @@ function checkStartupConformance(result: StartupConformanceResult) {
   expect(
     result.results.filter((item) => item.adapter === `query`),
   ).toHaveLength(queryStartupHistories.length)
-  for (const adapter of [
-    `convex`,
-    `electric`,
-    `trailbase`,
-    `rxdb`,
-    `powersync`,
-  ])
+  for (const adapter of [`convex`, `electric`, `trailbase`])
     expect(
       result.results.filter((item) => item.adapter === adapter),
     ).toHaveLength(persistedStartupHistories.length)
+  expect(
+    result.results.filter((item) => item.adapter === `powersync`),
+  ).toHaveLength(persistedStartupBatchHistories.length)
+  expect(result.results.filter((item) => item.adapter === `rxdb`)).toHaveLength(
+    persistedStartupSingleCommitHistories.length,
+  )
   for (const name of [`rxdb`, `powersync`])
     expect(
       result.capabilities.filter((item) => item.adapter === name),

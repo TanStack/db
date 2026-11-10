@@ -557,9 +557,17 @@ function valueArb(
       if (examples.length === 0) {
         throw new Error(`every ${kind} example is excluded`)
       }
-      return fc
-        .integer({ min: 0, max: examples.length - 1 })
-        .map((index) => examples[index]!())
+      return fc.integer({ min: 0, max: examples.length - 1 }).map(
+        (index) => examples[index]!(),
+        (value) => {
+          const index = examples.findIndex(
+            (example) => describeValue(example()) === describeValue(value),
+          )
+          if (index < 0)
+            throw new Error(`value is outside the declared examples`)
+          return index
+        },
+      )
     }),
   )
 }
@@ -600,19 +608,54 @@ function changeArb(
   excludes?: ValueExclusion,
 ): fc.Arbitrary<HistoryChange> {
   const changes: Array<fc.Arbitrary<HistoryChange>> = [
-    rowArb(kinds, fieldKinds, excludes).map((row) => ({
-      type: `upsert` as const,
-      row,
-    })),
-    fc
-      .integer({ min: 1, max: 5 })
-      .map((id) => ({ type: `delete` as const, id })),
+    rowArb(kinds, fieldKinds, excludes).map(
+      (row) => ({
+        type: `upsert` as const,
+        row,
+      }),
+      (value) => {
+        if (
+          !value ||
+          typeof value !== `object` ||
+          !(`type` in value) ||
+          value.type !== `upsert` ||
+          !(`row` in value)
+        )
+          throw new Error(`not an upsert`)
+        return value.row as ConformanceRow
+      },
+    ),
+    fc.integer({ min: 1, max: 5 }).map(
+      (id) => ({ type: `delete` as const, id }),
+      (value) => {
+        if (
+          !value ||
+          typeof value !== `object` ||
+          !(`type` in value) ||
+          value.type !== `delete` ||
+          !(`id` in value)
+        )
+          throw new Error(`not a delete`)
+        return value.id as number
+      },
+    ),
   ]
   if (kinds.length > 0 || fieldKinds.length > 0) {
     changes.push(
-      fc
-        .integer({ min: 1, max: 5 })
-        .map((id) => ({ type: `retouch` as const, id })),
+      fc.integer({ min: 1, max: 5 }).map(
+        (id) => ({ type: `retouch` as const, id }),
+        (value) => {
+          if (
+            !value ||
+            typeof value !== `object` ||
+            !(`type` in value) ||
+            value.type !== `retouch` ||
+            !(`id` in value)
+          )
+            throw new Error(`not a retouch`)
+          return value.id as number
+        },
+      ),
     )
   }
   return fc.oneof(...changes)
@@ -629,6 +672,21 @@ export type GrammarDomain = Pick<
   | `transientVariants`
   | `rejectedDelivery`
 >
+
+/** Inverse maps admit externally constructed histories without changing draws. */
+function declaredStep<K extends EagerLiveSourceStep[`kind`]>(
+  value: unknown,
+  kind: K,
+): Extract<EagerLiveSourceStep, { kind: K }> {
+  if (
+    !value ||
+    typeof value !== `object` ||
+    !(`kind` in value) ||
+    value.kind !== kind
+  )
+    throw new Error(`not a ${kind} step`)
+  return value as Extract<EagerLiveSourceStep, { kind: K }>
+}
 
 /** Generates histories whose steps use only the driver's declarations. */
 export function eagerLiveSourceHistoryArb(
@@ -654,10 +712,18 @@ export function eagerLiveSourceHistoryArb(
           ),
           seen: fc.integer({ min: 0, max: 3 }),
         })
-        .map(({ rows, seen }) =>
-          capabilities.has(`listen-before-fetch`)
-            ? { kind: `snapshot` as const, rows, seen }
-            : { kind: `snapshot` as const, rows },
+        .map(
+          ({ rows, seen }) =>
+            capabilities.has(`listen-before-fetch`)
+              ? { kind: `snapshot` as const, rows, seen }
+              : { kind: `snapshot` as const, rows },
+          (value) => {
+            const step = declaredStep(value, `snapshot`)
+            return {
+              rows: step.rows as Array<ConformanceRow>,
+              seen: step.seen ?? 0,
+            }
+          },
         ),
     },
     {
@@ -666,14 +732,34 @@ export function eagerLiveSourceHistoryArb(
         .array(changeArb(kinds, fieldKinds, domain.excludesValue), {
           maxLength: 3,
         })
-        .map((changes) => ({ kind: `changes` as const, changes })),
+        .map(
+          (changes) => ({ kind: `changes` as const, changes }),
+          (value) =>
+            ({ ...declaredStep(value, `changes`) })
+              .changes as Array<HistoryChange>,
+        ),
     },
-    { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
+    {
+      weight: 2,
+      arbitrary: fc.constant(null).map(
+        () => ({ kind: `fail` as const }),
+        (value) => {
+          declaredStep(value, `fail`)
+          return null
+        },
+      ),
+    },
     {
       weight: 1,
       arbitrary: capabilities.has(`prompt-after-restart`)
         ? fc.boolean().map((prompt) => ({ kind: `restart` as const, prompt }))
-        : fc.constant({ kind: `restart` as const }),
+        : fc.constant(null).map(
+            () => ({ kind: `restart` as const }),
+            (value) => {
+              declaredStep(value, `restart`)
+              return null
+            },
+          ),
     },
   ]
   if (capabilities.has(`duplicate-key-delivery`)) {
@@ -691,11 +777,20 @@ export function eagerLiveSourceHistoryArb(
           ),
           duplicate: fc.nat(2),
         })
-        .map(({ rows, duplicate }) => ({
-          kind: `malformed` as const,
-          rows,
-          duplicate,
-        })),
+        .map(
+          ({ rows, duplicate }) => ({
+            kind: `malformed` as const,
+            rows,
+            duplicate,
+          }),
+          (value) => {
+            const step = declaredStep(value, `malformed`)
+            return {
+              rows: step.rows as Array<ConformanceRow>,
+              duplicate: step.duplicate,
+            }
+          },
+        ),
     })
   }
   if (capabilities.has(`await-evidence`)) {
@@ -808,7 +903,14 @@ export function eagerLiveSourceHistoryArb(
       fc.oneof(
         ...steps.map(({ weight, arbitrary }) => ({
           weight,
-          arbitrary: arbitrary.map((step) => [step]),
+          arbitrary: arbitrary.map(
+            (step) => [step],
+            (value) => {
+              if (!Array.isArray(value) || value.length !== 1)
+                throw new Error(`not one step`)
+              return value[0] as EagerLiveSourceStep
+            },
+          ),
         })),
         ...outages.map((arbitrary, index) => ({
           weight: index === 0 ? 3 : 1,
@@ -817,7 +919,13 @@ export function eagerLiveSourceHistoryArb(
       ),
       { minLength: 1, maxLength: 12 },
     )
-    .map((elements) => elements.flat())
+    .map(
+      (elements) => elements.flat(),
+      (value) => {
+        if (!Array.isArray(value)) throw new Error(`not a history`)
+        return value.map((step: EagerLiveSourceStep) => [step])
+      },
+    )
   // EVID-2 and a prompt restart after a failure need sequences that random
   // steps rarely produce, so a history can open with one: no prefix weighs 5
   // and each declared scenario 1, so with one scenario one history in six
@@ -879,10 +987,24 @@ export function eagerLiveSourceHistoryArb(
       minLength: 1,
       maxLength: 3,
     })
-    .map((changes) => ({ kind: `changes` as const, changes }))
-  return fc
-    .tuple(fc.array(startup, { maxLength: 3 }), history)
-    .map(([burst, rest]) => [...burst, ...rest])
+    .map(
+      (changes) => ({ kind: `changes` as const, changes }),
+      (value) => declaredStep(value, `changes`).changes as Array<HistoryChange>,
+    )
+  return fc.tuple(fc.array(startup, { maxLength: 3 }), history).map(
+    ([burst, rest]) => [...burst, ...rest],
+    (value) => {
+      if (!Array.isArray(value)) throw new Error(`not a history`)
+      // A startup burst contributes at most three steps before the ordinary
+      // twelve-step grammar. This inverse changes admission, never draws.
+      const burstLength = Math.max(0, value.length - 12)
+      if (burstLength > 3) throw new Error(`startup burst is too long`)
+      return [value.slice(0, burstLength), value.slice(burstLength)] as [
+        Array<{ kind: `changes`; changes: Array<HistoryChange> }>,
+        Array<EagerLiveSourceStep>,
+      ]
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------

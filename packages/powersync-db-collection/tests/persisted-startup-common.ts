@@ -5,6 +5,8 @@
  * source SQLite is not a reason to waive replacement in a wrapped Collection.
  * Reload reads the unchanged table again. Remote PowerSync replication is
  * outside this local-table witness.
+ * A representation axis prefixes provider IDs and deserializes them back to
+ * the same model Collection keys. Expected rows do not depend on that encoding.
  */
 import { Schema, Table, column } from '@powersync/common'
 import { createCollection } from '@tanstack/db'
@@ -37,10 +39,13 @@ export function powerSyncStartupAdapterFor(
     scope: `collection`,
     async create(persistence, history, id, metadataTransform) {
       const { database, dispose } = await open(schema)
+      const sourceKey = (key: string) =>
+        history.sourceKeys ? `provider:${key}` : key
+      const deserializedSourceKeys = new Set<string>()
       await database.writeTransaction(async (tx) => {
         for (const row of startupRows(history.next, 2))
           await tx.execute(`INSERT INTO rows (id, value) VALUES (?, ?)`, [
-            row.id,
+            sourceKey(row.id),
             row.value,
           ])
       })
@@ -49,8 +54,21 @@ export function powerSyncStartupAdapterFor(
         id,
         database,
         table: schema.props.rows,
-        syncBatchSize: 1,
+        syncBatchSize: history.batchSize ?? 1,
         schema: rowSchema,
+        ...(history.sourceKeys
+          ? {
+              deserializationSchema: z.object({
+                id: z.string().transform((key) => {
+                  if (!key.startsWith(`provider:`))
+                    throw new Error(`PowerSync source key encoding was lost`)
+                  deserializedSourceKeys.add(key)
+                  return key.slice(`provider:`.length)
+                }),
+                value: z.number(),
+              }),
+            }
+          : {}),
         onDeserializationError: () => {},
         onLoad: () =>
           new Promise<void>((resolve) => {
@@ -81,7 +99,15 @@ export function powerSyncStartupAdapterFor(
         syncOutcome: startup.syncOutcome,
         initialResult: startup.initialResult,
         firstSubmission: startup.firstSubmission,
+        sourceTransactions: startup.sourceTransactions,
         waitForRestore: startup.waitForRestore,
+        checkStartup: () =>
+          history.sourceKeys &&
+          startupRows(history.next, 2).some(
+            (row) => !deserializedSourceKeys.has(sourceKey(row.id)),
+          )
+            ? [`PowerSync source-key transformation was not reached`]
+            : [],
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable,
