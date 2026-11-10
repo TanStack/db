@@ -204,7 +204,7 @@ describe(`guarded oracle replay`, () => {
     [
       `query-identity.compiled-output`,
       `tests/query/identity-output-shape-oracle.test.ts`,
-      `varies safe aliases and payloads, seed=undefined`,
+      `query-identity\\.compiled-output > random seed`,
     ],
     [
       `load-subset.rejected-waiter`,
