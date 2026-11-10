@@ -396,10 +396,6 @@ export const oracleLintSettings = {
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/query/compiler/group-by-pipeline-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/query/custom-index-order-selection-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

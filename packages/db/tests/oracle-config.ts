@@ -15,6 +15,7 @@ const staticOracleProperties = [
   `oracle.declared-reach`,
   `scripts.legacy-campaign-baseline`,
   `query.public-container-copy`,
+  `compiler.group-by.batch`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
   `pagination.limit-admission-builder-negative`,

@@ -397,6 +397,11 @@ const ownerGroups: ReadonlyArray<
     `startup-generation source-progress`,
   ],
   [
+    `db/tests/query/compiler/group-by-pipeline-oracle.test.ts`,
+    `compiler.group-by`,
+    `batch`,
+  ],
+  [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
     `membership-work`,
