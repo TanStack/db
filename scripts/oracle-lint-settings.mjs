@@ -24,14 +24,6 @@ export const oracleLintSettings = {
     // Frozen migration baseline: remove entries as their files convert. Never add one.
     legacyCampaigns: [
       {
-        file: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/comparison-oracle.property.test.ts`,
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

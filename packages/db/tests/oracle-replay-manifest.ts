@@ -632,7 +632,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `history-statistics async-history sync-history demand-change`,
+    `history-statistics async-history constructed-history sync-history demand-change`,
   ],
   [
     `db/tests/source-health-oracle.test.ts`,
@@ -1392,6 +1392,20 @@ const replayTestNames = new Map([
   ].map(
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+  ),
+  ...[
+    `async-history`,
+    `constructed-history`,
+    `demand-change`,
+    `sync-history`,
+    `publication-history`,
+    `restart-publication`,
+  ].map(
+    (name) =>
+      [
+        `subscription-lifecycle.${name}`,
+        `subscription-lifecycle\\.${name} > random seed`,
+      ] as const,
   ),
   [
     `electric.sql-predicate-semantics`,
