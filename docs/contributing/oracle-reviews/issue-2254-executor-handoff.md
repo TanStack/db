@@ -1067,3 +1067,10 @@ The local dependency recovery remains excluded from commits: only
 `@tanstack/solid-start` uses the local 1.169.5-to-1.169.4 override; Query Core
 uses the installed 5.90.20 within the supported peer range instead of unavailable
 5.107.1. Neither is part of the production change or the release changeset.
+
+
+The final reviewed implementation is commit `b633f501d7297cfbac9db041ca0dd09a773bf47a`. The final
+`pnpm lint:changed` run passes with no oracle lint or run-budget report.
+Subsequent evidence-only edits do not change the tested source, model, grammar,
+production driver, comparison, or configuration. CI and external-review status
+are reported separately for the final pushed PR head.
