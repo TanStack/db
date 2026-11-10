@@ -120,14 +120,6 @@ export const oracleLintSettings = {
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-ivm/tests/hash-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-ivm/tests/incrementalization-law-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

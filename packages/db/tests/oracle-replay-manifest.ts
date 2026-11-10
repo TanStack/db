@@ -1414,6 +1414,8 @@ const replayTestNames = new Map([
   ],
   [`ivm.hash-identity`, `ivm\\.hash-identity > random seed`],
   [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
+  [`ivm.hash-value`, `ivm\\.hash-value > random seed`],
+  [`ivm.incrementalization-law`, `ivm\\.incrementalization-law > random seed`],
   [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
   [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
   [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],
