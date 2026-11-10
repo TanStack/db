@@ -324,7 +324,7 @@ The final RED, GREEN and mutant use the normal package test configuration.
 From `packages/offline-transactions`, the focused command is:
 
 ```sh
-../../node_modules/.bin/vitest run --config vitest.config.ts \
+../../node_modules/.bin/vitest run --config vite.config.ts \
   tests/interruption-settlement-oracle.property.test.ts \
   --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2 \
   -t 'offline.disposal-handoff'
@@ -387,7 +387,7 @@ The final complete CLI command, from the worktree root, was:
 ```sh
 node_modules/.bin/oracle-gaps --env-prefix TANSTACK_DB_ORACLE \
   --package packages/offline-transactions --source src/OfflineExecutor.ts \
-  --diff-base origin/main --seed 20261110 --contexts 2 \
+  --diff-base ea3c920c1540486d0fb7410e089baa3a1583299c --seed 20261110 --contexts 2 \
   --out /private/tmp/evaluate-2254-gap-final
 ```
 
@@ -505,7 +505,7 @@ No production repair was required.
 ```sh
 node_modules/.bin/oracle-gaps --env-prefix TANSTACK_DB_ORACLE \
   --package packages/offline-transactions --source src/OfflineExecutor.ts \
-  --diff-base origin/main --seed 20261110 --contexts 2 \
+  --diff-base ea3c920c1540486d0fb7410e089baa3a1583299c --seed 20261110 --contexts 2 \
   --only OfflineExecutor.ts:M229,OfflineExecutor.ts:M231,OfflineExecutor.ts:M236,OfflineExecutor.ts:M238 \
   --out /private/tmp/evaluate-2254-gap-four
 ```
@@ -560,7 +560,7 @@ remain unchanged. No unassessed unchanged-line result is promoted to closed.
 ```sh
 node_modules/.bin/oracle-gaps --env-prefix TANSTACK_DB_ORACLE \
   --package packages/offline-transactions --source src/OfflineExecutor.ts \
-  --diff-base origin/main --seed 20261110 --contexts 2 \
+  --diff-base ea3c920c1540486d0fb7410e089baa3a1583299c --seed 20261110 --contexts 2 \
   --only OfflineExecutor.ts:M197,OfflineExecutor.ts:M198,OfflineExecutor.ts:M199,OfflineExecutor.ts:M200,OfflineExecutor.ts:M201,OfflineExecutor.ts:M202,OfflineExecutor.ts:M203,OfflineExecutor.ts:M204,OfflineExecutor.ts:M205,OfflineExecutor.ts:M206,OfflineExecutor.ts:M207,OfflineExecutor.ts:M208,OfflineExecutor.ts:M209,OfflineExecutor.ts:M210,OfflineExecutor.ts:M211,OfflineExecutor.ts:M212,OfflineExecutor.ts:M213,OfflineExecutor.ts:M214,OfflineExecutor.ts:M215,OfflineExecutor.ts:M216,OfflineExecutor.ts:M217,OfflineExecutor.ts:M218,OfflineExecutor.ts:M219,OfflineExecutor.ts:M220,OfflineExecutor.ts:M221,OfflineExecutor.ts:M222,OfflineExecutor.ts:M223,OfflineExecutor.ts:M224,OfflineExecutor.ts:M225,OfflineExecutor.ts:M226,OfflineExecutor.ts:M227,OfflineExecutor.ts:M228,OfflineExecutor.ts:M229,OfflineExecutor.ts:M230,OfflineExecutor.ts:M231,OfflineExecutor.ts:M232,OfflineExecutor.ts:M233,OfflineExecutor.ts:M234,OfflineExecutor.ts:M235,OfflineExecutor.ts:M236,OfflineExecutor.ts:M237,OfflineExecutor.ts:M238,OfflineExecutor.ts:M239,OfflineExecutor.ts:M241 \
   --out /private/tmp/evaluate-2254-gap-changed
 ```
@@ -627,7 +627,7 @@ files, 17 ordinary test files, campaign seed `20261110`, and two contexts:
 ```sh
 node_modules/.bin/oracle-gaps --env-prefix TANSTACK_DB_ORACLE \
   --package packages/offline-transactions --source src/OfflineExecutor.ts \
-  --diff-base origin/main --seed 20261110 --contexts 2 \
+  --diff-base ea3c920c1540486d0fb7410e089baa3a1583299c --seed 20261110 --contexts 2 \
   --out /private/tmp/evaluate-2254-gap-owned-final
 ```
 
@@ -771,3 +771,299 @@ The local manifest-only run used a scratch Vitest config without the unrelated
 IndexedDB setup because this worktree lacks the installed `fake-indexeddb`
 package. The guarded property runs used their normal package config. Full replay
 suite validation remains a CI gate; the local setup failure is not a test pass.
+
+## CodeRabbit follow-up: issued outcomes and barrier observations
+
+Review `5846173360` covered `c9b569f7578e969639f1c5d1d9ac4f7e050d9751`.
+Evaluation started on `4bc9978e787a10cf7ed95e7921edd2eb56139425`. That intervening
+commit changed only replay registration and evidence. All four inline findings
+remain applicable; the raw review and mutable summary are preserved locally.
+
+CR01 corrects the focused command to `vite.config.ts`, as used by the recorded
+package verification. `vitest.config.ts` is a distinct configuration that loads
+browser/UUID fixtures. Guarded replay also passes under that default configuration;
+these executions are distinguished rather than treated as identical environments.
+CR02 pins every documented gap command to baseline
+`ea3c920c1540486d0fb7410e089baa3a1583299c`. The historical runs used `origin/main`
+when it named that exact commit; the displayed commands now reproduce that
+baseline even after fetching. No historical result was rerun or reclassified
+merely by changing the displayed revision.
+
+CR03 is an enforcement gap in the same handoff contract: an issued predecessor
+can finish after disposal while its successor waits for leadership. A successor
+with added Collections registered a per-ID waiter but did not receive that old
+executor's outcome. Only one executor issues provider work, so this case does
+not require concurrent-leader semantics. The previous grammar always completed
+work on the final successor and could not expose the reversed delivery direction.
+
+- **Law:** Every pending caller in the retained-Collection handoff receives the
+  transaction outcome, including a successor waiting for leadership. Authority:
+  README Tracking Submission Status and decision
+  `offline-disposal-handoff-2026-11-10`.
+- **Reach:** `offline.disposal-issued-handoff` reuses the handoff model and
+  comparison. It generates one transaction, all four creation APIs, live/restored
+  optimism, either provider outcome, zero to three explicit old waiters, one to
+  three replacements, adapter-object replacement, and registry growth. Each
+  campaign has 24 generated plus eleven constructed histories. The initial
+  nine-state run reached both issued boundaries 33 times per campaign; final
+  eleven-state counts, including deletion and subscriber failures, follow below.
+- **RED:** Before production changed, the new normal-config campaigns failed
+  `caller settlement` at `completed`. Fixed campaign seed `20261110`, path
+  `3:0:0:0:0:0` shrank to a live manual transaction, one replacement, no explicit
+  old waiter, and an added Collection. The successor was pending instead of
+  fulfilled. The neighboring handoff/resource and connectivity selections passed
+  **43 tests**, including both real QueryDB campaigns, before production changed.
+- **GREEN:** Matching permits either registry to retain all entries of the
+  other. This lets a retired executor deliver to a growing successor as well as
+  a successor deliver to its predecessor. The new property passes both campaigns;
+  its guarded seed/path replay records one execution and a completed witness.
+  The full offline package passes **466 tests in 25 files**.
+- **Mutant:** Restoring only the old directional compatibility check fails
+  `caller settlement` at `completed` with that same seed/path. The existing
+  retained/fresh affected-Collection histories continue to enforce scope
+  isolation; an ancillary overlap alone remains insufficient.
+- **Limits:** The added crossing has one issued transaction and retained affected
+  Collections. It includes failed deletion and throwing settlement subscribers.
+  Existing campaigns own queued suffixes and fresh-Collection isolation. The new crossing
+  does not claim multiple simultaneous issued executors or cross-tab promises.
+
+CR04 was a false-green observation, not a new product policy. The real QueryDB
+production driver used one settlement flag for every barrier, and did not attach
+its first recorder until after `provider held`. A test-only transform temporarily
+installed `Promise.resolve()` at that capture and restored the actual held
+barrier afterward. The unchanged recorder accepted the whole direct replay
+(seed `20261110`, path `0`). That establishes a wrong intermediate checkpoint
+that the public QueryDB receipt's later comparison did not catch.
+
+The repaired recorder samples each promise with its own outcome object, drains its
+settlement reaction chain, and retries if the public field changes identity. The
+same injected observation now fails `refresh barrier` at `provider held`.
+Normal real QueryDB campaigns remain green, with all four declared states reached
+16 times per campaign. Seven supplemental tests in the ordinary
+`offline-executor-refresh-observer.test.ts` exercise absence, pending, fulfillment,
+rejection, replacement by a pending promise, and removal during a reaction.
+A chained-settlement witness first rejected a one-microtask sampler; the final
+recorder yields a task turn before checking identity and settlement.
+They do not replace the shared generated comparison or its real receiving path.
+
+The summary's docstring suggestion (CR05) reports an external default 80% rule;
+the repository has no such numeric policy. The applicable requirement is literate
+oracle prose, already present beside the model, grammar, driver and comparison.
+The suggested mandatory percentage is refuted as a repository violation; useful
+function explanations are retained, including the new containment and promise
+observer helpers. The generic unit-test generation suggestion (CR06) adds no
+behavioral finding; the seven targeted observer checks preserve its useful testing
+idea without placing unit tests in an oracle. The independent simplification
+follow-up (S01) moves resource-campaign prose back beside its grammar; it changes
+no executable rule.
+
+All four concrete CodeRabbit findings are fixed. The reviewer found a real
+missing delivery direction and a recorder defect that later snapshots hid; its
+suggested small repairs were useful. Hire recommendation: yes, with independent
+oracle verification of the proposed fixes. The automatic numeric docstring gate
+has no repository authority. Loss accounting: four fixed concrete findings,
+one refuted mandatory-policy claim, and one generic testing suggestion preserved
+in the targeted observer tests. No design decision or authorized repair from this first review is
+deferred. The applicable ORC audit above remains in force: this addition reuses
+independent judgment (ORC-002), adds the missing history crossing (ORC-004), observes
+its intermediate outcome with a named violation and actual reach (ORC-005/015),
+and rejects both the old implementation and a false-green recorder
+(ORC-006/010). No contract, comparison or run budget was narrowed.
+
+
+### Final issued-handoff reach and independent follow-up
+
+The final `offline.disposal-issued-handoff` campaign includes failed deletion
+and a throwing restored-settlement subscriber. The fixed and random campaigns
+use the same 24 generated plus eleven constructed histories, model, production
+driver, comparison, and run budget. The final selected run passes four tests
+(two campaigns, calibration, determinism); 73 unrelated tests stand aside.
+All declared states and additional measured states are reported here:
+
+- offline.disposal-issued-handoff fixed seed 20261110: `{"deletion failure":20,"grown registry":20,"issued deletion failure":20,"issued subscriber exception":9,"new adapter":17,"origin live":20,"origin restored":15,"path action":8,"path auto":3,"path default":3,"path manual":6,"restored optimism without a waiter":2,"retained affected Collection":35,"retired provider issued":35,"successor":35,"successor awaiting leadership":35,"throwing settlement subscriber":9}`.
+- offline.disposal-issued-handoff random seed: `{"deletion failure":20,"grown registry":19,"issued deletion failure":20,"issued subscriber exception":6,"new adapter":19,"origin live":25,"origin restored":10,"path action":9,"path auto":7,"path default":5,"path manual":4,"restored optimism without a waiter":2,"retained affected Collection":35,"retired provider issued":35,"successor":35,"successor awaiting leadership":35,"throwing settlement subscriber":6}`.
+
+The independent follow-up found two useful extensions. D01 showed that yielding
+one microtask could misread a promise that settled through a reaction chain.
+The ordinary observer test first failed, then passed when the recorder yielded
+one task turn. All seven observer tests pass. D02 requested deletion failure and
+subscriber exceptions while the retired provider finishes before successor
+leadership. Both now occur in the generated grammar and pass the common check.
+The one-direction mutant still fails `caller settlement` at `completed` with
+the expanded grammar. These repairs preserve the existing laws and their cuts.
+
+Final source SHA-256 values for this follow-up:
+
+- `packages/offline-transactions/src/OfflineExecutor.ts`: `dff0f5fd93b50da54451cc6570fe010f43bd6962eda209336667b55dd2f05da9`.
+- `packages/offline-transactions/tests/interruption-handoff-oracle.ts`: `b0be84ce61f9d737f70f8e28601a2bbf8ac65c213597a4eea84e8adc06c0be23`.
+- `packages/query-db-collection/tests/offline-executor-refresh-driver.ts`: `7bd232c635cd507a9984780df10fa148d61adcafa8a4d1ab8761ac9b22a080ee`.
+
+### Copied-outbox decision
+
+CodeRabbit review `5846348062`, on
+`4bc9978e787a10cf7ed95e7921edd2eb56139425`, raised CR07 outside the inline diff.
+A controlled probe admitted a UUID transaction into outbox A, disposed its
+executor, copied the pending row into independent outbox B, and replayed B with
+the same transaction ID and Collection objects. The original caller fulfilled;
+A retained its row and B became empty. This is an observed cross-settlement,
+not an equivalence or isolation claim. The API supplies no durable outbox
+identity with which to distinguish those stores from replacement adapter
+objects over one store.
+
+Decision record `offline-copied-outbox-limit-2026-11-10`: the maintainer chose
+“Keep copying/migration outside this PR.” The promised receiving path remains
+executor replacement over the same retained outbox. Independent copied stores,
+migration lineage, and an isolation guarantee between them are an accepted
+limit of this change. The README states the consequence explicitly. No
+persisted-format or public-API change introduces an outbox identity here.
+The Offline execution oracle owner retains this limit. A future migration or
+copied-store isolation contract must define identity and add generated
+same-store/copy histories before changing production. CR07 is accepted-design
+for this scope; its reproduced behavior remains recorded.
+
+
+### Follow-up loss audit
+
+The raw first and second CodeRabbit reviews, their inline comments, mutable
+summary, and independent follow-up are reconciled in the local lossless ledger.
+Nine raw review items comprise five fixed items (CR01–04 and CR06), one refuted
+mandatory docstring-percentage claim (CR05), the accepted copied-outbox limit
+(CR07), and two preserved duplicates (CR08–09). Three independent suggestions
+(S01, D01, D02) are fixed. Total: twelve items = eight fixed + one refuted + one
+accepted-design + two duplicates. The initial pending dispositions and complete
+original claims remain in history. No raw item or sibling finding disappears
+because it was minor, duplicated, or outside the inline diff. All four displayed
+gap commands now pin the baseline. No product-law decision remains pending.
+
+
+### CI lint-scope reach repair
+
+CI on `4bc9978e787a10cf7ed95e7921edd2eb56139425` failed its Lint job because
+`scripts.lint-scope` reached `hook-production` only once, below its declared
+minimum of two. The two property tests passed their behavior comparisons;
+the suite's reach assertion correctly rejected insufficient enforcement.
+The exact CI random seed `1392514884` reproduces the failure locally with the
+unchanged grammar. This is a grammar gap in lint selection coverage, not an
+offline product failure.
+
+The repair adds one constructed history per campaign. It draws a skeleton from
+the campaign seed and fixes its shape to `free` and hook kind to `production`,
+so another shape cannot replace the hook target. The same independent graph
+model, real temporary-repository driver, and scope comparisons judge it.
+This guarantees at least one production-hook history in each of the two
+campaigns. The random run budget stays 24, all earlier constructions remain,
+and the reach minimum stays two. The original grammar is the removal mutant:
+with that construction absent, the same seed reports `hook-production (1)`.
+With it present, the exact command passes both tests and the reach assertion.
+
+```sh
+TANSTACK_DB_ORACLE_SEED=1392514884 TANSTACK_DB_ORACLE_REACH_REPORT=1 \
+pnpm_config_verify_deps_before_run=false pnpm exec vitest run \
+  --config scripts/oracle-scripts.vitest.config.mjs \
+  scripts/lint-scope-oracle.property.test.js --maxWorkers=2
+```
+
+This changes no lint-selection law, production script, model, public observation,
+or excluded history. The normal fixed/random campaign's complete reach counts
+are retained below. Existing conformance obligations remain: the construction
+uses the shared judgment (ORC-002/016), stays in the legal grammar with fresh
+skeletons (004), exercises the real CLI (005), and makes reach mandatory (015).
+No provider or framework receiving claim is added (014), and no new reference
+state or shared-fault hypothesis triggers ORC-008/011.
+
+Normal verification uses fixed campaign seed `2234` and random campaign seed
+`1147628925`. Both property tests and the mandatory reach assertion pass.
+Aggregate counts across the two campaigns (24 generated + nine constructed
+histories in each) are:
+
+`{"direct-dependent":51,"transitive-dependent":45,"re-export-dependent":2,"oracle-dependent":9,"oracle-edit":35,"unrelated-edit":27,"production-boundary":18,"plugin-version-edit":3,"plugin-integrity-edit":8,"plugin-dependency-edit":7,"lockfile-edit":11,"settings-edit":7,"hook-lockfile-same-plugin":3,"large-lockfile-same-plugin":4,"missing-base-lockfile":27,"untracked-dependent":22,"js-oracle":30,"hook-oracle":7,"hook-support":25,"hook-driver":11,"hook-production":4,"hook-rule":19,"worktree-session":35,"worktree-own-rule":8,"scratch-directory":11}`.
+
+
+## Final reviewed-source audit
+
+Run `fd3da244acf0` repeats the complete source campaign after the issued-outcome
+repair and barrier-recorder correction. It uses the final offline source hash
+`dff0f5fd93b50da54451cc6570fe010f43bd6962eda209336667b55dd2f05da9`
+and the final handoff/receiving hashes above. The production source and those
+oracles did not change during this run. The earlier interrupted campaign is
+excluded: it was stopped and its temporary files removed before these stable
+measurements. Normal package tests and independent mutant transforms did not
+run beside this final campaign.
+
+```sh
+node_modules/.bin/oracle-gaps --env-prefix TANSTACK_DB_ORACLE \
+  --package packages/offline-transactions --source src/OfflineExecutor.ts \
+  --diff-base ea3c920c1540486d0fb7410e089baa3a1583299c \
+  --seed 20261110 --contexts 2 \
+  --out /private/tmp/evaluate-2254-gap-reviewed-stable
+```
+
+The final inventory has **298 operators: 278 killed, 15 survived, and five
+unreached**. All **47 changed-line operators** are killed. There are zero
+production crashes, timeouts, exclusions, or nondeterministic routes. The raw
+tool report therefore still has **20 gap labels**; this is not a zero-gap run.
+Each residual uniquely matches a prior adjudicated operator by function,
+operator kind, original expression, and replacement. The delivery-direction
+repair changes none of those residual functions. Eight are equivalent within
+the stated typed or call-path domain. Twelve change observations without an
+established stronger promise. The distinctions and authority analysis in the
+full-source ownership audit remain explicit, including follower-read failure
+and controls after partial failed initialization.
+
+The tool names a law in 268 kills. Ten other kills have `(unnamed)` metadata
+and a reproducible assertion route, retained by test name in the raw results.
+Earlier blanket references to every kill as a *named* law overstate that
+metadata. The correct claim is 278 reproducible assertion kills, of which 268
+name the law in the tool report. No crash or timeout supplies a kill.
+
+The residual mapping below preserves the old evidence IDs and the final
+operator IDs. Full expressions, stable keys, raw routes and current verdicts
+remain in the task-local result and disposition files; the prior sections
+supply each contract rationale.
+
+| Final operator | Earlier operator | Disposition |
+| --- | --- | --- |
+| `OfflineExecutor.ts:M45` | `OfflineExecutor.ts:M43` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M64` | `OfflineExecutor.ts:M62` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M65` | `OfflineExecutor.ts:M63` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M67` | `OfflineExecutor.ts:M65` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M74` | `OfflineExecutor.ts:M72` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M84` | `OfflineExecutor.ts:M82` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M90` | `OfflineExecutor.ts:M88` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M92` | `OfflineExecutor.ts:M90` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M97` | `OfflineExecutor.ts:M95` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M102` | `OfflineExecutor.ts:M100` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M103` | `OfflineExecutor.ts:M101` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M125` | `OfflineExecutor.ts:M123` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M129` | `OfflineExecutor.ts:M127` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M131` | `OfflineExecutor.ts:M129` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M133` | `OfflineExecutor.ts:M131` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M137` | `OfflineExecutor.ts:M135` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M150` | `OfflineExecutor.ts:M148` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M186` | `OfflineExecutor.ts:M184` | observable difference without a stronger promise |
+| `OfflineExecutor.ts:M245` | `OfflineExecutor.ts:M242` | typed/call-path equivalence |
+| `OfflineExecutor.ts:M269` | `OfflineExecutor.ts:M266` | observable difference without a stronger promise |
+
+All detected findings are owned and adjudicated; none is dismissed because it
+predates this branch. No known reachable violation of the accepted handoff law
+remains in the declared histories and observations. This bounded result is not
+a proof of arbitrary histories or a new promise about copied outboxes,
+malformed configuration, diagnostic wording, idle barrier identity, native
+storage, or cross-tab callers. The accepted copied-outbox decision above and
+the receiving-path limits continue to apply.
+
+
+### Final local verification
+
+The final normal package run passes 466 tests across 25 files. The offline
+TypeScript check, production build, explicit ESLint, Prettier, and diff whitespace
+checks pass. A final guarded replay on the expanded issued-handoff grammar uses
+campaign seed `20261110` and path `3:0:0:0:0:0`; it records one property execution,
+four completed non-failing predicate evaluations, and a successful child exit.
+The earlier one-direction mutant failure applies to these same final source and
+oracle hashes. The seven observer tests and settled-barrier mutant evidence also
+use the final recorder hash. No oracle run budget was lowered or removed.
+The local dependency recovery remains excluded from commits: only
+`@tanstack/solid-start` uses the local 1.169.5-to-1.169.4 override; Query Core
+uses the installed 5.90.20 within the supported peer range instead of unavailable
+5.107.1. Neither is part of the production change or the release changeset.

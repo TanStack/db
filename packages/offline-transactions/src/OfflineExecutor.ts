@@ -51,6 +51,16 @@ const completionOwners = new WeakMap<
   Set<OfflineExecutor>
 >()
 
+/** A replacement may add Collections while retaining every prior registry entry. */
+function retainsCollections(
+  configured: OfflineConfig[`collections`],
+  prior: OfflineConfig[`collections`],
+): boolean {
+  return Object.entries(prior).every(
+    ([name, collection]) => configured[name] === collection,
+  )
+}
+
 export class OfflineExecutor {
   private config: OfflineConfig
 
@@ -535,12 +545,16 @@ export class OfflineExecutor {
         if (
           (owner.pendingTransactionPromises.has(transactionId) ||
             owner.restorationTransactions.has(transactionId)) &&
-          // An unchanged ancillary Collection cannot connect otherwise
-          // different configurations. Outbox records name registry keys.
-          Object.entries(owner.config.collections).every(
-            ([name, configured]) =>
-              this.config.collections[name] === configured,
-          )
+          // Either executor may deliver the outcome: a retired issued call or
+          // its successor's replay. An ancillary overlap alone is insufficient.
+          (retainsCollections(
+            this.config.collections,
+            owner.config.collections,
+          ) ||
+            retainsCollections(
+              owner.config.collections,
+              this.config.collections,
+            ))
         )
           owners.add(owner)
       }

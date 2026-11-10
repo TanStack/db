@@ -108,8 +108,8 @@ import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 import {
   oracleFixedSeed,
   oraclePropertyOptions,
-  oracleRoute,
   oracleReplayTest,
+  oracleRoute,
   oracleRouteOf,
   oracleRuns,
   withOracleFixedHistories,
@@ -266,13 +266,12 @@ function programOf({ shape, ...skeleton }) {
 const programArbitrary = skeletonArbitrary.map(programOf)
 
 /**
- * Constructed histories. Each configuration edit, an edit hook that names the
- * lockfile while the plugin's entries stay as they were, an unrelated edit of
- * a large lockfile, and a base commit without a lockfile, is a declared state
- * that 24 random draws can miss. So every campaign also runs, before its
- * random histories, one generated skeleton per state with the one field that
- * enters it fixed. The skeletons are drawn from the campaign's seed, so they
- * are members of the grammar and vary with the seed.
+ * Constructed histories. The declared states below can be missed by 24 random
+ * draws: each configuration edit, a lockfile hook with unchanged plugin entries,
+ * an unrelated edit of a large lockfile, a base without a lockfile, and a
+ * production hook. Every campaign first runs one generated skeleton per state,
+ * fixing the fields that enter it. The skeletons come from the campaign's seed,
+ * so they are members of the grammar and vary with the seed.
  */
 const constructions = [
   ...[...PLUGIN_EDITS, LOCKFILE_EDIT, SETTINGS_EDIT].map(
@@ -294,6 +293,11 @@ const constructions = [
   (skeleton) => ({
     ...skeleton,
     lockfile: { ...skeleton.lockfile, base: `missing` },
+  }),
+  (skeleton) => ({
+    ...skeleton,
+    shape: `free`,
+    hookKind: `production`,
   }),
 ]
 

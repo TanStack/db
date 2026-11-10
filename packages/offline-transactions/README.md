@@ -315,6 +315,11 @@ to pending restored snapshots. Dispose and clean up account-scoped Collections
 separately when ending an account's UI lifetime;
 decide separately what to do with that account's durable outbox.
 
+Copying or migrating pending rows between independent outboxes is outside this
+handoff guarantee. The executor has no durable outbox identity. Replaying a copied
+row with the same transaction ID and Collection objects can settle the original
+callers while the original outbox still retains its copy.
+
 After `mutationFn` returns, the executor records a `deletion-pending` outbox
 phase before removing the row. If recording that phase or removing the row
 fails, `commit()`, `when('settled')`, and the per-ID completion waiter reject

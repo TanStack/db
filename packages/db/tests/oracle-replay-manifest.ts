@@ -705,7 +705,7 @@ const ownerGroups: ReadonlyArray<
   [
     `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
     `offline`,
-    `disposal-handoff disposal-handoff-resources`,
+    `disposal-handoff disposal-issued-handoff disposal-handoff-resources`,
     `offline-transactions/tests/interruption-handoff-oracle.ts`,
   ],
   [

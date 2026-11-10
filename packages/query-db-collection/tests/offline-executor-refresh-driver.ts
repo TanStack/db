@@ -22,6 +22,30 @@ import type {
 
 type Row = { id: string; value: string }
 
+/** Observe one stable public barrier without letting another promise settle it. */
+export async function readRefreshBarrier(
+  current: () => Promise<unknown> | null | undefined,
+): Promise<BarrierCut[`barrier`]> {
+  for (;;) {
+    const barrier = current()
+    const outcome = { settled: false }
+    if (barrier) {
+      void barrier.then(
+        () => {
+          outcome.settled = true
+        },
+        () => {
+          outcome.settled = true
+        },
+      )
+      // A task turn drains promise reaction chains as well as this reaction.
+      await turn()
+    }
+    if (barrier !== current()) continue
+    return !barrier ? `none` : outcome.settled ? `settled` : `pending`
+  }
+}
+
 // This production driver supplies a real QueryDB consumer to the offline
 // barrier oracle. It computes no expected rows or receipt outcomes. Query
 // results are copied snapshots of an external controlled backend. The backend
@@ -111,7 +135,6 @@ export async function driveQueryBarrier(
   const receipt = { value: `pending` }
   let staleDelivered = false
   const deferred = { scheduled: false }
-  let barrierSettled = false
   let restoreThen: (() => void) | undefined
   let primaryFailure = false
   const capture = async (
@@ -120,10 +143,12 @@ export async function driveQueryBarrier(
     receiving = false,
   ) => {
     if (!executor) throw new Error(`Receiving executor was not started`)
-    const barrier = collection.deferDataRefresh
+    const barrierState = await readRefreshBarrier(
+      () => collection.deferDataRefresh,
+    )
     observe(checkpoint, {
       completed,
-      barrier: !barrier ? `none` : barrierSettled ? `settled` : `pending`,
+      barrier: barrierState,
       calls: [...calls],
       callers: [...callers],
       errors: [...errors],
@@ -203,14 +228,6 @@ export async function driveQueryBarrier(
     observe(`reach`, `pending refresh barrier`)
     const barrier = collection.deferDataRefresh
     if (barrier) {
-      void barrier.then(
-        () => {
-          barrierSettled = true
-        },
-        () => {
-          barrierSettled = true
-        },
-      )
       // Existing offline-refresh e2e uses this positive scheduling witness.
       // Only QueryDB's actual subscription is intercepted, after our recorder.
       const originalThen = barrier.then.bind(barrier)

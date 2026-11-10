@@ -220,6 +220,7 @@ const staticOracleProperties = [
   `offline.key-scheduler-fifo-ledger`,
   `offline.interruption-settlement`,
   `offline.disposal-handoff`,
+  `offline.disposal-issued-handoff`,
   `offline.disposal-handoff-resources`,
   `offline.settled-id-window`,
   `offline.executor-api`,

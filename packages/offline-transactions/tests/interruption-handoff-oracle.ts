@@ -107,6 +107,7 @@ type Cut = {
   unhandled: Array<string>
   subscriberCalls: number
   subscriberErrorReported: boolean
+  reconciled?: boolean
 }
 
 class HandoffDetector implements OnlineDetector {
@@ -145,6 +146,7 @@ async function driveHandoff(
   plan: HandoffHistory,
   observe: (cut: string, value: unknown) => void,
   resources?: { createRetiredDetector: () => HandoffDetector },
+  issuedHandoff = false,
 ) {
   const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
   const unhandled = captureUnhandledRejections()
@@ -160,14 +162,16 @@ async function driveHandoff(
   let subscriberCalls = 0
   const subscriberError = new Error(`subscriber failed`)
   let subscriberErrorReported = false
-  let failedDeletion = false
+  let reconciled = false
+  let issuedProcessing: Promise<unknown> | null | undefined
+  const deletionFault = { happened: false }
   const storage = new (class extends FakeStorageAdapter {
     override async delete(key: string) {
       const index = ids.indexOf(key.slice(3))
       deletions.push(index)
       await deletionGates[index]!.promise
-      if (plan.deleteFailure && !failedDeletion) {
-        failedDeletion = true
+      if (plan.deleteFailure && !deletionFault.happened) {
+        deletionFault.happened = true
         throw new Error(`deletion failed`)
       }
       return super.delete(key)
@@ -223,6 +227,9 @@ async function driveHandoff(
   })
   const executors: Array<ReturnType<typeof startOfflineExecutor>> = []
   const detectors: Array<HandoffDetector> = []
+  const successorLeadership = gate()
+  let successorRequestedLeadership = false
+  let issuedExecutor: ReturnType<typeof startOfflineExecutor> | undefined
   const record = (promise: Promise<unknown>, index: number) => {
     const result = { result: `pending` as Result }
     void promise.then(
@@ -236,7 +243,7 @@ async function driveHandoff(
     callers[index]!.push(result)
     return result
   }
-  const start = (unrelated = false) => {
+  const start = (unrelated = false, holdLeadership = false) => {
     const detector =
       resources && executors.length === 0
         ? resources.createRetiredDetector()
@@ -269,7 +276,11 @@ async function driveHandoff(
       storage: unrelated ? new FakeStorageAdapter() : adapter,
       onlineDetector: detector,
       leaderElection: {
-        requestLeadership: () => Promise.resolve(true),
+        requestLeadership: () => {
+          if (!holdLeadership) return Promise.resolve(true)
+          successorRequestedLeadership = true
+          return successorLeadership.promise.then(() => true)
+        },
         isLeader: () => true,
         releaseLeadership: () => {},
         onLeadershipChange: () => () => {},
@@ -311,6 +322,7 @@ async function driveHandoff(
       unhandled: unhandled.rejections.map(String),
       subscriberCalls,
       subscriberErrorReported,
+      reconciled,
       ...(late ? { late } : {}),
     } satisfies Cut)
   let primaryFailure = false
@@ -392,6 +404,17 @@ async function driveHandoff(
       },
     )
     for (let replacement = 0; replacement < plan.replacements; replacement++) {
+      const finishRetired =
+        issuedHandoff && replacement === plan.replacements - 1
+      if (finishRetired) {
+        issuedExecutor = current
+        const detector = detectors[executors.indexOf(current)]!
+        detector.online = true
+        detector.notifyOnline()
+        issuedProcessing = collection.deferDataRefresh
+        await reachHandoff(() => calls.includes(0), `retired provider issued`)
+        observe(`reach`, `retired provider issued`)
+      }
       current.dispose()
       await drainHandoff()
       capture(`disposed`, 0)
@@ -413,23 +436,33 @@ async function driveHandoff(
           sync: { sync: ({ markReady }) => markReady() },
         })
       }
-      current = start()
-      await current.waitForInit()
+      current = start(false, finishRetired)
+      if (finishRetired) {
+        await reachHandoff(
+          () => successorRequestedLeadership,
+          `successor awaiting leadership`,
+        )
+        observe(`reach`, `successor awaiting leadership`)
+      } else await current.waitForInit()
       if (Object.keys(registrations).length > 0)
         observe(`reach`, `grown registry`)
       for (const index of ids.keys())
         record(current.waitForTransactionCompletion(ids[index]!), index)
       capture(`restored`, 0)
     }
-    const detector = detectors[executors.indexOf(current)]!
-    detector.online = true
-    detector.notifyOnline()
+    if (!issuedExecutor) {
+      const detector = detectors[executors.indexOf(current)]!
+      detector.online = true
+      detector.notifyOnline()
+    }
     // The public refresh barrier is the actual execution batch. Observe its
     // rejection without changing the caller's independently owed outcome or
     // requiring a particular diagnostic message or console sink.
-    void collection.deferDataRefresh?.catch((error: unknown) => {
-      if (error === subscriberError) subscriberErrorReported = true
-    })
+    void (issuedProcessing ?? collection.deferDataRefresh)?.catch(
+      (error: unknown) => {
+        if (error === subscriberError) subscriberErrorReported = true
+      },
+    )
     for (const index of ids.keys()) {
       await reachHandoff(() => calls.includes(index), `provider ${index}`)
       capture(`provider held`, index)
@@ -455,6 +488,16 @@ async function driveHandoff(
       capture(`completed`, index + 1)
       if (plan.deleteFailure) break
     }
+    if (issuedExecutor) {
+      // Only after the issued outcome may the successor process its retained
+      // terminal marker. Initialization alone does not promise offline replay.
+      detectors[executors.indexOf(current)]!.online = true
+      successorLeadership.resolve()
+      await current.waitForInit()
+      await drainHandoff()
+      reconciled = true
+      capture(`successor initialized`, 1)
+    } else successorLeadership.resolve()
     const late: Array<{ result: Result }> = []
     for (const index of ids.keys()) {
       if (plan.deleteFailure && index > 0) continue
@@ -495,6 +538,10 @@ async function driveHandoff(
     if (plan.deleteFailure) observe(`reach`, `deletion failure`)
     if (plan.shared && plan.outcomes.length > 1) observe(`reach`, `shared keys`)
     if (subscriberCalls) observe(`reach`, `throwing settlement subscriber`)
+    if (issuedHandoff && deletionFault.happened)
+      observe(`reach`, `issued deletion failure`)
+    if (issuedHandoff && subscriberCalls)
+      observe(`reach`, `issued subscriber exception`)
     return [
       ...rowCollections,
       unrelatedCollection,
@@ -506,6 +553,7 @@ async function driveHandoff(
     throw error
   } finally {
     unsubscribe?.()
+    successorLeadership.resolve()
     for (const release of [...providerGates, ...deletionGates])
       release.resolve()
     for (const executor of executors) executor.dispose()
@@ -624,7 +672,9 @@ function handoffModel(plan: HandoffHistory) {
         a.id.localeCompare(b.id),
       ),
       outbox: plan.outcomes.flatMap((_, index) =>
-        index < cut.completed && !plan.deleteFailure ? [] : [String(index)],
+        index < cut.completed && (!plan.deleteFailure || cut.reconciled)
+          ? []
+          : [String(index)],
       ),
     }
   }
@@ -1008,6 +1058,103 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
                 ? { ...entry, value: { ...(entry.value as Cut), rows: [] } }
                 : entry,
             ),
+    },
+  ],
+})
+
+// An issued predecessor may finish while its successor is still acquiring
+// leadership. There is still only one issued executor. The same model owes
+// every registered caller the outcome regardless of which executor delivers
+// it. One transaction keeps this crossing independent of queued-suffix replay;
+// the main grammar above continues to judge that suffix and scope isolation.
+const issuedHandoffHistory: fc.Arbitrary<HandoffHistory> = fc.record({
+  ...handoffFields,
+  outcomes: fc.array(fc.constantFrom(`fulfil`, `reject`), {
+    minLength: 1,
+    maxLength: 1,
+  }),
+  replacements: fc.integer({ min: 1, max: 3 }),
+  replaceCollection: fc.constant(false),
+})
+declareOracle({ grammar: [issuedHandoffHistory] })
+const issuedHandoffStates = [
+  ...paths.map((path) => `path ${path}`),
+  `origin live`,
+  `origin restored`,
+  `retired provider issued`,
+  `successor awaiting leadership`,
+  `grown registry`,
+  `issued deletion failure`,
+  `issued subscriber exception`,
+]
+oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
+  id: `offline.disposal-issued-handoff`,
+  law: {
+    statement: `A disposed executor's issued outcome settles every pending caller on retained configured Collections, including a successor with added Collections that has not acquired leadership yet.`,
+    authority: `README Tracking Submission Status permits issued calls to finish after disposal and retained-Collection executor replacement; maintainer decision offline-disposal-handoff-2026-11-10.`,
+    limits: `One issued transaction, one to three replacements, zero to three explicit old waiters, live or restored optimism, every creation API, one failed deletion or throwing restored-settlement subscriber; successor leadership is held until the retired outcome. No concurrent issued executors or cross-tab transport.`,
+    owner: `Offline execution`,
+  },
+  histories: {
+    arbitrary: issuedHandoffHistory,
+    runs: 24,
+    fixedSeeds: [20261110],
+    states: issuedHandoffStates,
+    measured: [
+      `successor`,
+      `new adapter`,
+      `retained affected Collection`,
+      `restored optimism without a waiter`,
+      `deletion failure`,
+      `throwing settlement subscriber`,
+    ],
+    constructed: issuedHandoffStates.map((state) => ({
+      name: state,
+      enters: [state],
+      build: (plan) => ({
+        ...plan,
+        growRegistry: state === `grown registry` || plan.growRegistry,
+        ...(state === `issued deletion failure` ? { deleteFailure: true } : {}),
+        ...(state === `issued subscriber exception`
+          ? {
+              origin: `restored` as const,
+              subscriberThrows: true,
+              deleteFailure: false,
+            }
+          : {}),
+        ...(state.startsWith(`path `)
+          ? { path: state.slice(5) as Path, origin: `live` as const }
+          : {}),
+        ...(state.startsWith(`origin `)
+          ? { origin: state.slice(7) as HandoffHistory[`origin`] }
+          : {}),
+      }),
+    })),
+  },
+  model: handoffModel,
+  driver: async (plan, observe) => {
+    await driveHandoff(plan, observe, undefined, true)
+  },
+  check: checkHandoff,
+  calibrations: [
+    {
+      name: `a successor misses the retired executor's outcome`,
+      law: `caller settlement`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `completed`
+            ? {
+                ...entry,
+                value: {
+                  ...(entry.value as Cut),
+                  callers: (entry.value as Cut).callers.map((callers) => [
+                    ...callers.slice(0, -1),
+                    `pending`,
+                  ]),
+                },
+              }
+            : entry,
+        ),
     },
   ],
 })
