@@ -49,8 +49,6 @@ import type {
   Observation,
 } from '../../db/tests/oracle-property'
 
-
-
 import type { Event, ListResponse } from 'trailbase'
 import type { RaceRow, Row } from './lifecycle-support'
 
