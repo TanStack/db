@@ -269,7 +269,8 @@ const programArbitrary = skeletonArbitrary.map(programOf)
  * Constructed histories. The declared states below can be missed by 24 random
  * draws: each configuration edit, a lockfile hook with unchanged plugin entries,
  * an unrelated edit of a large lockfile, a base without a lockfile, and a
- * production hook. Every campaign first runs one generated skeleton per state,
+ * production hook whose edited production module is reached by an oracle.
+ * Every campaign first runs one generated skeleton per state,
  * fixing the fields that enter it. The skeletons come from the campaign's seed,
  * so they are members of the grammar and vary with the seed.
  */
@@ -298,6 +299,10 @@ const constructions = [
     ...skeleton,
     shape: `free`,
     hookKind: `production`,
+    production: { ...skeleton.production, edited: true },
+    oracles: skeleton.oracles.map((oracle, index) =>
+      index === 0 ? { ...oracle, fixedTargets: [PRODUCTION] } : oracle,
+    ),
   }),
 ]
 
@@ -1020,6 +1025,8 @@ function compareRuleSource(marks, marked) {
 //     adds one, so the plugin's entries are new.
 //   untracked-dependent: an untracked oracle file reaches the hook's file.
 //   js-oracle: a JavaScript oracle file is selected.
+//   hook-production-boundary: the production hook names an edited production
+//     module that an oracle file reaches. Merely naming production is weaker.
 //   hook-oracle, hook-support, hook-driver, hook-production, hook-rule: the
 //     kind of file that the edit hook names; `rule` is a configuration file.
 //   worktree-session: the session works in a worktree, and the hooks run the
@@ -1051,6 +1058,7 @@ const STATES = [
   `hook-support`,
   `hook-driver`,
   `hook-production`,
+  `hook-production-boundary`,
   `hook-rule`,
   `worktree-session`,
   `worktree-own-rule`,
@@ -1166,6 +1174,8 @@ function recordStates(program) {
     (module) => module.name === program.hookTarget,
   )
   states.add(`hook-${target?.kind ?? `rule`}`)
+  if (target?.kind === `production` && states.has(`production-boundary`))
+    states.add(`hook-production-boundary`)
   if (program.session === `worktree`) {
     states.add(`worktree-session`)
     if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)

@@ -4,9 +4,17 @@ import { vi } from 'vitest'
 import { startOfflineExecutor } from '../src/OfflineExecutor'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
-import { driveQueryBarrier } from '../../query-db-collection/tests/offline-executor-refresh-driver'
 import { FakeStorageAdapter, gate, turn } from './harness'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  barrierHistory,
+  barrierModel,
+  checkBarrier,
+} from './executor-refresh-barrier-oracle'
+import type {
+  BarrierCut,
+  BarrierHistory,
+} from './executor-refresh-barrier-oracle'
 import type { Transaction } from '@tanstack/db'
 import type { Observation } from '../../db/tests/oracle-property'
 import type { LeaderElection, OnlineDetector } from '../src/types'
@@ -28,7 +36,8 @@ import type { LeaderElection, OnlineDetector } from '../src/types'
  * offline replay/disposal contracts, and QueryDB's offline-refresh e2e contract.
  * Disposal stops new processing while an already-issued call may finish.
  *
- * The two small models below judge separate laws. They use configured public
+ * The lifecycle model below and the shared barrier model in
+ * executor-refresh-barrier-oracle.ts judge separate laws. They use public
  * collaborators, the public entry point, real storage admission and provider
  * execution, and public callbacks/barriers/caller outcomes. Limits: controlled
  * Node-hosted collaborators and in-memory storage; no native browser event or
@@ -406,64 +415,6 @@ oracleProperty<LifecycleHistory, ReturnType<typeof lifecycleModel>>({
   ],
 })
 
-export type BarrierHistory = {
-  count: number
-  overlap: boolean
-  retire: boolean
-  notifications: number
-}
-// Zero writes exercises idle reconnect. Two or more writes permit an old batch
-// to finish offline, then its public completion callback starts a new batch.
-// Retirement keeps only the already-issued call eligible to finish. Counts
-// zero/one/two/three distinguish idle, one owner, overlap and a queued suffix.
-const barrierHistory: fc.Arbitrary<BarrierHistory> = fc.record({
-  count: fc.integer({ min: 0, max: 3 }),
-  overlap: fc.boolean(),
-  retire: fc.boolean(),
-  notifications: fc.integer({ min: 1, max: 3 }),
-})
-export type BarrierCut = {
-  barrier: `none` | `pending` | `settled`
-  calls: Array<number>
-  callers: Array<string>
-  outbox: Array<number>
-  errors: Array<string>
-  completed: number
-  query?: {
-    receipt: string
-    rows: Array<{ id: string; value: string }>
-    staleDelivered: boolean
-    deferredScheduled: boolean
-  }
-}
-// The JSDoc's Promise projection distinguishes pending from none/settled. It
-// does not independently owe null field identity. The same model also predicts
-// a real receiving consumer's public receipt and rows, which can distinguish an
-// installed fulfilled promise from a completed, usable QueryDB refresh.
-function barrierModel(plan: BarrierHistory) {
-  return (checkpoint: string, completed: number) => ({
-    callers: Array.from({ length: plan.count }, (_, index) =>
-      index < completed ? `fulfilled` : `pending`,
-    ),
-    outbox: Array.from(
-      { length: plan.count - completed },
-      (_, index) => index + completed,
-    ),
-    blocking:
-      checkpoint === `provider held` ||
-      checkpoint === `newer provider held` ||
-      checkpoint === `stale refetch held`,
-    queryReceipt: checkpoint === `batch completed` ? `fulfilled` : `pending`,
-    rows: [
-      { id: `base`, value: `base` },
-      ...Array.from({ length: plan.count }, (_, index) => ({
-        id: String(index),
-        value: `insert ${index}`,
-      })),
-    ].sort((left, right) => left.id.localeCompare(right.id)),
-  })
-}
-
 async function driveBarrier(
   plan: BarrierHistory,
   observe: (checkpoint: string, value: unknown) => void,
@@ -624,160 +575,6 @@ async function driveBarrier(
     warning.mockRestore()
   }
 }
-function checkBarrier(
-  _plan: BarrierHistory,
-  trace: ReadonlyArray<Observation>,
-  model: ReturnType<typeof barrierModel>,
-) {
-  for (const { checkpoint, value } of trace) {
-    if (checkpoint === `reach`) continue
-    const cut = value as BarrierCut
-    const expected = model(checkpoint, cut.completed)
-    const error =
-      differs(checkpoint, `connectivity errors`, cut.errors, []) ??
-      differs(
-        checkpoint,
-        `refresh barrier`,
-        cut.barrier === `pending`,
-        expected.blocking,
-      ) ??
-      differs(checkpoint, `caller settlement`, cut.callers, expected.callers) ??
-      differs(checkpoint, `durable ownership`, cut.outbox, expected.outbox) ??
-      (cut.query
-        ? (differs(
-            checkpoint,
-            `query refresh settlement`,
-            cut.query.receipt,
-            expected.queryReceipt,
-          ) ??
-          differs(
-            checkpoint,
-            `query refresh rows`,
-            cut.query.rows,
-            expected.rows,
-          ) ??
-          differs(
-            checkpoint,
-            `query receiving premise`,
-            cut.query.staleDelivered,
-            true,
-          ) ??
-          differs(
-            checkpoint,
-            `query receiving premise`,
-            cut.query.deferredScheduled,
-            true,
-          ))
-        : undefined) ??
-      (checkpoint === `provider held`
-        ? differs(checkpoint, `provider progress`, cut.calls, [0])
-        : undefined) ??
-      (checkpoint === `newer provider held`
-        ? differs(checkpoint, `provider progress`, cut.calls, [0, 1])
-        : undefined) ??
-      (checkpoint === `retired issued call completed`
-        ? differs(checkpoint, `disposal execution fence`, cut.calls, [0])
-        : undefined) ??
-      (checkpoint === `batch completed`
-        ? differs(
-            checkpoint,
-            `provider progress`,
-            cut.calls,
-            Array.from({ length: cut.completed }, (_, index) => index),
-          )
-        : undefined)
-    if (error) return error
-  }
-  return pass
-}
-declareOracle({
-  grammar: [barrierHistory],
-  model: [barrierModel],
-  check: [checkBarrier],
-})
-
-// QueryDB consumes the same barrier through a real refetch receipt. Promise
-// settlement alone can leave that consumer waiting if the executor retains a
-// field the adapter still treats as active. This receiving path therefore feeds
-// public refetch settlement and rows into the same independent judgment above.
-// The established offline-refresh e2e contract supplies the stale-read premise.
-// It uses controlled Node/jsdom scheduling, not native browser online events.
-const queryBarrierHistory: fc.Arbitrary<BarrierHistory> = fc.record({
-  count: fc.integer({ min: 1, max: 3 }),
-  overlap: fc.constant(false),
-  retire: fc.constant(false),
-  notifications: fc.integer({ min: 1, max: 3 }),
-})
-declareOracle({ grammar: [queryBarrierHistory] })
-const queryBarrierStates = [
-  `pending refresh barrier`,
-  `stale refetch delivered`,
-  `query deferred by barrier`,
-  `query refresh settled`,
-]
-oracleProperty<BarrierHistory, ReturnType<typeof barrierModel>>({
-  id: `offline.executor-connectivity-query-db`,
-  law: {
-    statement: `A real QueryDB refetch that receives stale data during restored durable replay remains pending while provider work is held, then fulfills with fresh rows after provider settlement and acknowledged outbox cleanup.`,
-    authority: `Collection.deferDataRefresh public JSDoc; QueryDB external refetch settlement owner and offline-refresh e2e stale-read premise. Persisting local mutations have a separate fetch-settlement exception.`,
-    limits: `Real QueryClient and QueryDB Collection in Node/jsdom, one to three restored offline inserts with per-ID waiters, controlled query backend and provider; no native browser event or remote durability claim. Local persisting-mutation refetches may settle at fetch; overlap and retirement remain with the core receiving path.`,
-    owner: `Offline execution`,
-  },
-  histories: {
-    arbitrary: queryBarrierHistory,
-    runs: 12,
-    fixedSeeds: [20261110],
-    states: queryBarrierStates,
-    constructed: queryBarrierStates.map((state) => ({
-      name: state,
-      enters: [state],
-      build: (plan) => plan,
-    })),
-  },
-  model: barrierModel,
-  driver: driveQueryBarrier,
-  check: checkBarrier,
-  calibrations: [
-    {
-      name: `a settled core barrier leaves the public refetch pending`,
-      law: `query refresh settlement`,
-      corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `batch completed`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as BarrierCut),
-                  query: {
-                    ...(entry.value as BarrierCut).query!,
-                    receipt: `pending`,
-                  },
-                },
-              }
-            : entry,
-        ),
-    },
-    {
-      name: `a stale refetch settles before the held provider`,
-      law: `query refresh settlement`,
-      corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `stale refetch held`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as BarrierCut),
-                  query: {
-                    ...(entry.value as BarrierCut).query!,
-                    receipt: `fulfilled`,
-                  },
-                },
-              }
-            : entry,
-        ),
-    },
-  ],
-})
 const barrierStates = [
   `idle reconnect`,
   `pending refresh barrier`,

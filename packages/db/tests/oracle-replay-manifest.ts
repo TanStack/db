@@ -705,7 +705,7 @@ const ownerGroups: ReadonlyArray<
   [
     `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
     `offline`,
-    `disposal-handoff disposal-issued-handoff disposal-handoff-resources`,
+    `disposal-handoff disposal-issued-handoff disposal-review-boundaries disposal-handoff-resources`,
     `offline-transactions/tests/interruption-handoff-oracle.ts`,
   ],
   [
@@ -723,8 +723,13 @@ const ownerGroups: ReadonlyArray<
   [
     `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
     `offline`,
-    `executor-coordination-lifecycle executor-connectivity-barrier executor-connectivity-query-db`,
+    `executor-coordination-lifecycle executor-connectivity-barrier`,
     `offline-transactions/tests/executor-lifecycle-oracle.ts`,
+  ],
+  [
+    `query-db-collection/tests/offline-executor-refresh-oracle.test.ts`,
+    `offline`,
+    `executor-connectivity-query-db`,
   ],
   [
     `offline-transactions/tests/executor-environment-oracle.property.test.ts`,

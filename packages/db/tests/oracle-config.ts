@@ -221,6 +221,7 @@ const staticOracleProperties = [
   `offline.interruption-settlement`,
   `offline.disposal-handoff`,
   `offline.disposal-issued-handoff`,
+  `offline.disposal-review-boundaries`,
   `offline.disposal-handoff-resources`,
   `offline.settled-id-window`,
   `offline.executor-api`,

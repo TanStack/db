@@ -18,7 +18,7 @@ import type { OnlineDetector } from '../../offline-transactions/src/types'
 import type {
   BarrierCut,
   BarrierHistory,
-} from '../../offline-transactions/tests/executor-lifecycle-oracle'
+} from '../../offline-transactions/tests/executor-refresh-barrier-oracle'
 
 type Row = { id: string; value: string }
 

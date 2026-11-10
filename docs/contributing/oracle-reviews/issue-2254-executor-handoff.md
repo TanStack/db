@@ -1074,3 +1074,211 @@ The final reviewed implementation is commit `b633f501d7297cfbac9db041ca0dd09a773
 Subsequent evidence-only edits do not change the tested source, model, grammar,
 production driver, comparison, or configuration. CI and external-review status
 are reported separately for the final pushed PR head.
+
+
+## Ten-finding review evaluation, 2026-11-10
+
+Starting head: `b2c942fc5e013e370dc45988ee5ff39ad5cafc73`. The reviewer
+supplied no reviewed commit and ran no tests. Its directional-matching finding
+addresses code before `b633f501d7297cfbac9db041ca0dd09a773bf47a`.
+The whole-review experiment plan and lossless raw ledger preceded the experiments.
+
+The accepted law stays unchanged: disposal retires processing resources while
+preserving caller and optimistic-state obligations on surviving Collections.
+A same-outbox durable outcome reaches their registered callers, including a live
+successor awaiting leadership. Disposal supplies no outcome on its own.
+Publication errors leave the processing promise after outcome delivery. Core's
+`Transaction.touchCollection()` specifies first-error propagation. This review
+does not establish an immediate suffix-execution or all-secondary-error logging law.
+
+### Experiments before production refactoring
+
+The new `offline.disposal-review-boundaries` property uses the existing handoff
+model, production driver and comparison. It generates six storage-deletion
+rejection values, a throwing nonfinal restored subscriber before a queued peer,
+and live offline predecessors while only the successor issues provider work.
+It runs all four creation APIs, both optimism origins, one to three transactions
+and replacements, registry growth and adapter replacement over the same store.
+The storage-value observation compares rejection separately from fulfillment;
+it does not require a new message-normalization contract for non-Error values.
+
+The extended comparison passes against unchanged starting production. Falsy
+storage failures already pass through `TransactionExecutor.removeSettledTransaction`'s
+`toError` boundary. They never reach `rejectTransaction` as a falsy value.
+A mutant that removes normalization fails `completed` / `caller settlement`,
+seed `1367791940`, shrink path `1:0:2:1:0:0:0:0:1:1:2`, with a fulfilling manual provider
+and deletion rejecting with `undefined`. This is a same-path disproof of R01,
+plus a missing-value-domain improvement, rather than a new production repair.
+
+The nonfinal subscriber crossing initially sampled a real zero-delay retry timer
+and failed determinism: the completed cut sometimes included the next provider
+call. The final review campaign controls timer dispatch before that observation.
+The law permits the peer to resume through the ordinary retry timer. The
+first package run also found a calibration that returned an unchanged trace
+when the first provider rejected. The calibration now selects only histories
+where its success corruption changes the completed caller result. Neither test
+machinery failure was a product RED result.
+
+Four deliberately wrong designs are rejected at `completed` / `caller settlement`:
+
+| Mutant | Seed | Shrink path |
+| --- | ---: | --- |
+| Pass raw storage rejection instead of normalizing it | 1367791940 | `1:0:2:1:0:0:0:0:1:1:2` |
+| Deliver only to disposed recipients | 20261110 | `0:0:0:0:0` |
+| Match registry containment in one direction | 20261110 | `1:0:0:0:0:0:0:0` |
+| Settle only the executing instance | 20261110 | `0:0:0:0:0:0` |
+
+The latter two retain the prior regression's required delivery directions.
+The instance-only proposal is incomplete: any replacement must still route or
+transfer old caller and restored-snapshot obligations. Lightweight completion
+records could change retention costs, but are a separate implementation option.
+
+### Lossless review disposition
+
+| ID | Technical judgment | PR action and retained value |
+| --- | --- | --- |
+| R01 | Refuted on the reported storage-deletion path; errors are normalized before signaling. | Add the six-value generated dimension and a normalization mutant. |
+| R02 | Retention while obligations remain is factual and permitted by the accepted contract. Disposal without replay supplies no outcome; manual deletion has no caller-cancellation contract. | Preserve pending ownership and the existing post-settlement Node/V8 resource-release witness. No unconditional unfinished-work reclamation claim. |
+| R03 | First subscriber error propagation after outcome delivery is the accepted behavior. The current batch can end and its peer resumes through retry. Secondary-error logging is not promised. | Add the nonfinal subscriber/queued-peer crossing and controlled timer dispatch. |
+| R04 | Already fixed by bidirectional complete registry containment at b633f501d. | Re-run the old-direction mutant and retain issued predecessor/live growing successor coverage. |
+| R05 | Live recipients over the same outbox intentionally receive its durable outcome; a stale local queue does not recreate a deleted durable row. | Add a live offline predecessor; reject the disposed-only mutation. Concurrent conflicting issued outcomes remain outside the accepted guarantee. |
+| R06 | Undeclared receiving-test dependency confirmed; a runtime package cycle was overstated. QueryDB's offline dependency is developmental and the reverse type import is erased. | Move receiving registration into QueryDB and share a registration-free barrier judgment. |
+| R07 | Repeated matching work confirmed, including for rejected candidates. | Deduplicate all candidates, then snapshot matching recipients before callbacks. |
+| R08 | Repeated registration for distinct new obligations confirmed. Existing-ID waits already return early. | Register at zero-to-nonzero obligations; re-register after drain without another persistent flag. |
+| R09 | Instance-only settlement fails the agreed handoff law. Registry removal is not a complete fix. | Keep routing; preserve the lightweight-record idea as an optional engineering alternative. |
+| R10 | PR body omits weight evidence, although the existing committed record already explained prior measurements and growth. | Add final shipped-byte measurements and refactor rationale to the PR body. |
+
+R07's deterministic configuration-read diagnostic at two, four and eight
+Collections measures receiving-owner reads of 6/20/72 before versus 4/8/16
+after for matching candidates, and 4/24/112 versus 4/8/16 for rejected candidates.
+A subsequent distinct waiter or restoration now reads zero Collection entries,
+previously N; first registration and re-registration after drain still read N.
+These are engineering observations, not a new public performance promise.
+The recipient snapshot remains selected before subscriber reentry.
+
+R06 preserves property ID `offline.executor-connectivity-query-db`, its 12-run
+budget, fixed seed, four declared states, both calibrations and all public cuts.
+The new runner is `packages/query-db-collection/tests/offline-executor-refresh-oracle.test.ts`;
+`executor-refresh-barrier-oracle.ts` exports the unchanged independent judgment
+without registering tests. Both real receiving campaigns reach all four states
+16 times before and after relocation. The guarded replay selects the new owner
+and executes once. Offline TypeScript's compilation graph contains no QueryDB
+or Query Core files. The core lifecycle/barrier campaigns also pass.
+A package-local gap run cannot substitute for this separate receiving route.
+
+The review has useful efficiency and dependency observations and exposes
+valuable missing history dimensions. Its prioritization is unreliable: the
+leading failure claim bypasses a normalization boundary, one severe finding is
+stale, and several proposed fixes conflict with accepted promises. Recommendation:
+use this reviewer for exploratory input with executable verification; do not hire
+it as an independent final correctness gate on this evidence.
+
+Loss accounting: 10 raw findings = 4 fixed now + 1 already fixed + 2 refuted +
+3 accepted-design. No finding is deferred or discarded. The optional record-based
+implementation idea is preserved without presenting it as an unimplemented law.
+
+Guide audit for this extension: ORC-001/002 retain the existing independent law;
+ORC-003 keeps prose next to the new grammar and production cuts; ORC-004's new
+axes reconstruct the review paths (ablation loses raw-error values, nonfinal
+publication failure, or live recipient), bounded to six rejection forms and
+three predecessors/transactions; concurrent issued executors and copied stores
+remain excluded by the earlier decisions. ORC-005 compares caller rejection,
+rows, durable IDs and the processing error at each existing cut. ORC-006 uses
+the four mutants above plus the shared corruption calibration. ORC-007 retains
+fixed/random parity and manifest replay. ORC-008 adds no reference-model state;
+ORC-009 keeps completed as the existing provider-plus-deletion projection.
+ORC-010 preserves cleanup and original mismatches. For ORC-011 the review's
+instance-only rival is experimentally rejected by the original caller obligation;
+no second semantic formulation is needed for that identified fault. ORC-012 is
+this record. ORC-013 contrasts held deletion with completed outcome and a live
+recipient with the disposed-only mutation. ORC-014 preserves the separate real
+QueryClient/QueryDB driver, with controlled backend/event limits. ORC-015 declares
+all new states, including API paths and optimism origins. ORC-016 keeps fixed
+and constructed histories on the shared model/production driver/comparison.
+
+
+### Final review weight and verification
+
+`pnpm size:compare --packages offline-transactions --files` succeeds, including
+all eight app scenarios at zero gzip/brotli delta. Its aggregate overlapping
+web/native exports omit the changed API and report a false zero. Separate
+production entry bundles use minification, external dependencies, gzip level 9
+and brotli quality 11:
+
+| Entry | Base gzip | Final gzip | Delta gzip | Base brotli | Final brotli | Delta brotli |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| web | 9218 | 9459 | +241 | 8334 | 8556 | +222 |
+| React Native | 9504 | 9742 | +238 | 8563 | 8789 | +226 |
+
+The isolated exact-parent comparison measures the candidate/registration
+refactor at +24 gzip/+11 brotli bytes for web and +26/+26 for native. It removes
+repeated Collection scans while preserving the pre-publication recipient snapshot.
+An earlier 14-byte comparison used an older record, not the exact parent, and
+does not isolate this refactor. Success and failure still share one settlement
+operation. The remaining bytes implement the accepted handoff law; the simpler
+adapter-only, global-ID, disposal-rejection and instance-only designs fail its
+distinguishing histories. Tests and documentation are separate from shipped
+production bytes. The missing temporary baseline checkout was recreated at the
+same merge base and reused the installed dependencies; no installation was needed.
+
+The final normal offline package run passes **465 tests across 25 files**.
+QueryDB now owns the five receiving tests that previously inflated that package's
+count. The separate receiving run passes all five tests, reaching each of four
+states 16 times in each campaign. A transform that retains a settled connectivity
+barrier fails `query refresh settlement` at `batch completed` in that relocated
+runner. This explicitly preserves the receiving mutation route outside the
+offline package's local gap discovery.
+
+
+Final production SHA-256: `2f7299ec03b2a4f741c7ad485c3fdc09454ca1e8c08a2e3c8e46034f06e29b5a`.
+The final grammar recheck passes unchanged starting production and rejects all
+four mutants. The raw-storage mutant's fixed campaign additionally exposes
+`durable ownership` after a null rejection; its random campaign provides the
+caller-success counterexample in the table. Guarded replay of the new property
+at seed 20261110/path0 selects the interruption runner and records exactly one
+property execution. The full-source gap refresh runs against this source hash;
+earlier full-source totals describe their recorded prior hash.
+
+### Latest CodeRabbit construction follow-up
+
+Review `5847137916` covers starting head b2c942fc5e013e370dc45988ee5ff39ad5cafc73.
+Its production-hook construction finding is confirmed: construction seed zero
+could leave production unedited. The revised construction forces an edited
+production module, an oracle import of it, and the production hook. A declared
+`hook-production-boundary` intersection measures that complete premise.
+The seed-zero premise diagnostic is RED before and GREEN after; a 1,000-seed
+construction sweep finds no missing premise. These are grammar witnesses, not
+production mutant kills. Normal fixed/random lint-scope campaigns pass both
+tests in 457 seconds; all 26 reach states satisfy minimum two across the run.
+The random run budget remains 24. The run did not print individual counts, so
+no per-state count is claimed. An earlier attempt failed temporary Git-repository
+setup under the user's global hooks; a process-local hooks override for those
+test-owned repositories allowed the normal test to run. It changes no repository
+or user Git configuration.
+
+The other three raw items repeat the default docstring gate or optional generated
+test/documentation suggestions already adjudicated. The lossless scratch ledger
+keeps them as duplicates: four raw items equal one fixed plus three duplicates.
+The starting-head browser workflow separately timed out one OPFS reload checkpoint
+while 47 peers passed. No trace artifact was uploaded. The executor change has
+no source path to that reload driver, but pre-existing status is unproven;
+the updated head's CI must supply the superseding result.
+
+Final normal review-boundary reach (24 generated plus 14 constructed histories per campaign):
+
+| Required state | Fixed | Random |
+| --- | ---: | ---: |
+| path manual | 8 | 4 |
+| path auto | 3 | 6 |
+| path default | 3 | 8 |
+| path action | 9 | 4 |
+| origin live | 23 | 22 |
+| origin restored | 15 | 16 |
+| deletion rejects error | 3 | 3 |
+| deletion rejects undefined | 3 | 4 |
+| deletion rejects null | 1 | 2 |
+| deletion rejects false | 2 | 3 |
+| deletion rejects zero | 1 | 4 |
+| deletion rejects empty | 3 | 3 |
+| peer after subscriber exception | 3 | 1 |
+| live offline predecessor | 19 | 20 |

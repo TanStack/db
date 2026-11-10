@@ -16,6 +16,7 @@ import { FakeStorageAdapter, gate, turn } from './harness'
 import {
   captureUnhandledRejections,
   cleanupOfflineOracle,
+  useControlledClock,
 } from './oracle-lifecycle'
 import type { Transaction } from '@tanstack/db'
 import type { Observation } from '../../db/tests/oracle-property'
@@ -68,6 +69,12 @@ type HandoffHistory = {
   subscriberThrows: boolean
   replaceCollection: boolean
   growRegistry: boolean
+  // Review boundary dimensions are optional in the original grammar. The
+  // companion campaign below supplies each dimension constructively.
+  deletionRejection?:
+    `error` | `undefined` | `null` | `false` | `zero` | `empty`
+  subscriberEarly?: boolean
+  keepPredecessorsLive?: boolean
 }
 const paths: Array<Path> = [`manual`, `auto`, `default`, `action`]
 const handoffFields = {
@@ -165,6 +172,17 @@ async function driveHandoff(
   let reconciled = false
   let issuedProcessing: Promise<unknown> | null | undefined
   const deletionFault = { happened: false }
+  const deletionError = new Error(`deletion failed`)
+  const deletionRejections = {
+    error: deletionError,
+    undefined: undefined,
+    null: null,
+    false: false,
+    zero: 0,
+    empty: ``,
+  }
+  const deletionRejection =
+    deletionRejections[plan.deletionRejection ?? `error`]
   const storage = new (class extends FakeStorageAdapter {
     override async delete(key: string) {
       const index = ids.indexOf(key.slice(3))
@@ -172,7 +190,7 @@ async function driveHandoff(
       await deletionGates[index]!.promise
       if (plan.deleteFailure && !deletionFault.happened) {
         deletionFault.happened = true
-        throw new Error(`deletion failed`)
+        throw deletionRejection
       }
       return super.delete(key)
     }
@@ -237,7 +255,16 @@ async function driveHandoff(
         result.result = `fulfilled`
       },
       (error: unknown) => {
-        result.result = error instanceof Error ? error.message : String(error)
+        // For the expanded storage value domain the law owes rejection,
+        // not a particular normalized message. Keep fulfillment distinct.
+        result.result =
+          plan.deletionRejection &&
+          deletionFault.happened &&
+          plan.outcomes[index] === `fulfil`
+            ? `deletion failed`
+            : error instanceof Error
+              ? error.message
+              : String(error)
       },
     )
     callers[index]!.push(result)
@@ -415,9 +442,9 @@ async function driveHandoff(
         await reachHandoff(() => calls.includes(0), `retired provider issued`)
         observe(`reach`, `retired provider issued`)
       }
-      current.dispose()
+      if (!plan.keepPredecessorsLive) current.dispose()
       await drainHandoff()
-      capture(`disposed`, 0)
+      capture(plan.keepPredecessorsLive ? `predecessor idle` : `disposed`, 0)
       // Only the final replacement changes Collection identity. Every earlier
       // replacement remains a retained-Collection handoff control.
       if (plan.replaceCollection && replacement === plan.replacements - 1) {
@@ -469,23 +496,32 @@ async function driveHandoff(
       providerGates[index]!.resolve()
       await reachHandoff(() => deletions.includes(index), `deletion ${index}`)
       capture(`deletion held`, index)
-      // Target restored-snapshot cleanup, at the final processing cut. Core's
+      // Target restored-snapshot cleanup. The review campaign also throws
+      // before a queued peer, to check eventual peer progress after the batch
+      // error. Core's
       // live manual commit may itself throw a subscriber error while its receipt
       // fulfils; that separate publication contract belongs to core's oracle.
       if (
         plan.subscriberThrows &&
         plan.origin === `restored` &&
-        (plan.deleteFailure || index === ids.length - 1)
+        (plan.deleteFailure ||
+          index === (plan.subscriberEarly ? 0 : ids.length - 1))
       ) {
         const subscription = collection.subscribeChanges(() => {
           subscriberCalls++
+          if (plan.subscriberEarly) unsubscribe?.()
           throw subscriberError
         })
         unsubscribe = () => subscription.unsubscribe()
       }
       deletionGates[index]!.resolve()
       await drainHandoff()
+      // The review campaign controls the retry dispatch instead of sampling
+      // whether a real zero-delay timer happened to fire during task turns.
+      if (plan.subscriberEarly) await vi.advanceTimersByTimeAsync(0)
       capture(`completed`, index + 1)
+      if (plan.subscriberEarly && subscriberCalls && index > 0)
+        observe(`reach`, `peer after subscriber exception`)
       if (plan.deleteFailure) break
     }
     if (issuedExecutor) {
@@ -535,6 +571,14 @@ async function driveHandoff(
     if (replaced && plan.origin === `live`)
       observe(`reach`, `replaced ${plan.path} path`)
     if (plan.facade) observe(`reach`, `new adapter`)
+    if (
+      plan.deletionRejection &&
+      deletionFault.happened &&
+      plan.outcomes[0] === `fulfil`
+    )
+      observe(`reach`, `deletion rejects ${plan.deletionRejection}`)
+    if (plan.keepPredecessorsLive && plan.replacements)
+      observe(`reach`, `live offline predecessor`)
     if (plan.deleteFailure) observe(`reach`, `deletion failure`)
     if (plan.shared && plan.outcomes.length > 1) observe(`reach`, `shared keys`)
     if (subscriberCalls) observe(`reach`, `throwing settlement subscriber`)
@@ -1155,6 +1199,137 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
               }
             : entry,
         ),
+    },
+  ],
+})
+
+// This review campaign crosses three previously independent boundaries. A
+// storage adapter can reject with any JavaScript value: callers still reject
+// and optimistic state drops. A throwing old restoration subscriber must leave
+// its batch with the same exception after all caller outcomes are delivered;
+// a later ready peer can then run via the ordinary retry timer. A predecessor
+// may remain live but offline while only the successor issues provider work.
+// These histories exclude concurrent issued providers and copied outboxes.
+const rejectionKinds = [
+  `error`,
+  `undefined`,
+  `null`,
+  `false`,
+  `zero`,
+  `empty`,
+] as const
+const reviewHandoffHistory: fc.Arbitrary<HandoffHistory> = fc.record({
+  ...handoffFields,
+  replacements: fc.integer({ min: 1, max: 3 }),
+  replaceCollection: fc.constant(false),
+  deletionRejection: fc.constantFrom(...rejectionKinds),
+  subscriberEarly: fc.boolean(),
+  keepPredecessorsLive: fc.boolean(),
+})
+const reviewHandoffStates = [
+  ...paths.map((path) => `path ${path}`),
+  `origin live`,
+  `origin restored`,
+  ...rejectionKinds.map((kind) => `deletion rejects ${kind}`),
+  `peer after subscriber exception`,
+  `live offline predecessor`,
+]
+declareOracle({ grammar: [reviewHandoffHistory] })
+oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
+  id: `offline.disposal-review-boundaries`,
+  law: {
+    statement: `Storage deletion failure rejects callers regardless of its value; restoration subscriber errors propagate after outcome delivery without permanently blocking queued peers; an offline live predecessor receives the sole executing successor's durable outcome.`,
+    authority: `README Tracking Submission Status and dispose contract; Transaction.touchCollection first-error propagation; maintainer decision offline-disposal-handoff-2026-11-10.`,
+    limits: `Controlled provider/storage in one runtime; one issued executor; one to three retained-Collection predecessors and transactions. No copied outboxes, concurrent conflicting outcomes, immediate suffix execution, or all-error logging promise.`,
+    owner: `Offline execution`,
+  },
+  histories: {
+    arbitrary: reviewHandoffHistory,
+    runs: 24,
+    fixedSeeds: [20261110],
+    states: reviewHandoffStates,
+    measured: [
+      `successor`,
+      `new adapter`,
+      `deletion failure`,
+      `shared keys`,
+      `throwing settlement subscriber`,
+      `retained affected Collection`,
+      `grown registry`,
+      `restored optimism without a waiter`,
+    ],
+    constructed: reviewHandoffStates.map((state) => ({
+      name: state,
+      enters: [state],
+      build: (plan) => ({
+        ...plan,
+        ...(state.startsWith(`path `)
+          ? { path: state.slice(5) as Path, origin: `live` as const }
+          : {}),
+        ...(state.startsWith(`origin `)
+          ? { origin: state.slice(7) as HandoffHistory[`origin`] }
+          : {}),
+        ...(state.startsWith(`deletion rejects `)
+          ? {
+              deletionRejection: state.slice(17) as NonNullable<
+                HandoffHistory[`deletionRejection`]
+              >,
+              deleteFailure: true,
+              outcomes: [
+                `fulfil`,
+                ...plan.outcomes.slice(1),
+              ] as HandoffHistory[`outcomes`],
+            }
+          : {}),
+        ...(state === `peer after subscriber exception`
+          ? {
+              origin: `restored` as const,
+              outcomes: [`fulfil`, `fulfil`] as HandoffHistory[`outcomes`],
+              deleteFailure: false,
+              shared: false,
+              subscriberThrows: true,
+              subscriberEarly: true,
+            }
+          : {}),
+        ...(state === `live offline predecessor`
+          ? { keepPredecessorsLive: true, waiters: Math.max(1, plan.waiters) }
+          : {}),
+      }),
+    })),
+  },
+  model: handoffModel,
+  driver: async (plan, observe) => {
+    const releaseClock = useControlledClock()
+    try {
+      await driveHandoff(plan, observe)
+    } finally {
+      releaseClock()
+    }
+  },
+  check: checkHandoff,
+  calibrations: [
+    {
+      name: `a falsy storage rejection reports success`,
+      law: `caller settlement`,
+      corrupt: (trace, plan) =>
+        !plan.deleteFailure || plan.outcomes[0] !== `fulfil`
+          ? undefined
+          : trace.map((entry) =>
+              entry.checkpoint === `completed`
+                ? {
+                    ...entry,
+                    value: {
+                      ...(entry.value as Cut),
+                      callers: (entry.value as Cut).callers.map(
+                        (entries, index) =>
+                          plan.outcomes[index] === `fulfil`
+                            ? entries.map(() => `fulfilled`)
+                            : entries,
+                      ),
+                    },
+                  }
+                : entry,
+            ),
     },
   ],
 })

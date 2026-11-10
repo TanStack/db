@@ -511,8 +511,8 @@ export class OfflineExecutor {
       deferred.reject = reject
     })
 
-    this.pendingTransactionPromises.set(transactionId, deferred)
     this.trackCompletion()
+    this.pendingTransactionPromises.set(transactionId, deferred)
     return deferred.promise
   }
 
@@ -527,6 +527,11 @@ export class OfflineExecutor {
   }
 
   private trackCompletion(): void {
+    if (
+      this.pendingTransactionPromises.size > 0 ||
+      this.restorationTransactions.size > 0
+    )
+      return
     for (const collection of Object.values(this.config.collections)) {
       let owners = completionOwners.get(collection)
       if (!owners) completionOwners.set(collection, (owners = new Set()))
@@ -539,12 +544,17 @@ export class OfflineExecutor {
     result: unknown,
     error?: Error,
   ): void {
-    const owners = new Set<OfflineExecutor>([this])
+    const candidates = new Set<OfflineExecutor>([this])
     for (const collection of Object.values(this.config.collections)) {
-      for (const owner of completionOwners.get(collection) ?? []) {
-        if (
-          (owner.pendingTransactionPromises.has(transactionId) ||
-            owner.restorationTransactions.has(transactionId)) &&
+      for (const owner of completionOwners.get(collection) ?? [])
+        candidates.add(owner)
+    }
+    // Select every recipient before publication can reenter this executor.
+    const owners = [...candidates].filter(
+      (owner) =>
+        owner === this ||
+        ((owner.pendingTransactionPromises.has(transactionId) ||
+          owner.restorationTransactions.has(transactionId)) &&
           // Either executor may deliver the outcome: a retired issued call or
           // its successor's replay. An ancillary overlap alone is insufficient.
           (retainsCollections(
@@ -554,11 +564,8 @@ export class OfflineExecutor {
             retainsCollections(
               owner.config.collections,
               this.config.collections,
-            ))
-        )
-          owners.add(owner)
-      }
-    }
+            ))),
+    )
 
     const cleanupErrors: Array<unknown> = []
     for (const owner of owners) {
@@ -591,11 +598,11 @@ export class OfflineExecutor {
     offlineTransactionId: string,
     restorationTransaction: Transaction,
   ): void {
+    this.trackCompletion()
     this.restorationTransactions.set(
       offlineTransactionId,
       restorationTransaction,
     )
-    this.trackCompletion()
   }
 
   private cleanupRestorationTransaction(
