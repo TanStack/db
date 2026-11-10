@@ -991,9 +991,7 @@ async function runNullableCursorScenario(
     const preload = live.preload()
     expect(pending.length).toBeGreaterThan(0)
     // Settling one request can append its boundary-refinement request.
-    // eslint-disable-next-line @typescript-eslint/prefer-for-of
-    for (let index = 0; index < pending.length; index++) {
-      const request = pending[index]!
+    for (const request of pending) {
       begin()
       for (const row of rowsForLoadSubset(orderedRows, request.options)) {
         if (delivered.has(row.id)) continue
@@ -4436,9 +4434,7 @@ describe(`pagination recomputation oracle`, () => {
       const preload = live.preload()
       expect(pending).toHaveLength(1)
       // Settling one request can append its boundary-refinement request.
-      // eslint-disable-next-line @typescript-eslint/prefer-for-of
-      for (let index = 0; index < pending.length; index++) {
-        const request = pending[index]!
+      for (const request of pending) {
         begin()
         for (const row of rowsForLoadSubset(rows, request.options)) {
           if (delivered.has(row.id)) continue
