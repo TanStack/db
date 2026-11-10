@@ -14,6 +14,16 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
+    `scripts`,
+    `legacy-campaign-baseline`,
+  ],
+  [
+    `db/tests/declared-reach-oracle.property.test.ts`,
+    `oracle`,
+    `declared-reach`,
+  ],
+  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
@@ -951,6 +961,11 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `scripts.legacy-campaign-baseline`,
+    `scripts\\.legacy-campaign-baseline > random seed`,
+  ],
+  [`oracle.declared-reach`, `reach ledgers refine the declared reach model`],
   [
     `includes-work.projection-payload`,
     `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,

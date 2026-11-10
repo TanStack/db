@@ -299,10 +299,31 @@ presence of a preferred heading, class, comment template, or helper.
   bug-class repair.
 - **Obligation:** The property MUST declare the states that its changed or
   cited laws depend on, and MUST fail when generated histories reach a declared
-  state fewer times than its stated minimum. Use
-  [`createOracleReach`](../../packages/db/tests/oracle-reach.ts) or an
-  equivalent counter that fails the property. A passing run count does not
-  satisfy this requirement.
+  state fewer times than its stated minimum. Declare the states with
+  `histories.states` in `oracleProperty` and supply `histories.constructed`
+  builders that splice them into generated histories. The pinned API has no
+  numeric minimum option. Enforce a normal campaign minimum of N with at least
+  N randomized constructed builders that each list the state in `enters` and
+  reach it. With multiple builders in the pinned API, their results MUST have
+  distinct object identities or provably disjoint primitive values. Prefer a
+  fresh object or array from each invocation. A single primitive-valued builder
+  does not have this collision.
+  Repeated primitive values or shared objects can replace an earlier builder
+  in the framework's history-to-builder map and bypass its state checks. Each
+  normal campaign checks one seed-derived construction from every builder.
+  Confirm every builder's named state checks with missing-state controls, and
+  verify that the reported counts meet N. These checks enforce the minimum.
+  The pinned framework also invokes builders during generated runs, but it
+  does not associate their fresh objects with their `enters` obligations.
+  The property MUST separately check each builder's generated outputs against
+  its named states, using the same production driver and state observations.
+  A missing-state control MUST show that this check rejects a generated
+  construction that omits a required state. Printed counts and additional
+  random hits alone do not enforce either obligation.
+  Literal fixed histories do not count toward required reach. A passing run
+  count does not satisfy this requirement.
+  Existing files on the shrinking `legacyCampaigns` list retain their legacy
+  reach checks until conversion; new or converted campaigns use `oracleProperty`.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.

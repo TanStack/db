@@ -23,8 +23,10 @@ Work in this order when a production change is part of the task:
    observation cuts. Include required real-host receiving witnesses in this
    pre-edit gate; a controlled core witness does not supply their evidence.
 3. Extend the history grammar, production driver, or observation until generated
-   histories reach the state where the law matters. Declare that state with
-   `createOracleReach` (ORC-015) for each required receiving path.
+   histories reach the state where the law matters. Declare it in
+   `histories.states` of `oracleProperty` and supply `histories.constructed` builders for each
+   required receiving path (ORC-015). Builders splice the required state into
+   generated histories; literal fixed histories do not count toward reach.
 4. Run those comparisons on unchanged production. Record the defect's RED
    result and the neighboring guarantees' results. A setup failure or missing
    required witness blocks production edits; repair the test path first.
@@ -96,3 +98,10 @@ untested. Use concise prose suited to the change; no particular report template
 is required. When changing repository coverage, update the existing oracle owner
 and coverage map to reflect the changed scope. A scratch law-design experiment
 retains its proposals and limits without claiming new repository coverage.
+
+For a bug fix or feature, convert its owning legacy oracles to `oracleProperty`
+and remove their `legacyCampaigns` entries. Close gaps in changed functions by
+an oracle kill or an explicit maintainer allowance for the anchored gaps. A
+coverage-map entry, equivalent-mutant claim, or unobservable-effect claim does
+not close a gap. For a pure conversion, compare before/after gap reports with
+the same seed and retain every previously killed mutant by stable key.

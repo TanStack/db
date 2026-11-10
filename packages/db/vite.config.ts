@@ -55,6 +55,9 @@ const config = defineConfig({
     },
     typecheck: { enabled: true, tsconfig: `./tsconfig.test.json` },
     setupFiles: [`./tests/test-setup.ts`],
+    // The compatibility self-oracle resets modules to exercise each replay
+    // environment. Inline the framework so vi.resetModules resets it too.
+    server: { deps: { inline: [`@tanstack/oracles`] } },
   },
 })
 
