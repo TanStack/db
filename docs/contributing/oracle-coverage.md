@@ -8064,19 +8064,33 @@ uses membership in a four-file universe. The driver commits base settings in a
 temporary Git repository, writes head settings, runs the actual CLI, and
 compares the full additions report and exit status after process completion.
 The grammar also varies the setting's presence and the gate's presence at base.
+Fixture histories cross inherited pre-commit/prepare-commit-msg hooks with
+plain or strict CRLF global configuration. A constructed no-hook history with
+strict CRLF settings requires fixture setup and the completed gate report to
+remain independent of developer global configuration.
 Only absence of both permits initial adoption; after the setting is removed,
 the gate's presence preserves an empty allowed set. Constructed histories cover
 an addition, an addition after an empty adopted baseline, an addition after the
 setting was removed, a removal, and initial adoption. Both 20-history campaigns
-run these same laws and constructions. The checker rejects an always-accept
-observation. Production mutants that always accept or allow a removed baseline
+run these same laws and constructions. A local association records each
+builder's declared states on every invocation. The shared check compares those
+declarations with actual state observations for seeded, generated, and shrunk
+constructed outputs; it does not depend on the pinned framework's seeded-only
+association. The checker rejects both an always-accept report and a trace that
+omits a required constructed state at the virtual `constructed states`
+checkpoint. This checkpoint is unrecorded, so an incomplete driver trace keeps
+its actual driver failure primary rather than inventing an earlier state
+omission. Actual gate-report mismatches still use `completed`. Production
+mutants that always accept or allow a removed baseline
 to restart fail the named `only shrinks` law at `completed`, including direct
 seed/path replay.
 
 Limits: valid settings with unique file names; the settings module exists at
 base and exports literal settings without imports. The external lint plugin
-owns malformed entries, stale entries, and the classification of legacy API
-uses. The gate compares file identities and permits reason edits. No existing
+owns malformed entries, stale entries in files that still exist, and the
+classification of legacy API uses. Deleted files have no lint invocation;
+remove their baseline entries when deleting them. The gate compares file
+identities and permits reason edits. No existing
 product law or campaign is converted by the repin. Each later conversion needs
 its own same-seed before/after gap comparison; this adoption does not supply
 that evidence. Gaps in changed functions close by a kill or an explicit

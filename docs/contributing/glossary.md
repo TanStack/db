@@ -238,7 +238,7 @@ crossing subsystem boundaries; these comparisons are not interchangeable.
 | oracle owner | The file that owns a law's judgment, as listed in the coverage map. Always qualify it; owner alone is a product term. |
 | decision record | A recorded maintainer decision with an id, date, scope, and text. A law or a limit cites it as its authority. Production output is never authority. |
 | limit | A declared statement of what an oracle does not establish, such as a state, dimension, production path, or comparison that it does not cover. It names an oracle owner and a decision record and reports whether it was in effect. A tool-detected hole is a gap, not a limit. |
-| gap | A hole that a tool or review detects, such as a declared state that was never reached or a mutant that survived. A gap in a changed function closes with an oracle kill or an explicit maintainer allowance for its anchored gaps. Recording it as a limit does not close it. Qualify it; a sequence gap is a product term. |
+| gap | A hole that a tool or review detects, such as a declared state that was never reached or a mutant that survived. A reach gap closes when generated histories meet the declared state's enforced minimum under ORC-015. A mutant gap in a changed function closes with an oracle kill or an explicit maintainer allowance for its anchored gaps. Recording either as a limit does not close it. Qualify it; a sequence gap is a product term. |
 | self-oracle | An oracle whose subject is the oracle framework itself. |
 
 ## Grammar rules
