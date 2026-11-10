@@ -93,13 +93,15 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
@@ -816,6 +818,10 @@ function repositoryOf(program) {
     join(launch, `scripts`, `check-oracle-run-counts.mjs`),
     readFileSync(runCountScript, `utf8`),
   )
+  writeFileSync(
+    join(launch, `scripts`, `oracle-specifiers.mjs`),
+    readFileSync(scannerScript, `utf8`),
+  )
   for (const module of program.modules) {
     if (!module.untracked)
       writeFileSync(
@@ -935,7 +941,7 @@ function runCli(
   if (!valid) {
     throw new Error(`cli failed (exit ${result.status}):\n${result.stderr}`)
   }
-  return reportedOracles(lines)
+  return { ...reportedOracles(lines), raw: result.stderr }
 }
 
 /** What each scope reports, from one repository. */
@@ -1053,6 +1059,14 @@ const STATES = [
   `untracked-dependent`,
   `cache-invalidated`,
   `companion-declares`,
+  `changed-delete-case`,
+  `changed-delete-companion`,
+  `changed-rename-case`,
+  `changed-settings`,
+  `changed-rule`,
+  `changed-configuration`,
+  `poisoned-cache-text`,
+  `stale-temp-pruned`,
   `js-oracle`,
   `hook-oracle`,
   `hook-support`,
@@ -1248,28 +1262,44 @@ describe(`lint selection after an edit`, () => {
 
 // -- 6. Lint cache -------------------------------------------------------------
 //
-// Law L4c (lint cache): a cached run reports exactly what an uncached run
-// reports at the same state. The hooks keep each oracle file's messages under a
-// key of the file, the test modules that it reaches (the rule reads them), and
-// the lint configuration, and a stop report under the branch's changes. A
-// key that a change alters must be recomputed, so an edit to an imported module
-// reaches the report of the file that imports it. Authority: the rule's own
-// contract (TanStack/oracles, `no-unit-test`): a file that relies on a
+// Law L4c (lint cache): an agent feedback hook's cached run reports what an
+// uncached run reports at the same state, and the enforcement runs (`pnpm
+// lint:changed` and the pre-commit hook) never read the cache. Authority: the
+// no-unit-test rule's contract (TanStack/oracles): a file that relies on a
 // companion module's declaration declares nothing itself, and it is undeclared
 // only when no test reaches a part. So the case file below is reported exactly
-// when its companion does not declare the check, and its own content never
-// changes.
+// when its companion does not declare the check.
 //
-// The grammar draws whether the companion declares at base and at head. The
-// driver warms the cache at base with the edit hook, which lints the case file
-// under the base key. It then writes the head companion, and runs the changed
-// scope uncached and cached, the edit hook, the stop hook, and the stop hook
-// again, which must repeat the same report. A cache keyed only on the case
-// file's own content keeps the base message at head, and fails.
+// The grammar draws whether the companion declares at base and at head, then a
+// sequence of changes the branch makes after the head state: deleting the case
+// file, deleting the companion, renaming the case file, editing the settings
+// module, installing a changed rule, and changing the configuration input. After
+// each change, a cached stop run must repeat an uncached one, and a configuration
+// change must add a stop key. Last, every cache entry is poisoned, and the text
+// run must still match an uncached one. A constant stop key fails the stop checks;
+// a cache that trusts stored entries in text mode fails the last check. A cache
+// write also removes a temporary file that an interrupted write left, so the
+// warm-up must leave none behind.
 
+const scannerScript = join(repoRoot, `scripts`, `oracle-specifiers.mjs`)
 const CACHE_CASE = `cache.oracle.test.ts`
+const RENAMED_CASE = `renamed.oracle.test.ts`
 const COMPANION = `companion.ts`
 const CASE_TEST = `import { check } from './companion'\nit('reads one value', () => { check(1) })`
+// Changes the grammar draws after the head state, in order.
+const CHANGES = [
+  `delete-case`,
+  `delete-companion`,
+  `rename-case`,
+  `settings`,
+  `rule`,
+  `configuration`,
+]
+// The changes that alter the lint configuration, so they must add a stop key.
+const CONFIGURATION_CHANGES = [`settings`, `rule`, `configuration`]
+// The configuration input that a `configuration` change draws. A test stands in
+// for a new parser, ESLint, or Node version, which a real install would change.
+const CONFIGURATION_STUB = `stub-parser-version-1`
 
 /** The companion module at a state: it declares the check, or it only exports it. */
 function companionText(declares) {
@@ -1281,6 +1311,10 @@ function companionText(declares) {
 const cacheArbitrary = fc.record({
   declaresAtBase: fc.boolean(),
   declaresAtHead: fc.boolean(),
+  changes: fc.array(fc.constantFrom(...CHANGES), {
+    minLength: 0,
+    maxLength: 3,
+  }),
 })
 
 /**
@@ -1296,7 +1330,7 @@ function predictCachedReport(declares, selected = true) {
 
 /**
  * A launch checkout whose base commit holds the case file and the companion at
- * base, with the lint script and its settings, and the installed dependencies.
+ * base, with the lint script, its modules, and the installed dependencies.
  */
 function cacheRepositoryOf(program) {
   const launch = mkdtempSync(join(work, `c`))
@@ -1314,14 +1348,14 @@ function cacheRepositoryOf(program) {
   )
   mkdirSync(join(launch, `scripts`), { recursive: true })
   writeFileSync(join(launch, SETTINGS), readFileSync(settingsFile, `utf8`))
-  writeFileSync(
-    join(launch, `scripts`, `agent-lint-feedback.mjs`),
-    readFileSync(feedbackScript, `utf8`),
-  )
-  writeFileSync(
-    join(launch, `scripts`, `check-oracle-run-counts.mjs`),
-    readFileSync(runCountScript, `utf8`),
-  )
+  // Each copy keeps its real name, so the hook finds its modules by path.
+  for (const [source, name] of [
+    [feedbackScript, `agent-lint-feedback.mjs`],
+    [runCountScript, `check-oracle-run-counts.mjs`],
+    [scannerScript, `oracle-specifiers.mjs`],
+  ]) {
+    writeFileSync(join(launch, `scripts`, name), readFileSync(source, `utf8`))
+  }
   writeFileSync(join(launch, APP, `tests`, CACHE_CASE), `${CASE_TEST}\n`)
   writeFileSync(
     join(launch, APP, `tests`, COMPANION),
@@ -1333,17 +1367,81 @@ function cacheRepositoryOf(program) {
   return launch
 }
 
+/** Whether a cache file holds a stop report: the single slot of the earlier hook, or a slot per checkout. */
+const isStopEntry = (name) =>
+  name === `stop.json` || (name.startsWith(`stop-`) && name.endsWith(`.json`))
+
+/** The stop keys that a cache directory holds, sorted. */
+function stopKeysIn(directory) {
+  return readdirSync(directory)
+    .filter((name) => isStopEntry(name))
+    .map((name) => JSON.parse(readFileSync(join(directory, name), `utf8`)).key)
+    .sort()
+}
+
+/**
+ * Applies one change to the session checkout. Returns false when the change has
+ * nothing to act on, such as renaming a case file that a deletion removed.
+ */
+function applyChange(launch, change, state) {
+  const caseFile = join(launch, APP, `tests`, state.caseName)
+  switch (change) {
+    case `delete-case`:
+      if (!existsSync(caseFile)) return false
+      rmSync(caseFile)
+      return true
+    case `delete-companion`: {
+      const companion = join(launch, APP, `tests`, COMPANION)
+      if (!existsSync(companion)) return false
+      rmSync(companion)
+      return true
+    }
+    case `rename-case`:
+      if (!existsSync(caseFile)) return false
+      renameSync(caseFile, join(launch, APP, `tests`, RENAMED_CASE))
+      state.caseName = RENAMED_CASE
+      return true
+    case `settings`:
+      writeFileSync(
+        join(launch, SETTINGS),
+        `${readFileSync(join(launch, SETTINGS), `utf8`)}// edited\n`,
+      )
+      return true
+    case `rule`: {
+      const rule = join(launch, RULE_SOURCE)
+      writeFileSync(
+        rule,
+        readFileSync(rule, `utf8`).replace(
+          RULE_MESSAGE,
+          `${RULE_MESSAGE} ${RULE_MARK}`,
+        ),
+      )
+      return true
+    }
+    case `configuration`:
+      state.configurationInput = CONFIGURATION_STUB
+      return true
+    default:
+      throw new Error(`unknown change ${change}`)
+  }
+}
+
 /**
  * Runs the cache campaign's observations for one program: the warm-up at base,
- * then the head observations. Each cached run uses one cache directory, and the
- * uncached run disables the cache.
+ * the head observations, then each change followed by its stop runs, then the
+ * text run after every cache entry is poisoned. A cached run uses one cache
+ * directory, and an uncached run disables the cache.
  */
 function observedCache(program) {
   const launch = cacheRepositoryOf(program)
   try {
     const script = join(launch, `scripts`, `agent-lint-feedback.mjs`)
-    const cache = { ORACLE_LINT_CACHE_DIR: mkdtempSync(join(work, `cache-`)) }
-    const uncached = { ORACLE_LINT_CACHE_DIR: `` }
+    const cache = mkdtempSync(join(work, `cache-`))
+    const state = { caseName: CACHE_CASE, configurationInput: `` }
+    const environment = (directory) => ({
+      ORACLE_LINT_CACHE_DIR: directory,
+      ORACLE_LINT_CONFIGURATION_INPUT: state.configurationInput,
+    })
     const companion = join(launch, APP, `tests`, COMPANION)
     const editHook = (env) =>
       runCli(
@@ -1361,33 +1459,61 @@ function observedCache(program) {
         JSON.stringify({ cwd: launch }),
         env,
       )
-    const warmed = editHook(cache)
+    const textRun = (env) =>
+      runCli(launch, script, [`--format=text`], undefined, env)
+
+    // A temporary file left by an interrupted write, two hours old. The next
+    // cache write removes it, so no temporary file survives the warm-up.
+    const leftover = join(cache, `${`0`.repeat(64)}.json.1.tmp`)
+    writeFileSync(leftover, `{`)
+    const aged = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    utimesSync(leftover, aged, aged)
+    const warmed = editHook(environment(cache))
     writeFileSync(companion, companionText(program.declaresAtHead))
-    const changed = runCli(
-      launch,
-      script,
-      [`--format=text`],
-      undefined,
-      uncached,
-    )
-    const changedCached = runCli(
-      launch,
-      script,
-      [`--format=text`],
-      undefined,
-      cache,
-    )
-    const hook = editHook(cache)
-    const stop = stopHook(cache)
-    const stopAgain = stopHook(cache)
-    return { warmed, changed, changedCached, hook, stop, stopAgain }
+    const observed = {
+      warmed,
+      leftovers: readdirSync(cache).filter((name) => name.endsWith(`.tmp`)),
+      changed: textRun(environment(``)),
+      changedCached: textRun(environment(cache)),
+      hook: editHook(environment(cache)),
+      stop: stopHook(environment(cache)),
+      stopAgain: stopHook(environment(cache)),
+      steps: [],
+    }
+    for (const change of program.changes) {
+      if (!applyChange(launch, change, state)) continue
+      const before = stopKeysIn(cache)
+      observed.steps.push({
+        change,
+        cached: stopHook(environment(cache)),
+        uncached: stopHook(environment(``)),
+        newKeys: stopKeysIn(cache).filter((key) => !before.includes(key))
+          .length,
+      })
+    }
+    // Every entry is replaced by a poisoned one. A run that reads a stored
+    // entry reports the poison, not the state.
+    for (const name of readdirSync(cache)) {
+      if (!name.endsWith(`.json`)) continue
+      writeFileSync(
+        join(cache, name),
+        JSON.stringify(
+          name.startsWith(`stop-`)
+            ? { key: `poisoned`, report: `POISONED` }
+            : [],
+        ),
+      )
+    }
+    observed.poisoned = {
+      cached: textRun(environment(cache)),
+      uncached: textRun(environment(``)),
+    }
+    return observed
   } finally {
     rmSync(launch, { recursive: true, force: true })
   }
 }
 
-// The cache campaign owns the environment of its runs, so it passes the cache
-// directory through `runCli` rather than the process environment.
 function cacheCampaign(name) {
   const predicate = async (program) => {
     await setImmediate()
@@ -1398,6 +1524,9 @@ function cacheCampaign(name) {
     if (program.declaresAtHead) reach.reach(`companion-declares`)
     const observed = observedCache(program)
     const edited = program.declaresAtBase !== program.declaresAtHead
+    // The warm-up's write prunes the stale temporary file.
+    compareSelected(observed.leftovers, [])
+    reach.reach(`stale-temp-pruned`)
     const expected = {
       warmed: predictCachedReport(program.declaresAtBase),
       hook: predictCachedReport(program.declaresAtHead),
@@ -1409,6 +1538,22 @@ function cacheCampaign(name) {
     for (const scope of Object.keys(expected)) {
       compareSelected(observed[scope].oracles, expected[scope])
     }
+    // Each change: the cached stop run repeats the uncached one, report text
+    // included, and a configuration change adds a stop key.
+    for (const step of observed.steps) {
+      compareSelected(step.cached.raw, step.uncached.raw)
+      if (CONFIGURATION_CHANGES.includes(step.change)) {
+        compareSelected(step.newKeys > 0, true)
+      }
+      reach.reach(`changed-${step.change}`)
+    }
+    if (observed.steps.length > 0) {
+      compareSelected(
+        observed.poisoned.cached.raw,
+        observed.poisoned.uncached.raw,
+      )
+      reach.reach(`poisoned-cache-text`)
+    }
   }
   it(`${name}: fixed-seed campaign`, async () => {
     const parameters = oracleFixedSeed(2238, {
@@ -1416,7 +1561,7 @@ function cacheCampaign(name) {
     })
     oracleRoute(oracleRouteOf(parameters))
     await fc.assert(fc.asyncProperty(cacheArbitrary, predicate), parameters)
-  }, 1_200_000)
+  }, 1_800_000)
 }
 
 // The declaration names the parts above. It runs nothing, so it follows them.
