@@ -742,7 +742,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
     `replay`,
-    `ordered-window-faults ordered-failed-replay ordered-preload-recovery keyed-request-failures subscription-demand-origin`,
+    `ordered-window-faults ordered-failed-replay ordered-preload-recovery keyed-request-failures subscription-demand-origin new-sibling-demand sibling-settlement-order subscription-error-order subscription-success-scope`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -1789,16 +1789,16 @@ function directReplayTestName(property: string): string | undefined {
     property.startsWith(`react.ssr-effects-`)
   )
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
-  if (property === `replay.ordered-window-faults`)
-    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
-  if (property === `replay.ordered-failed-replay`)
-    return `keeps the last publication through a failed replay \\(replay campaign\\)`
-  if (property === `replay.ordered-preload-recovery`)
-    return `recovers replays that start during the initial preload \\(replay campaign\\)`
-  if (property === `replay.keyed-request-failures`)
-    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
-  if (property === `replay.subscription-demand-origin`)
-    return `distinguishes failed demand origins \\(replay campaign\\)`
+  if (
+    [
+      `replay.ordered-window-faults`,
+      `replay.ordered-failed-replay`,
+      `replay.ordered-preload-recovery`,
+      `replay.keyed-request-failures`,
+      `replay.subscription-demand-origin`,
+    ].includes(property)
+  )
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
