@@ -1,4 +1,4 @@
-import { BasicIndex } from '@tanstack/db'
+import { BasicIndex, withCollectionConfigFactory } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import {
   subsetOptionsToQueryKey,
@@ -119,21 +119,23 @@ const registerTable = (
   return entry
 }
 
-export const supabaseCollectionOptions = <TSchema extends StandardSchemaV1>({
-  tableName,
-  keys,
-  schema,
-  queryClient,
-  supabase,
-  realtime,
-  realtimeUseFilter = false,
-  syncMode = 'on-demand',
-  defaultStringCollation,
-  parse,
-  serialize,
-}: SupabaseCollectionOptions<TSchema>) => {
+const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
+  options: SupabaseCollectionOptions<TSchema>,
+) => {
+  const {
+    tableName,
+    keys,
+    schema,
+    supabase,
+    realtime,
+    realtimeUseFilter = false,
+    syncMode = 'on-demand',
+    defaultStringCollation,
+    parse,
+    serialize,
+  } = options
   // if the query client is not provided, use the global query client
-  queryClient = queryClient ?? getQueryClient()
+  const queryClient = options.queryClient ?? getQueryClient()
 
   type TItem = StandardSchemaV1.InferOutput<TSchema>
 
@@ -207,3 +209,19 @@ export const supabaseCollectionOptions = <TSchema extends StandardSchemaV1>({
     },
   }
 }
+
+export const supabaseCollectionOptions = <TSchema extends StandardSchemaV1>(
+  options: SupabaseCollectionOptions<TSchema>,
+): ReturnType<typeof createSupabaseConfig<TSchema>> =>
+  // Each DbClient materializes its own config, reading through the client's
+  // `queryClient` dependency the way query-db-collection does. The config above
+  // spreads the query collection's options, which drops that collection's own
+  // factory; it would also skip the Realtime wrapper, so this one rebuilds the
+  // whole Supabase config.
+  withCollectionConfigFactory(createSupabaseConfig(options), (client) =>
+    createSupabaseConfig({
+      ...options,
+      queryClient:
+        client.getDependency<QueryClient>(`queryClient`) ?? options.queryClient,
+    }),
+  )
