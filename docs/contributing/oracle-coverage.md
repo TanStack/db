@@ -8029,8 +8029,10 @@ seed/path replay.
 
 Limits: valid settings with unique file names; the settings module exists at
 base and exports literal settings without imports. The external lint plugin
-owns malformed entries, stale entries, and the classification of legacy API
-uses. The gate compares file identities and permits reason edits. No existing
+owns malformed entries, stale entries in files that still exist, and the
+classification of legacy API uses. Deleted files have no lint invocation;
+remove their baseline entries when deleting them. The gate compares file
+identities and permits reason edits. No existing
 product law or campaign is converted by the repin. Each later conversion needs
 its own same-seed before/after gap comparison; this adoption does not supply
 that evidence. Gaps in changed functions close by a kill or an explicit

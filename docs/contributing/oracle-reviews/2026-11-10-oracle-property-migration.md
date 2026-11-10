@@ -1,7 +1,8 @@
 # oracleProperty repin and migration baseline
 
 Reviewed implementation: `9a5214f2801c2c7918f6fd21ac5add317559322a`.
-Base: `ea3c920c1`. This record covers the repin checkpoint. Subsequent
+Base: `ea3c920c1`. The rubric account is an author self-review. This record
+covers the repin checkpoint. Subsequent
 conversion batches need their own before/after evidence.
 
 ## Scope and authority
@@ -139,9 +140,20 @@ remain pending publication approval; local test success does not establish them.
 
 The gate assumes valid unique entries and a settings module present at base,
 with literal exports and no imports. The external lint plugin owns malformed
-entries, stale entries, and legacy-use classification. The gate permits reason
-edits and tests file identities. The upstream malformed-entry lint fix has not
+entries, stale entries in files that still exist, and legacy-use classification.
+Deleted files have no lint invocation; remove their baseline entries when
+deleting them. The gate permits reason edits and tests file identities.
+The upstream malformed-entry lint fix has not
 landed at the checked main head; all adopted entries are well formed.
+
+An independent reviewer tested implementation `9a5214f28`: all five gate tests
+pass with `GIT_CONFIG_GLOBAL=/dev/null` to isolate fixture commits from the
+user's global hooks. Four separate temporary-repository probes exercised the
+default merge-base path (addition, removal, adoption, and removed-setting
+addition). The classifier inventory matched all 199 baseline identities. The
+review found no confirmed gate correctness defect. Initial runs affected by a
+blocked global Git hook supplied no oracle verdict. Source mutants and the
+wider compatibility/install checks were not independently repeated.
 
 ## Conversion survey
 
