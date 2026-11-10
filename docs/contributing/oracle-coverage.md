@@ -5104,6 +5104,13 @@ native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
 late (its fallback throttle), so the contract's before-wait checkpoint sits at
 450 ms.
 
+The readiness fixture does not retain writes. The [shared adapter startup owner](../../packages/db-adapter-conformance/src/persisted-startup-oracle.ts)
+receives the network-first contract on all six eager adapters. It compares
+saved rows and durable state while the source is held past the deadline, then
+the first complete source result and its durability before refresh, plus reopen.
+It also generates enabled-option responses before the deadline. Exact deadline,
+empty/failed restore, and remote-failure timing remain with this readiness owner.
+
 ## Sync metadata session
 
 [Issue #2220](https://github.com/TanStack/db/issues/2220) reports that a
@@ -7747,24 +7754,36 @@ judgment, controlled storage, and real Node SQLite hosts. Per host, fixed and
 random campaigns each run 80 generated histories with separate enforced reach.
 Histories cross nonempty prior subsets of three keys, any next subset weighted
 toward empty, changed overlap values, and response before/after persisted
-restore. Query additionally crosses peer ownership and five response origins:
+restore. A generated initial-render axis enables network-first and crosses
+source responses before the deadline with a source held past it. Every adapter,
+host and generated campaign enforces separate reach for both enabled paths.
+Query additionally crosses peer ownership and five response origins:
 fetch, initialData/cache with fetching disabled or held pending. Already
 available results precede restore; fetched and push results exercise both orders.
 
-The shared comparisons check public and durable rows immediately after preload,
-before refresh can repair storage, then public rows inside refresh fulfillment,
+With network-first fallback, the shared comparisons check saved public and
+durable rows after preload while the source is still held. After delivery,
+the source's `markReady()` and applied receipts identify its first complete
+result. Other histories retain the immediate post-preload comparison.
+Public and durable rows are checked before refresh can repair storage,
+then public rows inside refresh fulfillment,
 durable rows afterward, and rows after a local-only reopen. Scoped Query
 snapshots also check exact ownership at all four snapshot cuts. Startup checks
 the reload owner's one-full-row-read law before its own durable observation.
 Query's receiving driver preserves exact fetch-count and pending-fetch premises.
 The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
-runs eight Query histories and four complete-result histories for each of the
+runs twenty Query histories and twelve complete-result histories for each of the
 other five adapters through the same composition and check on real worker/OPFS.
 
 The original Query omission fails startup on both Node hosts and OPFS. Convex
 without its first-result truncate, a survivor in the bare eager-source grammar,
 now fails the same comparison on all three hosts. Current Convex passes; this
 migration confirms no new Convex defect. Electric also passes unchanged.
+The expanded network-first grammar passes on unchanged production across both
+Node hosts and OPFS. Per-adapter/host mutants that drop source persistence after
+fallback fail at `startupDurable`, before a refresh. Fallback checker controls
+also reject lost saved rows. The one-full-row-read law excludes only the
+observer's own durable reads.
 The new receiving campaigns expose startup violations in RxDB, PowerSync and
 TrailBase before production edits, on both Node hosts and real OPFS. RxDB and
 PowerSync select snapshots for pending persisted baselines; TrailBase hydrates

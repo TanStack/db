@@ -1,12 +1,19 @@
 /**
- * Persisted restore cannot weaken a complete source snapshot. At startup and
- * refresh fulfillment, public and durable rows must reflect replacement, even
+ * Persisted restore cannot weaken a complete source snapshot. At the first
+ * source result and refresh fulfillment, public and durable rows must reflect
+ * replacement, even
  * when the result arrived before restore. A scoped source removes only its own
  * ownership; a peer's omitted row survives. A collection-wide source replaces
  * every row. Authority: the shared eager-source READY-3/PUB-7 replacement law,
  * docs/collections/query-collection.md ("Direct Writes and Query Sync", "Initial
  * Data"), and persistence's durable acceptance contract. The maintainer chose
  * shared persistence conformance as this crossing's owner on 2026-11-09.
+ *
+ * Network-first initial rendering changes when saved rows may be shown, not
+ * the later complete result or its durability. At deadline fallback, before any
+ * source response, saved rows and ownership stay intact. Authority: the glossary's
+ * network-first initial-render contract and persisted-readiness oracle. That
+ * owner retains empty/failed restore, remote-failure, and exact deadline laws.
  *
  * The model abstracts source scopes to `source` and `peer`. These are ownership
  * edges, not subscriptions or provider identities. Whole-Collection adapters
@@ -26,7 +33,8 @@ export type PersistedStartupHistory = {
   previous: number
   next: number
   peer: boolean
-  response: `before-restore` | `after-restore`
+  response: `before-restore` | `after-restore` | `after-deadline`
+  initialRender?: `network-first`
 }
 export type StartupRow = { id: string; value: number }
 export type StartupScope = `collection` | `scoped`
@@ -37,6 +45,8 @@ export type StartupSnapshot = {
 export type PersistedStartupObservation = {
   responseBeforeRestore: boolean
   startupRowReads: number
+  fallback?: StartupSnapshot
+  fallbackDurable?: StartupSnapshot
   startup: StartupSnapshot
   startupDurable: StartupSnapshot
   refresh: StartupSnapshot
@@ -97,6 +107,22 @@ export const persistedStartupMembershipArb = (scope: StartupScope) =>
     next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
     peer: scope === `scoped` ? fc.boolean() : fc.constant(false),
   })
+// A deadline fallback is legal only with network-first enabled and a held
+// source result. Ordinary responses retain both restore orders. The deadline's
+// exact threshold belongs to the persisted-readiness oracle; here zero expires
+// the wait while the source is held, and 60 seconds keeps it pending otherwise.
+export const persistedStartupRenderArb = fc.boolean()
+export function withStartupRender<H extends PersistedStartupHistory>(
+  h: H,
+  networkFirst: boolean,
+  fallback: boolean,
+): H {
+  return {
+    ...h,
+    ...(networkFirst ? { initialRender: `network-first` as const } : {}),
+    response: networkFirst && fallback ? `after-deadline` : h.response,
+  }
+}
 export const persistedStartupHistoryArb = (
   scope: StartupScope,
 ): fc.Arbitrary<PersistedStartupHistory> =>
@@ -105,16 +131,55 @@ export const persistedStartupHistoryArb = (
       persistedStartupMembershipArb(scope),
       fc.constantFrom(`before-restore` as const, `after-restore` as const),
     )
-    .map(([membership, response]) => ({ ...membership, response }))
+    .chain(([membership, response]) =>
+      fc
+        .tuple(persistedStartupRenderArb, fc.boolean())
+        .map(([network, fallback]) =>
+          withStartupRender({ ...membership, response }, network, fallback),
+        ),
+    )
 
 // These are inputs to the same judgment as generated histories. Receivers may
 // add adapter-specific origins, but never supply hand-written expected answers.
-export const persistedStartupHistories: Array<PersistedStartupHistory> = [
+const baseStartupHistories: Array<PersistedStartupHistory> = [
   { previous: 1, next: 2, peer: false, response: `before-restore` },
   { previous: 1, next: 0, peer: false, response: `before-restore` },
   { previous: 3, next: 6, peer: false, response: `before-restore` },
   { previous: 3, next: 6, peer: false, response: `after-restore` },
 ]
+
+export const persistedStartupHistories = baseStartupHistories.flatMap((h) => [
+  h,
+  withStartupRender(h, true, false),
+  withStartupRender(h, true, true),
+])
+
+// Before any source result, timeout changes readiness only. Saved rows and
+// ownership must survive intact, both publicly and durably. Reusing replacement
+// with the old membership/value derives this cut without a second state model.
+export function expectedStartupFallback(
+  h: PersistedStartupHistory,
+  scope: StartupScope,
+): StartupSnapshot {
+  const saved = expectedPersistedStartup({ ...h, next: h.previous }, scope)
+  return { ...saved, rows: startupRows(h.previous, 1) }
+}
+export function persistedStartupFallbackViolations(
+  h: PersistedStartupHistory,
+  scope: StartupScope,
+  cut: string,
+  actual: StartupSnapshot | undefined,
+): Array<string> {
+  const expected =
+    h.response === `after-deadline`
+      ? expectedStartupFallback(h, scope)
+      : undefined
+  return JSON.stringify(actual) === JSON.stringify(expected)
+    ? []
+    : [
+        `${cut}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      ]
+}
 
 export class PersistedStartupViolation extends Error {
   constructor(readonly violations: Array<string>) {
@@ -162,6 +227,10 @@ export function persistedStartupViolations(
   observation: PersistedStartupObservation,
 ): Array<string> {
   const violations = persistedStartupPremiseViolations(h, observation)
+  for (const cut of [`fallback`, `fallbackDurable`] as const)
+    violations.push(
+      ...persistedStartupFallbackViolations(h, scope, cut, observation[cut]),
+    )
   for (const cut of [
     `startup`,
     `startupDurable`,
@@ -180,9 +249,15 @@ export function persistedStartupViolations(
 }
 
 declareOracle({
-  model: [expectedPersistedStartup],
-  grammar: [persistedStartupMembershipArb, persistedStartupHistoryArb],
+  model: [expectedPersistedStartup, expectedStartupFallback],
+  grammar: [
+    persistedStartupMembershipArb,
+    persistedStartupRenderArb,
+    withStartupRender,
+    persistedStartupHistoryArb,
+  ],
   check: [
+    persistedStartupFallbackViolations,
     persistedStartupCutViolations,
     persistedStartupPremiseViolations,
     persistedStartupViolations,

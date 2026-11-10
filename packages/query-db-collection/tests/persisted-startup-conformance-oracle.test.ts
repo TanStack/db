@@ -6,7 +6,11 @@
 import { describe } from 'vitest'
 import fc from 'fast-check'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { persistedStartupMembershipArb } from '../../db-adapter-conformance/src/persisted-startup-oracle'
+import {
+  persistedStartupMembershipArb,
+  persistedStartupRenderArb,
+  withStartupRender,
+} from '../../db-adapter-conformance/src/persisted-startup-oracle'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import {
   queryStartupAdapter,
@@ -43,6 +47,13 @@ const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
     },
   )
   .map(({ membership, ...schedule }) => ({ ...membership, ...schedule }))
+  .chain((h) =>
+    fc
+      .tuple(persistedStartupRenderArb, fc.boolean())
+      .map(([network, fallback]) =>
+        withStartupRender(h, network, fallback && h.origin === `fetch`),
+      ),
+  )
 
 declareOracle({ grammar: [queryStartupHistoryArb] })
 // Keep registration visible to Vitest's static typecheck collector as well

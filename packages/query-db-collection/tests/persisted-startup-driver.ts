@@ -10,8 +10,13 @@ import { queryCollectionOptions } from '../src/query'
 import {
   sortedStartupRows,
   startupRows,
+  withStartupRender,
 } from '../../db-adapter-conformance/src/persisted-startup-oracle'
-import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+import {
+  startupInitialRender,
+  trackStartupSync,
+  untilStartup,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import type {
   PersistedStartupHistory,
@@ -28,7 +33,7 @@ export type QueryStartupHistory = PersistedStartupHistory & {
     | `cached-disabled`
     | `cached-pending`
 }
-export const queryStartupHistories: Array<QueryStartupHistory> = [
+const baseQueryStartupHistories: Array<QueryStartupHistory> = [
   {
     origin: `fetch`,
     previous: 1,
@@ -87,6 +92,12 @@ export const queryStartupHistories: Array<QueryStartupHistory> = [
   },
 ]
 
+export const queryStartupHistories = baseQueryStartupHistories.flatMap((h) => [
+  h,
+  withStartupRender(h, true, false),
+  ...(h.origin === `fetch` ? [withStartupRender(h, true, true)] : []),
+])
+
 type QueryMetadata =
   { queryCollection?: { owners?: Record<string, true> } } | undefined
 const owners = (metadata: unknown, id: string) =>
@@ -134,24 +145,28 @@ export const queryStartupAdapter: PersistedStartupAdapter<QueryStartupHistory> =
         if (event.type === `updated` && event.action.type === `success`)
           fetch.completed = true
       })
+      const options = queryCollectionOptions<StartupRow>({
+        id,
+        queryKey: [id],
+        queryClient: client,
+        getKey: (row) => row.id,
+        enabled: !disabled,
+        staleTime: pending ? 0 : Infinity,
+        ...(h.origin.startsWith(`initial`)
+          ? { initialData: startupRows(h.next, 2) }
+          : {}),
+        queryFn: async () => {
+          fetch.calls++
+          if (pending || h.response !== `before-restore`) await response
+          return startupRows(h.next, 2)
+        },
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...queryCollectionOptions<StartupRow>({
-            id,
-            queryKey: [id],
-            queryClient: client,
-            getKey: (row) => row.id,
-            enabled: !disabled,
-            staleTime: pending ? 0 : Infinity,
-            ...(h.origin.startsWith(`initial`)
-              ? { initialData: startupRows(h.next, 2) }
-              : {}),
-            queryFn: async () => {
-              fetch.calls++
-              if (pending || h.response === `after-restore`) await response
-              return startupRows(h.next, 2)
-            },
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(h),
           persistence,
         }),
       )
@@ -166,10 +181,11 @@ export const queryStartupAdapter: PersistedStartupAdapter<QueryStartupHistory> =
       })
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot,
         deliver: async () => {
           if (h.origin === `fetch`) {
-            if (h.response === `after-restore`) releaseResponse()
+            if (h.response !== `before-restore`) releaseResponse()
             await untilStartup(() => fetch.completed)
           }
         },

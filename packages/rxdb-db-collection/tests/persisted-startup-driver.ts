@@ -8,6 +8,10 @@
 import { createCollection } from '@tanstack/db'
 import { createRxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
+import {
+  startupInitialRender,
+  trackStartupSync,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import {
@@ -65,19 +69,24 @@ export const rxdbStartupAdapter: PersistedStartupAdapter<PersistedStartupHistory
         }
         return query(prepared)
       }
+      const options = rxdbCollectionOptions({
+        id,
+        rxCollection: rows,
+        syncBatchSize: 2,
+        syncMode: `eager`,
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...rxdbCollectionOptions({
-            id,
-            rxCollection: rows,
-            syncBatchSize: 2,
-            syncMode: `eager`,
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(history),
           persistence,
         }),
       )
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver: () => {
           available = true

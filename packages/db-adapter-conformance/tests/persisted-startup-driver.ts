@@ -2,7 +2,9 @@
  * Shared production composition for persisted-startup-oracle.ts. The adapter
  * supplies a real Collection, delivery control, and (for scoped sources) its
  * metadata projection. The host supplies storage and holds the first row read.
- * Seed through public persisted sync, then compare before any refresh, inside
+ * Seed through public persisted sync. Network-first fallback compares saved rows
+ * before delivery; the source result compares at readiness and applied receipts.
+ * Then compare before any refresh, inside
  * refresh fulfillment, after its durable read, and after a local-only reopen.
  */
 import { createCollection } from '@tanstack/db'
@@ -11,11 +13,13 @@ import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import {
   PersistedStartupViolation,
   persistedStartupCutViolations,
+  persistedStartupFallbackViolations,
   persistedStartupPremiseViolations,
   persistedStartupViolations,
   sortedStartupRows,
   startupRows,
 } from '../src/persisted-startup-oracle'
+import type { SyncConfig } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 import type { HeldCall } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import type {
@@ -40,6 +44,7 @@ export interface PersistedStartupSource {
     readonly size: number
     values: () => IterableIterator<StartupRow>
   }
+  initialResult: Promise<void>
   snapshot: () => StartupSnapshot
   deliver: () => Promise<void>
   responseAvailable: () => boolean
@@ -56,6 +61,50 @@ export interface PersistedStartupAdapter<H extends PersistedStartupHistory> {
     h: H,
     id: string,
   ) => PersistedStartupSource | Promise<PersistedStartupSource>
+}
+// Observe the adapter's public sync boundary before persistence wraps it.
+// markReady identifies its initial complete answer; applied receipts identify
+// when that answer is visible (and durably accepted). Fallback preload alone
+// cannot supply this checkpoint. This recorder supplies no writes or readiness.
+export function trackStartupSync<T extends object, K extends string | number>(
+  sync: SyncConfig<T, K>,
+) {
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const initialResult = new Promise<void>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  void initialResult.catch(() => {})
+  const tracked: SyncConfig<T, K> = {
+    ...sync,
+    sync: (params) => {
+      const receipts: Array<true | Promise<void>> = []
+      return sync.sync({
+        ...params,
+        commit: (signal) => {
+          const receipt = params.commit(signal)
+          receipts.push(receipt)
+          return receipt
+        },
+        markReady: () => {
+          params.markReady()
+          void Promise.all(receipts).then(() => resolve(), reject)
+        },
+      })
+    },
+  }
+  return { sync: tracked, initialResult }
+}
+export function startupInitialRender(h: PersistedStartupHistory) {
+  return h.initialRender
+    ? {
+        initialRender: {
+          strategy: `network-first` as const,
+          networkTimeoutMs: h.response === `after-deadline` ? 0 : 60_000,
+        },
+      }
+    : {}
 }
 export const startupTurn = () =>
   new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -134,24 +183,54 @@ export async function observePersistedStartup<
           : {}),
       }
     }
+    let observationReads = 0
     const ready = current.collection.preload()
     await untilStartup(hold.isHeld)
     if (h.response === `before-restore`) await current.deliver()
     await startupTurn()
     const responseBeforeRestore = current.responseAvailable() && hold.isHeld()
     hold.release()
+    let fallback: StartupSnapshot | undefined
+    let fallbackDurable: StartupSnapshot | undefined
+    if (h.response === `after-deadline`) {
+      await ready
+      fallback = current.snapshot()
+      const violations = persistedStartupFallbackViolations(
+        h,
+        adapter.scope,
+        `fallback`,
+        fallback,
+      )
+      if (current.responseAvailable())
+        violations.push(`fallback did not precede the source response`)
+      if (violations.length) throw new PersistedStartupViolation(violations)
+      // Exclude the observer's own read from startup's one-row-scan budget.
+      const beforeRead = readRowCount()
+      fallbackDurable = await durableSnapshot()
+      observationReads += readRowCount() - beforeRead
+      const durableViolations = persistedStartupFallbackViolations(
+        h,
+        adapter.scope,
+        `fallbackDurable`,
+        fallbackDurable,
+      )
+      if (durableViolations.length)
+        throw new PersistedStartupViolation(durableViolations)
+      await current.deliver()
+    }
     if (h.response === `after-restore`) {
       await untilStartup(() => current.collection.size > 0)
       await current.deliver()
     }
     await ready
+    if (h.response === `after-deadline`) await current.initialResult
     const startup = current.snapshot()
     if (responseBeforeRestore !== (h.response === `before-restore`))
       throw new Error(`Startup response/restore premise was not reached`)
     onStartup()
     assertCut(`startup`, startup)
     // Work is captured before the observation's own durable read.
-    const startupRowReads = readRowCount() - initialReadCount
+    const startupRowReads = readRowCount() - initialReadCount - observationReads
     const premiseViolations = [
       ...persistedStartupPremiseViolations(h, {
         responseBeforeRestore,
@@ -183,6 +262,7 @@ export async function observePersistedStartup<
       const observation = {
         responseBeforeRestore,
         startupRowReads,
+        ...(fallback ? { fallback, fallbackDurable } : {}),
         startup,
         startupDurable,
         refresh,

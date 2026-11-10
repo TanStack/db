@@ -11,7 +11,11 @@ import {
   sortedStartupRows,
   startupRows,
 } from '../../db-adapter-conformance/src/persisted-startup-oracle'
-import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+import {
+  startupInitialRender,
+  trackStartupSync,
+  untilStartup,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import type { Event, ListResponse, RecordApi } from 'trailbase'
 import type {
@@ -33,16 +37,24 @@ export const trailBaseStartupAdapter: PersistedStartupAdapter<PersistedStartupHi
             pending = resolve
           }),
       } as unknown as RecordApi<StartupRow>
+      const options = trailBaseCollectionOptions<
+        StartupRow,
+        StartupRow,
+        string
+      >({
+        id,
+        recordApi: api,
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        parse: {},
+        serialize: {},
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...trailBaseCollectionOptions<StartupRow, StartupRow, string>({
-            id,
-            recordApi: api,
-            getKey: (row) => row.id,
-            syncMode: `eager`,
-            parse: {},
-            serialize: {},
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(history),
           persistence,
         }),
       )
@@ -55,6 +67,7 @@ export const trailBaseStartupAdapter: PersistedStartupAdapter<PersistedStartupHi
       }
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

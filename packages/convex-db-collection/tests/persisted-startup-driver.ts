@@ -5,6 +5,10 @@
  * exist here. Both delivery/restore orders use the same shared comparison.
  */
 import { createCollection } from '@tanstack/db'
+import {
+  startupInitialRender,
+  trackStartupSync,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { convexCollectionOptions } from '../src'
 import {
@@ -21,20 +25,24 @@ export const convexStartupAdapter: PersistedStartupAdapter<PersistedStartupHisto
     scope: `collection`,
     create(persistence, h, id) {
       const provider = new ConvexProvider(`javascript`)
+      const options = convexCollectionOptions({
+        id,
+        client: provider.client,
+        query: rowsQuery,
+        queryArgs: {},
+        select: (result) =>
+          result.map((row) => ({
+            id: String.fromCharCode(97 + row.id),
+            value: row.value as number,
+          })),
+        getKey: (row) => row.id,
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...convexCollectionOptions({
-            id,
-            client: provider.client,
-            query: rowsQuery,
-            queryArgs: {},
-            select: (result) =>
-              result.map((row) => ({
-                id: String.fromCharCode(97 + row.id),
-                value: row.value as number,
-              })),
-            getKey: (row) => row.id,
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(h),
           persistence,
         }),
       )
@@ -53,6 +61,7 @@ export const convexStartupAdapter: PersistedStartupAdapter<PersistedStartupHisto
       }
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

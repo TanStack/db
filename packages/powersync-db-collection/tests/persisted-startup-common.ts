@@ -15,7 +15,11 @@ import {
   sortedStartupRows,
   startupRows,
 } from '../../db-adapter-conformance/src/persisted-startup-oracle'
-import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+import {
+  startupInitialRender,
+  trackStartupSync,
+  untilStartup,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { powerSyncCollectionOptions } from '../src'
 import type { CommonPowerSyncDatabase } from '@powersync/common'
 import type { PersistedStartupHistory } from '../../db-adapter-conformance/src/persisted-startup-oracle'
@@ -42,19 +46,23 @@ export function powerSyncStartupAdapterFor(
       })
       let pending: (() => void) | undefined
       let available = false
+      const options = powerSyncCollectionOptions({
+        id,
+        database,
+        table: schema.props.rows,
+        schema: rowSchema,
+        onDeserializationError: () => {},
+        onLoad: () =>
+          new Promise<void>((resolve) => {
+            pending = resolve
+          }),
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...powerSyncCollectionOptions({
-            id,
-            database,
-            table: schema.props.rows,
-            schema: rowSchema,
-            onDeserializationError: () => {},
-            onLoad: () =>
-              new Promise<void>((resolve) => {
-                pending = resolve
-              }),
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(history),
           persistence,
         }),
       )
@@ -67,6 +75,7 @@ export function powerSyncStartupAdapterFor(
       }
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

@@ -12,7 +12,11 @@ import {
   sortedStartupRows,
   startupRows,
 } from '../../db-adapter-conformance/src/persisted-startup-oracle'
-import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
+import {
+  startupInitialRender,
+  trackStartupSync,
+  untilStartup,
+} from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { electricCollectionOptions } from '../src/electric'
 import type {
   PersistedStartupHistory,
@@ -50,17 +54,21 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
           signal?.addEventListener(`abort`, abort, { once: true })
           requests.push(request)
         })
+      const options = electricCollectionOptions<StartupRow>({
+        id,
+        shapeOptions: {
+          url: `http://startup/shape-${id}`,
+          params: { table: `rows` },
+          fetchClient,
+        },
+        getKey: (row) => row.id,
+      })
+      const startup = trackStartupSync(options.sync)
       const collection = createCollection(
         persistedCollectionOptions({
-          ...electricCollectionOptions<StartupRow>({
-            id,
-            shapeOptions: {
-              url: `http://startup/shape-${id}`,
-              params: { table: `rows` },
-              fetchClient,
-            },
-            getKey: (row) => row.id,
-          }),
+          ...options,
+          sync: startup.sync,
+          ...startupInitialRender(history),
           persistence,
         }),
       )
@@ -116,6 +124,7 @@ export const electricStartupAdapter: PersistedStartupAdapter<PersistedStartupHis
       }
       return {
         collection,
+        initialResult: startup.initialResult,
         snapshot: () => ({ rows: sortedStartupRows(collection.values()) }),
         deliver,
         responseAvailable: () => available,

@@ -1,6 +1,7 @@
 /**
  * Receiving registration for persisted-startup-oracle.ts. Every adapter runs
- * its legal grammar through both storage hosts, at the same four cuts and
+ * its legal grammar through both storage hosts, at fallback (when enabled),
+ * the first source result, durability, refresh and
  * reopen. Fixed histories and generated histories share driver and judgment.
  * Each host/campaign enforces its own reach; one cannot cover another's gap.
  */
@@ -18,7 +19,9 @@ import {
 } from '../../db/tests/oracle-config'
 import {
   expectedPersistedStartup,
+  expectedStartupFallback,
   persistedStartupCutViolations,
+  persistedStartupFallbackViolations,
   persistedStartupViolations,
 } from '../src/persisted-startup-oracle'
 import { observePersistedStartup } from './persisted-startup-driver'
@@ -28,7 +31,11 @@ import type { PersistedStartupHistory } from '../src/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from './persisted-startup-driver'
 
 declareOracle({
-  check: [persistedStartupCutViolations, persistedStartupViolations],
+  check: [
+    persistedStartupCutViolations,
+    persistedStartupFallbackViolations,
+    persistedStartupViolations,
+  ],
 })
 
 export function registerPersistedStartupConformance<
@@ -67,9 +74,28 @@ export function registerPersistedStartupConformance<
       ).not.toEqual([])
     },
   )
+  oracleReplayTest(it)(`rejects a lost persisted fallback`, () => {
+    const h = {
+      ...histories[0]!,
+      initialRender: `network-first` as const,
+      response: `after-deadline` as const,
+    }
+    const saved = expectedStartupFallback(h, adapter.scope)
+    expect(
+      persistedStartupFallbackViolations(h, adapter.scope, `fallback`, {
+        ...saved,
+        rows: [],
+      }),
+    ).not.toEqual([])
+    expect(
+      persistedStartupCutViolations(h, adapter.scope, `startupDurable`, saved),
+    ).not.toEqual([])
+  })
   const states = [
     `response-before-restore`,
     `restore-before-response`,
+    `network-first-source-result`,
+    `network-first-fallback`,
     `empty-result`,
     `overlapping-update`,
     `omitted-row`,
@@ -103,6 +129,12 @@ export function registerPersistedStartupConformance<
                   ? `response-before-restore`
                   : `restore-before-response`,
               )
+              if (history.initialRender)
+                historyReach.reach(
+                  history.response === `after-deadline`
+                    ? `network-first-fallback`
+                    : `network-first-source-result`,
+                )
               if (history.next === 0) historyReach.reach(`empty-result`)
               if (history.next & history.previous)
                 historyReach.reach(`overlapping-update`)
@@ -120,6 +152,52 @@ export function registerPersistedStartupConformance<
           storage.close()
         }
       }
+      // A source that publishes after fallback but silently loses its durable
+      // writes must fail before refresh can repair it. Seed and restore use the
+      // real host; only the receiving source's persistence commits are dropped.
+      oracleReplayTest(it)(
+        `rejects lost source persistence after fallback`,
+        async () => {
+          const history = histories.find(
+            (h) => h.response === `after-deadline`,
+          )!
+          const storage = createStartupHost(host)
+          try {
+            await expect(
+              observePersistedStartup(
+                {
+                  ...adapter,
+                  create: (persistence, h, id) =>
+                    adapter.create(
+                      {
+                        ...persistence,
+                        adapter: new Proxy(persistence.adapter, {
+                          get(target, key) {
+                            if (key === `applyCommittedTx`)
+                              return async () => {}
+                            const value: unknown = Reflect.get(target, key)
+                            return typeof value === `function`
+                              ? value.bind(target)
+                              : value
+                          },
+                        }),
+                      },
+                      h,
+                      id,
+                    ),
+                },
+                storage.persistence,
+                storage.holdBaseline,
+                history,
+                `lost-persistence-${host}`,
+                storage.readRowCount,
+              ),
+            ).rejects.toThrow(/startupDurable:/)
+          } finally {
+            storage.close()
+          }
+        },
+      )
       oracleReplayTest(it).each(histories)(
         `reconciles persisted startup: %j`,
         async (history) => {
