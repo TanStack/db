@@ -1,16 +1,15 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
-import { createOracleReach } from './oracle-reach.js'
+import { oracleReplayRequested, oracleRoute } from './oracle-config.js'
+import { oracleProperty } from './oracle-property.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from './oracle-assertion-adapter.js'
 import {
   absentMarker,
   describeMismatch,
@@ -30,6 +29,7 @@ import {
   sessionHistoryArbitrary,
 } from './sync-metadata-session-oracle.js'
 import { declareOracle } from './oracle-declaration.js'
+import type { Verdict } from './oracle-property.js'
 import type {
   ReceiptState,
   SessionAction,
@@ -253,7 +253,11 @@ async function assertSessionHistory(
   const { mismatch } = await runSessionHistory(grammar, history, () =>
     createCoreDriver(grammar.fullRows),
   )
-  if (mismatch) throw new Error(describeMismatch(history, mismatch))
+  if (mismatch)
+    rejectAt(
+      `sync metadata session comparison`,
+      new Error(describeMismatch(history, mismatch)),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -684,35 +688,6 @@ const declaredReach: Record<string, Array<[string, number]>> = {
   ],
 }
 
-/** One reach counter per minimum, for a grammar's fixed campaign. */
-function createCampaignReach(grammar: SessionGrammar, property: string) {
-  const states = declaredReach[grammar.name]!
-  const counters = [...new Set(states.map(([, minimum]) => minimum))].map(
-    (minimum) => {
-      const declared = states
-        .filter(([, stateMinimum]) => stateMinimum === minimum)
-        .map(([state]) => state)
-      return {
-        declared: new Set(declared),
-        reach: createOracleReach(`${property} (fixed)`, declared, { minimum }),
-      }
-    },
-  )
-  return {
-    record(history: ReadonlyArray<SessionAction>): void {
-      const regimes = historyRegimes(grammar, history)
-      for (const { declared, reach } of counters) {
-        reach.beginHistory()
-        for (const regime of regimes)
-          if (declared.has(regime)) reach.reach(regime)
-      }
-    },
-    assertReached(): void {
-      for (const { reach } of counters) reach.assertReached()
-    },
-  }
-}
-
 describe(`sync metadata session oracle`, () => {
   it(`derives the named witnesses from the laws`, async () => {
     oracleRoute(`fixed history`)
@@ -896,10 +871,10 @@ describe(`sync metadata session grammar ablation`, () => {
       oracleRoute(`fixed seed`)
       const count = (filter: (action: SessionAction) => boolean) =>
         fc
-          .sample(
-            sessionHistoryArbitrary(grammar),
-            oracleFixedSeed(2_220_100, { numRuns: 200 }),
-          )
+          .sample(sessionHistoryArbitrary(grammar), {
+            seed: 2_220_100,
+            numRuns: 200,
+          })
           .filter((history) =>
             historyRegimes(grammar, history.filter(filter)).has(regime),
           ).length
@@ -908,10 +883,10 @@ describe(`sync metadata session grammar ablation`, () => {
           ? nestedGrammar
           : grammar
       const full = fc
-        .sample(
-          sessionHistoryArbitrary(fullGrammar),
-          oracleFixedSeed(2_220_100, { numRuns: 200 }),
-        )
+        .sample(sessionHistoryArbitrary(fullGrammar), {
+          seed: 2_220_100,
+          numRuns: 200,
+        })
         .filter((history) =>
           historyRegimes(fullGrammar, history).has(regime),
         ).length
@@ -932,32 +907,33 @@ describe(`sync metadata session hold invariance`, () => {
       const mismatch = await runHoldInvariance(grammar, history, () =>
         createCoreDriver(grammar.fullRows),
       )
-      if (mismatch) throw new Error(describeMismatch(history, mismatch))
+      if (mismatch)
+        rejectAt(
+          `sync metadata session comparison`,
+          new Error(describeMismatch(history, mismatch)),
+        )
     }
-    oracleReplayTest(fcTest).prop(
-      [sessionHistoryArbitrary(grammar)],
-      oracleFixedSeed(seed + 100, { numRuns: oracleRuns(50) }),
-    )(
-      `keeps ${grammar.name} source reads independent of holds (fixed)`,
-      (history) => {
-        oracleRoute(`fixed seed`)
-        return run(history)
+    oracleProperty<Array<SessionAction>, Verdict>({
+      id: invariance,
+      law: {
+        owner: `Sync metadata session hold invariance`,
+        statement: `Source reads are independent of publication holds.`,
+        authority: `The independent session laws and runHoldInvariance relation in sync-metadata-session-oracle.ts.`,
+        limits: `The existing bounded ${grammar.name} action grammar and core DbClient driver.`,
       },
-      60_000,
-    )
-    // A path replay of this property runs here.
-    const generatedCampaign = oraclePropertyOptions(50, invariance)
-    oracleReplayTest(fcTest, invariance).prop(
-      [sessionHistoryArbitrary(grammar)],
-      generatedCampaign,
-    )(
-      `keeps ${grammar.name} source reads independent of holds (random)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(generatedCampaign))
-        return run(history)
+      histories: {
+        arbitrary: sessionHistoryArbitrary(grammar),
+        runs: 50,
+        fixedSeeds: [seed + 100],
       },
-      60_000,
-    )
+      model: recordedAssertionJudgment,
+      driver: (history, observe) =>
+        recordAssertionJudgment(invariance, history, observe, () =>
+          run(history),
+        ),
+      check: forwardAssertionJudgment,
+      timeout: 60_000,
+    })
   }
 })
 
@@ -988,74 +964,88 @@ describe(`sync metadata session paired formulations`, () => {
         const mismatch = await formulation.run(grammar, history, () =>
           createCoreDriver(grammar.fullRows),
         )
-        if (mismatch) throw new Error(describeMismatch(history, mismatch))
+        if (mismatch)
+          rejectAt(
+            `sync metadata session comparison`,
+            new Error(describeMismatch(history, mismatch)),
+          )
       }
-      oracleReplayTest(fcTest).prop(
-        [sessionHistoryArbitrary(grammar)],
-        oracleFixedSeed(seed + 200, { numRuns: oracleRuns(50) }),
-      )(
-        `${formulation.title} on ${grammar.name} histories (fixed)`,
-        (history) => {
-          oracleRoute(`fixed seed`)
-          return run(history)
+      oracleProperty<Array<SessionAction>, Verdict>({
+        id: name,
+        law: {
+          owner: `Sync metadata session paired formulations`,
+          statement: formulation.title,
+          authority: `The independent key-independence and seed-order relations in sync-metadata-session-oracle.ts.`,
+          limits: `The unchanged ${grammar.name} action grammar and receiving core path.`,
         },
-        60_000,
-      )
-      // A path replay of this property runs here.
-      const generatedCampaign2 = oraclePropertyOptions(50, name)
-      oracleReplayTest(fcTest, name).prop(
-        [sessionHistoryArbitrary(grammar)],
-        generatedCampaign2,
-      )(
-        `${formulation.title} on ${grammar.name} histories (random)`,
-        (history) => {
-          oracleRoute(oracleRouteOf(generatedCampaign2))
-          return run(history)
+        histories: {
+          arbitrary: sessionHistoryArbitrary(grammar),
+          runs: 50,
+          fixedSeeds: [seed + 200],
         },
-        60_000,
-      )
+        model: recordedAssertionJudgment,
+        driver: (history, observe) =>
+          recordAssertionJudgment(name, history, observe, () => run(history)),
+        check: forwardAssertionJudgment,
+        timeout: 60_000,
+      })
     }
 })
 
 describe(`sync metadata session campaigns`, () => {
-  for (const entry of grammars) {
-    const { grammar, property, seed } = entry
-    const run = (history: Array<SessionAction>) =>
-      assertSessionHistory(grammar, history)
-    const reach = createCampaignReach(grammar, property)
-    oracleReplayTest(fcTest).prop(
-      [sessionHistoryArbitrary(grammar)],
-      oracleFixedSeed(seed, {
-        numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
-      }),
-    )(
-      `keeps the session law on ${grammar.name} histories (fixed)`,
-      (history) => {
-        oracleRoute(`fixed seed`)
-        reach.record(history)
-        return run(history)
-      },
-      120_000,
-    )
-    oracleReplayTest(it)(
-      `reaches the declared states in the ${grammar.name} fixed campaign`,
-      () => {
-        oracleRoute(`fixed seed`)
-        reach.assertReached()
-      },
-    )
-    // A path replay of this property runs here.
-    const generatedCampaign3 = oraclePropertyOptions(100, property)
-    oracleReplayTest(fcTest, property).prop(
-      [sessionHistoryArbitrary(grammar)],
-      generatedCampaign3,
-    )(
-      `keeps the session law on ${grammar.name} histories (random)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(generatedCampaign3))
-        return run(history)
-      },
-      60_000,
-    )
-  }
+  for (const entry of grammars)
+    describe(entry.grammar.name, () => {
+      const { grammar, property, seed } = entry
+      const states = declaredReach[grammar.name]!
+      let counts = new Map<string, number>()
+      let fixedCampaign = false
+      const histories = {
+        arbitrary: sessionHistoryArbitrary(grammar),
+        runs: 100,
+        fixedSeeds: [seed],
+        measured: states.map(([state]) => state),
+      }
+      // Native registration reads the budget when the campaign executes. Keep
+      // the original fixed150/450 exceptions and the random100 budget.
+      beforeEach(({ task }) => {
+        fixedCampaign = task.name.startsWith(`fixed seed `)
+        histories.runs = fixedCampaign && `runs` in entry ? entry.runs : 100
+        counts = new Map(states.map(([state]) => [state, 0]))
+      })
+      afterEach(({ task }) => {
+        if (!fixedCampaign || task.result?.state === `fail`) return
+        process.stdout.write(
+          `${property} fixed minimums ${JSON.stringify(Object.fromEntries(counts))}\n`,
+        )
+        if (oracleReplayRequested()) return
+        for (const [state, minimum] of states)
+          expect(
+            counts.get(state),
+            `${property}: ${state} history minimum`,
+          ).toBeGreaterThanOrEqual(minimum)
+      })
+      oracleProperty<Array<SessionAction>, Verdict>({
+        id: property,
+        law: {
+          owner: `Sync metadata session`,
+          statement: `Source reads include accepted and open writes in the independent session order, while rows and receipts follow atomic application.`,
+          authority: `The borrowed consistency laws, maintainer decisions and independent model in sync-metadata-session-oracle.ts.`,
+          limits: `The unchanged ${grammar.name} grammar, core hold and DbClient hydration boundary.`,
+        },
+        histories,
+        model: recordedAssertionJudgment,
+        driver: (history, observe) =>
+          recordAssertionJudgment(property, history, observe, async () => {
+            const regimes = historyRegimes(grammar, history)
+            for (const [state] of states)
+              if (regimes.has(state)) {
+                observe(`reach`, state)
+                if (fixedCampaign) counts.set(state, counts.get(state)! + 1)
+              }
+            await assertSessionHistory(grammar, history)
+          }),
+        check: forwardAssertionJudgment,
+        timeout: 120_000,
+      })
+    })
 })

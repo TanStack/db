@@ -1558,10 +1558,6 @@ const replayTestNames = new Map([
     `converges after interleaved source prefixes.*random or replayed`,
   ],
   [
-    `source-health.required-history`,
-    `required histories refine the model.*random`,
-  ],
-  [
     `collection-lifecycle.gc-mutation-shapes`,
     `retains every touched Collection across mutation shapes.*seed undefined`,
   ],
