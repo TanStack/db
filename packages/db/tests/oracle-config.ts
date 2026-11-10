@@ -72,6 +72,8 @@ const staticOracleProperties = [
   `ivm.topk-negative-window-array`,
   `ivm.topk-negative-window-grouped`,
   `ivm.topk-negative-window-orderBy`,
+  `ivm.topk-fractional-keyed-array`,
+  `ivm.topk-fractional-keyed-grouped`,
   `ivm.topk-cyclic-payloads-array`,
   `ivm.topk-cyclic-payloads-grouped`,
   `ivm.topk-outer-join-replacements-array`,

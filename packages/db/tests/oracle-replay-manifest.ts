@@ -791,7 +791,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts`,
     `ivm`,
-    `topk-cyclic-payloads-array topk-cyclic-payloads-grouped topk-outer-join-replacements-array topk-outer-join-replacements-grouped`,
+    `topk-cyclic-payloads-array topk-cyclic-payloads-grouped topk-outer-join-replacements-array topk-outer-join-replacements-grouped topk-fractional-keyed-array topk-fractional-keyed-grouped`,
   ],
   // Owners of the replays that moved to the shared variables.
   [
@@ -1406,6 +1406,30 @@ const replayTestNames = new Map([
   [
     `ivm.topk-negative-window-orderBy`,
     `ivm\\.topk-negative-window-orderBy > random seed`,
+  ],
+  [
+    `ivm.topk-cyclic-payloads-array`,
+    `ivm\\.topk-cyclic-payloads-array > random seed`,
+  ],
+  [
+    `ivm.topk-cyclic-payloads-grouped`,
+    `ivm\\.topk-cyclic-payloads-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-outer-join-replacements-array`,
+    `ivm\\.topk-outer-join-replacements-array > random seed`,
+  ],
+  [
+    `ivm.topk-outer-join-replacements-grouped`,
+    `ivm\\.topk-outer-join-replacements-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-fractional-keyed-array`,
+    `ivm\\.topk-fractional-keyed-array > random seed`,
+  ],
+  [
+    `ivm.topk-fractional-keyed-grouped`,
+    `ivm\\.topk-fractional-keyed-grouped > random seed`,
   ],
   [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
   [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
