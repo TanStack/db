@@ -1367,11 +1367,11 @@ const replayTestNames = new Map([
   ],
   [
     `structural-identity.equal-representations`,
-    `agrees with D2 value identity for equal representations`,
+    `structural-identity\\.equal-representations > random seed`,
   ],
   [
     `structural-identity.independent-values`,
-    `agrees with D2 value identity for independent values`,
+    `structural-identity\\.independent-values > random seed`,
   ],
   [
     `index-update.reference-model`,
@@ -1389,6 +1389,8 @@ const replayTestNames = new Map([
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
   ],
+  [`ivm.hash-identity`, `ivm\\.hash-identity > random seed`],
+  [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
   [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
   [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
   [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],

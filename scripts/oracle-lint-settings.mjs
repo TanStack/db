@@ -120,10 +120,6 @@ export const oracleLintSettings = {
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-ivm/tests/hash-identity-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-ivm/tests/hash-oracle.property.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -138,10 +134,6 @@ export const oracleLintSettings = {
       {
         file: `packages/db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts`,
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-ivm/tests/structural-identity-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
