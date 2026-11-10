@@ -340,6 +340,7 @@ const staticOracleProperties = [
   `electric.invalid-resume-partition`,
   `electric.metadata-merge-complete-state`,
   `electric.process-grammar`,
+  `electric.source-ledger-calibration`,
   `electric.publication-before-persistence`,
   `electric.queued-presence-order`,
   `electric.resume-metadata-merge`,

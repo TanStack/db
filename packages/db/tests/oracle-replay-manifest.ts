@@ -995,7 +995,7 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
-    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
+    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar source-ledger-calibration publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
   ],
   [
     `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
@@ -1354,6 +1354,21 @@ const replayTestNames = new Map([
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
+  ...ownerGroups
+    .filter(
+      ([file]) =>
+        file ===
+        `electric-db-collection/tests/electric-oracle.property.test.ts`,
+    )
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
   ...ownerGroups
     .filter(([, prefix]) => prefix === `pg-serializer`)
     .flatMap(([, prefix, suffixes]) =>
