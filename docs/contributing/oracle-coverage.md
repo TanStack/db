@@ -4340,20 +4340,26 @@ keeps `scripts/agent-lint-feedback.mjs` and
 `scripts/check-oracle-run-counts.mjs`, whose oracles are
 `scripts.lint-scope` and `scripts.run-budget` above.
 
-The oracle framework's own laws moved to `@tanstack/oracles` in
-TanStack/oracles#1, with the self-tests that judge them. In the TanStack/oracles
-repository, `packages/oracles/tests/declared-reach-oracle.property.test.ts`
-(`oracle.declared-reach`; the earlier TanStack DB
-[review record](oracle-reviews/pr-2290-declared-reach.md)) owns what
-`createOracleReach` (ORC-015) counts, when it checks reach, and what fixed
-examples prove. It also owns the run parameters that `oracleRandomParameters`
-and `oraclePropertyOptions` return. `packages/oracles/tests/oracle-campaign.test.ts`
-in the same repository owns the campaigns that `runOracleCampaign` runs.
-TanStack DB no longer runs these self-tests: `packages/db/tests/oracle-reach.ts`
-and `packages/db/tests/oracle-campaign.ts` only re-export the framework after
-they load TanStack DB's configuration (`oracle-config.ts`). The laws below are
-the ones those self-tests judge; their limits are recorded with them in
-TanStack/oracles.
+The oracle framework's laws live in `@tanstack/oracles` in TanStack/oracles.
+`oracleProperty` is its only campaign API. During DB's migration, the removed
+`createOracleReach` and `runOracleCampaign` implementations are vendored from
+commit `fe532f4` in `packages/db/tests/oracle-reach.ts` and
+`packages/db/tests/oracle-campaign.ts`. Their generated self-oracle is again
+`packages/db/tests/declared-reach-oracle.property.test.ts`
+(`oracle.declared-reach`), with the compatibility examples in
+`oracle-reach.test.ts` and `oracle-campaign.test.ts`. The generated model,
+ledger grammar, comparisons, and 200-run budget are preserved; its imports and
+environment names use DB's configuration. These files judge the transitional
+helpers only. The current framework's `oracleProperty` laws and constructed
+reach remain owned by TanStack/oracles.
+
+`scripts/oracle-lint-settings.mjs` lists the existing legacy campaign files.
+That list may only shrink. New or converted campaigns use `oracleProperty`,
+and conversions retain every earlier mutant kill under the same gap-report
+seed. Literal fixed histories become randomized constructed histories when
+they supply required reach. The compatibility implementations and their tests
+leave DB when the last caller converts. The laws below describe only these
+legacy helpers:
 
 - A history counts once per declared state it enters. A `reach()` call for an
   undeclared state, or before the first history, throws and counts nothing.
@@ -4386,7 +4392,7 @@ examples, so their reach does not depend on the seed (#2287).
 `source-health.history` gets the same guarantee from
 `source-health.required-history`, which runs every reach prefix in each
 campaign and shares its reach without fixed histories. The
-`oracle.declared-reach` self-test in TanStack/oracles generates ledgers over two to four states, up to six histories with fixed marks,
+`oracle.declared-reach` compatibility self-test in DB generates ledgers over two to four states, up to six histories with fixed marks,
 minimums up to three, up to four declared fixed histories, invalid options,
 undeclared and early reaches, an optional `replaying` option, a fixed campaign
 seed, and invalid campaign environments, under four run kinds: ordinary,
@@ -8181,3 +8187,54 @@ component covers numeric keys/sums and synchronous D2 graph drains, without
 correlated routes, public events, provider schedules or general aggregate shapes.
 The public aggregate-select and grouped-result-key owners retain those wider
 value/key contracts and their stated limits.
+
+## Legacy oracle campaign migration (2026-11-10)
+
+The commit-pinned `@tanstack/oracles` framework supplies `oracleProperty` as
+its only campaign API. DB retains the two removed helpers and their self-tests
+locally while the explicit `legacyCampaigns` baseline shrinks. The baseline
+contains 199 files at adoption, including three restored compatibility test
+files. `node scripts/oracle-campaign-inventory.mjs` surveys the current files
+with the lint plugin's own legacy-use classifier; its shape and fixed-history
+flags are planning hints, not evidence of a completed conversion.
+
+`scripts/legacy-campaign-baseline-oracle.property.test.js`
+(`scripts.legacy-campaign-baseline`) owns the migration gate in
+`scripts/check-legacy-oracle-campaigns.mjs`. AGENTS.md's migration ratchet is its
+authority: an adopted baseline may only lose exact file identities. The model
+uses membership in a four-file universe. The driver commits base settings in a
+temporary Git repository, writes head settings, runs the actual CLI, and
+compares the full additions report and exit status after process completion.
+The grammar also varies the setting's presence and the gate's presence at base.
+Fixture histories cross inherited pre-commit/prepare-commit-msg hooks with
+plain or strict CRLF global configuration. A constructed no-hook history with
+strict CRLF settings requires fixture setup and the completed gate report to
+remain independent of developer global configuration.
+Only absence of both permits initial adoption; after the setting is removed,
+the gate's presence preserves an empty allowed set. Constructed histories cover
+an addition, an addition after an empty adopted baseline, an addition after the
+setting was removed, a removal, and initial adoption. Both 20-history campaigns
+run these same laws and constructions. A local association records each
+builder's declared states on every invocation. The shared check compares those
+declarations with actual state observations for seeded, generated, and shrunk
+constructed outputs; it does not depend on the pinned framework's seeded-only
+association. The checker rejects both an always-accept report and a trace that
+omits a required constructed state at the virtual `constructed states`
+checkpoint. This checkpoint is unrecorded, so an incomplete driver trace keeps
+its actual driver failure primary rather than inventing an earlier state
+omission. Actual gate-report mismatches still use `completed`. Production
+mutants that always accept or allow a removed baseline
+to restart fail the named `only shrinks` law at `completed`, including direct
+seed/path replay.
+
+Limits: valid settings with unique file names; the settings module exists at
+base and exports literal settings without imports. The external lint plugin
+owns malformed entries, stale entries in files that still exist, and the
+classification of legacy API uses. Deleted files have no lint invocation;
+remove their baseline entries when deleting them. The gate compares file
+identities and permits reason edits. No existing
+product law or campaign is converted by the repin. Each later conversion needs
+its own same-seed before/after gap comparison; this adoption does not supply
+that evidence. Gaps in changed functions close by a kill or an explicit
+maintainer allowance for their anchored gaps; a coverage-map entry alone does
+not close them.

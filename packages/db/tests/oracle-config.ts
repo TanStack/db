@@ -12,6 +12,8 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `oracle.declared-reach`,
+  `scripts.legacy-campaign-baseline`,
   `query.public-container-copy`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
