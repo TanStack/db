@@ -546,7 +546,7 @@ function createPowerSyncCollectionConfig<
           )
           const pendingOperations: Array<PendingOperation> = []
 
-          const changes = operations.map((op) => {
+          const changes = operations.map((op): Parameters<typeof write>[0] => {
             const { id, operation, timestamp, value } = op
             const parsedValue = deserializeSyncRow({
               id,
