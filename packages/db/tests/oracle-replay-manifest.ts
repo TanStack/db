@@ -245,8 +245,27 @@ const ownerGroups: ReadonlyArray<
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     `trailbase`,
-    `lifecycle`,
+    `lifecycle lifecycle.persisted-hydration.controlled lifecycle.persisted-hydration.node-sqlite`,
   ],
+  [
+    `query-db-collection/tests/persisted-precedence-oracle.test.ts`,
+    `query`,
+    `persisted-write-precedence`,
+  ],
+  [
+    `query-db-collection/tests/retained-scoped-hydration-oracle.test.ts`,
+    `query`,
+    `retained-scoped-hydration cached-peer-claim`,
+  ],
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+        `adapter.${adapter}`,
+        `eager-reload`,
+        `db-adapter-conformance/tests/eager-reload-oracle-suite.ts`,
+      ] as const,
+  ),
   [
     `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     `electric`,
@@ -969,6 +988,32 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `query.persisted-write-precedence`,
+    `orders generated fetch/write histories \\(random\\)`,
+  ],
+  [
+    `query.retained-scoped-hydration`,
+    `revalidates generated retained scopes \\(random\\)`,
+  ],
+  [
+    `query.cached-peer-claim`,
+    `orders generated cached peer claims \\(random\\)`,
+  ],
+  ...[`controlled`, `node-sqlite`].map(
+    (host) =>
+      [
+        `trailbase.lifecycle.persisted-hydration.${host}`,
+        `retires generated persisted hydration through ${host} with random seed`,
+      ] as const,
+  ),
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `adapter.${adapter}.eager-reload`,
+        `reconciles generated reload histories \\(random\\)`,
+      ] as const,
+  ),
   ...[
     `query.startup-ownership`,
     ...[`convex`, `electric`, `trailbase`, `rxdb`, `powersync`].map(

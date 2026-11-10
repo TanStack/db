@@ -30,6 +30,7 @@ import {
 import { InvalidQueryResultError } from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import { mergeDirectWritesOverFetch } from './direct-write-precedence-oracle'
 import {
   categorySubset,
   cleanups,
@@ -1609,18 +1610,6 @@ async function runOverlappingSubsetHistory({
  * wins for its key. This reference overlays the writes on the fetched rows in
  * order. It is the expected visible rows of the merge-cut histories below.
  */
-type MergeRow = { id: string; value: string }
-function mergeDirectWritesOverFetch(
-  fetched: Array<MergeRow>,
-  writes: Array<MergeRow>,
-): Record<string, string> {
-  const rows = new Map(fetched.map((row) => [row.id, row]))
-  for (const row of writes) rows.set(row.id, row)
-  return Object.fromEntries(
-    [...rows.values()].map((row) => [row.id, row.value]),
-  )
-}
-
 // A pending application obligation can include persistence after publication.
 // While its receipt is held, allow either complete source snapshot; never infer
 // receipt settlement merely from visible rows. Once it fulfills, the waiter

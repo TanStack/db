@@ -10,8 +10,17 @@ import {
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { trailBaseCollectionOptions } from '../src/trailbase'
+import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
 import { MockRecordApi } from './mock-record-api'
+import { observeHydrationLifecycle } from './lifecycle-hydration-driver'
+import {
+  hydrationLifecycleHistories,
+  hydrationLifecycleHistoryArb,
+  hydrationLifecycleStates,
+  hydrationLifecycleViolations,
+} from './lifecycle-hydration-oracle'
 import {
   deferred,
   failure,
@@ -23,6 +32,7 @@ import {
 } from './lifecycle-support'
 import type { Event, ListResponse } from 'trailbase'
 import type { RaceRow, Row } from './lifecycle-support'
+import type { HydrationLifecycleHistory } from './lifecycle-hydration-oracle'
 
 /**
  * # Does a TrailBase sync run publish and retire one valid row history?
@@ -1379,7 +1389,7 @@ async function checkPageHistory(history: PageHistory) {
   const trace = JSON.stringify(history)
   const checkChangedKeys = (label: string) => {
     for (const id of changedKeys) {
-      if (inTransit.some((pending) => pending.id === id)) continue
+      if (inTransit.some((delivery) => delivery.id === id)) continue
       expect(value(id), `${trace} ${label}: key ${id}`).toEqual(service.get(id))
     }
   }
@@ -1631,6 +1641,82 @@ it(`loads a row in a fresh run that an earlier run's event touched`, () => {
   return checkFreshRunAfterEvent()
 })
 
+/**
+ * The persisted receiver crosses the same cleanup law with an old completed
+ * list waiting at hydrateBaseline, or a late rejected list. Fixed histories
+ * and both generated campaigns use the same judgment on controlled and real
+ * SQLite hosts. The browser receiver imports the model and driver directly.
+ */
+async function checkHydrationLifecycle(
+  history: HydrationLifecycleHistory,
+  host: `controlled` | `node-sqlite`,
+  reach?: ReturnType<typeof createOracleReach>,
+) {
+  reach?.beginHistory()
+  const storage = createStartupHost(host)
+  return withOracleCleanup(async () => {
+    const actual = await observeHydrationLifecycle(
+      storage.persistence,
+      history,
+      `trailbase-hydration-${host}`,
+    )
+    for (const state of actual.reached) reach?.reach(state)
+    expect(hydrationLifecycleViolations(history, actual)).toEqual([])
+    return actual
+  }, [() => storage.close()])
+}
+for (const host of [`controlled`, `node-sqlite`] as const) {
+  it.each(hydrationLifecycleHistories)(
+    `retires persisted hydration through ${host}: %j`,
+    async (history) => {
+      oracleRoute(`fixed history`)
+      await checkHydrationLifecycle(history, host)
+    },
+  )
+  for (const campaign of [`fixed`, `random`] as const) {
+    const property = `trailbase.lifecycle.persisted-hydration.${host}`
+    const settings =
+      campaign === `fixed`
+        ? oracleFixedSeed(728_159, { numRuns: oracleRuns(50) })
+        : oraclePropertyOptions(50, property)
+    const reach = createOracleReach(
+      `${property}.${campaign}`,
+      hydrationLifecycleStates,
+    )
+    let ran = false
+    let obsoleteBegins = 0
+    afterAll(() => {
+      if (!ran) return
+      reach.assertReached()
+      process.stdout.write(
+        `${property}.${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))} obsoleteBegins=${obsoleteBegins}\n`,
+      )
+    })
+    fcTest.prop([hydrationLifecycleHistoryArb], settings)(
+      `retires generated persisted hydration through ${host} with ${campaign} seed`,
+      async (history) => {
+        oracleRoute(oracleRouteOf(settings))
+        ran = true
+        const actual = await checkHydrationLifecycle(history, host, reach)
+        obsoleteBegins += actual.obsoleteBegins
+      },
+    )
+  }
+  it(`rejects old-work row corruption through ${host}`, async () => {
+    oracleRoute(`calibration`)
+    const history = hydrationLifecycleHistories.find(
+      (h) => h.resumeAt === `replacement-ready` && h.replacement !== 0,
+    )!
+    const actual = await checkHydrationLifecycle(history, host)
+    expect(
+      hydrationLifecycleViolations(history, {
+        ...actual,
+        retiredResume: { ...actual.retiredResume, rows: [] },
+      }),
+    ).not.toEqual([])
+  })
+}
+
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
@@ -1643,6 +1729,7 @@ declareOracle({
     checkStreamEnd,
     checkPageHistory,
     checkFreshRunAfterEvent,
+    checkHydrationLifecycle,
   ],
   model: [expectedEarlyDemand],
 })

@@ -255,6 +255,54 @@ coverage or a proof of completeness. The 10× campaign passed 800 generated
 histories (fixed campaign seed 714203, random campaign seed 127535183) plus the
 32 corpus cases. No service-backed E2E run is claimed.
 
+## Persisted hydration and retired work
+
+The primary lifecycle runner also receives real persistence through
+`lifecycle-hydration-driver.ts`. Its directly named
+`lifecycle-hydration-oracle.ts` projects the same cleanup law onto public and
+durable rows: cleanup clears public rows and retires source authority; a new
+eager result replaces saved rows; late old work changes neither observation.
+This projection preserves row provenance only until the replacement. It does
+not reproduce the adapter's cancellation flags, wrapper queues, or core fences.
+
+The driver calls the real old run's `hydrateBaseline()` and holds its completion
+after hydration finishes. A complete old list then waits at the exact await
+before its omission sweep. A neighboring history instead rejects an old list
+after cleanup, so it does not claim hydration reach. Old work resumes while the
+Collection is cleaned up, after a new run restores rows but still holds its
+list, or after the new complete result is ready. Each history then supplies a
+new change event to prove the replacement reader remains usable.
+
+The grammar varies all subsets of three string keys for saved, old-listed, and
+replacement rows. A rejected old list has no payload, encoded as old mask 0.
+It crosses empty and nonempty replacements, overlap and
+omission, both old outcomes, all three resume cuts, and default versus
+network-first rendering. Network-first uses a deadline beyond this controlled
+history. Under the SQLite guide's "Render after SQLite restore" contract,
+both forms stay loading before adapter readiness here; cleanup rejects the
+unfinished old preload with `AbortError`.
+
+Twenty-four fixed histories and 50-history fixed-seed/fresh campaigns per host
+run the same independent judgment through controlled storage and real Node
+SQLite. Each campaign requires all nine named states. Public rows, durable
+rows, and status are compared immediately after old work resumes, at replacement
+readiness, and after the new event. The same judgment also requires old-reader
+cancel/release, continued replacement ownership, final replacement release, and
+append-only errors through cleanup. Obsolete `begin` attempts are diagnostics,
+not a zero-work product promise. Browser receiving code imports the same model,
+fixed histories, driver, and comparison.
+
+Use property ids `trailbase.lifecycle.persisted-hydration.controlled` and
+`trailbase.lifecycle.persisted-hydration.node-sqlite` with the same checked replay
+runner above. The fixed campaign seed is 728159. The
+[hydration-gap record](../../../docs/contributing/oracle-reviews/2026-11-10-trailbase-hydration-gap.md)
+records comparison results and the exact M150 cancellation-guard experiment.
+That edit is reached but equivalent in the tested persisted composition:
+old callbacks attempt a sync transaction after cleanup, while the wrapper and
+core deny them publication authority. The shared row-loss calibration rejects
+a changed replacement observation. This result does not add a promise of zero
+internal work after cancellation.
+
 ## Shared conformance driver
 
 `eager-live-source-conformance-oracle.property.test.ts` runs the shared eager

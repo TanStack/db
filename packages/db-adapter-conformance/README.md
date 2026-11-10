@@ -97,6 +97,22 @@ persistence capability protocol through the real RxDB/PowerSync sync boundary.
 The persistence-loss calibration wraps hydration-scoped adapters, requires an
 actual dropped write, and fails if its clean candidate fails.
 
+Package-local RxDB/PowerSync registrations also invoke the shared capability
+suite, so package-scoped test discovery and mutation audits include the protocol
+owner. The 22-history grammar and judgment stay in this package.
+
+`tests/eager-reload-oracle.ts` reuses the complete-result judgment for unwrapped
+RxDB/PowerSync receivers. These histories cross fresh startup and empty/nonempty
+reload baselines with an optional persisting optimistic insert. Unwrapped sources
+are necessary: persistence's own snapshot choice can mask a broken retained-row
+predicate. After mutation settlement and applied receipts, source rows must equal
+the complete result. Readiness alone proves acceptance, so fulfillment during a
+persisting mutation can still expose the coherent retained baseline and overlay.
+Chromium's `eager-gap-conformance-oracle.opfs.spec.ts` receives the same 24
+histories per adapter, plus 104 eager Query precedence, 48 on-demand Query scope,
+two cached-peer claims, and 24 TrailBase lifecycle histories from their primary owners. These 226 histories enforce separate reach
+and share their owners' comparisons.
+
 ```sh
 pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts
 pnpm --filter @tanstack/convex-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.property.test.ts
