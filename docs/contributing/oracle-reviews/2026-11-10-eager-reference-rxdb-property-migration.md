@@ -7,12 +7,12 @@ outcomes and named verdicts, source hashes, declared-state counts, and log hashe
 This record covers the shared eager-source machinery, reference receiver, and
 RxDB receiver. Other receiving adapters retain their legacy campaigns.
 
-The additive calibration-budget repair in the followup source commit is
-**pending canonical CI validation**. The earlier package results and complete
-mutation pair below apply to their recorded source. They do not establish that
-the newly restored 48 searches or final native package checks pass. Static
-checks establish the original predicates, budgets and ordered candidates; the
-CI handoff records the exact final candidate commit.
+The additive calibration-budget repair at `fafdeb2b8b9f3c40e5b978b6ff784bb2931eeff7`
+passes its focused native package run: 48 tests in 24.56 seconds. Canonical CI
+validation remains pending. The earlier package results and complete mutation
+pair below apply to their recorded source. They do not establish final native
+package checks. Static checks establish the original predicates, budgets and
+ordered candidates.
 
 ## Law, reach, and preservation
 
@@ -124,8 +124,10 @@ arbitrary equals the converted native arbitrary and `fc.sample` follows the
 same pre-shrink `fc.check` candidate order. The sample loop stops on the first
 accepted law and propagates failures outside the exact `ConformanceViolation`
 class. It does not shrink and claims no shrunk calibration counterexample;
-product campaigns keep their ordinary shrinking and replay. Runtime validation
-of the 48 searches is pending in canonical CI. No local heavy run was started.
+product campaigns keep their ordinary shrinking and replay. The focused command
+`pnpm_config_verify_deps_before_run=false pnpm --filter @tanstack/db-adapter-conformance exec vitest run --maxWorkers=1 --coverage.enabled=false tests/reference-adapter-calibration.test.ts`
+passed all 48 tests in 24.56 seconds on the unchanged followup harness. This
+bounded run does not repeat the complete reference suite or RxDB mutation pair.
 
 The original full RxDB pair remains earlier-source evidence. The additive
 ordinary file is outside all 168 RxDB closure files, which remain byte-identical

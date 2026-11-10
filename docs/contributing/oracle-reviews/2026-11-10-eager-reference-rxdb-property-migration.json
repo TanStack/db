@@ -6882,7 +6882,7 @@
       ],
       "mechanism": "fc.sample and pre-shrink fc.check use identical toss order; all600 candidate hashes match for each actual driver configuration. No production execution or mutation job."
     },
-    "executionStatus": "Pending canonical CI validation; no restored48-control runtime result is claimed."
+    "executionStatus": "Focused native runtime passed: 48 tests in 24.56 seconds; canonical CI validation pending."
   },
   "finalRxdbReach": [
     {
@@ -6949,7 +6949,7 @@
     }
   ],
   "calibrationBudgetFollowup": {
-    "status": "CI validation pending. No local heavy run of the restored48 searches was started.",
+    "status": "Focused native runtime passed: 48 tests in 24.56 seconds; canonical CI validation pending.",
     "newOrdinaryHarness": "packages/db-adapter-conformance/tests/reference-adapter-calibration.test.ts",
     "change": "Additive exact original hostile-search stream using native model/driver/check; retain supplemental native calibrations.",
     "earlierPairApplicability": {
@@ -7003,7 +7003,7 @@
       },
       "generation": "Native arbitrary gains unmappers only. All600 actual generated values match original source in each of3 configurations; see calibration-candidate-order.json."
     },
-    "candidateIdentification": "The followup source commit containing this record; exact commit SHA is recorded in the external CI handoff.",
+    "candidateIdentification": "fafdeb2b8b9f3c40e5b978b6ff784bb2931eeff7",
     "sourceParent": "c7f0de31a671f8a6d63179e26f8c061892d79c4f",
     "sourceSha256": {
       "packages/db-adapter-conformance/tests/reference-adapter-calibration.test.ts": "605bd8c3c726119331e69087fe8283faf3c9a1067f6538c2286ab3ac994e9789",
@@ -7014,6 +7014,15 @@
       "Canonical RxDB runtime/schema types24 tests",
       "Conformance TypeScript check",
       "Optional fresh remote full132 BEFORE/AFTER pair; evaluate exact stable-key semantic preservation separately"
-    ]
+    ],
+    "focusedRuntime": {
+      "sourceCommit": "fafdeb2b8b9f3c40e5b978b6ff784bb2931eeff7",
+      "command": "pnpm_config_verify_deps_before_run=false pnpm --filter @tanstack/db-adapter-conformance exec vitest run --maxWorkers=1 --coverage.enabled=false tests/reference-adapter-calibration.test.ts",
+      "testsPassed": 48,
+      "durationSeconds": 24.56,
+      "logSha256": "9a82a86d29397d9d08f170e3d6ec9e82e290b586085f466fc918110eed7dea13",
+      "sourceSha256": "605bd8c3c726119331e69087fe8283faf3c9a1067f6538c2286ab3ac994e9789",
+      "limits": "Focused ordinary calibration harness only. Does not repeat the complete reference suite or RxDB mutation pair."
+    }
   }
 }
