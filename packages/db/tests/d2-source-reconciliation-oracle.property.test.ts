@@ -1,15 +1,18 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { expect, it as vitestIt } from 'vitest'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   addWeight,
   expectedWeightedRowIdentity,
@@ -21,8 +24,6 @@ import type {
 import type { ChangeMessage } from '../src/types.js'
 
 const it = oracleReplayTest(vitestIt)
-const fixedCampaign = oracleReplayTest(fcTest)
-const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 /**
  * D2 source reconciliation turns source-key snapshots into exact signed row
@@ -263,8 +264,10 @@ function expectTrackerMatchesSource(
     [a]: readonly [SourceKey, SourceRow],
     [b]: readonly [SourceKey, SourceRow],
   ) => `${typeof a}:${String(a)}`.localeCompare(`${typeof b}:${String(b)}`)
-  expect([...sentRows.entries()].sort(compareEntries)).toEqual(
-    [...sourceRows.entries()].sort(compareEntries),
+  oracleAssertion('expectTrackerMatchesSource', () =>
+    expect([...sentRows.entries()].sort(compareEntries)).toEqual(
+      [...sourceRows.entries()].sort(compareEntries),
+    ),
   )
 }
 
@@ -272,12 +275,16 @@ function expectWeightedRelationMatchesSource(
   sourceRows: ReadonlyMap<SourceKey, SourceRow>,
   relation: ReadonlyMap<string, number>,
 ): void {
-  expect(
-    [...relation.entries()].sort(([a], [b]) => a.localeCompare(b)),
-  ).toEqual(
-    [...sourceRows.entries()]
-      .map(([key, row]) => [expectedWeightedRowIdentity(key, row), 1] as const)
-      .sort(([a], [b]) => a.localeCompare(b)),
+  oracleAssertion('expectWeightedRelationMatchesSource', () =>
+    expect(
+      [...relation.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    ).toEqual(
+      [...sourceRows.entries()]
+        .map(
+          ([key, row]) => [expectedWeightedRowIdentity(key, row), 1] as const,
+        )
+        .sort(([a], [b]) => a.localeCompare(b)),
+    ),
   )
 }
 
@@ -347,8 +354,12 @@ function applyReconciliationStep(
     expectTrackerMatchesSource(model.sourceRows, model.sentRows)
     expectWeightedRelationMatchesSource(model.sourceRows, model.relation)
   } else {
-    expect(model.sentRows.size).toBe(0)
-    expect(model.relation.size).toBe(0)
+    oracleAssertion('applyReconciliationStep', () =>
+      expect(model.sentRows.size).toBe(0),
+    )
+    oracleAssertion('applyReconciliationStep', () =>
+      expect(model.relation.size).toBe(0),
+    )
   }
 }
 
@@ -474,10 +485,10 @@ function executedReplayReach(steps: ReadonlyArray<ReconciliationStep>): number {
 
 it(`executes changed down-state sources and checks their restart replay`, () => {
   oracleRoute(`fixed seed`)
-  const histories = fc.sample(
-    reconciliationHistoryArbitrary,
-    oracleFixedSeed(1780, { numRuns: 500 }),
-  )
+  const histories = fc.sample(reconciliationHistoryArbitrary, {
+    seed: 1780,
+    numRuns: 500,
+  })
 
   // Run every history, not just the first syntax match. Each accepted restart
   // has already passed tracker and signed-relation assertions above.
@@ -517,42 +528,39 @@ it(`does not count absent replay or an unfinished downtime as replay coverage`, 
 
 const assertChangedSourceReplay = (row: SourceRow, key: SourceKey) => {
   const replacement = { ...row, revision: row.revision + 1 }
-  expect(
-    executedReplayReach([
-      upsert(key, row),
-      { type: `teardown` },
-      upsert(key, replacement, row),
-      { type: `restart` },
-    ]),
-  ).toBe(1)
+  oracleAssertion('assertChangedSourceReplay', () =>
+    expect(
+      executedReplayReach([
+        upsert(key, row),
+        { type: `teardown` },
+        upsert(key, replacement, row),
+        { type: `restart` },
+      ]),
+    ).toBe(1),
+  )
 }
 
-const sourceRowFixedSeed = oracleFixedSeed(1782, { numRuns: oracleRuns(100) })
-fixedCampaign.prop(
-  [sourceRowArbitrary, sourceKeyArbitrary],
-  sourceRowFixedSeed,
-)(
-  `forces a changed source payload through every generated helper restart for a fixed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(sourceRowFixedSeed))
-    return assertChangedSourceReplay(...args)
+oracleProperty({
+  id: `d2-source.changed-restart`,
+  law: {
+    statement: `A changed source payload is replayed exactly when a helper graph restarts.`,
+    authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
+    limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
+    owner: `docs/contributing/oracle-coverage.md`,
   },
-)
-
-const sourceRowCampaign = oraclePropertyOptions(
-  100,
-  `d2-source.changed-restart`,
-)
-randomCampaign(`d2-source.changed-restart`).prop(
-  [sourceRowArbitrary, sourceKeyArbitrary],
-  sourceRowCampaign,
-)(
-  `forces a changed source payload through every generated helper restart for a random or replayed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(sourceRowCampaign))
-    return assertChangedSourceReplay(...args)
+  histories: {
+    arbitrary: fc.tuple(sourceRowArbitrary, sourceKeyArbitrary),
+    runs: 100,
+    fixedSeeds: [1782],
   },
-)
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`d2-source.changed-restart`, plan, observe, () =>
+      assertChangedSourceReplay(...plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
   `detects driver mutation at %s without changing expected source rows`,
@@ -609,34 +617,27 @@ const assertExactSourceContributions = (
   }
 }
 
-const reconciliationHistoryFixedSeed = oracleFixedSeed(1780, {
-  numRuns: oracleRuns(200),
+oracleProperty({
+  id: `d2-source.exact-retractions`,
+  law: {
+    statement: `After every helper action, exact signed contributions integrate to the authoritative source rows.`,
+    authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
+    limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
+    owner: `docs/contributing/oracle-coverage.md`,
+  },
+  histories: {
+    arbitrary: reconciliationHistoryArbitrary,
+    runs: 200,
+    fixedSeeds: [1780],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`d2-source.exact-retractions`, plan, observe, () =>
+      assertExactSourceContributions(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
-fixedCampaign.prop(
-  [reconciliationHistoryArbitrary],
-  reconciliationHistoryFixedSeed,
-)(
-  `keeps one exact D2 contribution per source key for a fixed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(reconciliationHistoryFixedSeed))
-    return assertExactSourceContributions(...args)
-  },
-)
-
-const reconciliationHistoryCampaign = oraclePropertyOptions(
-  200,
-  `d2-source.exact-retractions`,
-)
-randomCampaign(`d2-source.exact-retractions`).prop(
-  [reconciliationHistoryArbitrary],
-  reconciliationHistoryCampaign,
-)(
-  `keeps one exact D2 contribution per source key for a random or replayed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(reconciliationHistoryCampaign))
-    return assertExactSourceContributions(...args)
-  },
-)
 
 const assertDisjointHistoriesCommute = ([left, right]: [
   Array<SourceOperation>,
@@ -650,34 +651,35 @@ const assertDisjointHistoriesCommute = ([left, right]: [
   applyReconciliationStep(rightThenLeft, { type: `batch`, operations: right })
   applyReconciliationStep(rightThenLeft, { type: `batch`, operations: left })
 
-  expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
+  oracleAssertion('assertDisjointHistoriesCommute', () =>
+    expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight)),
+  )
 }
 
-const disjointHistoriesFixedSeed = oracleFixedSeed(1781, {
-  numRuns: oracleRuns(100),
+oracleProperty({
+  id: `d2-source.disjoint-commutation`,
+  law: {
+    statement: `Disjoint source histories commute in source rows, sent rows and integrated weighted relation.`,
+    authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
+    limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
+    owner: `docs/contributing/oracle-coverage.md`,
+  },
+  histories: {
+    arbitrary: disjointHistoriesArbitrary,
+    runs: 100,
+    fixedSeeds: [1781],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `d2-source.disjoint-commutation`,
+      plan,
+      observe,
+      () => assertDisjointHistoriesCommute(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
-fixedCampaign.prop([disjointHistoriesArbitrary], disjointHistoriesFixedSeed)(
-  `commutes independent source histories for a fixed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(disjointHistoriesFixedSeed))
-    return assertDisjointHistoriesCommute(...args)
-  },
-)
-
-const disjointHistoriesCampaign = oraclePropertyOptions(
-  100,
-  `d2-source.disjoint-commutation`,
-)
-randomCampaign(`d2-source.disjoint-commutation`).prop(
-  [disjointHistoriesArbitrary],
-  disjointHistoriesCampaign,
-)(
-  `commutes independent source histories for a random or replayed seed`,
-  (...args) => {
-    oracleRoute(oracleRouteOf(disjointHistoriesCampaign))
-    return assertDisjointHistoriesCommute(...args)
-  },
-)
 
 // What this oracle owns: the gap report judges reconcileChangesForD2 and its
 // static reference tree by this file's tests.

@@ -72,7 +72,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { codedWarning } from '../src/error-message'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
 import { errorSampleArguments } from './error-sample-arguments'
 import { exportedErrorClasses } from './production-error-messages-fixture'
 import { findErrorSites } from './error-sites-oracle'
@@ -647,23 +646,22 @@ describe(`production error messages`, () => {
 
   it(`documents every code with its class`, () => {
     oracleRoute(`case`)
-    const reach = createOracleReach(
-      `production-errors.generated-docs`,
-      [`cli-stdout-received`, `catalog-compared`],
-      { replaying: false },
-    )
-    reach.beginHistory()
+    const states = [`cli-stdout-received`, `catalog-compared`] as const
+    const reached = new Set<(typeof states)[number]>()
     try {
       const docs = renderErrorDocs()
-      reach.reach(`cli-stdout-received`)
+      reached.add(`cli-stdout-received`)
       expectCodesDocumented(docs)
-      reach.reach(`catalog-compared`)
-      reach.assertReached()
+      reached.add(`catalog-compared`)
+      for (const state of states)
+        expect(reached.has(state), `${state} history minimum`).toBe(true)
     } finally {
       if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
         console.info(
           `production-errors.generated-docs reach`,
-          Object.fromEntries(reach.counts()),
+          Object.fromEntries(
+            states.map((state) => [state, Number(reached.has(state))]),
+          ),
         )
     }
   })
