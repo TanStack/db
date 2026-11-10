@@ -748,3 +748,26 @@ Final source hashes for the reviewed implementation and new executable owners:
 - `packages/offline-transactions/tests/executor-lifecycle-oracle.ts`: `863a2639a7b4f2a221c3580dd040ba91c74dad718cf7f7e9db28c61a70483d85`.
 - `packages/offline-transactions/tests/settled-id-window-oracle.ts`: `41d958ec333349f41d77a34cc953a578479f70caac8089ddcae232c089574e99`.
 - `packages/query-db-collection/tests/offline-executor-refresh-driver.ts`: `b26a314dfa8741e0e1e9ef48b4a2cfac4b63277a1b00c07d2ed71037d099ba56`.
+
+## Replay manifest repair
+
+CI on `c9b569f7578e969639f1c5d1d9ac4f7e050d9751` rejected the nine newly
+registered properties because their receiving files were absent from the shared
+replay manifest. The existing `named oracle replay manifest` comparison failed
+`names an owner for every registered property` with those nine names (115 other
+replay tests passed). This was an omitted registration, not an offline product
+failure or a reason to relax the comparison.
+
+The repair adds each receiving file and its directly imported property module
+to `packages/db/tests/oracle-replay-manifest.ts`. All 69 manifest tests pass with
+the unchanged comparison. Each of the nine new properties also passes its real
+guarded command with campaign seed `20261110` and path `0`; each reports exactly
+one execution and a completed, non-failing witness for the requested property.
+This includes the resource and real QueryDB receiving paths. The offline source,
+models, history grammars, comparisons, and run budgets are unchanged, so the
+full-source mutation results above remain applicable.
+
+The local manifest-only run used a scratch Vitest config without the unrelated
+IndexedDB setup because this worktree lacks the installed `fake-indexeddb`
+package. The guarded property runs used their normal package config. Full replay
+suite validation remains a CI gate; the local setup failure is not a test pass.
