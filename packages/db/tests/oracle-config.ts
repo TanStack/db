@@ -341,6 +341,7 @@ const staticOracleProperties = [
   `electric.metadata-merge-complete-state`,
   `electric.process-grammar`,
   `electric.source-ledger-calibration`,
+  `electric.sql-predicate-semantics`,
   `electric.publication-before-persistence`,
   `electric.queued-presence-order`,
   `electric.resume-metadata-merge`,

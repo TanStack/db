@@ -564,6 +564,11 @@ const ownerGroups: ReadonlyArray<
     `match-reentry publication-epoch-convergence persistence-interleaving`,
   ],
   [
+    `electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `electric`,
+    `sql-predicate-semantics`,
+  ],
+  [
     `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
     `electric-recovery`,
     `publication-stream-convergence`,
@@ -1354,6 +1359,12 @@ const replayTestNames = new Map([
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
+  [
+    `electric.sql-predicate-semantics`,
+    `electric\\.sql-predicate-semantics > random seed`,
+  ],
+  [`trailbase.lifecycle`, `trailbase\\.lifecycle > random seed`],
+  [`trailbase.page-event`, `trailbase\\.page-event > random seed`],
   ...[...registeredOracleProperties]
     .filter((property) => property.startsWith(`electric.sdk-`))
     .map(
@@ -1808,6 +1819,10 @@ const ownerReplayConfigs = new Map([
   [
     `packages/convex-db-collection/e2e/lazy-concurrency-oracle.test.ts`,
     `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
   ],
   [
     `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,

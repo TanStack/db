@@ -1,14 +1,15 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
 import {
@@ -67,6 +68,26 @@ type SyncRunPlan =
 type Scenario = {
   mode: `eager` | `on-demand`
   syncRuns: Array<SyncRunPlan>
+}
+
+// Registration transports the complete existing independent interpreter's
+// judgment. It adds no product expectation and retains original driver errors.
+function existingTrailbaseComparison<T>(
+  law: string,
+  compare: (history: T) => Promise<void>,
+) {
+  return {
+    resolve: (history: T) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: async (
+      plan: { history: T },
+      record: (checkpoint: string, value: unknown) => void,
+    ) => {
+      await recordAssertionJudgment(law, plan, record, () =>
+        oracleAssertion(law, () => compare(plan.history)),
+      )
+    },
+  }
 }
 
 /**
@@ -477,22 +498,22 @@ it.each([`list`, `set`, `buffered`] as const)(
     })
   },
 )
-const scenarioFixedSeed = oracleFixedSeed(714_203, { numRuns: oracleRuns(50) })
-fcTest.prop([scenarioArb], scenarioFixedSeed)(
-  `matches generated lifecycle histories with a fixed seed`,
-  (scenario) => {
-    oracleRoute(oracleRouteOf(scenarioFixedSeed))
-    return checkLifecycle(scenario)
+oracleProperty({
+  id: `trailbase.lifecycle`,
+  law: {
+    owner: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
+    statement: `A TrailBase sync run publishes and retires one valid row history.`,
+    authority: `The lifecycle contract in this file's opening prose and tests/ORACLE.md, enacted by checkLifecycle's independent keyed relation.`,
+    limits: `The unchanged controlled RecordApi/native ReadableStream grammar; SDK fetch/SSE decoding, filtered subsets, mutation acknowledgements, and service reconnects remain outside this owner.`,
   },
-)
-const scenarioCampaign = oraclePropertyOptions(50, `trailbase.lifecycle`)
-fcTest.prop([scenarioArb], scenarioCampaign)(
-  `matches generated lifecycle histories with a random or replayed seed`,
-  (scenario) => {
-    oracleRoute(oracleRouteOf(scenarioCampaign))
-    return checkLifecycle(scenario)
+  histories: {
+    arbitrary: scenarioArb,
+    runs: 50,
+    fixedSeeds: [714203],
   },
-)
+  ...existingTrailbaseComparison(`trailbase.lifecycle`, checkLifecycle),
+  check: forwardAssertionJudgment,
+})
 
 /**
  * ## Does an early on-demand load wait for the change listener?
@@ -1494,24 +1515,22 @@ it.each(pageFixedHistories)(`converges: %s`, (_name, history) => {
   oracleRoute(`fixed history`)
   return checkPageHistory(history)
 })
-const pageHistoryFixedSeed = oracleFixedSeed(205_917, {
-  numRuns: oracleRuns(40),
+oracleProperty({
+  id: `trailbase.page-event`,
+  law: {
+    owner: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
+    statement: `Paged service rows and ordered change events converge after their histories drain.`,
+    authority: `The page/event law in tests/ORACLE.md and checkPageHistory's independent service-row model.`,
+    limits: `The unchanged two-page and at-most-two-load controlled grammar; offset paging varies updates only, and no live service, larger page count, or reconnect claim is added.`,
+  },
+  histories: {
+    arbitrary: pageHistoryArb,
+    runs: 40,
+    fixedSeeds: [205917],
+  },
+  ...existingTrailbaseComparison(`trailbase.page-event`, checkPageHistory),
+  check: forwardAssertionJudgment,
 })
-fcTest.prop([pageHistoryArb], pageHistoryFixedSeed)(
-  `converges across generated page histories with a fixed seed`,
-  (history) => {
-    oracleRoute(oracleRouteOf(pageHistoryFixedSeed))
-    return checkPageHistory(history)
-  },
-)
-const pageHistoryCampaign = oraclePropertyOptions(40, `trailbase.page-event`)
-fcTest.prop([pageHistoryArb], pageHistoryCampaign)(
-  `converges across generated page histories with a random or replayed seed`,
-  (history) => {
-    oracleRoute(oracleRouteOf(pageHistoryCampaign))
-    return checkPageHistory(history)
-  },
-)
 
 /**
  * ## Does a fresh sync run load a row an earlier run's event touched?
