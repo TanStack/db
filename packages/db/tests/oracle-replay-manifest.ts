@@ -395,9 +395,24 @@ const ownerGroups: ReadonlyArray<
     `stream-record-lifetime`,
   ],
   [
+    `db/tests/live-query-cache-lifecycle-oracle.test.ts`,
+    `live-query`,
+    `cache-claim-lifecycle`,
+  ],
+  [
+    `db/tests/live-query-cache-options-oracle.test.ts`,
+    `live-query`,
+    `cache-option-admission`,
+  ],
+  [
+    `db/tests/live-query-preload-indexing-oracle.test.ts`,
+    `live-query`,
+    `preload-indexing`,
+  ],
+  [
     `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
     `live-query`,
-    `start-handoff`,
+    `start-handoff deferred-sibling`,
   ],
   [
     `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
@@ -1426,7 +1441,6 @@ const replayTestNames = new Map([
     `ssr.stream-record-lifetime`,
     `settles each record demand at its transport checkpoint.*random`,
   ],
-  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [
     `pooled-live-query.late-cleanup`,
     `releases late cleanup registration channels.*random`,
@@ -1574,6 +1588,10 @@ const enumeratedProperties = new Set([
   `react.cache-options.server-render`,
   `preact.bound-options`,
   `preact.bound-schema-options`,
+  `live-query.cache-claim-lifecycle`,
+  `live-query.cache-option-admission`,
+  `live-query.preload-indexing`,
+  `live-query.deferred-sibling`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
 ])
