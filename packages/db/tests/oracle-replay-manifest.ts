@@ -121,6 +121,16 @@ const ownerGroups: ReadonlyArray<
     `react`,
     `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
+  [
+    `react-db/tests/bound-schema-options-oracle.test.tsx`,
+    `react.bound-schema-options`,
+    `live suspense`,
+  ],
+  [
+    `react-db/tests/cache-options-oracle.test.tsx`,
+    `react.cache-options`,
+    `client-render suspense-render server-render`,
+  ],
   [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
     `preact-db/tests/bound-schema-options-oracle.test.ts`,
@@ -1291,6 +1301,11 @@ const reseededProperties = new Set<string>()
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
   `reverse-index.large-reads`,
+  `react.bound-schema-options.live`,
+  `react.bound-schema-options.suspense`,
+  `react.cache-options.client-render`,
+  `react.cache-options.suspense-render`,
+  `react.cache-options.server-render`,
   `preact.bound-options`,
   `preact.bound-schema-options`,
   `oracle-replay.enumerated-calibration`,

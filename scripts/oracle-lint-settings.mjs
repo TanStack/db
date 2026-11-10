@@ -664,15 +664,7 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/react-db/tests/bound-schema-options-oracle.test.tsx`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/react-db/tests/cache-first-registration-oracle.test.tsx`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/react-db/tests/cache-options-oracle.test.tsx`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
