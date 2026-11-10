@@ -2377,34 +2377,11 @@ remaining design and coverage questions, including valid Temporal kinds without
 public order and mixed-kind query order. Earlier PR-branch counterexamples do
 not by themselves establish an `origin/main` failure.
 
-The Query DB ownership oracle's
-[persisted startup dimension](../../packages/query-db-collection/tests/persisted-startup-ownership-oracle.ts)
-crosses a complete eager Query response with a held persisted restore (#2367).
-Its independent set-replacement model removes only that Query's old ownership
-and preserves another persisted owner. The generated grammar crosses nonempty
-prior subsets of three keys, any next subset (weighted toward empty), changed
-values on overlapping keys, a peer owner, and response-before/after-restore.
-It also crosses complete initialData and cached responses with fetching disabled
-or pending. Controlled storage and real Node SQLite each run fixed and random
-80-history campaigns with separate declared reach for both schedules, empty
-results, peer owners, and all five response origins.
-The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/query-startup-ownership-oracle.opfs.spec.ts)
-runs eight histories through the shared driver and comparison: the reported
-race, an empty answer, shared ownership, a restore-first control, and each
-cached/initialData origin. The checkpoints compare public and durable rows and
-exact ownership after preload, before refetch can repair storage, then inside
-and after refetch fulfillment and after a local-only reopen. Startup also checks
-the reload oracle's existing one-full-row-read law. The repair awaits the
-wrapper's baseline publication instead of scanning the same rows again.
-Original omission behavior, a nonempty-only repair, and a redundant-scan repair
-fail these comparisons. Captured mismatches and primary runtime errors survive
-secondary cleanup errors. The neighboring persisted direct-write oracle records
-source commit order independently of Query cache availability and compares the
-matching nonpersisted schedule; Node SQLite receives all three held boundaries.
-Limits: eager startup, three string keys and numeric
-values, one persistence instance; no on-demand window, concurrent tab writer,
-arbitrary metadata namespace, or failed-I/O claim. Evidence is in the
-[issue evaluation](oracle-reviews/2026-11-09-issue-2367.md).
+Persisted startup replacement is owned by the shared
+[adapter persistence conformance oracle](#adapter-conformance-persisted-startup-2367).
+The Query ownership oracle retains its scope-local removal, peer ownership,
+mutation, and non-startup lifecycle laws. Its former startup dimension now runs
+as a receiving path of the shared owner, with the same histories and cuts.
 
 The Query DB ownership oracle also owns the explicit mutation-handler refresh
 contract ([evidence](oracle-reviews/pr-2171-explicit-query-refresh.md)). Its 18-history table crosses insert, update, and delete with no
@@ -7743,6 +7720,55 @@ fixed/random actual overwrite reaches are repair 25/18 and callback 25/25.
 These boundaries retain their controlled core and Node-host SQLite/Electric
 limits. No HTTP, framework, browser-process, or arbitrary-shape closure follows.
 See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02).
+
+## Adapter conformance: persisted startup (#2367)
+
+The [shared persistence owner](../../packages/db-adapter-conformance/src/persisted-startup-oracle.ts)
+judges complete source replacement across persisted restore. A collection-wide
+source replaces every row. A scoped source removes only its old ownership;
+an omitted row with a surviving peer stays. Authority: READY-3/PUB-7, the Query
+complete-result and scope-local omission contract, and persistence's durable
+acceptance contract. The maintainer selected this shared owner on 2026-11-09.
+The independent set model has no Query cache, source diff, or restore algorithm.
+
+[Query](../../packages/query-db-collection/tests/persisted-startup-conformance-oracle.test.ts)
+and [Convex](../../packages/convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
+are real receiving paths: a QueryClient and a Convex JavaScript SDK over a
+controlled protocol socket. Each uses the same
+[composition driver](../../packages/db-adapter-conformance/tests/persisted-startup-driver.ts),
+judgment, controlled storage, and real Node SQLite hosts. Per host, fixed and
+random campaigns each run 80 generated histories with separate enforced reach.
+Histories cross nonempty prior subsets of three keys, any next subset weighted
+toward empty, changed overlap values, and response before/after persisted
+restore. Query additionally crosses peer ownership and five response origins:
+fetch, initialData/cache with fetching disabled or held pending. Already
+available results precede restore; fetched and push results exercise both orders.
+
+The shared comparisons check public and durable rows immediately after preload,
+before refresh can repair storage, then public rows inside refresh fulfillment,
+durable rows afterward, and rows after a local-only reopen. Scoped Query
+snapshots also check exact ownership at all four snapshot cuts. Startup checks
+the reload owner's one-full-row-read law before its own durable observation.
+Query's receiving driver preserves exact fetch-count and pending-fetch premises.
+The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
+runs all eight previous Query histories and four complete-snapshot Convex
+histories through the same composition and check on the real worker/OPFS host.
+
+The original Query omission fails startup on both Node hosts and OPFS. Convex
+without its first-result truncate, a survivor in the bare eager-source grammar,
+now fails the same comparison on all three hosts. Current Convex passes; this
+migration confirms no new Convex defect. The original Query baseline-await
+repair stays at its adapter boundary. The old Query-only startup model/runner
+and OPFS files are retired after receiving parity; Query-specific ownership
+laws and the unrelated direct-write/failure-fidelity repairs remain.
+
+Limits: eager startup, three string keys and numeric values, one persistence
+instance, one source scope plus an optional persisted peer. No on-demand window,
+concurrent tab writer, arbitrary metadata namespace, failed-I/O, or every
+intermediate-publication claim. Other adapters' persisted receiving paths remain
+open under this shared owner; their bare eager conformance does not establish
+persisted startup. See [migration status](../../packages/db-adapter-conformance/MIGRATION.md)
+and the [versioned evidence](oracle-reviews/2026-11-09-issue-2367.md).
 
 ## Adapter conformance: eager live sources (#2118)
 

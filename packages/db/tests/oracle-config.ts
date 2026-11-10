@@ -330,6 +330,7 @@ const staticOracleProperties = [
   `persisted-demand-coverage.required`,
   `sqlite-reload.class`,
   `query.startup-ownership`,
+  `adapter.convex.persisted-startup`,
   `browser.multi-tab-reserved-history`,
   `browser.electric-source-prefix`,
   `sqlite-reload.class.electron`,

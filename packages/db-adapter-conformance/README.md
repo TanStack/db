@@ -66,6 +66,41 @@ was reached fewer than five times, so histories that miss a state the laws
 need do not pass silently. The in-repo campaigns use `createOracleReach`
 from `packages/db/tests/oracle-reach.ts`.
 
+## Persisted startup conformance
+
+`src/persisted-startup-oracle.ts` owns complete-result replacement across a
+persisted restore. It applies to both push adapters and client-cache adapters.
+The bare eager-source family does not generate persisted rows. Replacement
+uses the same READY-3/PUB-7 judgment, with scope-local ownership for sources
+such as Query and persistence's durable acceptance contract.
+
+`tests/persisted-startup-driver.ts` composes a real adapter with persistence.
+An adapter supplies its Collection, response delivery, refresh, and optional
+scoped ownership projection. `tests/persisted-startup-host.ts` supplies
+controlled storage and real Node SQLite. The shared suite enforces separate
+reach for each host and fixed/random 80-history campaign. It compares startup
+public/durable rows before refresh, public rows inside refresh fulfillment,
+durable rows after refresh, and a local-only reopen. It also shares the reload
+owner's one-row-read law. A scoped adapter checks exact source/peer ownership.
+
+Query receives the shared property with its five cache/fetch origins and peer
+scope. Convex receives it over the real SDK and controlled socket. Both run
+under their package's `test:oracles` command. Chromium OPFS receives eight Query
+and four Convex histories through the same model, composition, and comparison:
+
+```sh
+pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts
+pnpm --filter @tanstack/convex-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.property.test.ts
+pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts persisted-startup-conformance-oracle.opfs.spec.ts
+```
+
+Restoring the original Query implementation fails startup at these receiving
+boundaries. Removing Convex's first-result truncate also fails here; it survived
+the bare eager grammar because restart starts with no rows. Current Convex
+passes. These witnesses establish the shared replacement law on the exercised
+paths, not every adapter or the rest of the persistence family. The coverage
+map and [migration log](MIGRATION.md) retain the remaining work.
+
 ## Drivers
 
 - **Reference adapter** (`tests/reference-adapter.ts`): a small push adapter
