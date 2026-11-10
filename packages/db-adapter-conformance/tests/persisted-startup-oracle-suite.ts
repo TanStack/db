@@ -18,6 +18,7 @@ import {
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
+  PersistedStartupViolation,
   expectedPersistedStartup,
   expectedStartupFallback,
   persistedStartupCutViolations,
@@ -59,6 +60,7 @@ export function registerPersistedStartupConformance<
   oracleReplayTest(it)(
     `rejects stale durability before a later refresh`,
     () => {
+      oracleRoute(`calibration`)
       const history = histories[0]!
       const stale = expectedPersistedStartup(
         { ...history, next: history.previous },
@@ -75,6 +77,7 @@ export function registerPersistedStartupConformance<
     },
   )
   oracleReplayTest(it)(`rejects a lost persisted fallback`, () => {
+    oracleRoute(`calibration`)
     const h = {
       ...histories[0]!,
       initialRender: `network-first` as const,
@@ -144,6 +147,7 @@ export function registerPersistedStartupConformance<
               const responseOrigin = origin(history)
               if (responseOrigin) historyReach.reach(responseOrigin)
             },
+            (violations) => expect(violations).toEqual([]),
           )
           expect(
             persistedStartupViolations(history, adapter.scope, observation),
@@ -158,9 +162,30 @@ export function registerPersistedStartupConformance<
       oracleReplayTest(it)(
         `rejects lost source persistence after fallback`,
         async () => {
+          oracleRoute(`calibration`)
           const history = histories.find(
             (h) => h.response === `after-deadline`,
           )!
+          // Controlled storage models one Collection; use a fresh host for
+          // each candidate so the clean run cannot seed the corrupted run.
+          const clean = createStartupHost(host)
+          try {
+            await observePersistedStartup(
+              adapter,
+              clean.persistence,
+              clean.holdBaseline,
+              history,
+              `clean-persistence-${host}`,
+              clean.readRowCount,
+            )
+          } catch (error) {
+            // A broken clean trace is not a calibration candidate. The normal
+            // histories judge it; a second fault cannot calibrate that trace.
+            if (error instanceof PersistedStartupViolation) return
+            throw error
+          } finally {
+            clean.close()
+          }
           const storage = createStartupHost(host)
           try {
             await expect(

@@ -55,7 +55,12 @@ const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
       ),
   )
 
-declareOracle({ grammar: [queryStartupHistoryArb] })
+// The receiving path judges persisted startup through this adapter entry.
+// The shared model owns replacement; this list lets the gap CLI credit it.
+declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
+  grammar: [queryStartupHistoryArb],
+})
 // Keep registration visible to Vitest's static typecheck collector as well
 // as its runtime collector; the shared suite registers the actual law checks.
 describe(`persisted startup conformance: Query`, () => {

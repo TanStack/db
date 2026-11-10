@@ -126,6 +126,7 @@ export async function observePersistedStartup<
   id: string,
   readRowCount: () => number,
   onStartup: () => void = () => {},
+  onViolation: (violations: Array<string>) => void = () => {},
 ): Promise<PersistedStartupObservation> {
   const seed = createCollection(
     persistedCollectionOptions<StartupRow, string>({
@@ -153,6 +154,13 @@ export async function observePersistedStartup<
   return withOracleCleanup(async () => {
     source = await adapter.create(persistence, h, id)
     const current = source
+    // The Node runner asserts here so the gap CLI records a behavioral verdict
+    // at the original cut. Browser receivers keep the same structured error.
+    const rejectViolations = (violations: Array<string>) => {
+      if (!violations.length) return
+      onViolation(violations)
+      throw new PersistedStartupViolation(violations)
+    }
     const assertCut = (cut: string, actual: StartupSnapshot) => {
       const violations = persistedStartupCutViolations(
         h,
@@ -160,7 +168,7 @@ export async function observePersistedStartup<
         cut,
         actual,
       )
-      if (violations.length) throw new PersistedStartupViolation(violations)
+      rejectViolations(violations)
     }
     const durableSnapshot = async (): Promise<StartupSnapshot> => {
       const stored = await persistence.adapter.loadResumeSnapshot(
@@ -203,7 +211,7 @@ export async function observePersistedStartup<
       )
       if (current.responseAvailable())
         violations.push(`fallback did not precede the source response`)
-      if (violations.length) throw new PersistedStartupViolation(violations)
+      rejectViolations(violations)
       // Exclude the observer's own read from startup's one-row-scan budget.
       const beforeRead = readRowCount()
       fallbackDurable = await durableSnapshot()
@@ -214,8 +222,7 @@ export async function observePersistedStartup<
         `fallbackDurable`,
         fallbackDurable,
       )
-      if (durableViolations.length)
-        throw new PersistedStartupViolation(durableViolations)
+      rejectViolations(durableViolations)
       await current.deliver()
     }
     if (h.response === `after-restore`) {
@@ -238,8 +245,7 @@ export async function observePersistedStartup<
       }),
       ...(current.checkStartup?.() ?? []),
     ]
-    if (premiseViolations.length)
-      throw new PersistedStartupViolation(premiseViolations)
+    rejectViolations(premiseViolations)
     const startupDurable = await durableSnapshot()
     assertCut(`startupDurable`, startupDurable)
     const refresh = await current.refresh().then(() => {
@@ -274,7 +280,7 @@ export async function observePersistedStartup<
         adapter.scope,
         observation,
       )
-      if (violations.length) throw new PersistedStartupViolation(violations)
+      rejectViolations(violations)
       return observation
     }, [() => reopened.cleanup()])
   }, [() => hold.uninstall(), () => source?.dispose()])

@@ -12,7 +12,12 @@ import { registerPersistedStartupConformance } from '../../db-adapter-conformanc
 import { convexStartupAdapter } from './persisted-startup-driver'
 
 const historyArb = persistedStartupHistoryArb(`collection`)
-declareOracle({ grammar: [historyArb] })
+// The receiving path judges persisted startup through this adapter entry.
+// The shared model owns replacement; this list lets the gap CLI credit it.
+declareOracle({
+  owns: [`src/options.ts#convexCollectionOptions`],
+  grammar: [historyArb],
+})
 // Keep registration visible to Vitest's static typecheck collector as well
 // as its runtime collector; the shared suite registers the actual law checks.
 describe(`persisted startup conformance: Convex`, () => {
