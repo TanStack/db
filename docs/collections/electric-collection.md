@@ -339,6 +339,31 @@ await todosCollection.utils.awaitMatch(
 )
 ```
 
+#### Replay history retention
+
+Electric collections retain the last 1,000 change and move messages for later
+`awaitMatch` calls. Set `matchHistoryLimit` on `electricCollectionOptions` to
+change this count. The default remains `1000`; the value must be a nonnegative
+integer. This bounds message count, not bytes, and messages can contain full row
+values.
+
+```ts
+const collection = createCollection(
+  electricCollectionOptions<{ id: string }>({
+    getKey: (row) => row.id,
+    shapeOptions: { url: `/api/items` },
+    matchHistoryLimit: 0,
+  }),
+)
+```
+
+With `0`, register `awaitMatch` **before** starting the operation whose message
+it should observe. A call registered after a message arrives cannot replay it,
+even if that message has not committed yet. Already registered predicates still
+observe incoming messages, and their matches resolve at the same commit boundary.
+`awaitTxId` keeps its separate transaction evidence. This option does not evict
+Collection rows or cancel subscriptions.
+
 ### Cleanup and resume safety
 
 Pending `awaitTxId`/`awaitMatch` calls belong to one collection lifecycle.

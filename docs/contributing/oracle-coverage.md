@@ -7993,3 +7993,20 @@ component covers numeric keys/sums and synchronous D2 graph drains, without
 correlated routes, public events, provider schedules or general aggregate shapes.
 The public aggregate-select and grouped-result-key owners retain those wider
 value/key contracts and their stated limits.
+
+## Electric match replay history limit
+
+The `electric.match-history` property in
+`packages/electric-db-collection/tests/electric-oracle.property.test.ts` checks
+its proposed `matchHistoryLimit` contract. A ledger suffix predicts predicate
+visits for late registrations before/after commit; zero disables replay without
+removing live acknowledgement. Fixed and random campaigns cross limits 0, 1, 3
+and default 1000, exact boundary/overflow, all three sync modes and original/copied
+descriptor materializations. Public wait settlement checks commit, separate txid
+evidence, must-refetch resetting a previously matched waiter, predicate error
+identity and retirement. Each history requires pending/committed replay,
+live-match, refetch and retirement reach. The unchanged implementation fails
+at the zero-history pending-replay comparison, expected [] versus observed [1].
+This controls ShapeStream callbacks, not live Electric delivery, bytes retained,
+GC timing, every persistence schedule, or application/card lifetimes. Those
+receiving paths remain outside this new option's current oracle evidence.

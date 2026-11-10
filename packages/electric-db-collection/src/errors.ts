@@ -35,3 +35,13 @@ export class StreamAbortedError extends ElectricDBCollectionError {
     this.name = `StreamAbortedError`
   }
 }
+
+export class InvalidMatchHistoryLimitError extends ElectricDBCollectionError {
+  constructor(limit: number, collectionId?: string) {
+    super(
+      `Expected a nonnegative integer matchHistoryLimit, received ${limit}`,
+      collectionId,
+    )
+    this.name = `InvalidMatchHistoryLimitError`
+  }
+}
