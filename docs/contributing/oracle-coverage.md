@@ -4257,6 +4257,14 @@ is needed for native keyboard dispatch.
 
 ## Oracle tooling
 
+The converted TopK batch, OP-SQLite alias and Preact window-render owners check
+constructed-state observations in their shared comparisons as well as the
+framework's seeded checks. The pinned framework omits builder association for
+fresh generated constructions. Their [reach follow-up](oracle-reviews/2026-11-10-constructed-reach-followup.md)
+records generated-only omission controls, shared-check calibrations and the
+unchanged production paths and run budgets. The finite Preact bound-options
+owner already enforces its per-case cuts and reach directly.
+
 `scripts/run-budget-oracle.property.test.js` owns run-budget tracking
 (`scripts.run-budget`): every lowered budget, and every budget whose key is in
 no tracked oracle file at head, is reported. A budget belongs to the oracle

@@ -141,7 +141,35 @@ const FIXED_ALIAS_ORACLE_SEED = 165903
 const aliasOracleRuns = readAliasOracleRuns(process.env, { scale: false })
 
 type Aliases = Array<string>
-type Expected = ReadonlyArray<Observation>
+type Expected = {
+  observations: ReadonlyArray<Observation>
+  requiredStates: ReadonlyArray<string>
+}
+// The pinned framework remembers only seeded constructor outputs. This map
+// records every fresh alias-array construction, including generated/shrunk ones.
+// It stores promised states; query settlement supplies the actual observations.
+const constructionStates = new WeakMap<Aliases, ReadonlyArray<string>>()
+function constructedAliases(
+  aliases: Aliases,
+  states: ReadonlyArray<string>,
+): Aliases {
+  constructionStates.set(aliases, states)
+  return aliases
+}
+function expectedAliases(
+  aliases: Aliases,
+  observations: ReadonlyArray<Observation>,
+): Expected {
+  return { observations, requiredStates: constructionStates.get(aliases) ?? [] }
+}
+const constructionReachCalibration: Calibration<Aliases, Aliases> = {
+  name: `omits constructed-state observations`,
+  law: `constructed reach`,
+  corrupt: (trace, aliases) =>
+    constructionStates.has(aliases)
+      ? trace.filter(({ checkpoint }) => checkpoint !== `reach`)
+      : undefined,
+}
 const law = {
   statement: `SQLite query preserves every alias, row, value, key order, and row order across documented object and columnar result carriers, including rows made only of write marker aliases.`,
   authority: `SQLiteDriver.query contract; published OP-SQLite rows and rawRows/columnNames result envelopes; the explicit bare-array result mode contract.`,
@@ -179,7 +207,7 @@ function judge(
         )
   if (grammar.kind === `violation`) return grammar
   const recorded = trace.filter((entry) => entry.checkpoint !== `reach`)
-  for (const [index, wanted] of expected.entries()) {
+  for (const [index, wanted] of expected.observations.entries()) {
     const actual = recorded[index]
     if (actual?.checkpoint !== wanted.checkpoint) {
       return violation(
@@ -199,15 +227,27 @@ function judge(
         )
     if (verdict.kind === `violation`) return verdict
   }
-  return (
-    differs(
-      `query settled`,
-      ROW_LAW,
-      recorded.length,
-      expected.length,
-      `each query records exactly one result and, where promised, one execution count`,
-    ) ?? pass
+  const unexpected = differs(
+    `query settled`,
+    ROW_LAW,
+    recorded.length,
+    expected.observations.length,
+    `each query records exactly one result and, where promised, one execution count`,
   )
+  if (unexpected) return unexpected
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  for (const state of expected.requiredStates)
+    if (!reached.has(state))
+      return violation(
+        `query settled`,
+        `the constructed aliases did not enter ${state}`,
+        `constructed reach`,
+      )
+  return pass
 }
 
 // Each construction keeps the generated aliases and forces one named alias.
@@ -219,10 +259,11 @@ function aliasConstructions(
   return allowed.map((alias) => ({
     name: `includes alias ${alias}`,
     enters: [`alias:${alias}`],
-    build: (generated) => [
-      alias,
-      ...generated.filter((other) => other !== alias),
-    ],
+    build: (generated) =>
+      constructedAliases(
+        [alias, ...generated.filter((other) => other !== alias)],
+        [`alias:${alias}`],
+      ),
   }))
 }
 function recordAliasReach(
@@ -332,16 +373,17 @@ oracleProperty<Aliases, Expected>({
     constructed: aliasConstructions(writeResultFieldNames),
     fixed: fixedAliases(writeResultFieldNames),
   },
-  model: (aliases) => [
-    {
-      checkpoint: `direct rows`,
-      value: aliasRowsObservation([
-        Object.fromEntries(
-          aliases.map((alias, index) => [alias, `${index}:${alias}`]),
-        ),
-      ]),
-    },
-  ],
+  model: (aliases) =>
+    expectedAliases(aliases, [
+      {
+        checkpoint: `direct rows`,
+        value: aliasRowsObservation([
+          Object.fromEntries(
+            aliases.map((alias, index) => [alias, `${index}:${alias}`]),
+          ),
+        ]),
+      },
+    ]),
   driver: async (aliases, observe) => {
     const row = Object.fromEntries(
       aliases.map((alias, index) => [alias, `${index}:${alias}`]),
@@ -351,11 +393,14 @@ oracleProperty<Aliases, Expected>({
     recordAliasReach(aliases, observe)
   },
   check: (aliases, trace, expected) => judge(aliases, trace, expected, `write`),
-  calibrations: calibrations.filter(
-    (calibration) =>
-      calibration.name === `silently empty result` ||
-      calibration.name === `missing reserved alias`,
-  ),
+  calibrations: [
+    ...calibrations.filter(
+      (calibration) =>
+        calibration.name === `silently empty result` ||
+        calibration.name === `missing reserved alias`,
+    ),
+    constructionReachCalibration,
+  ],
 })
 
 const carriers = [
@@ -411,7 +456,11 @@ oracleProperty<Aliases, Expected>({
       {
         name: `all documented carriers`,
         enters: carriers.map((carrier) => `carrier:${carrier}`),
-        build: (generated) => generated,
+        build: (generated) =>
+          constructedAliases(
+            [...generated],
+            carriers.map((carrier) => `carrier:${carrier}`),
+          ),
       },
     ],
     fixed: [
@@ -423,10 +472,13 @@ oracleProperty<Aliases, Expected>({
     ],
   },
   model: (aliases) =>
-    carriers.map((checkpoint) => ({
-      checkpoint,
-      value: aliasRowsObservation(aliasQueryCase(aliases).expected),
-    })),
+    expectedAliases(
+      aliases,
+      carriers.map((checkpoint) => ({
+        checkpoint,
+        value: aliasRowsObservation(aliasQueryCase(aliases).expected),
+      })),
+    ),
   driver: async (aliases, observe) => {
     for (const [index, { result, arrayResultMode }] of equivalentResults(
       aliases,
@@ -442,7 +494,7 @@ oracleProperty<Aliases, Expected>({
   },
   check: (aliases, trace, expected) =>
     judge(aliases, trace, expected, `statement`),
-  calibrations,
+  calibrations: [...calibrations, constructionReachCalibration],
 })
 
 // Both retained SQL witnesses share the reference and exact comparison. The
@@ -465,7 +517,11 @@ oracleProperty<Aliases, Expected>({
       {
         name: `both SQLite result paths`,
         enters: [`SQL columnar`, `SQL direct rows`],
-        build: (generated) => generated,
+        build: (generated) =>
+          constructedAliases(
+            [...generated],
+            [`SQL columnar`, `SQL direct rows`],
+          ),
       },
     ],
     fixed: [
@@ -476,17 +532,18 @@ oracleProperty<Aliases, Expected>({
       },
     ],
   },
-  model: (aliases) => [
-    { checkpoint: `columnar query count`, value: 1 },
-    {
-      checkpoint: `columnar rows`,
-      value: aliasRowsObservation(aliasQueryCase(aliases).expected),
-    },
-    {
-      checkpoint: `direct rows rows`,
-      value: aliasRowsObservation(aliasQueryCase(aliases).expected),
-    },
-  ],
+  model: (aliases) =>
+    expectedAliases(aliases, [
+      { checkpoint: `columnar query count`, value: 1 },
+      {
+        checkpoint: `columnar rows`,
+        value: aliasRowsObservation(aliasQueryCase(aliases).expected),
+      },
+      {
+        checkpoint: `direct rows rows`,
+        value: aliasRowsObservation(aliasQueryCase(aliases).expected),
+      },
+    ]),
   driver: async (aliases, observe) => {
     const { sql, params } = aliasQueryCase(aliases)
     const { driver, queryExecutions } = columnarDriver()
@@ -509,7 +566,7 @@ oracleProperty<Aliases, Expected>({
   },
   check: (aliases, trace, expected) =>
     judge(aliases, trace, expected, `statement`),
-  calibrations,
+  calibrations: [...calibrations, constructionReachCalibration],
 })
 
 declareOracle({

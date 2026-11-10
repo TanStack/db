@@ -239,6 +239,7 @@ function expectedRender(history: RenderHistory, move: Move) {
     initial: expectedRows({ offset: 0, limit: history.limit }),
     committed: expectedRows(accepted),
     aborted: expectedRows(accepted),
+    reach: states,
   }
 }
 
@@ -293,6 +294,29 @@ function checkRender(
       if (wrongAcquisition) return wrongAcquisition
     }
   }
+  // Judge any recorded semantic failure first, then require the whole promised
+  // initial/commit/rejection observation sequence and both actual transitions.
+  const cuts = trace
+    .filter(({ checkpoint }) => checkpoint !== `reach`)
+    .map(({ checkpoint }) => checkpoint)
+  const missing = differs(`render completed`, `window observation`, cuts, [
+    `initial`,
+    `committed`,
+    `aborted`,
+  ])
+  if (missing) return missing
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  for (const state of expected.reach)
+    if (!reached.has(state))
+      return violation(
+        `render completed`,
+        `the history did not enter ${state}`,
+        `window render reach`,
+      )
   return pass
 }
 
@@ -352,8 +376,19 @@ for (const [id, remote, keyed, move] of renderProperties) {
     driver: (history, observe) =>
       driveRenderHistory(history, remote, keyed, move, observe),
     check: checkRender,
-    calibrations:
-      move === `offset`
+    calibrations: [
+      {
+        name: `missing render reach`,
+        law: `window render reach`,
+        corrupt: (trace) =>
+          trace.filter(({ checkpoint }) => checkpoint !== `reach`),
+      },
+      {
+        name: `missing render observations`,
+        law: `window observation`,
+        corrupt: () => [],
+      },
+      ...(move === `offset`
         ? []
         : [
             {
@@ -375,7 +410,8 @@ for (const [id, remote, keyed, move] of renderProperties) {
                     : entry,
                 ),
             },
-          ],
+          ]),
+    ],
   })
 }
 

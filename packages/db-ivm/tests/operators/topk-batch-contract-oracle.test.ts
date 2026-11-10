@@ -31,7 +31,11 @@ import {
   pass,
   violation,
 } from '../../../db/tests/oracle-property.js'
-import type { Observation, Verdict } from '../../../db/tests/oracle-property.js'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from '../../../db/tests/oracle-property.js'
 
 // Keep the existing ownership entry and its package-local reference tree.
 declareOracle({ owns: [`src/operators/topKState.ts#topKBatch`] })
@@ -210,6 +214,46 @@ const valueRelations: Array<{
 
 type Observe = (checkpoint: string, value: unknown) => void
 type ExpectedObservation = { checkpoint: string; value: unknown }
+type ExpectedTrace = {
+  observations: ReadonlyArray<ExpectedObservation>
+  requiredStates: ReadonlyArray<string>
+}
+
+// e1fb504 associates only seeded constructions with their builders. Remember
+// every build, including generated and shrunk results, without changing the
+// history language. Each primitive registry has one builder, so equal numeric
+// histories never carry conflicting obligations. The model records declarations;
+// the production driver independently records whether each state was entered.
+function requireConstructionReach<History>(
+  builders: ReadonlyArray<ConstructedHistory<History>>,
+) {
+  const required = new Map<History, ReadonlyArray<string>>()
+  return {
+    constructed: builders.map((builder) => ({
+      ...builder,
+      build: (history: History) => {
+        const built = builder.build(history)
+        required.set(built, builder.enters)
+        return built
+      },
+    })),
+    calibration: {
+      name: `omits constructed-state observations`,
+      law: `constructed reach`,
+      corrupt: (trace: ReadonlyArray<Observation>, history: History) =>
+        required.has(history)
+          ? trace.filter(({ checkpoint }) => checkpoint !== `reach`)
+          : undefined,
+    },
+    model: (
+      history: History,
+      observations: ReadonlyArray<ExpectedObservation>,
+    ): ExpectedTrace => ({
+      observations,
+      requiredStates: required.get(history) ?? [],
+    }),
+  }
+}
 type RowLabel = `before` | `after` | `transient` | `other`
 type Payload = { value: unknown }
 type InputRow = [number, Payload]
@@ -223,7 +267,11 @@ type Cell = {
   after: InputRow
   transient: InputRow
 }
-type MatrixPlan = { retractFirst: boolean; cells: Array<Cell> }
+type MatrixPlan = {
+  sourceHistory: MatrixHistory
+  retractFirst: boolean
+  cells: Array<Cell>
+}
 
 const authority = `topKBatch's existing cancellation/replacement contract and oracle-coverage.md, Ordered relations and BTree; signed-zero decision 2026-11-02.`
 const limits = `The original authored relation families, controlled forced-hash collisions, direct batch return and finite graph drains. No provider scheduling or new value-identity policy.`
@@ -235,13 +283,13 @@ const limits = `The original authored relation families, controlled forced-hash 
 // Product exceptions propagate, so a crash cannot masquerade as a law verdict.
 function checkTrace(
   trace: ReadonlyArray<Observation>,
-  expected: ReadonlyArray<ExpectedObservation>,
+  expected: ExpectedTrace,
   law: string,
 ): Verdict {
   let at = 0
   for (const actual of trace) {
     if (actual.checkpoint === `reach`) continue
-    const owed = expected[at++]
+    const owed = expected.observations[at++]
     if (owed === undefined)
       return violation(
         actual.checkpoint,
@@ -251,9 +299,27 @@ function checkTrace(
     const mismatch = differs(actual.checkpoint, law, actual, owed)
     if (mismatch) return mismatch
   }
-  return at === expected.length
-    ? pass
-    : violation(expected[at]!.checkpoint, `the result was not observed`, law)
+  if (at !== expected.observations.length)
+    return violation(
+      expected.observations[at]!.checkpoint,
+      `the result was not observed`,
+      law,
+    )
+  // Preserve a recorded product-law mismatch before judging reach metadata.
+  // A generated construction owes the same declared entries as its seed.
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  for (const state of expected.requiredStates)
+    if (!reached.has(state))
+      return violation(
+        `completed`,
+        `the constructed history did not enter ${state}`,
+        `constructed reach`,
+      )
+  return pass
 }
 
 // Realization uses the authored constructor's equivalence bit, never a
@@ -261,6 +327,7 @@ function checkTrace(
 // production input; it does not decide the expected contribution.
 function matrixPlan(history: MatrixHistory): MatrixPlan {
   return {
+    sourceHistory: history,
     retractFirst: history.retractFirst,
     cells: valueRelations.flatMap(({ name, pair }) =>
       [
@@ -408,6 +475,25 @@ function driveMatrix(
   }
 }
 
+const matrixConstructions = requireConstructionReach<MatrixHistory>([
+  {
+    name: `retractions arrive first`,
+    enters: [
+      `retract first`,
+      `equal versions`,
+      `replacement versions`,
+      `transient cancellation`,
+      `ordinary batch`,
+      `forced collision`,
+    ],
+    build: (history) => ({ ...history, retractFirst: true }),
+  },
+  {
+    name: `additions arrive first`,
+    enters: [`add first`],
+    build: (history) => ({ ...history, retractFirst: false }),
+  },
+])
 oracleProperty({
   id: `ivm.topk-batch-relations`,
   law: {
@@ -432,32 +518,20 @@ oracleProperty({
       `ordinary batch`,
       `forced collision`,
     ],
-    constructed: [
-      {
-        name: `retractions arrive first`,
-        enters: [
-          `retract first`,
-          `equal versions`,
-          `replacement versions`,
-          `transient cancellation`,
-          `ordinary batch`,
-          `forced collision`,
-        ],
-        build: (history) => ({ ...history, retractFirst: true }),
-      },
-      {
-        name: `additions arrive first`,
-        enters: [`add first`],
-        build: (history) => ({ ...history, retractFirst: false }),
-      },
-    ],
+    constructed: matrixConstructions.constructed,
   },
   resolve: matrixPlan,
-  model: expectedMatrix,
+  model: (plan) =>
+    matrixConstructions.model(plan.sourceHistory, expectedMatrix(plan)),
   driver: driveMatrix,
   check: (_plan, trace, expected) =>
     checkTrace(trace, expected, `same-key contributions`),
   calibrations: [
+    {
+      ...matrixConstructions.calibration,
+      corrupt: (trace, plan) =>
+        matrixConstructions.calibration.corrupt(trace, plan.sourceHistory),
+    },
     {
       name: `drops replacement retractions`,
       law: `same-key contributions`,
@@ -470,6 +544,21 @@ const ordinaryRowHistory = fc.record({
   rank: fc.integer(),
   retractFirst: fc.boolean(),
 })
+const ordinaryConstructions = requireConstructionReach<{
+  rank: number
+  retractFirst: boolean
+}>([
+  {
+    name: `retractions first`,
+    enters: [`File present`, `File absent`, `retract first`],
+    build: (history) => ({ ...history, retractFirst: true }),
+  },
+  {
+    name: `additions first`,
+    enters: [`add first`],
+    build: (history) => ({ ...history, retractFirst: false }),
+  },
+])
 oracleProperty({
   id: `ivm.topk-batch-file-independent`,
   law: {
@@ -483,24 +572,16 @@ oracleProperty({
     runs: 25,
     fixedSeeds: [409039],
     states: [`File present`, `File absent`, `retract first`, `add first`],
-    constructed: [
-      {
-        name: `retractions first`,
-        enters: [`File present`, `File absent`, `retract first`],
-        build: (history) => ({ ...history, retractFirst: true }),
-      },
-      {
-        name: `additions first`,
-        enters: [`add first`],
-        build: (history) => ({ ...history, retractFirst: false }),
-      },
-    ],
+    constructed: ordinaryConstructions.constructed,
   },
-  model: () =>
-    [true, false].map((available) => ({
-      checkpoint: `File available=${available}: retained rows`,
-      value: { available, rows: [{ row: `after`, weight: 1 }] },
-    })),
+  model: (history) =>
+    ordinaryConstructions.model(
+      history,
+      [true, false].map((available) => ({
+        checkpoint: `File available=${available}: retained rows`,
+        value: { available, rows: [{ row: `after`, weight: 1 }] },
+      })),
+    ),
   driver: ({ rank, retractFirst }, observe) => {
     for (const available of [true, false]) {
       const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
@@ -550,6 +631,7 @@ oracleProperty({
   check: (_history, trace, expected) =>
     checkTrace(trace, expected, `ordinary replacement`),
   calibrations: [
+    ordinaryConstructions.calibration,
     {
       name: `omits the replacement observation`,
       law: `ordinary replacement`,
@@ -558,6 +640,13 @@ oracleProperty({
   ],
 })
 
+const sharedConstructions = requireConstructionReach<number>([
+  {
+    name: `shared siblings`,
+    enters: [`shared subtree comparison`],
+    build: (depth) => Math.max(1, depth),
+  },
+])
 oracleProperty({
   id: `ivm.topk-batch-shared-subtrees`,
   law: {
@@ -571,17 +660,12 @@ oracleProperty({
     runs: 25,
     fixedSeeds: [409034],
     states: [`shared subtree comparison`],
-    constructed: [
-      {
-        name: `shared siblings`,
-        enters: [`shared subtree comparison`],
-        build: (depth) => Math.max(1, depth),
-      },
-    ],
+    constructed: sharedConstructions.constructed,
   },
-  model: () => [
-    { checkpoint: `batch and leaf reads`, value: { length: 0, reads: 2 } },
-  ],
+  model: (depth) =>
+    sharedConstructions.model(depth, [
+      { checkpoint: `batch and leaf reads`, value: { length: 0, reads: 2 } },
+    ]),
   driver: (depth, observe) => {
     const spy = vi.spyOn(hashing, `hash`).mockReturnValue(7)
     try {
@@ -614,6 +698,7 @@ oracleProperty({
   check: (_depth, trace, expected) =>
     checkTrace(trace, expected, `bounded shared-tree reads`),
   calibrations: [
+    sharedConstructions.calibration,
     {
       name: `omits the leaf-read result`,
       law: `bounded shared-tree reads`,
@@ -694,6 +779,13 @@ function driveUnrelated(
   if (count > 1) observe(`reach`, `multiple unrelated keys`)
 }
 
+const unrelatedConstructions = requireConstructionReach<number>([
+  {
+    name: `generated unrelated keys and getters`,
+    enters: [`unrelated payload getters`, `multiple unrelated keys`],
+    build: (count) => Math.max(2, count),
+  },
+])
 oracleProperty({
   id: `ivm.topk-batch-unrelated-payloads`,
   law: {
@@ -707,22 +799,18 @@ oracleProperty({
     runs: 25,
     fixedSeeds: [409035],
     states: [`unrelated payload getters`, `multiple unrelated keys`],
-    constructed: [
-      {
-        name: `generated unrelated keys and getters`,
-        enters: [`unrelated payload getters`, `multiple unrelated keys`],
-        build: (count) => Math.max(2, count),
-      },
-    ],
+    constructed: unrelatedConstructions.constructed,
     fixed: [
       { name: `each of two keys contributes its own replacement`, history: 2 },
     ],
   },
-  model: expectedUnrelated,
+  model: (count) =>
+    unrelatedConstructions.model(count, expectedUnrelated(count)),
   driver: driveUnrelated,
   check: (_count, trace, expected) =>
     checkTrace(trace, expected, `unread unrelated payloads`),
   calibrations: [
+    unrelatedConstructions.calibration,
     {
       name: `omits the unrelated-read result`,
       law: `unread unrelated payloads`,
@@ -736,6 +824,13 @@ oracleProperty({
   ],
 })
 
+const cancellationConstructions = requireConstructionReach<number>([
+  {
+    name: `generated cancelling history`,
+    enters: [`independently allocated cancellation`],
+    build: (count) => count,
+  },
+])
 oracleProperty({
   id: `ivm.topk-batch-long-cancellation`,
   law: {
@@ -749,15 +844,12 @@ oracleProperty({
     runs: 25,
     fixedSeeds: [409037],
     states: [`independently allocated cancellation`],
-    constructed: [
-      {
-        name: `generated cancelling history`,
-        enters: [`independently allocated cancellation`],
-        build: (count) => count,
-      },
-    ],
+    constructed: cancellationConstructions.constructed,
   },
-  model: () => [{ checkpoint: `cancelled batch`, value: { length: 0 } }],
+  model: (count) =>
+    cancellationConstructions.model(count, [
+      { checkpoint: `cancelled batch`, value: { length: 0 } },
+    ]),
   driver: (count, observe) => {
     const make = (value: number) => ({ value })
     const changes: Array<[[number, ReturnType<typeof make>], number]> = []
@@ -773,6 +865,7 @@ oracleProperty({
   check: (_count, trace, expected) =>
     checkTrace(trace, expected, `complete cancellation`),
   calibrations: [
+    cancellationConstructions.calibration,
     {
       name: `omits the cancellation result`,
       law: `complete cancellation`,

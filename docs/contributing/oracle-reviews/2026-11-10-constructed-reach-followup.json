@@ -1,0 +1,329 @@
+{
+  "base": "9ef5794755deb114fb93c059ed4f082af947a727",
+  "framework": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+  "sourceSha256": {
+    "packages/db-ivm/tests/operators/topk-batch-contract-oracle.test.ts": "27c02456693daaa836803fdb68d586576d7c62312be92ff495aeee9db8dcc4a8",
+    "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts": "e647c12f0faedbfb4b98318e97bf5804628d3b81ba7a06b473dee52c459c9ee6",
+    "packages/preact-db/tests/window-render-oracle.test.tsx": "bccb0a6c2a3019c690e9e9e23be3300776fbb2977ca91a063aaa133ffb26c2b7"
+  },
+  "reach": {
+    "ivm.topk-batch-relations": {
+      "fixed seed 409033": {
+        "add first": 13,
+        "equal versions": 27,
+        "forced collision": 27,
+        "ordinary batch": 27,
+        "replacement versions": 27,
+        "retract first": 14,
+        "transient cancellation": 27
+      },
+      "random seed": {
+        "add first": 15,
+        "equal versions": 27,
+        "forced collision": 27,
+        "ordinary batch": 27,
+        "replacement versions": 27,
+        "retract first": 12,
+        "transient cancellation": 27
+      }
+    },
+    "ivm.topk-batch-file-independent": {
+      "fixed seed 409039": {
+        "File absent": 27,
+        "File present": 27,
+        "add first": 11,
+        "retract first": 16
+      },
+      "random seed": {
+        "File absent": 27,
+        "File present": 27,
+        "add first": 15,
+        "retract first": 12
+      }
+    },
+    "ivm.topk-batch-shared-subtrees": {
+      "fixed seed 409034": {
+        "shared subtree comparison": 24
+      },
+      "random seed": {
+        "shared subtree comparison": 25
+      }
+    },
+    "ivm.topk-batch-unrelated-payloads": {
+      "fixed seed 409035": {
+        "multiple unrelated keys": 26,
+        "unrelated payload getters": 26
+      },
+      "random seed": {
+        "multiple unrelated keys": 26,
+        "unrelated payload getters": 26
+      }
+    },
+    "ivm.topk-batch-long-cancellation": {
+      "fixed seed 409037": {
+        "independently allocated cancellation": 26
+      },
+      "random seed": {
+        "independently allocated cancellation": 26
+      }
+    },
+    "op-sqlite.write-marker-aliases": {
+      "fixed seed 165903": {
+        "alias:changes": 35,
+        "alias:insertId": 31,
+        "alias:lastInsertRowId": 41,
+        "alias:rowsAffected": 35
+      },
+      "random seed": {
+        "alias:changes": 25,
+        "alias:insertId": 37,
+        "alias:lastInsertRowId": 38,
+        "alias:rowsAffected": 35
+      }
+    },
+    "op-sqlite.result-carrier-equivalence": {
+      "fixed seed 165903": {
+        "alias:another_value": 29,
+        "alias:changes": 32,
+        "alias:columnNames": 26,
+        "alias:insertId": 43,
+        "alias:lastInsertRowId": 36,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 28,
+        "alias:res": 34,
+        "alias:resultRows": 32,
+        "alias:results": 34,
+        "alias:rows": 36,
+        "alias:rowsAffected": 31,
+        "carrier:direct rows": 63,
+        "carrier:nested results": 63,
+        "carrier:raw rows": 63,
+        "carrier:resultRows": 63,
+        "carrier:rows": 63,
+        "carrier:rows and columns": 63,
+        "carrier:rows and raw rows": 63,
+        "carrier:statement results": 63
+      },
+      "random seed": {
+        "alias:another_value": 39,
+        "alias:changes": 29,
+        "alias:columnNames": 31,
+        "alias:insertId": 23,
+        "alias:lastInsertRowId": 30,
+        "alias:ordinary_name": 36,
+        "alias:rawRows": 32,
+        "alias:res": 28,
+        "alias:resultRows": 32,
+        "alias:results": 33,
+        "alias:rows": 31,
+        "alias:rowsAffected": 38,
+        "carrier:direct rows": 63,
+        "carrier:nested results": 63,
+        "carrier:raw rows": 63,
+        "carrier:resultRows": 63,
+        "carrier:rows": 63,
+        "carrier:rows and columns": 63,
+        "carrier:rows and raw rows": 63,
+        "carrier:statement results": 63
+      }
+    },
+    "op-sqlite.columnar-sql-aliases": {
+      "fixed seed 165903": {
+        "SQL columnar": 63,
+        "SQL direct rows": 63,
+        "alias:another_value": 29,
+        "alias:changes": 32,
+        "alias:columnNames": 26,
+        "alias:insertId": 43,
+        "alias:lastInsertRowId": 36,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 28,
+        "alias:res": 34,
+        "alias:resultRows": 32,
+        "alias:results": 34,
+        "alias:rows": 36,
+        "alias:rowsAffected": 31
+      },
+      "random seed": {
+        "SQL columnar": 63,
+        "SQL direct rows": 63,
+        "alias:another_value": 34,
+        "alias:changes": 33,
+        "alias:columnNames": 40,
+        "alias:insertId": 39,
+        "alias:lastInsertRowId": 37,
+        "alias:ordinary_name": 35,
+        "alias:rawRows": 40,
+        "alias:res": 38,
+        "alias:resultRows": 40,
+        "alias:results": 33,
+        "alias:rows": 35,
+        "alias:rowsAffected": 35
+      }
+    },
+    "preact.window-render.eager-derived-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-derived-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-derived-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.eager-keyed-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-derived-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-offset": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-limit": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    },
+    "preact.window-render.on-demand-keyed-both": {
+      "fixed seed 2291": {
+        "aborted move": 7,
+        "committed move": 7
+      },
+      "random seed": {
+        "aborted move": 7,
+        "committed move": 7
+      }
+    }
+  },
+  "experiments": [
+    {
+      "case": "old Preact empty trace",
+      "result": "calibration RED: shared check accepted no observations"
+    },
+    {
+      "case": "old Preact omitted reach",
+      "result": "calibration RED: shared check accepted trace without reach"
+    },
+    {
+      "case": "old TopK omitted reach",
+      "result": "5 calibration REDs: all shared checks accepted omitted reach"
+    },
+    {
+      "case": "old RN omitted reach",
+      "result": "3 calibration REDs: all shared checks accepted omitted reach"
+    },
+    {
+      "case": "TopK generated-only missing state",
+      "result": "RED named constructed reach at completed",
+      "seed": 409033,
+      "path": "2:0:0",
+      "oldCheckControl": "passed with same generated-only suppression"
+    },
+    {
+      "case": "RN generated-only missing state",
+      "result": "RED named constructed reach at query settled",
+      "seed": 165903,
+      "path": "4:0",
+      "oldCheckControl": "passed with same generated-only suppression"
+    },
+    {
+      "case": "repaired TopK default owner command",
+      "result": "27 pass, no type errors"
+    },
+    {
+      "case": "repaired Preact both integrated owner command",
+      "result": "93 pass, no type errors"
+    },
+    {
+      "case": "repaired RN default whole-package command",
+      "result": "306 pass, coverage/typechecking enabled, no type errors"
+    }
+  ]
+}
