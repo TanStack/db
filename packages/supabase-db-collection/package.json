@@ -22,7 +22,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.107.0",
+    "@tanstack/db-collection-e2e": "workspace:*",
     "@tanstack/query-core": "^5.90.20",
     "@vitest/coverage-istanbul": "^5.0.5",
     "zod": "^4.6.7"

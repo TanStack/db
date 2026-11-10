@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [browser, desktop, cloud-mobile]
+        group: [browser, desktop, cloud-mobile, supabase]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -75,6 +75,25 @@ jobs:
           --filter '@tanstack/cloudflare-durable-objects-db-sqlite-persistence...'
           --filter '@tanstack/react-native-db-sqlite-persistence...'
           build
+
+      - name: Setup Supabase CLI
+        if: matrix.group == 'supabase'
+        uses: supabase/setup-cli@689adcfb80d947100a1eab127289b97d1fb07b13 # v3.2.0
+        with:
+          version: 2.116.0
+
+      - name: Start Supabase
+        if: matrix.group == 'supabase'
+        # The collection needs only the database, PostgREST, Realtime and the
+        # API gateway (Kong). Skipping the other services saves image pulls and
+        # startup time. The e2e global setup reuses this running stack.
+        working-directory: packages/supabase-db-collection
+        run: supabase start -x studio,mailpit,storage-api,imgproxy,postgres-meta,edge-runtime,logflare,vector,supavisor
+
+      - name: Run Supabase E2E tests
+        if: matrix.group == 'supabase'
+        working-directory: packages/supabase-db-collection
+        run: pnpm test:e2e
 
       - name: Run Electric E2E tests
         if: matrix.group == 'browser'
@@ -232,6 +251,11 @@ jobs:
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v
+
+      - name: Stop Supabase
+        if: always() && matrix.group == 'supabase'
+        working-directory: packages/supabase-db-collection
+        run: supabase stop --no-backup
 
       - name: Upload test results
         if: failure()

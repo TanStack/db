@@ -1788,6 +1788,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.107.0
         version: 2.119.0
+      '@tanstack/db-collection-e2e':
+        specifier: workspace:*
+        version: link:../db-collection-e2e
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
