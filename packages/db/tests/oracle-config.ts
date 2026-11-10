@@ -310,6 +310,7 @@ const staticOracleProperties = [
   `query.ordered-mutation-outcome`,
   `query-db.refetch-ordered-prefix`,
   `query-db.refetch-held-page-end`,
+  `query-db.refetch-held-report`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
   `ordered-loader.replay-continuation`,

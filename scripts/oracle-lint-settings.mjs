@@ -119,10 +119,6 @@ export const oracleLintSettings = {
         file: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
-      {
-        file: `packages/query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
-        reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
     ],
     replayWitnessModules: [`packages/db/tests/oracle-replay-witness.ts`],
   },
