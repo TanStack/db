@@ -120,7 +120,24 @@ const ownerGroups: ReadonlyArray<
     `react`,
     `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
-  [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
+  [
+    `preact-db/tests/window-render-oracle.test.tsx`,
+    `preact`,
+    [
+      `window-render.eager-derived-offset`,
+      `window-render.eager-derived-limit`,
+      `window-render.eager-derived-both`,
+      `window-render.eager-keyed-offset`,
+      `window-render.eager-keyed-limit`,
+      `window-render.eager-keyed-both`,
+      `window-render.on-demand-derived-offset`,
+      `window-render.on-demand-derived-limit`,
+      `window-render.on-demand-derived-both`,
+      `window-render.on-demand-keyed-offset`,
+      `window-render.on-demand-keyed-limit`,
+      `window-render.on-demand-keyed-both`,
+    ].join(` `),
+  ],
   [
     `react-db/tests/ssr-effects-oracle.test.ts`,
     `react`,
@@ -999,7 +1016,54 @@ const replayTestNames = new Map([
     `live-query-observer.hydration-subset-handoff`,
     `seeded ready-subset handoff \\(fresh\\)`,
   ],
-  [`preact.window-render`, `window changes at Preact commit.*fresh`],
+  [
+    `preact.window-render.eager-derived-offset`,
+    `preact\\.window-render\\.eager-derived-offset > random seed`,
+  ],
+  [
+    `preact.window-render.eager-derived-limit`,
+    `preact\\.window-render\\.eager-derived-limit > random seed`,
+  ],
+  [
+    `preact.window-render.eager-derived-both`,
+    `preact\\.window-render\\.eager-derived-both > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-offset`,
+    `preact\\.window-render\\.eager-keyed-offset > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-limit`,
+    `preact\\.window-render\\.eager-keyed-limit > random seed`,
+  ],
+  [
+    `preact.window-render.eager-keyed-both`,
+    `preact\\.window-render\\.eager-keyed-both > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-offset`,
+    `preact\\.window-render\\.on-demand-derived-offset > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-limit`,
+    `preact\\.window-render\\.on-demand-derived-limit > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-derived-both`,
+    `preact\\.window-render\\.on-demand-derived-both > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-offset`,
+    `preact\\.window-render\\.on-demand-keyed-offset > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-limit`,
+    `preact\\.window-render\\.on-demand-keyed-limit > random seed`,
+  ],
+  [
+    `preact.window-render.on-demand-keyed-both`,
+    `preact\\.window-render\\.on-demand-keyed-both > random seed`,
+  ],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
   [
     `ivm.topk-negative-window-array`,
