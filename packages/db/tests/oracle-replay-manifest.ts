@@ -425,7 +425,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
-    `membership-work`,
+    `membership-work membership-work-fixed`,
   ],
   [
     `db/tests/query/includes-collection-oracle.property.test.ts`,
@@ -891,7 +891,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/distinct-collision-oracle.test.ts`,
     `query`,
-    `distinct-collisions`,
+    `distinct-collisions distinct-collisions-ordered`,
   ],
   [
     `db-ivm/tests/operators/topk-batch-contract-oracle.test.ts`,
@@ -1089,6 +1089,17 @@ export type OracleReplayManifestEntry = {
 const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
+  ...[
+    `query.public-container-copy`,
+    `query-identity.compiled-output`,
+    `query-identity.equality-partition`,
+    `derived-publication.membership-work`,
+    `derived-publication.membership-work-fixed`,
+    `query.distinct-collisions-ordered`,
+  ].map(
+    (property) =>
+      [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+  ),
   [
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
@@ -1197,10 +1208,7 @@ const replayTestNames = new Map([
     `includes.bucket-collisions`,
     `preserves colliding active buckets.*(random|replay)`,
   ],
-  [
-    `query.distinct-collisions`,
-    `preserves public distinct collision rows.*random`,
-  ],
+  [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [
     `sqlite-resume.source-progress`,
     `preserves source progress evidence.*random or replayed`,

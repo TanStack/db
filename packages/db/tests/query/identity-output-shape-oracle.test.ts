@@ -23,16 +23,17 @@ import {
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
+  oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  pass,
+  violation,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import { assertEqualityPartition } from './identity-output-shape-support.js'
+import { observeEqualityPartition } from './identity-output-shape-support.js'
 import type { EqualityPair } from './identity-output-shape-support.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { CollectionImpl } from '../../src/collection/index.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -130,10 +131,11 @@ function expectedShapeRows(
   )
 }
 
-async function runShapes(
+async function driveShapes(
   form: Form,
   aliases: [string, string, string, string],
   label: string,
+  observe: (checkpoint: string, value: unknown) => void,
   mutant?: ResultMutant,
 ) {
   const users = createCollection<User>({
@@ -244,8 +246,7 @@ async function runShapes(
       for (const entry of bag) {
         // Unit inputs produce exact integer bag counts. Array lengths alone
         // would silently truncate a malformed fractional output weight.
-        expect(Number.isSafeInteger(entry.count)).toBe(true)
-        expect(entry.count).toBeGreaterThanOrEqual(0)
+        observe(`weight`, entry.count)
       }
       return bag.flatMap(({ row, count }) =>
         Array.from({ length: count }, () => structuredClone(row)),
@@ -278,92 +279,171 @@ async function runShapes(
       const left = makeQuery(aliases[0], aliases[1])
       const right = makeQuery(aliases[2], aliases[3])
       const initialOutputs = [left.send(), right.send()]
-      const explicit = form.startsWith('explicit')
       const identities = [
         getQueryIdentity(left.query),
         getQueryIdentity(right.query),
       ]
       if (mutant === 'constant-identity') identities[1] = identities[0]!
-      expect(
-        identities[0] === identities[1],
-        'output-sensitive identity law',
-      ).toBe(explicit)
-      const check = (outputs: Array<Array<unknown>>, rows: Array<User>) => {
+      observe(`identity`, identities[0] === identities[1])
+      const record = (checkpoint: string, outputs: Array<Array<unknown>>) => {
         if (mutant === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
         if (mutant === 'missing-peer') outputs[1]!.pop()
         if (mutant === 'shared-wrong-output') {
           outputs[0] = [{ wrong: true }]
           outputs[1] = [{ wrong: true }]
         }
-        expectBag(
-          outputs[0]!,
-          expectedShapeRows(
-            form,
-            rows,
-            initialPosts,
-            left.userAlias,
-            left.postAlias,
-          ),
-        )
-        expectBag(
-          outputs[1]!,
-          expectedShapeRows(
-            form,
-            rows,
-            initialPosts,
-            right.userAlias,
-            right.postAlias,
-          ),
-        )
-        if (explicit) expectBag(outputs[0]!, outputs[1]!)
+        observe(checkpoint, outputs)
       }
-      check(initialOutputs, initialUsers)
+      record(`initial`, initialOutputs)
       const updated: User = { ...initialUsers[0]!, label: label + '-updated' }
-      check(
-        [
-          left.send(initialUsers[0], updated),
-          right.send(initialUsers[0], updated),
-        ],
-        [updated, initialUsers[1]!],
-      )
+      record(`updated`, [
+        left.send(initialUsers[0], updated),
+        right.send(initialUsers[0], updated),
+      ])
       return Promise.resolve()
     },
     () => [() => users.cleanup(), () => posts.cleanup()],
   )
 }
 
+// The reference keeps the same finite sources and recomputes complete bags at
+// initial publication and after the label update. Aliases affect output shape;
+// the independent calculation never reads the compiler or its identity key.
+type ShapeHistory = [Form, Array<string>, string]
+function modelShapes([form, aliases, label]: ShapeHistory) {
+  const users = [
+    { id: 1, label },
+    { id: 2, label: `unmatched peer` },
+  ]
+  const posts = [
+    { id: 10, userId: 1, title: `same title` },
+    { id: 11, userId: 1, title: `same title` },
+    { id: 12, userId: 99, title: `orphan` },
+  ]
+  const outputs = (rows: Array<User>) => [
+    expectedShapeRows(form, rows, posts, aliases[0]!, aliases[1]!),
+    expectedShapeRows(form, rows, posts, aliases[2]!, aliases[3]!),
+  ]
+  return {
+    equalIdentity: form.startsWith(`explicit`),
+    initial: outputs(users),
+    updated: outputs([{ ...users[0]!, label: label + `-updated` }, users[1]!]),
+  }
+}
+
+// The existing bag judgment also rejects fractional/negative weights before
+// array expansion. Only comparison assertions are translated to a verdict;
+// compiler, graph and cleanup errors escape the production driver unchanged.
+function checkShapes(
+  _history: ShapeHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelShapes>,
+): Verdict {
+  let checkpoint = `weight`
+  try {
+    for (const observation of trace) {
+      checkpoint = observation.checkpoint
+      if (checkpoint === `weight`) {
+        const count = observation.value as number
+        expect(Number.isSafeInteger(count)).toBe(true)
+        expect(count).toBeGreaterThanOrEqual(0)
+      } else if (checkpoint === `identity`) {
+        expect(observation.value, `output-sensitive identity law`).toBe(
+          expected.equalIdentity,
+        )
+      } else if (checkpoint === `initial` || checkpoint === `updated`) {
+        const outputs = observation.value as Array<Array<unknown>>
+        expectBag(outputs[0]!, expected[checkpoint][0]!)
+        expectBag(outputs[1]!, expected[checkpoint][1]!)
+        if (expected.equalIdentity) expectBag(outputs[0]!, outputs[1]!)
+      }
+    }
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint,
+      law: `compiled output shape`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  for (const required of [`identity`, `initial`, `updated`])
+    if (!trace.some((observation) => observation.checkpoint === required))
+      return violation(
+        required,
+        `the compiler comparison checkpoint is missing`,
+        `compiled output shape`,
+      )
+  return pass
+}
+
+async function runShapes(
+  form: Form,
+  aliases: [string, string, string, string],
+  label: string,
+  mutant?: ResultMutant,
+) {
+  const trace: Array<Observation> = []
+  await driveShapes(
+    form,
+    aliases,
+    label,
+    (checkpoint, value) => trace.push({ checkpoint, value }),
+    mutant,
+  )
+  const verdict = checkShapes(
+    [form, aliases, label],
+    trace,
+    modelShapes([form, aliases, label]),
+  )
+  if (verdict.kind === `violation`)
+    throw verdict.cause ?? new Error(verdict.difference)
+}
+
+const shapeHistories = fc.tuple(
+  fc.constantFrom(...forms),
+  fc.shuffledSubarray(
+    ['user', 'post', 'account', 'article', 'writer', 'entry'],
+    { minLength: 4, maxLength: 4 },
+  ),
+  fc.string({ maxLength: 8 }),
+)
+oracleProperty({
+  id: `query-identity.compiled-output`,
+  law: {
+    statement: `Query identity erases aliases only when complete compiled output bags agree, including lexical keys and multiplicity.`,
+    authority: `The query identity and compiled output shape contract stated above; expectedShapeRows independently predicts both initial and updated bags.`,
+    limits: `The original five query forms, six safe alias names, bounded labels and finite source rows; no arbitrary cache history or framework scheduling claim.`,
+    owner: `Query identity`,
+  },
+  histories: {
+    arbitrary: shapeHistories,
+    runs: 60,
+    fixedSeeds: [101600],
+    states: [],
+    constructed: [],
+  },
+  model: modelShapes,
+  driver: ([form, aliases, label], observe) =>
+    driveShapes(
+      form,
+      aliases as [string, string, string, string],
+      label,
+      observe,
+    ),
+  check: checkShapes,
+})
+
+const test = oracleReplayTest(it)
 describe('query identity agrees with compiled lexical output shape', () => {
-  it.each(forms)(
+  test.each(forms)(
     'preserves full results and multiplicity for %s',
     async (form) => {
       oracleRoute(`case`)
       await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
     },
   )
-  it.each([101600, undefined])(
-    'varies safe aliases and payloads, seed=%s',
-    async (seed) => {
-      const parameters =
-        seed === undefined
-          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.constantFrom(...forms),
-          fc.shuffledSubarray(
-            ['user', 'post', 'account', 'article', 'writer', 'entry'],
-            { minLength: 4, maxLength: 4 },
-          ),
-          fc.string({ maxLength: 8 }),
-          (form, aliases, label) =>
-            runShapes(form, aliases as [string, string, string, string], label),
-        ),
-        parameters,
-      )
-    },
-  )
-  it.each([
+  test.each([
     'alias',
     'missing-peer',
     'constant-identity',
@@ -464,24 +544,70 @@ const equalityPairArbitrary: fc.Arbitrary<EqualityPair> = fc.oneof(
   }),
 )
 
-describe(`equality-value and IR operand identity agree`, () => {
-  it.each([20260928, undefined])(
-    `agrees across the supported value grammar, seed=%s`,
-    async (seed) => {
-      const campaignParameters =
-        seed === undefined
-          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(160) })
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(equalityPairArbitrary, (pair) => {
-          assertEqualityPartition(pair)
-          return Promise.resolve()
-        }),
-        campaignParameters,
-      )
-    },
+// Pair labels and the independently declared equality bit remain the original
+// generated grammar. The production path records all three judgments as data.
+function modelEqualityPair(pair: EqualityPair) {
+  return {
+    d2: pair.equal,
+    operand: pair.equal,
+    predicate: pair.left == null || pair.right == null ? null : pair.equal,
+  }
+}
+function checkEqualityPair(
+  pair: EqualityPair,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelEqualityPair>,
+): Verdict {
+  const observation = trace.find(
+    ({ checkpoint }) => checkpoint === `equality partition`,
   )
+  if (observation === undefined)
+    return violation(
+      `equality partition`,
+      `the key-construction checkpoint is missing`,
+      `equality partition`,
+    )
+  const actual = observation.value as ReturnType<
+    typeof observeEqualityPartition
+  >
+  try {
+    expect(actual.d2, `${pair.label}: D2 key`).toBe(expected.d2)
+    expect(actual.operand, `${pair.label}: IR operand key`).toBe(
+      expected.operand,
+    )
+    expect(actual.predicate, `${pair.label}: predicate result`).toBe(
+      expected.predicate,
+    )
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint: `equality partition`,
+      law: `equality partition`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  return pass
+}
+oracleProperty({
+  id: `query-identity.equality-partition`,
+  law: {
+    statement: `D2 equality keys, IR equality operand keys and the compiled equality predicate agree with the independently declared value-pair partition.`,
+    authority: `The supported equality-value and equality-operand contract stated at the start of this owner.`,
+    limits: `The unchanged primitive, Date, Temporal, binary and reference-pair grammar; no complete JavaScript-value or collision-freedom claim.`,
+    owner: `Query identity`,
+  },
+  histories: {
+    arbitrary: equalityPairArbitrary,
+    runs: 160,
+    fixedSeeds: [20260928],
+    states: [],
+    constructed: [],
+  },
+  model: modelEqualityPair,
+  driver: (pair, observe) =>
+    observe(`equality partition`, observeEqualityPartition(pair)),
+  check: checkEqualityPair,
 })
 
 type CompoundRow = { id: number; a: number; b: number; c: number }
@@ -515,7 +641,7 @@ function expectedCompoundJoinRows(
  */
 describe(`compound join identity and output`, () => {
   for (const boundary of [`direct`, `from`, `joined`] as const) {
-    it(`retains every equality across ${boundary}`, async () => {
+    test(`retains every equality across ${boundary}`, async () => {
       oracleRoute(`case`)
       const leftRows = [
         { id: 1, a: 1, b: 2, c: 9 },
@@ -645,6 +771,11 @@ declareOracle({
     'src/query/ir-stable-identity.ts#getQueryIdentity',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
-  check: [runShapes],
-  model: [expectedShapeRows, expectedCompoundJoinRows],
+  check: [checkShapes, checkEqualityPair],
+  model: [
+    expectedShapeRows,
+    expectedCompoundJoinRows,
+    modelShapes,
+    modelEqualityPair,
+  ],
 })

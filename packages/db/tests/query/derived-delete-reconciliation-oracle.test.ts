@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -6,13 +6,14 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
+  oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  pass,
+  violation,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { SyncConfig } from '../../src/types.js'
 
 // Law: while an optimistic delete hides a derived row, synced batches for the
@@ -45,8 +46,11 @@ const flushHistory = fc.array(
   }),
   { minLength: 1, maxLength: 12 },
 )
-async function runFlushHistory(
-  steps: Array<{ inserts: number; update: boolean }>,
+type FlushHistory = Array<{ inserts: number; update: boolean }>
+
+async function driveFlushHistory(
+  steps: FlushHistory,
+  observe: (checkpoint: string, value: unknown) => void,
   prepareDriverRow: (row: Row, phase: WritePhase) => Row = (row) => row,
 ) {
   let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
@@ -95,18 +99,20 @@ async function runFlushHistory(
           value: prepareDriverRow({ ...row }, `insert`),
         })
       }
-      expect(sync.commit()).toBe(true)
-      expect(lookup, `flush ${index}`).toHaveBeenCalledTimes(
-        step.update ? 1 : 0,
-      )
-      expect(derived._state.pendingSyncedTransactions).toHaveLength(index + 1)
-      expect([...derived.values()]).toEqual([])
+      const committed = sync.commit()
+      observe(`flush ${index}`, {
+        committed,
+        lookups: lookup.mock.calls.length,
+        queued: derived._state.pendingSyncedTransactions.length,
+        rows: [...derived.values()],
+      })
     }
     done.resolve()
     await settled
-    expect([...derived.values()].map((row) => stripVirtualProps(row))).toEqual([
-      ...expected.values(),
-    ])
+    observe(
+      `settled rows`,
+      [...derived.values()].map((row) => stripVirtualProps(row)),
+    )
   } finally {
     done.resolve()
     await settled
@@ -136,11 +142,11 @@ declareOracle({
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/transactions.ts#createTransaction',
   ],
-  check: [runFlushHistory],
-  model: [expectedRowsAfterQueuedBatches],
+  check: [checkFlushHistory],
+  model: [expectedRowsAfterQueuedBatches, modelFlushHistory],
 })
 
-it.each([`initial`, `update`, `insert`] as const)(
+oracleReplayTest(it).each([`initial`, `update`, `insert`] as const)(
   `detects driver-only row mutation at the %s boundary`,
   async (phase) => {
     oracleRoute(`calibration`)
@@ -155,30 +161,131 @@ it.each([`initial`, `update`, `insert`] as const)(
   },
 )
 
-const flushHistoryFixedSeed = oracleFixedSeed(41703, {
-  numRuns: oracleRuns(40),
+// The independent reference owns the source rows implied by the history.
+// Each held flush commits, queues once, and stays invisible; only an update
+// needs a membership lookup. Settlement exposes all committed source rows.
+function modelFlushHistory(steps: FlushHistory) {
+  const rows = new Map([[1, { id: 1, value: 0 }]])
+  const flushes = steps.map((step, index) => {
+    if (step.update) rows.set(1, { id: 1, value: index + 1 })
+    for (let offset = 0; offset < step.inserts; offset++) {
+      const id = rows.size + 1
+      rows.set(id, { id, value: index })
+    }
+    return {
+      committed: true,
+      lookups: step.update ? 1 : 0,
+      queued: index + 1,
+      rows: [],
+    }
+  })
+  return { flushes, rows: [...rows.values()] }
+}
+function checkFlushHistory(
+  _steps: FlushHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelFlushHistory>,
+): Verdict {
+  for (const [index, flush] of expected.flushes.entries()) {
+    const checkpoint = `flush ${index}`
+    const actual = trace.find((entry) => entry.checkpoint === checkpoint)
+    if (actual === undefined)
+      return violation(
+        checkpoint,
+        `the queued flush checkpoint is missing`,
+        `membership work`,
+      )
+    try {
+      const value = actual.value as typeof flush
+      expect(value.committed).toBe(true)
+      expect(value.lookups, checkpoint).toBe(flush.lookups)
+      expect(value.queued).toBe(flush.queued)
+      expect(value.rows).toEqual(flush.rows)
+    } catch (error) {
+      return {
+        kind: `violation`,
+        checkpoint,
+        law: `membership work`,
+        difference: String(error),
+        cause: error,
+      }
+    }
+  }
+  const settled = trace.find(({ checkpoint }) => checkpoint === `settled rows`)
+  if (settled === undefined)
+    return violation(
+      `settled rows`,
+      `the transaction settlement checkpoint is missing`,
+      `membership work`,
+    )
+  try {
+    expect(settled.value).toEqual(expected.rows)
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint: `settled rows`,
+      law: `membership work`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  return pass
+}
+async function runFlushHistory(
+  steps: FlushHistory,
+  prepareDriverRow?: (row: Row, phase: WritePhase) => Row,
+) {
+  const trace: Array<Observation> = []
+  await driveFlushHistory(
+    steps,
+    (checkpoint, value) => trace.push({ checkpoint, value }),
+    prepareDriverRow,
+  )
+  const verdict = checkFlushHistory(steps, trace, modelFlushHistory(steps))
+  if (verdict.kind === `violation`)
+    throw verdict.cause ?? new Error(verdict.difference)
+}
+
+// The old fixed and fresh campaigns had different run budgets (40 and 60).
+// Separate registrations retain both. The fixed-budget registration also gets
+// the framework's standard fresh campaign; neither old budget is reduced.
+const flushOptions = {
+  law: {
+    statement: `Queued source batches stay invisible beneath an optimistic derived delete, share membership work only when an update needs it, and publish committed source rows after settlement.`,
+    authority: `The existing derived-publication and membership-work law stated at the start of this owner.`,
+    limits: `The original one-to-twelve queued flushes with one-to-five inserts and optional row-one updates; the finite shape/outcome matrix remains supplemental below.`,
+    owner: `Derived publication`,
+  },
+  model: modelFlushHistory,
+  driver: driveFlushHistory,
+}
+oracleProperty({
+  ...flushOptions,
+  id: `derived-publication.membership-work-fixed`,
+  histories: {
+    arbitrary: flushHistory,
+    runs: 40,
+    fixedSeeds: [41703],
+    states: [],
+    constructed: [],
+  },
+  check: checkFlushHistory,
 })
-fcTest.prop([flushHistory], flushHistoryFixedSeed)(
-  `shares membership work only for balanced deltas across fixed queue histories`,
-  (steps) => {
-    oracleRoute(oracleRouteOf(flushHistoryFixedSeed))
-    return runFlushHistory(steps)
+oracleProperty({
+  ...flushOptions,
+  id: `derived-publication.membership-work`,
+  histories: {
+    arbitrary: flushHistory,
+    runs: 60,
+    fixedSeeds: [],
+    states: [],
+    constructed: [],
   },
-)
-const flushHistoryCampaign = oraclePropertyOptions(
-  60,
-  `derived-publication.membership-work`,
-)
-fcTest.prop([flushHistory], flushHistoryCampaign)(
-  `shares membership work only for balanced deltas across random queue histories`,
-  (steps) => {
-    oracleRoute(oracleRouteOf(flushHistoryCampaign))
-    return runFlushHistory(steps)
-  },
-)
+  check: checkFlushHistory,
+})
 
 describe(`derived updates beneath optimistic deletes`, () => {
-  it.each(cases)(
+  oracleReplayTest(it).each(cases)(
     `$shape / layered=$layered / $outcome / $batches batches`,
     async ({ shape, layered, outcome, batches }) => {
       oracleRoute(`case`)
