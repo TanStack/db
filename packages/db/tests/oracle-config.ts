@@ -250,6 +250,7 @@ const staticOracleProperties = [
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,
+  `live-query-observer.snapshot-health`,
   `live-query-observer.row-container-sharing`,
   `live-query-observer.capture-paths`,
   `live-query-observer.record-shape`,
