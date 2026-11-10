@@ -880,6 +880,11 @@ const ownerGroups: ReadonlyArray<
     `publication`,
   ],
   [
+    `db/tests/query/custom-index-order-selection-oracle.test.ts`,
+    `live-query`,
+    `output-indexing`,
+  ],
+  [
     `db/tests/query/join-result-key-oracle.property.test.ts`,
     `join-result-key`,
     `pairs whole-source whole-source-matrix`,
@@ -1348,6 +1353,11 @@ const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `pooled-live-query.bootstrap-ownership`,
+    `pooled-live-query.cleanup-peers`,
+    `pooled-live-query.late-cleanup`,
+    `pooled-live-query.cleanup-admission`,
+    `pooled-live-query.publication`,
     `join-result-key.pairs`,
     `join-result-key.whole-source`,
     `load-subset.exact-completion`,
@@ -1560,22 +1570,6 @@ const replayTestNames = new Map([
     `preserves retention across transaction phases.*seed undefined`,
   ],
   [
-    `pooled-live-query.late-cleanup`,
-    `releases late cleanup registration channels.*random`,
-  ],
-  [
-    `pooled-live-query.bootstrap-ownership`,
-    `bootstrap ownership after callback failure.*random`,
-  ],
-  [
-    `pooled-live-query.cleanup-peers`,
-    `cleanup status reaches every observer.*random`,
-  ],
-  [
-    `pooled-live-query.cleanup-admission`,
-    `matches a live-query Collection's cleanup admission \\(random\\)`,
-  ],
-  [
     `subscription-lifecycle.notification-error`,
     `acquires retained demand after replacement readiness.*random`,
   ],
@@ -1774,12 +1768,8 @@ function directReplayTestName(property: string): string | undefined {
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
-  if (property.startsWith(`pagination.limit-admission-`)) {
-    const suffix = property.slice(`pagination.limit-admission-`.length)
-    const negative = suffix.endsWith(`-negative`)
-    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
-    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
-  }
+  if (property.startsWith(`pagination.limit-admission-`))
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:
