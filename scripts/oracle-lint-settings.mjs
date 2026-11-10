@@ -132,10 +132,6 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/cursor-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/d2-source-reconciliation-oracle.property.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -149,10 +145,6 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/db/tests/indexed-db/cross-tab-history-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/local-storage-value-fidelity-oracle.property.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
