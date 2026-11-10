@@ -45,66 +45,107 @@
  * I/O, or cross-process coordination. Those belong to the shared-driver oracle
  * and provider refinements.
  */
-import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createSQLiteCorePersistenceAdapter } from '../src'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
-  oracleFixedSeed,
-  oracleRoute,
-  oracleRouteOf,
-} from '../../db/tests/oracle-config'
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-property'
 import { PromiseBrandedFirstQueryGatedDriver } from './shared-logical-scheduling-support'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 
-describe(`shared logical scheduling`, () => {
-  it(`keeps generated promise-discovered hydrate units non-preemptible`, async () => {
-    const parameters = oracleFixedSeed(1868, {
-      numRuns: 12,
-      endOnFailure: true,
-    })
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(
-        fc.record({
-          hydrateQueries: fc.integer({ min: 1, max: 4 }),
-          peerQueries: fc.integer({ min: 1, max: 3 }),
-        }),
-        async ({ hydrateQueries, peerQueries }) => {
-          const driver = new PromiseBrandedFirstQueryGatedDriver()
-          const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
-          const peerAdapters = Array.from({ length: peerQueries }, () =>
-            createSQLiteCorePersistenceAdapter({ driver }),
-          )
+type History = { hydrateQueries: number; peerQueries: number }
+const historyArbitrary = fc.record({
+  hydrateQueries: fc.integer({ min: 1, max: 4 }),
+  peerQueries: fc.integer({ min: 1, max: 3 }),
+})
 
-          const hydrate = hydrateAdapter.runInHydrationScope!(
-            async (scoped) => {
-              for (let index = 0; index < hydrateQueries; index++) {
-                await scoped.loadCollectionMetadata!({
-                  kind: `eager`,
-                  collectionId: `hydrate-${index}`,
-                })
-              }
-            },
-          )
-          await driver.firstQueryEntered.promise
+// The complete hydration unit precedes peers; each requested metadata query
+// then contributes one admission, independently of the scheduler's structure.
+function expected(history: History) {
+  return Array.from(
+    { length: history.hydrateQueries + history.peerQueries },
+    () => `query`,
+  )
+}
 
-          const peers = peerAdapters.map((adapter, index) =>
-            adapter.loadCollectionMetadata!({
-              kind: `eager`,
-              collectionId: `peer-${index}`,
-            }),
-          )
-          expect(driver.admissions).toHaveLength(
-            driver.firstQueryAdmissionCount,
-          )
-
-          driver.releaseFirstQuery()
-          await Promise.all([hydrate, ...peers])
-          expect(driver.metadataAdmissions).toEqual(
-            Array.from({ length: hydrateQueries + peerQueries }, () => `query`),
-          )
-        },
-      ),
-      parameters,
-    )
+async function drive(
+  { hydrateQueries, peerQueries }: History,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const driver = new PromiseBrandedFirstQueryGatedDriver()
+  const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
+  const peerAdapters = Array.from({ length: peerQueries }, () =>
+    createSQLiteCorePersistenceAdapter({ driver }),
+  )
+  const hydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
+    for (let index = 0; index < hydrateQueries; index++) {
+      await scoped.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `hydrate-${index}`,
+      })
+    }
   })
+  await driver.firstQueryEntered.promise
+  const peers = peerAdapters.map((adapter, index) =>
+    adapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `peer-${index}`,
+    }),
+  )
+  observe(`held`, {
+    admissions: driver.admissions.length,
+    firstQueryAdmissionCount: driver.firstQueryAdmissionCount,
+  })
+  driver.releaseFirstQuery()
+  await Promise.all([hydrate, ...peers])
+  observe(`settled`, driver.metadataAdmissions)
+}
+
+function check(
+  _history: History,
+  trace: ReadonlyArray<Observation>,
+  owed: ReturnType<typeof expected>,
+): Verdict {
+  const held = trace.find((entry) => entry.checkpoint === `held`)?.value as
+    { admissions: number; firstQueryAdmissionCount: number } | undefined
+  return (
+    differs(
+      `held`,
+      `non-preemptible hydration`,
+      held?.admissions,
+      held?.firstQueryAdmissionCount,
+    ) ??
+    differs(
+      `settled`,
+      `all requested metadata queries`,
+      trace.find((entry) => entry.checkpoint === `settled`)?.value,
+      owed,
+    ) ??
+    pass
+  )
+}
+
+declareOracle({
+  owns: [`src/sqlite-core-adapter.ts`],
+  model: [expected],
+  grammar: [historyArbitrary],
+  check: [check],
+})
+
+oracleProperty({
+  id: `sqlite-persistence.logical-scheduling`,
+  law: {
+    statement: `A promise-discovered hydration unit remains non-preemptible, and every requested hydration and peer metadata query completes.`,
+    authority: `RFC #1659 shared-driver identity and scheduling protocol.`,
+    limits: `One promise-branded driver identity; bounded metadata queries. No K=1 fairness, SQL correctness, or cross-process claim.`,
+    owner: `SQLite persistence`,
+  },
+  histories: { arbitrary: historyArbitrary, runs: 12, fixedSeeds: [1868] },
+  model: expected,
+  driver: drive,
+  check,
 })

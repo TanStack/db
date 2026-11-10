@@ -196,20 +196,12 @@ export const oracleLintSettings = {
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-sqlite-persistence-core/tests/persisted-reload-replacement-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-sqlite-persistence-core/tests/persisted-sync-problem-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-sqlite-persistence-core/tests/shared-logical-scheduling-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,

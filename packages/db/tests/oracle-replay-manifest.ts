@@ -15,6 +15,16 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `db-sqlite-persistence-core/tests/persisted-reload-replacement-oracle.test.ts`,
+    `persisted-reload-replacement`,
+    `history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/shared-logical-scheduling-oracle.test.ts`,
+    `sqlite-persistence`,
+    `logical-scheduling`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,

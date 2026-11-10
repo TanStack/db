@@ -12,6 +12,8 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `persisted-reload-replacement.history`,
+  `sqlite-persistence.logical-scheduling`,
   `oracle.declared-reach`,
   `scripts.legacy-campaign-baseline`,
   `query.public-container-copy`,
