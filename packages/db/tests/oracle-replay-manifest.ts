@@ -1279,19 +1279,6 @@ const replayTestNames = new Map([
     `preact.window-render.on-demand-keyed-both`,
     `preact\\.window-render\\.on-demand-keyed-both > random seed`,
   ],
-  [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
-  [
-    `ivm.topk-negative-window-array`,
-    `Absolute-rank negative window oracle:.*array.*random`,
-  ],
-  [
-    `ivm.topk-negative-window-grouped`,
-    `Absolute-rank negative window oracle:.*grouped.*random`,
-  ],
-  [
-    `ivm.topk-negative-window-orderBy`,
-    `Absolute-rank negative window oracle:.*orderBy.*random`,
-  ],
   [`ivm.distinct-collisions`, `ivm\\.distinct-collisions > random seed`],
   [
     `ivm.distinct-representatives`,
@@ -1406,6 +1393,20 @@ const replayTestNames = new Map([
   [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
   [`ivm.hash-value`, `ivm\\.hash-value > random seed`],
   [`ivm.incrementalization-law`, `ivm\\.incrementalization-law > random seed`],
+  [`ivm.topk-support-window`, `ivm\\.topk-support-window > random seed`],
+  [`ivm.topk-numeric-window`, `ivm\\.topk-numeric-window > random seed`],
+  [
+    `ivm.topk-negative-window-array`,
+    `ivm\\.topk-negative-window-array > random seed`,
+  ],
+  [
+    `ivm.topk-negative-window-grouped`,
+    `ivm\\.topk-negative-window-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-negative-window-orderBy`,
+    `ivm\\.topk-negative-window-orderBy > random seed`,
+  ],
   [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
   [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
   [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],
