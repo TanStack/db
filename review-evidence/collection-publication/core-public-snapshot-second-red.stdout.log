@@ -1,0 +1,12 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+{"property":"subscription-lifecycle.atomic-public-snapshot","campaign":"fixed","seed":20261030,"path":"0","failed":true,"runs":1,"reach":{"held-after-truncate":1,"held-after-candidate-commit":1,"held-after-equal-followup":1,"quiet-failure":0,"failed-retirement":0,"successful-retry":0,"successful-publication":1,"cleanup-old-work-fenced":1,"restarted-publication":1}}
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts (141 tests | 1 failed | 139 skipped) 39ms
+     × checks atomic Collection public snapshots (fixed campaign) 33ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 139 skipped (141)
+   Start at  10:16:00
+   Duration  1.24s (transform 463ms, setup 54ms, import 858ms, tests 39ms, environment 211ms)
+

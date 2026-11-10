@@ -1,0 +1,17 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/query/includes-publication-oracle.test.ts (93 tests | 2 failed) 2965ms
+     × compares the final 'A' to 'A' row with the last public snapshot 15ms
+     × compares the final 'B' to 'A' row with the last public snapshot 6ms
+ ❯ |@tanstack/db| tests/query/replay-failure-boundary.test.ts (8 tests | 4 failed) 83ms
+     × keeps peers and retained results sound: {"failureMode":"throw","partialWrite":false} 18ms
+     × keeps peers and retained results sound: {"failureMode":"throw","partialWrite":true} 6ms
+     × keeps peers and retained results sound: {"failureMode":"reject","partialWrite":false} 5ms
+     × keeps peers and retained results sound: {"failureMode":"reject","partialWrite":true} 4ms
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  6 failed | 379 passed (385)
+   Start at  11:18:04
+   Duration  12.73s (transform 1.00s, setup 272ms, import 2.52s, tests 8.29s, environment 1.19s)
+

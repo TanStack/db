@@ -1,0 +1,505 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 38)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 36)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection
+      Coverage enabled with istanbul
+
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":-1},{"id":"b","value":0},{"id":"c","value":1}],"replacement":[{"id":"a","value":2},{"id":"d","value":5}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":-1},{"id":"c","value":1},{"id":"b","value":0}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":-1},{"id":"c","value":1}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":0}],"deleted":[]},{"rows":[{"id":"a","value":2}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":2},{"id":"b","value":0}],"values":[{"id":"a","value":2},{"id":"b","value":0}],"get":[{"id":"a","value":2},{"id":"b","value":0}]},"foldedRows":[{"id":"a","value":-1},{"id":"c","value":1},{"id":"b","value":0}],"sizes":{"size":2}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":-1},{"id":"c","value":1}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":0}],"deleted":[]},{"rows":[{"id":"a","value":2}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":2},{"id":"b","value":0}],"values":[{"id":"a","value":2},{"id":"b","value":0}],"get":[{"id":"a","value":2},{"id":"b","value":0}]},"foldedRows":[{"id":"a","value":-1},{"id":"c","value":1},{"id":"b","value":0}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: -1 }, …(2) ] to deeply equal [ { id: 'a', value: 2 }, …(1) ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":3},{"id":"d","value":6}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"b","value":1}],"values":[{"id":"a","value":3},{"id":"b","value":1}],"get":[{"id":"a","value":3},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"b","value":1}],"values":[{"id":"a","value":3},{"id":"b","value":1}],"get":[{"id":"a","value":3},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal [ { id: 'a', value: 3 }, …(1) ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":1},{"id":"d","value":4}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":1},{"id":"b","value":1}],"values":[{"id":"a","value":1},{"id":"b","value":1}],"get":[{"id":"a","value":1},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":1},{"id":"b","value":1}],"values":[{"id":"a","value":1},{"id":"b","value":1}],"get":[{"id":"a","value":1},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal [ { id: 'a', value: 1 }, …(1) ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":1},{"id":"d","value":4}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"rawPublicationFailed":false,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: +0 } ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"rawPublicationFailed":false,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[{"id":"d","value":3}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0},{"id":"d","value":3}],"values":[{"id":"a","value":0},{"id":"d","value":3}],"get":[{"id":"a","value":0},{"id":"d","value":3}]},"foldedRows":[{"id":"a","value":0},{"id":"d","value":3}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"rawPublicationFailed":false,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","campaign":"fixed","seed":20261030,"path":"0:0:0:0:1:1","runs":1,"shrinks":5,"failed":true,"generatedReach":{"initial-real-query-loads-settled":1,"both-replay-query-functions-entered":1,"real-query-replay-commit-forwarded":1,"held-public-snapshot-compared":1,"successful-replay-progressed":0,"failed-replay-progressed":1},"additionalExecutionReach":{"initial-real-query-loads-settled":8,"both-replay-query-functions-entered":8,"real-query-replay-commit-forwarded":8,"held-public-snapshot-compared":8,"successful-replay-progressed":2,"failed-replay-progressed":6},"reach":{"initial-real-query-loads-settled":9,"both-replay-query-functions-entered":9,"real-query-replay-commit-forwarded":9,"held-public-snapshot-compared":9,"successful-replay-progressed":2,"failed-replay-progressed":7}}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":16},{"id":"d","value":19}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":16}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":16}],"values":[{"id":"a","value":16}],"get":[{"id":"a","value":16}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":16}],"deleted":[]},{"rows":[{"id":"d","value":19}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":16},{"id":"d","value":19}],"values":[{"id":"a","value":16},{"id":"d","value":19}],"get":[{"id":"a","value":16},{"id":"d","value":19}]},"foldedRows":[{"id":"a","value":16},{"id":"d","value":19}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[{"id":"d","value":3}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0},{"id":"d","value":3}],"values":[{"id":"a","value":0},{"id":"d","value":3}],"get":[{"id":"a","value":0},{"id":"d","value":3}]},"foldedRows":[{"id":"a","value":0},{"id":"d","value":3}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[{"id":"d","value":3}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0},{"id":"d","value":3}],"values":[{"id":"a","value":0},{"id":"d","value":3}],"get":[{"id":"a","value":0},{"id":"d","value":3}]},"foldedRows":[{"id":"a","value":0},{"id":"d","value":3}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"rawPublicationFailed":false,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","campaign":"random","seed":1537196487,"path":"0:0:0","runs":1,"shrinks":2,"failed":true,"generatedReach":{"initial-real-query-loads-settled":1,"both-replay-query-functions-entered":1,"real-query-replay-commit-forwarded":1,"held-public-snapshot-compared":1,"successful-replay-progressed":1,"failed-replay-progressed":0},"additionalExecutionReach":{"initial-real-query-loads-settled":3,"both-replay-query-functions-entered":3,"real-query-replay-commit-forwarded":3,"held-public-snapshot-compared":3,"successful-replay-progressed":3,"failed-replay-progressed":0},"reach":{"initial-real-query-loads-settled":4,"both-replay-query-functions-entered":4,"real-query-replay-commit-forwarded":4,"held-public-snapshot-compared":4,"successful-replay-progressed":4,"failed-replay-progressed":0}}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":1}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[{"id":"a","value":1}],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0}],"replacement":[],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":["a"]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":["a"]},{"rows":[],"deleted":[]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0}],"replacement":[{"id":"a","value":0}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":3},{"id":"d","value":5}],"outcome":"resolve"},"outcome":"resolve","entered":["left","right"],"completion":"fulfilled","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"b","value":1}],"values":[{"id":"a","value":3},{"id":"b","value":1}],"get":[{"id":"a","value":3},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]},{"rows":[{"id":"d","value":5}],"deleted":["b"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"d","value":5}],"values":[{"id":"a","value":3},{"id":"d","value":5}],"get":[{"id":"a","value":3},{"id":"d","value":5}]},"foldedRows":[{"id":"a","value":3},{"id":"d","value":5}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[],"replacement":[{"id":"a","value":1}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":1}],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":1}],"values":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0}],"replacement":[],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":["a"]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":["a"]}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []"]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0}],"replacement":[{"id":"a","value":0}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":1}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[],"deleted":[]}],"reads":{"toArray":[{"id":"a","value":0}],"values":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":1}},"rawPublicationFailed":true,"secondaryFailures":[]}
+{"property":"query-db.collection-public-snapshot","history":{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":3},{"id":"d","value":5}],"outcome":"reject"},"outcome":"reject","entered":["left","right"],"completion":"rejected","queryReceipts":["fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled","fulfilled"],"afterTruncate":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true}],"reads":{"toArray":[],"values":[],"get":[]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":0}},"heldRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"b","value":1}],"values":[{"id":"a","value":3},{"id":"b","value":1}],"get":[{"id":"a","value":3},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"settledRead":{"appliedCommits":[{"rows":[],"deleted":[],"truncate":true},{"rows":[],"deleted":[]},{"rows":[{"id":"a","value":0},{"id":"c","value":2}],"deleted":[]},{"rows":[],"deleted":[]},{"rows":[{"id":"b","value":1}],"deleted":[]},{"rows":[{"id":"a","value":3}],"deleted":["c"]}],"reads":{"toArray":[{"id":"a","value":3},{"id":"b","value":1}],"values":[{"id":"a","value":3},{"id":"b","value":1}],"get":[{"id":"a","value":3},{"id":"b","value":1}]},"foldedRows":[{"id":"a","value":0},{"id":"c","value":2},{"id":"b","value":1}],"sizes":{"size":2}},"rawPublicationFailed":true,"secondaryFailures":["AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal [ { id: 'a', value: 3 }, …(1) ]"]}
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 4
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 5
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 6
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 7
+[QueryCollection] Error observing query collection-publication-query,right: Error: Query replacement failed
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:319:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+ ❯ |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts (10 tests | 10 failed) 75ms
+   × reflects real Query applied commits in raw observations (fixed campaign) 51ms
+   × reflects real Query applied commits in raw observations (random or replay campaign) 7ms
+   × receives the shared Query public snapshot history 0 2ms
+   × receives the shared Query public snapshot history 1 2ms
+   × receives the shared Query public snapshot history 2 2ms
+   × receives the shared Query public snapshot history 3 2ms
+   × receives the shared Query public snapshot history 4 2ms
+   × receives the shared Query public snapshot history 5 2ms
+   × receives the shared Query public snapshot history 6 2ms
+   × receives the shared Query public snapshot history 7 3ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (fixed campaign)
+Error: Property failed after 1 tests
+{ seed: 20261030, path: "0:0:0:0:1:1", endOnFailure: true }
+Counterexample: [{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"resolve"}]
+Shrunk 5 time(s)
+Got AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:96:5)
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:312:7)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+ ❯ tests/collection-publication-query-oracle.test.ts:412:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:407:19
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:433:11
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+ ❯ tests/collection-publication-query-oracle.test.ts:412:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:407:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > reflects real Query applied commits in raw observations (random or replay campaign)
+Error: Property failed after 1 tests
+{ seed: 1537196487, path: "0:0:0", endOnFailure: true }
+Counterexample: [{"initial":[],"replacement":[{"id":"a","value":0},{"id":"d","value":3}],"outcome":"resolve"}]
+Shrunk 2 time(s)
+Got AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:96:5)
+    at receiveQueryPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:312:7)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:412:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at runQueryPublicSnapshotCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection/tests/collection-publication-query-oracle.test.ts:407:19)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+ ❯ tests/collection-publication-query-oracle.test.ts:412:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:407:19
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:433:11
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+ ❯ tests/collection-publication-query-oracle.test.ts:412:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ runQueryPublicSnapshotCampaign tests/collection-publication-query-oracle.test.ts:407:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 0
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 4
+AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 1
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 5
+AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 2
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 6
+AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:313:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 3
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 7
+AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal [ { id: 'a', value: 3 }, …(1) ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "a",
+-     "value": 3,
++     "value": 0,
+    },
+    {
+      "id": "b",
+      "value": 1,
++   },
++   {
++     "id": "c",
++     "value": 2,
+    },
+  ]
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:312:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 4
+AssertionError: failed: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:347:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 5
+AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:347:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/13]⎯
+
+ FAIL  |@tanstack/query-db-collection| tests/collection-publication-query-oracle.test.ts > receives the shared Query public snapshot history 7
+AssertionError: failed: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal [ { id: 'a', value: 3 }, …(1) ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "a",
+-     "value": 3,
++     "value": 0,
+    },
+    {
+      "id": "b",
+      "value": 1,
++   },
++   {
++     "id": "c",
++     "value": 2,
+    },
+  ]
+
+ ❯ checkPublicSnapshotObservation ../db/tests/collection-public-snapshot-oracle.ts:96:5
+     94|     sortedRows(observation.foldedRows),
+     95|     `${phase}: full-state subscriber fold`,
+     96|   ).toEqual(expected)
+       |     ^
+     97|   for (const [path, keys] of Object.entries(observation.keys ?? {}))
+     98|     expect([...keys].sort(), `${phase}: public keys through ${path}`).…
+ ❯ receiveQueryPublicSnapshot tests/collection-publication-query-oracle.test.ts:347:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/13]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  10 failed | 2 passed (12)
+Type Errors  no errors
+   Start at  10:50:07
+   Duration  3.80s (transform 1.34s, setup 0ms, import 1.82s, tests 75ms, environment 209ms, typecheck 1.52s)
+

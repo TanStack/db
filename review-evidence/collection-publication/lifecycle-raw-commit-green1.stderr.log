@@ -1,0 +1,830 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 36)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 37)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle
+Error: subscription-lifecycle.demand-change: generated histories reached these states fewer than 1 times, so their laws were not enforced there: a held replacement covers a failed owner (0), judging between releases would publish a replay the change fails (0)
+ ❯ Object.assertReached tests/oracle-reach.ts:124:38
+    122|           : []),
+    123|       ]
+    124|       if (failures.length > 0) throw new Error(failures.join(`\n`))
+       |                                      ^
+    125|     },
+    126|   }
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1708:53
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/40]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 36 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'default-eager' source with 'absent' loader, 'empty' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'default-eager' source with 'present' loader, 'empty' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'eager' source with 'absent' loader, 'empty' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'eager' source with 'present' loader, 'empty' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'default-eager' source with 'absent' loader, 'row' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'default-eager' source with 'present' loader, 'row' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'eager' source with 'absent' loader, 'row' replacement, and 'truncate'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > demand created while its Collection is cleaned up > 'eager' source with 'present' loader, 'row' replacement, and 'truncate'
+AssertionError: expected { physicalAcquisitions: +0, …(3) } to deeply equal { physicalAcquisitions: +0, …(3) }
+
+- Expected
++ Received
+
+  {
+    "collectionStatus": "loading",
+    "physicalAcquisitions": 0,
+    "result": "pending",
+-   "status": "loadingSubset",
++   "status": "ready",
+  }
+
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:186:16
+    184|               status: subscription.status,
+    185|               collectionStatus: collection.status,
+    186|             }).toEqual(expected.afterInterruption)
+       |                ^
+    187|           }
+    188|
+ ❯ withOracleCleanup tests/utils.ts:34:5
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:133:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > retains an earlier peer failure after aborting it while another peer will resolve
+AssertionError: {"history":[{"type":"cleanup"},{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"abort","demand":"a"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},"observedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":0},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":0},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1137:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > retains an earlier peer failure after aborting it while another peer will reject
+AssertionError: {"history":[{"type":"cleanup"},{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"abort","demand":"a"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1137:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > holds detached callers for their peer until reject
+AssertionError: {"history":[{"type":"cleanup"},{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"result","attemptId":"unacquired","resultKind":"promise"},{"type":"publication"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":0,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1191:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > covers every required command and cross-phase transition
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":3,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":3},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"load","id":3,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":3},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1339:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > does not wait for an aborted load to settle for 'duplicate owners after overlapping re…'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"newest","outcome":"resolve"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":4},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":4},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1413:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > releases exact ownership while older replay work is pending
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"newest","outcome":"resolve"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"release","demand":"a"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":4},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":4},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1418:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > tracks 'manual' cancellation across 1 replay(s) ending in 'reject'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > tracks 'reject' cancellation across 1 replay(s) ending in 'reject'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":1},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":1},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1443:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > tracks 'manual' cancellation across 2 replay(s) ending in 'reject'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > tracks 'reject' cancellation across 2 replay(s) ending in 'reject'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"truncate"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":2},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":2},{"type":"error","attemptId":2},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1443:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > publishes a raw snapshot after failed restart
+AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1661:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > publishes a raw snapshot after failed restart
+AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"request","demand":"a"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1661:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > publishes a raw snapshot after failed restart
+AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1661:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > publishes a raw snapshot after failed restart
+AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"release","demand":"a"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":1}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":1,"replayGeneration":0},{"type":"error","attemptId":1},{"type":"status","status":"ready"},{"type":"load","id":2,"demand":"a","syncRunGeneration":1,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"status","status":"ready"},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":1}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1661:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > judges a replay once after a change that retires a replacement and a pending owner
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"request","demand":"c"},{"type":"replace","demand":"b","replaced":"a"},{"type":"truncate"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"change","release":["c","b"]},{"type":"request","demand":"c"}],"command":{"type":"change","release":["c","b"]},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"unload","attemptId":5,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"unload","attemptId":5,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1721:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > keeps a replay failed when 'a replacement aborted after its repla…'
+AssertionError: {"history":[{"type":"request","demand":"c"},{"type":"request","demand":"b"},{"type":"request","demand":"a"},{"type":"replace","demand":"a","replaced":"c"},{"type":"truncate"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"reject"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"abort","demand":"a"},{"type":"request","demand":"a"}],"command":{"type":"abort","demand":"a"},"observedTrace":[{"type":"load","id":0,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ runDemandChangeHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1783:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > keeps a replay failed when 'a replacement aborted after a peer lo…'
+AssertionError: {"history":[{"type":"request","demand":"c"},{"type":"request","demand":"b"},{"type":"request","demand":"a"},{"type":"replace","demand":"b","replaced":"c"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"reject"},{"type":"abort","demand":"b"},{"type":"request","demand":"a"}],"command":{"type":"abort","demand":"b"},"observedTrace":[{"type":"load","id":0,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":3},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ runDemandChangeHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1783:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > matches the pure lifecycle model for a random or replayed seed (with seed=122217675)
+Error: Property failed after 21 tests
+{ seed: 122217675, path: "20:8", endOnFailure: true }
+Counterexample: [[{"type":"request","demand":"b"},{"type":"truncate"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"abort","demand":"a"}],"manual"]
+Shrunk 1 time(s)
+Got AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"truncate"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"abort","demand":"a"}],"command":{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":1},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":1,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"error","attemptId":1},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+    at assertState (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63)
+    at runHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1813:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1813:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > judges a replay once per demand change for a fixed seed (with seed=1657005)
+Error: Property failed after 1 tests
+{ seed: 1657005, path: "0:0:1:1:1:4:3:1:9", endOnFailure: true }
+Counterexample: [[{"type":"request","demand":"a"},{"type":"request","demand":"c"},{"type":"request","demand":"b"},{"type":"replace","demand":"c","replaced":"a"},{"type":"truncate"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"change","release":["b","c"]},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"change","release":["a","b"]},{"type":"change","release":["a","c"]}],"manual"]
+Shrunk 8 time(s)
+Got AssertionError: replay completion: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"c"},{"type":"request","demand":"b"},{"type":"replace","demand":"c","replaced":"a"},{"type":"truncate"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"change","release":["b","c"]},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"change","release":["a","b"]},{"type":"change","release":["a","c"]}],"command":{"type":"change","release":["a","c"]},"observedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":5,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"load","id":6,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"result","attemptId":6,"resultKind":"promise"},{"type":"publication"},{"type":"error","attemptId":3},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":6,"handlerSyncRunGeneration":0},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":5,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"load","id":6,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"result","attemptId":6,"resultKind":"promise"},{"type":"publication"},{"type":"error","attemptId":3},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":6,"handlerSyncRunGeneration":0},{"type":"status","status":"ready"}]}: expected 'rejected' to be 'fulfilled' // Object.is equality
+    at assertState (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:764:60)
+    at runHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7)
+    at runDemandChangeHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1824:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:764:60
+    762|         else if (expectedReplayFailure) wait.expected = `rejected`
+    763|       }
+    764|       check(wait.outcome, `replay completion: ${context}`).toBe(
+       |                                                            ^
+    765|         wait.expected === `aborted` ? `rejected` : wait.expected,
+    766|       )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ runDemandChangeHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1824:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts > CollectionSubscription async lifecycle history oracle > judges a replay once per demand change for a random or replayed seed (with seed=1530656390)
+Error: Property failed after 1 tests
+{ seed: 1530656390, path: "0:0:1:4:6:7", endOnFailure: true }
+Counterexample: [[{"type":"request","demand":"b"},{"type":"request","demand":"a"},{"type":"request","demand":"c"},{"type":"replace","demand":"a","replaced":"c"},{"type":"truncate"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"change","release":["b","a"]},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"resolve"}],"manual"]
+Shrunk 5 time(s)
+Got AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"request","demand":"a"},{"type":"request","demand":"c"},{"type":"replace","demand":"a","replaced":"c"},{"type":"truncate"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"change","release":["b","a"]},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"resolve"}],"command":{"type":"settle","demand":"c","scope":"current","age":"oldest","outcome":"resolve"},"observedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"load","id":6,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"result","attemptId":6,"resultKind":"promise"},{"type":"publication"},{"type":"error","attemptId":6},{"type":"status","status":"ready"}],"expectedTrace":[{"type":"load","id":0,"demand":"b","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":0,"resultKind":"promise"},{"type":"status","status":"loadingSubset"},{"type":"publication"},{"type":"load","id":1,"demand":"a","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":1,"resultKind":"promise"},{"type":"publication"},{"type":"load","id":2,"demand":"c","syncRunGeneration":0,"replayGeneration":0},{"type":"result","attemptId":2,"resultKind":"promise"},{"type":"publication"},{"type":"unload","attemptId":0,"handlerSyncRunGeneration":0},{"type":"load","id":3,"demand":"b","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":1,"handlerSyncRunGeneration":0},{"type":"load","id":4,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":2,"handlerSyncRunGeneration":0},{"type":"load","id":5,"demand":"c","syncRunGeneration":0,"replayGeneration":1},{"type":"unload","attemptId":3,"handlerSyncRunGeneration":0},{"type":"unload","attemptId":4,"handlerSyncRunGeneration":0},{"type":"load","id":6,"demand":"a","syncRunGeneration":0,"replayGeneration":1},{"type":"result","attemptId":6,"resultKind":"promise"},{"type":"publication"},{"type":"error","attemptId":6},{"type":"status","status":"ready"}]}: expected false to be true // Object.is equality
+    at assertState (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63)
+    at runHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7)
+    at runDemandChangeHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1840:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertState tests/collection-subscription-lifecycle-history-oracle.property.test.ts:755:63
+    753|     if (replayOpen && !replayWork) expectedReplayFailure = true
+    754|     check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    755|     check(subscription.hasFailedTruncateReplacement, context).toBe(
+       |                                                               ^
+    756|       replayOpen && expectedReplayFailure,
+    757|     )
+ ❯ runHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1035:7
+ ❯ runDemandChangeHistory tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1715:21
+ ❯ tests/collection-subscription-lifecycle-history-oracle.property.test.ts:1840:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'resolve' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "2707c520-eac5-498d-bd0d-efa1ae5b9503",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'resolve' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "2984f926-131f-4b59-bab7-f8520fee68aa",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'reject' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "011efb86-deaa-437b-8f05-0929dd61e8d5",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'reject' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "349bb5c7-87e5-4428-b338-2d0c9666057e",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'release' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "2594ef26-427c-4381-9170-05492296865c",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'release' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "a5c04c64-51b6-4546-812f-441ff92f1cfa",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'unsubscribe' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "6dbb532f-a401-48c0-963d-9770366d5cc8",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'unsubscribe' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "41d6ef2b-c490-4223-9641-b0aefb46e2e9",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'cleanup' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "ea400582-d5d8-4b38-b44d-71a627a354ff",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'cleanup' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "f516a874-a98e-44b3-9271-d82061476dba",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/40]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts > CollectionSubscription demand lifecycle oracle > observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'abort' / 'during'
+AssertionError: expected [ { id: 'row', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "$collectionId": "33b953e9-5461-456e-944d-e356f49f70c4",
++     "$hasPendingWrites": false,
++     "$key": "row",
++     "$origin": "remote",
++     "id": "row",
++   },
++ ]
+
+ ❯ tests/collection-subscription-lifecycle-oracle.test.ts:1099:40
+    1097|           if (outcome !== `return` && outcome !== `throw`) {
+    1098|             expect(settlements).toEqual([])
+    1099|             expect([...rows.values()]).toEqual([])
+       |                                        ^
+    1100|           }
+    1101|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/40]⎯
+

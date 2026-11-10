@@ -1,0 +1,10 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+
+ Test Files  1 passed (1)
+      Tests  147 passed | 2 skipped (149)
+   Start at  11:22:45
+   Duration  8.50s (transform 658ms, setup 81ms, import 1.21s, tests 6.77s, environment 292ms)
+
+Oracle replay: {"property":"subscription-lifecycle.publication-history","seed":-1439698414,"path":"1:22","owner":"packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts","command":["/Users/kyle.mathews/.n/bin/node","/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/vitest.mjs","run","tests/collection-subscription-lifecycle-publication-oracle.property.test.ts","--config","/tmp/collection-publication-core.vitest.config.mts","--coverage.enabled=false","--typecheck.enabled=false","--maxWorkers=1","--fileParallelism=false"],"witnessMode":"async","witnesses":[{"property":"subscription-lifecycle.publication-history","seed":-1439698414,"path":"1:22","numRuns":32,"failed":false}],"executions":1}

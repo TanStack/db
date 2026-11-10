@@ -1,0 +1,12 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+{"property":"subscription-lifecycle.cleanup-optimistic-publication","campaign":"random","seed":20261030,"path":"0:0:0","failed":true,"runs":1,"completedGeneratedReach":{"restart-source-pending":1,"optimistic-before-source":1,"settlement-before-source":1,"later-source-applied":1},"completedShrinkReach":{"restart-source-pending":0,"optimistic-before-source":0,"settlement-before-source":0,"later-source-applied":0}}
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts (151 tests | 1 failed | 150 skipped) 21ms
+     × keeps cleanup-retained rows through optimistic publication (random or replay campaign) 21ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 150 skipped (151)
+   Start at  11:30:25
+   Duration  1.33s (transform 562ms, setup 48ms, import 962ms, tests 21ms, environment 204ms)
+

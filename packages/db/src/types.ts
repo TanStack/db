@@ -364,7 +364,7 @@ export type LoadSubsetOptions = {
    * is cooperative: async adapters should stop before installing more
    * request-scoped rows. If an in-flight baseline cannot be canceled, the
    * returned load promise must settle after those writes become visible so
-   * core can keep overlapping replay private until then.
+   * consumers can keep overlapping replay results private until then.
    */
   signal?: AbortSignal
   /**

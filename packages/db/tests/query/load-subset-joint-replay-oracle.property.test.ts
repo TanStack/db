@@ -35,6 +35,11 @@ import { createTransaction } from '../../src/transactions.js'
 import { runOracleCampaign } from '../oracle-campaign.js'
 import { oracleRuns } from '../oracle-config'
 import { flushPromises, withOracleCleanup } from '../utils.js'
+import {
+  ReplayPublicationModel,
+  normalize,
+} from './replay-publication-oracle.js'
+import type { Owner, PublicRow } from './replay-publication-oracle.js'
 import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
@@ -42,90 +47,6 @@ import type {
 } from '../../src/types.js'
 
 type Row = { id: string; version: number; value: number; kind: `data` | `hold` }
-type PublicRow = Pick<Row, `id` | `version` | `value`>
-type Owner = `main` | `peer`
-const normalize = (rows: ReadonlyArray<PublicRow>) =>
-  rows
-    .map(({ id, version, value }) => ({ id, version, value }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-
-// Last complete publication and current obligations are distinguishable: the
-// same new rows remain private with an older participant or a failed owner,
-// but become public once all still-owned work and receipts establish success.
-class ReplayPublicationModel {
-  readonly owners = new Set<Owner>([`main`, `peer`])
-  readonly visible = new Map<Owner, Array<PublicRow>>()
-  private replacement: Array<PublicRow>
-  private readonly participants = new Map<
-    string,
-    { owner: Owner; attempt: number }
-  >()
-  private readonly receipts = new Set<string>()
-  private readonly failed = new Set<Owner>()
-  private latest = 0
-  private readonly replaying = new Set<Owner>()
-  private closed = false
-
-  constructor(initial: Array<PublicRow>) {
-    this.replacement = normalize(initial)
-    for (const owner of this.owners) this.visible.set(owner, normalize(initial))
-  }
-  start(): number {
-    if (this.closed) throw new Error(`model: replay after cleanup`)
-    for (const owner of this.owners) this.replaying.add(owner)
-    this.failed.clear()
-    // A replacement aborts the prior attempts. Accepted writes still owe
-    // their receipts, but obsolete provider settlement holds no readiness.
-    this.participants.clear()
-    const attempt = ++this.latest
-    for (const owner of this.owners)
-      this.participants.set(`${attempt}:${owner}`, { owner, attempt })
-    return attempt
-  }
-  accept(id: string, rows: Array<PublicRow>): void {
-    this.replacement = normalize(rows)
-    this.receipts.add(id)
-  }
-  apply(id: string): void {
-    this.receipts.delete(id)
-    this.publishIfComplete()
-  }
-  settle(attempt: number, owner: Owner, failed: boolean): void {
-    this.participants.delete(`${attempt}:${owner}`)
-    if (
-      !this.closed &&
-      this.owners.has(owner) &&
-      attempt === this.latest &&
-      failed
-    )
-      this.failed.add(owner)
-    this.publishIfComplete()
-  }
-  retire(owner: Owner): void {
-    this.owners.delete(owner)
-    this.failed.delete(owner)
-    for (const [id, participant] of this.participants)
-      if (participant.owner === owner) this.participants.delete(id)
-    this.publishIfComplete()
-  }
-  cleanup(): void {
-    this.closed = true
-  }
-  private publishIfComplete(): void {
-    if (this.closed || this.receipts.size) return
-    for (const owner of this.owners) {
-      if (!this.replaying.has(owner) || this.failed.has(owner)) continue
-      if (
-        [...this.participants.values()].some(
-          (participant) => participant.owner === owner,
-        )
-      )
-        continue
-      this.visible.set(owner, normalize(this.replacement))
-      this.replaying.delete(owner)
-    }
-  }
-}
 
 type Scenario = {
   count: number

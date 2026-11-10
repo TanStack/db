@@ -1,0 +1,110 @@
+{
+  "base": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+  "runs": [
+    {
+      "mutant": "withhold-raw",
+      "receiver": "core",
+      "exit": 1,
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "--maxWorkers=1",
+        "--fileParallelism=false",
+        "--config",
+        "/tmp/collection-publication-core.vitest.config.mts",
+        "tests/collection-subscription-lifecycle-publication-oracle.property.test.ts",
+        "-t",
+        "checks atomic Collection public snapshots.*replay"
+      ],
+      "property": "subscription-lifecycle.atomic-public-snapshot",
+      "seed": "20261030",
+      "path": "0:0:0:0:1:1",
+      "classification": "assertion failure at intended public comparison",
+      "checkpoint": "held applied candidate: full-state subscriber fold"
+    },
+    {
+      "mutant": "withhold-raw",
+      "receiver": "query",
+      "exit": 1,
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "--maxWorkers=1",
+        "--fileParallelism=false",
+        "--config",
+        "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/review-evidence/collection-publication/query-receiving-vitest.config.mts",
+        "tests/collection-publication-query-oracle.test.ts",
+        "-t",
+        "reflects real Query applied commits in raw observations.*replay"
+      ],
+      "property": "query-db.collection-public-snapshot",
+      "seed": "20261030",
+      "path": "0:0:0:0:1:1",
+      "classification": "assertion failure at intended public comparison",
+      "checkpoint": "held applied candidate: full-state subscriber fold"
+    },
+    {
+      "mutant": "withhold-raw",
+      "receiver": "persisted",
+      "exit": 1,
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "--maxWorkers=1",
+        "--fileParallelism=false",
+        "--config",
+        "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/review-evidence/collection-publication/vitest.persisted-public-snapshot.config.mts",
+        "tests/collection-public-snapshot-persisted-oracle.test.ts"
+      ],
+      "property": "persistence.collection-public-snapshot",
+      "seed": "30102026",
+      "path": "1",
+      "classification": "assertion failure at intended public comparison",
+      "checkpoint": "raw truncate: full-state subscriber fold"
+    },
+    {
+      "mutant": "optimistic-as-source",
+      "exit": 1,
+      "command": [
+        "/Users/kyle.mathews/.n/bin/node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "--maxWorkers=1",
+        "--fileParallelism=false",
+        "--config",
+        "/tmp/collection-publication-core.vitest.config.mts",
+        "tests/collection-subscription-lifecycle-publication-oracle.property.test.ts",
+        "-t",
+        "keeps cleanup-retained rows through optimistic publication.*replay"
+      ],
+      "property": "subscription-lifecycle.cleanup-optimistic-publication",
+      "seed": 20261030,
+      "path": "0:0:0",
+      "classification": "assertion failure at intended public comparison",
+      "checkpoint": "same-turn optimistic insert: exact callback batches"
+    }
+  ],
+  "restored": {
+    "packages/db/src/collection/subscription.ts": {
+      "before": "3078838292deff0a5879c7463fdcced5bccd79378a587d246d5df659671430c5",
+      "after": "3078838292deff0a5879c7463fdcced5bccd79378a587d246d5df659671430c5",
+      "equal": true
+    },
+    "packages/db/src/collection/changes.ts": {
+      "before": "f4f76988a427c37e37fcd21ffd5f30176074f92bdf0af31d343d08ba54d245d8",
+      "after": "f4f76988a427c37e37fcd21ffd5f30176074f92bdf0af31d343d08ba54d245d8",
+      "equal": true
+    }
+  }
+}

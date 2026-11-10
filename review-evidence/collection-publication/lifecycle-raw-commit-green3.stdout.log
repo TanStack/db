@@ -1,0 +1,18 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts (97 tests | 8 failed) 37587ms
+     × 'default-eager' source with 'absent' loader, 'empty' replacement, 'truncate', and empty commit false 6ms
+     × 'default-eager' source with 'present' loader, 'empty' replacement, 'truncate', and empty commit false 3ms
+     × 'eager' source with 'absent' loader, 'empty' replacement, 'truncate', and empty commit false 3ms
+     × 'eager' source with 'present' loader, 'empty' replacement, 'truncate', and empty commit false 4ms
+     × 'default-eager' source with 'absent' loader, 'row' replacement, 'truncate', and empty commit false 3ms
+     × 'default-eager' source with 'present' loader, 'row' replacement, 'truncate', and empty commit false 3ms
+     × 'eager' source with 'absent' loader, 'row' replacement, 'truncate', and empty commit false 3ms
+     × 'eager' source with 'present' loader, 'row' replacement, 'truncate', and empty commit false 3ms
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  8 failed | 201 passed (209)
+   Start at  11:12:28
+   Duration  41.43s (transform 666ms, setup 145ms, import 1.68s, tests 38.72s, environment 652ms)
+

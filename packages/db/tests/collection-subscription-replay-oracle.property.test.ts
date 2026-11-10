@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -9,6 +9,7 @@ import { createTransaction } from '../src/transactions.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils.js'
 import {
   expectSameSubsetRequest,
@@ -28,36 +29,30 @@ import type {
 import type { Scheduler } from 'fast-check'
 
 /**
- * # Does replay replace a source atomically under hostile timing?
+ * # Do raw subscriptions follow applied transactions during replay?
  *
- * Replay rebuilds a subscription while old acquisitions, source writes,
- * optimistic state, callbacks, and cleanup may still be in flight. The public
- * snapshot must change only when the newest complete replay earns authority.
- * Older, failed, aborted, or released work may settle and release resources,
- * but it must not leak rows or overwrite a newer snapshot. A newer replay
- * aborts the older attempts' loads, and an abort ends a load (maintainer
- * decision): the newest replay does not wait for them. An `unloadSubset`
- * that throws is an adapter bug: the subscription reports it uncaught once,
- * and it is not a replay failure, so the replay continues as if the release
- * had succeeded.
- * A direct snapshot can select source rows while replay keeps publication
- * private. A later ordered local snapshot must continue after those selected
- * rows, including during subscriber callback reentry.
+ * The maintainer decision in
+ * `docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md`
+ * gives raw Collection subscribers each applied transaction. A truncate
+ * publishes its deletes; each accepted partial replacement publishes its rows.
+ * A later load failure does not retract those writes. Complete graph-result
+ * retention belongs to live queries, which this direct-subscription driver
+ * does not judge.
  *
- * Small scenario records describe source rows, logical demands, replay
- * attempts, settlement order, release points, and later source actions. Plain
- * Map-based reducers compute the expected snapshot and event batches. The
- * production driver uses real Collection subscriptions, indexes, transactions,
- * and callback reentry. It compares every intermediate publication, not only
- * the final rows.
+ * Before this revision, the model retained the old callback rows until replay
+ * success, including after accepted writes and failures. The distinguishing
+ * new prediction is empty callback rows after an applied truncate, followed
+ * by the applied partial rows while sibling loads remain pending or fail.
+ * Historical stronger-law RED evidence remains in the linked decision record.
  *
- * `collection-subscription-lifecycle-publication-oracle.property.test.ts`
- * owns the general public-row and exact-batch law. This file applies it to
- * replay-specific schedules, including same-key source changes after a failed
- * replay. The Collection `subscribeChanges` contract supplies the public
- * observation. General owner/attempt status is modeled in the lifecycle
- * grammar, and optimistic transaction semantics in the optimistic-history
- * oracle.
+ * Scenario records retain competing attempts, settlement order, releases,
+ * source writes, optimistic transactions, cleanup, and callback reentry.
+ * Independent keyed maps compute each applied transaction's exact batch.
+ * Real subscriptions, indexes and transactions supply observations. Load status,
+ * original errors, stale signals and exact acquisition releases remain checked.
+ * The primary lifecycle publication owner owns the broader public-read law;
+ * this driver covers its direct-subscription replay schedules and selected-key
+ * continuation. It does not establish real-provider or live-query behavior.
  */
 
 type ReplayDemandId = ReplayRow[`id`]
@@ -337,7 +332,17 @@ function publicationDiff(
   return changes
 }
 
+const rawReplayReach = createOracleReach(
+  `subscription-replay.raw-transactions`,
+  [
+    `applied-truncate`,
+    `sequential-transaction-prefix`,
+    `optimistic-source-settlement`,
+  ],
+)
+
 async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
+  rawReplayReach.beginHistory()
   let begin!: () => void
   let write!: (
     message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -354,6 +359,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
   const queuedReacquisitions = new Set<ReplayDemandId>()
   const pendingReplays: Array<PendingReplay> = []
   const sourceRows = new Map<string | number, ReplayRow>()
+  let rawPublicationStart: number | undefined
+  const expectedRawBatches: Array<Array<ReplayChange>> = []
   const sourceWrites: Array<SourceWrite> = []
   const expectedSourceWrites: Array<SourceWrite> = []
   const demandWheres = new Map(
@@ -397,6 +404,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       rows: rows.map((row) => ({ ...row })),
     })
     if (!installed || rows.length === 0) return installed
+    const before = new Map(sourceRows)
     begin()
     for (const row of rows) {
       write({
@@ -406,6 +414,10 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     }
     commit()
     for (const row of rows) sourceRows.set(row.id, { ...row })
+    if (rawPublicationStart !== undefined) {
+      const batch = publicationDiff(before, sourceRows)
+      if (batch.length > 0) expectedRawBatches.push(batch)
+    }
     return true
   }
 
@@ -506,6 +518,13 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     expect(sortedRows(visible)).toEqual(sortedRows(expected))
   }
 
+  const assertRawPublication = () => {
+    assertPublished(sourceRows)
+    expect(
+      publicationBatches.slice(rawPublicationStart).map(sortedChanges),
+    ).toEqual(expectedRawBatches.map(sortedChanges))
+  }
+
   const assertSource = () => {
     const actual = rowsById(
       collection.toArray.map(({ id, value }) => ({ id, value })),
@@ -522,6 +541,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       write({ type: `delete`, key: action.id })
       commit()
       sourceRows.delete(action.id)
+      expectedRawBatches.push([
+        { type: `delete`, key: action.id, value: { ...previous } },
+      ])
       return true
     }
 
@@ -549,16 +571,12 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     )
     assertPublished(expectedPublished)
     assertSource()
-    let expectedPublicationCount = publicationCount
+    rawPublicationStart = publicationCount
     let lastReportedError: Error | undefined
     let modelReplayState:
       | {
-          baseline: Map<string | number, ReplayRow>
           pending: Set<number>
           currentAttemptIndex: number
-          publicationCount: number
-          // The current attempt failed, even if its demand was released since.
-          failed: boolean
         }
       | undefined
 
@@ -570,7 +588,6 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       attemptIndex: number,
     ): void => {
       state.currentAttemptIndex = attemptIndex
-      state.failed = false
       state.pending.clear()
     }
 
@@ -618,7 +635,6 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       } else {
         if (isCurrent) {
           lastReportedError = pending.error
-          replayState.failed = true
         } else {
           expect(pending.signal?.aborted).toBe(true)
         }
@@ -628,68 +644,19 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       await flushPromises()
       assertSource()
 
-      if (!replayState) {
-        expect(subscription.status).toBe(`ready`)
-        assertPublished(expectedPublished)
-        expect(subscription.lastError).toBe(lastReportedError)
-        return
-      }
-
-      const hasPendingReplay = replayState.pending.size > 0
       expect(subscription.status).toBe(
-        hasPendingReplay ? `loadingSubset` : `ready`,
+        replayState && replayState.pending.size > 0 ? `loadingSubset` : `ready`,
       )
-
-      if (replayState.pending.size === 0) {
-        const currentAttempt =
-          scenario.attempts[replayState.currentAttemptIndex]!
-        const currentAttemptSucceeds = currentAttempt.loads.every(
-          ({ demandId, outcome }) =>
-            !activeDemandIds.has(demandId) || outcome === `resolve`,
-        )
-        const previousPublication = new Map(expectedPublished)
-        expectedPublished.clear()
-        const nextRows = currentAttemptSucceeds
-          ? sourceRows
-          : replayState.baseline
-        for (const [id, row] of nextRows) {
-          expectedPublished.set(id, { ...row })
-        }
-
-        if (currentAttemptSucceeds) {
-          const expectedBatch = publicationDiff(
-            previousPublication,
-            expectedPublished,
-          )
-          expect(publicationCount - replayState.publicationCount).toBe(
-            Number(expectedBatch.length > 0),
-          )
-          if (expectedBatch.length > 0) {
-            expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-              sortedChanges(expectedBatch),
-            )
-          }
-          modelReplayState = undefined
-        } else {
-          expect(publicationCount).toBe(replayState.publicationCount)
-        }
-        expectedPublicationCount = publicationCount
-      } else {
-        expect(publicationCount).toBe(replayState.publicationCount)
-      }
-
-      assertPublished(expectedPublished)
+      if (replayState?.pending.size === 0) modelReplayState = undefined
+      assertRawPublication()
       expect(subscription.lastError).toBe(lastReportedError)
       expect(reportedErrors.at(-1)).toBe(lastReportedError)
     }
 
     for (const [attemptIndex, attempt] of scenario.attempts.entries()) {
       modelReplayState ??= {
-        baseline: new Map(expectedPublished),
         pending: new Set(),
         currentAttemptIndex: attemptIndex,
-        publicationCount: expectedPublicationCount,
-        failed: false,
       }
       startModelAttempt(modelReplayState, attemptIndex)
 
@@ -697,6 +664,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         queuedLoads.push({ attemptIndex, load })
       }
       const firstReplayIndex = pendingReplays.length
+      const truncateBatch = publicationDiff(sourceRows, new Map())
+      if (truncateBatch.length > 0) expectedRawBatches.push(truncateBatch)
       begin()
       truncate()
       commit()
@@ -725,39 +694,13 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             modelReplayState.pending.delete(replayIndex)
           }
         }
-        // A released request does not retract rows already applied by the
-        // source. Releasing the final demand retires the replay: one that has
-        // not failed publishes the rows the source applied, since nothing can
-        // complete it; a failed one keeps the retained baseline (law 9).
-        if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0) {
-          if (!modelReplayState.failed) {
-            const previousPublication = new Map(expectedPublished)
-            expectedPublished.clear()
-            for (const [id, row] of sourceRows) {
-              expectedPublished.set(id, { ...row })
-            }
-            const expectedBatch = publicationDiff(
-              previousPublication,
-              expectedPublished,
-            )
-            expect(publicationCount - modelReplayState.publicationCount).toBe(
-              Number(expectedBatch.length > 0),
-            )
-            if (expectedBatch.length > 0) {
-              expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-                sortedChanges(expectedBatch),
-              )
-            }
-          }
-          expectedPublicationCount = publicationCount
+        // Demand release changes ownership, never an applied row transaction.
+        if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0)
           modelReplayState = undefined
-        }
       }
       assertSource()
-      assertPublished(expectedPublished)
-      expect(publicationCount).toBe(
-        modelReplayState?.publicationCount ?? expectedPublicationCount,
-      )
+      rawReplayReach.reach(`applied-truncate`)
+      assertRawPublication()
       expect(subscription.lastError).toBe(lastReportedError)
       expect(subscription.status).toBe(
         modelReplayState && modelReplayState.pending.size > 0
@@ -780,8 +723,6 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     expect(modelReplayState?.pending.size ?? 0).toBe(0)
 
     for (const action of scenario.afterSettlement) {
-      const countBeforeAction = publicationCount
-      const previousPublication = new Map(expectedPublished)
       if (action.type === `request`) {
         queuedReacquisitions.add(action.demandId)
         activeDemandIds.add(action.demandId)
@@ -789,38 +730,17 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           optimizedOnly: false,
           where: demandWheres.get(action.demandId),
         })
-        const row = sourceRows.get(action.demandId)
-        if (!modelReplayState && row) {
-          expectedPublished.set(action.demandId, { ...row })
-        }
+        // Every already-published source key is reserved. A repeated explicit
+        // snapshot still delivers its empty selection batch.
+        expectedRawBatches.push([])
       }
       const applied = applySourceAction(action)
-      if (applied && action.type === `delete`) {
-        if (!modelReplayState) expectedPublished.delete(action.id)
-      } else if (applied && action.type === `put`) {
+      if (applied && action.type === `put`) {
         recordExpectedSourceWrite([action.row], { type: `ordinary` }, true)
         assertSourceWrites()
-        if (!modelReplayState) {
-          expectedPublished.set(action.row.id, { ...action.row })
-        }
       }
       assertSource()
-      assertPublished(expectedPublished)
-      const expectedBatch = publicationDiff(
-        previousPublication,
-        expectedPublished,
-      )
-      const expectsPublication =
-        !modelReplayState &&
-        (action.type === `request` || expectedBatch.length > 0)
-      expect(publicationCount).toBe(
-        countBeforeAction + Number(expectsPublication),
-      )
-      if (expectsPublication) {
-        expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-          sortedChanges(expectedBatch),
-        )
-      }
+      assertRawPublication()
     }
 
     subscription.unsubscribe()
@@ -843,6 +763,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
 async function runSequentialReplayScenario(
   scenario: SequentialReplayScenario,
 ): Promise<void> {
+  rawReplayReach.beginHistory()
   let begin!: () => void
   let write!: (
     message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -972,29 +893,19 @@ async function runSequentialReplayScenario(
       }
       await flushPromises()
 
-      const succeeded = load.outcome === `return` || load.outcome === `resolve`
-      if (succeeded) {
-        expectedPublished.clear()
-        for (const [id, row] of sourceRows) {
-          expectedPublished.set(id, { ...row })
-        }
-      } else {
-        expectedPublished.clear()
-        for (const [id, row] of baseline) expectedPublished.set(id, { ...row })
+      if (load.outcome === `throw` || load.outcome === `reject`)
         expectedLastError = expectedError
-      }
-
-      const expectedBatch = succeeded
-        ? publicationDiff(baseline, expectedPublished)
-        : []
-      expect(publicationCount - publicationBefore).toBe(
-        Number(expectedBatch.length > 0),
-      )
-      if (expectedBatch.length > 0) {
-        expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
-          sortedChanges(expectedBatch),
-        )
-      }
+      expectedPublished.clear()
+      for (const [id, row] of sourceRows) expectedPublished.set(id, { ...row })
+      const expectedBatches = [
+        publicationDiff(baseline, new Map()),
+        publicationDiff(new Map(), expectedPublished),
+      ].filter((batch) => batch.length > 0)
+      rawReplayReach.reach(`sequential-transaction-prefix`)
+      expect(publicationCount - publicationBefore).toBe(expectedBatches.length)
+      expect(
+        publicationBatches.slice(publicationBefore).map(sortedChanges),
+      ).toEqual(expectedBatches.map(sortedChanges))
       expect(sortedRows(visible)).toEqual(sortedRows(expectedPublished))
       expect(
         sortedRows(
@@ -1347,6 +1258,7 @@ function applyOptimisticOperation(
 async function runOptimisticReplayScenario(
   scenario: OptimisticReplayScenario,
 ): Promise<void> {
+  rawReplayReach.beginHistory()
   let begin!: () => void
   let write!: (
     message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -1458,16 +1370,22 @@ async function runOptimisticReplayScenario(
     await flushPromises()
     await flushPromises()
 
-    // A failed replay leaves the subscription at its last coherent snapshot.
-    const expected =
-      scenario.outcome === `resolve` ? replaySource : optimisticBaseline
-    const expectedBatch =
-      scenario.outcome === `resolve`
-        ? publicationDiff(optimisticBaseline, expected)
-        : []
+    // Load failure does not retract source writes. Core still holds ordinary
+    // source commits during mutation persistence, then publishes the final base
+    // together with dropping the optimistic overlay.
+    const afterTruncate = applyOptimisticOperation(new Map(), scenario)
+    const expected = replaySource
+    rawReplayReach.reach(`optimistic-source-settlement`)
+    const expectedBatches = [
+      [
+        ...publicationDiff(optimisticBaseline, new Map()),
+        ...publicationDiff(new Map(), afterTruncate),
+      ],
+      publicationDiff(afterTruncate, expected),
+    ].filter((batch) => batch.length > 0)
     expect(sortedRows(visible)).toEqual(sortedRows(expected))
     expect(batches.map(sortedChanges)).toEqual(
-      expectedBatch.length > 0 ? [sortedChanges(expectedBatch)] : [],
+      expectedBatches.map(sortedChanges),
     )
     expect(subscription.lastError).toBe(
       scenario.outcome === `reject` ? replayFailure : undefined,
@@ -1488,26 +1406,38 @@ const { multiplier, ...replayConfig } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 /**
- * The filtered-replay model. Replay replaces every source row that the callback
- * mirror does not show, as one insert batch, and the next ordered row is the
- * first value of at least 1 that replay did not select privately.
+ * A truncate deletes the selected baseline. During source callback reentry,
+ * a filtered snapshot selects its matching rows, the ordered snapshot selects
+ * the first remaining ordered row, and the source batch supplies other keys.
+ * Each key is delivered once; load settlement adds no row transaction.
  */
 function predictFilteredReplay(
   rows: ReadonlyArray<{ id: string; value: number }>,
   initialPublicRows: ReadonlyMap<string, { id: string; value: number }>,
-  privatelySelected: ReadonlySet<string>,
+  selected: ReadonlySet<string>,
 ): {
   nextOrdered: { id: string; value: number } | undefined
-  replacement: Array<string>
+  batches: Array<Array<string>>
 } {
   const nextOrdered = rows
     .filter(({ value }) => value >= 1)
     .sort((left, right) => left.value - right.value)
-    .find(({ id }) => !privatelySelected.has(id))
-  const replacement = rows
-    .filter(({ id }) => !initialPublicRows.has(id))
-    .map(({ id }) => `insert:${id}`)
-  return { nextOrdered, replacement }
+    .find(({ id }) => !selected.has(id))
+  const selectedAfterReentry = new Set([
+    ...selected,
+    ...(nextOrdered ? [nextOrdered.id] : []),
+  ])
+  return {
+    nextOrdered,
+    batches: [
+      [...initialPublicRows.keys()].map((id) => `delete:${id}`),
+      rows.filter(({ id }) => selected.has(id)).map(({ id }) => `insert:${id}`),
+      nextOrdered ? [`insert:${nextOrdered.id}`] : [],
+      rows
+        .filter(({ id }) => !selectedAfterReentry.has(id))
+        .map(({ id }) => `insert:${id}`),
+    ].filter((batch) => batch.length > 0),
+  }
 }
 
 declareOracle({
@@ -1530,6 +1460,7 @@ declareOracle({
 })
 
 describe(`CollectionSubscription replay oracle`, () => {
+  afterAll(() => rawReplayReach.assertReached())
   it(`generates shared, failed, stale, released, and post-replay histories`, () => {
     const scenarios = fc.sample(replayScenarioArbitrary, {
       seed: 1755,
@@ -1572,27 +1503,27 @@ describe(`CollectionSubscription replay oracle`, () => {
     ).toBe(true)
   })
 
-  // A snapshot chosen while a direct truncate replay is pending enters the
-  // private replacement, not the callback mirror. Its key still excludes that
-  // row from the next ordered local selection. An earlier subscriber's callback
-  // is a legal reentry cut: it can read the source replacement before this
-  // subscriber receives the same source transaction.
-  it(`continues after a privately selected filtered snapshot during callback reentry`, async () => {
+  // A snapshot during pending replay publishes immediately. Its selected key
+  // still excludes that row from the next ordered local selection. Earlier
+  // subscriber callback reentry sees the same applied source transaction.
+  it(`continues after a filtered snapshot during pending replay callback reentry`, async () => {
     type Row = { id: string; value: number }
     const rows: Array<Row> = [
       { id: `one`, value: 1 },
       { id: `two`, value: 2 },
       { id: `three`, value: 3 },
     ]
-    // The model separates a callback-visible row from rows selected locally
-    // during replay. Neither all source rows nor the callback mirror determines
-    // the next choice; only the filtered snapshot selected `one` here.
-    const privatelySelected = new Set(
+    // The next ordered choice follows the explicit filtered selection made
+    // during reentry, before this subscriber receives the source batch.
+    const selectedDuringReentry = new Set(
       rows.filter(({ id }) => id === `one`).map(({ id }) => id),
     )
     const initialPublicRows = new Map<string, Row>([[`one`, rows[0]!]])
-    const { nextOrdered, replacement: expectedReplacement } =
-      predictFilteredReplay(rows, initialPublicRows, privatelySelected)
+    const { nextOrdered, batches: expectedBatches } = predictFilteredReplay(
+      rows,
+      initialPublicRows,
+      selectedDuringReentry,
+    )
     const publicRows = new Map<string, Row>()
 
     let begin!: () => void
@@ -1696,17 +1627,15 @@ describe(`CollectionSubscription replay oracle`, () => {
       await flushPromises()
 
       expect(reentered).toBe(true)
-      expect(batches).toEqual([])
+      expect(batches).toEqual(expectedBatches)
       expect(loadOptions.at(-1)).toMatchObject({ offset: 0 })
       expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
-        1 + privatelySelected.size + Number(nextOrdered !== undefined),
+        1 + selectedDuringReentry.size + Number(nextOrdered !== undefined),
       )
       expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined()
       heldReplay.resolve()
       await flushPromises()
-      expect(batches.map((batch) => [...batch].sort())).toEqual([
-        expectedReplacement.sort(),
-      ])
+      expect(batches).toEqual(expectedBatches)
       expect(invalidChanges).toEqual([])
       expect([...publicRows.keys()].sort()).toEqual(
         rows.map(({ id }) => id).sort(),
@@ -1719,7 +1648,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`keeps private row tracking through consecutive failed replays`, async () => {
+  it(`publishes raw transactions through consecutive failed replays`, async () => {
     await runReplayScenario({
       initialRows: [
         { id: `one`, value: -2 },
@@ -1809,7 +1738,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`does not republish an identical snapshot after a synchronous replay failure`, async () => {
+  it(`publishes truncate and replacement transactions after a synchronous replay failure`, async () => {
     await runSequentialReplayScenario({
       initialRows: [{ id: `one`, value: 0 }],
       loads: [
@@ -1819,7 +1748,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`keeps a same-key source replacement private after a failed replay`, async () => {
+  it(`publishes a same-key source replacement after a failed replay`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],
@@ -1834,7 +1763,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`does not let an unpublished truncate delete suppress a later insert`, async () => {
+  it(`does not let a truncate delete suppress a later insert`, async () => {
     await runReplayScenario({
       initialRows: [],
       demandIds: [`two`, `one`],
@@ -1938,7 +1867,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`uses the newest complete multi-demand replay`, async () => {
+  it(`publishes the newest multi-demand replay transaction prefix`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`, `two`],
@@ -2026,7 +1955,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`replaces a retained snapshot with a later empty replay`, async () => {
+  it(`publishes a later empty replay after a failed replay`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],

@@ -69,6 +69,12 @@ production queues, caches, or semantic helpers merely to share their names.
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
 
+A raw Collection's public snapshot follows its applied source transactions.
+Replay load failure does not retract those transactions or stop raw subscriber
+updates. A live-query Collection has its own complete-result publication
+boundary; it can retain a previous graph result while its source Collections
+continue to publish transactions (maintainer decision, 2026-10-30).
+
 ## Collection status and health terms
 
 Collection status and the health tree are separate axes. Status says whether the

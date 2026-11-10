@@ -1,0 +1,20 @@
+{
+  "mutantExit": 1,
+  "restored": true,
+  "sourceHash": "3078838292deff0a5879c7463fdcced5bccd79378a587d246d5df659671430c5",
+  "restoredExit": 0,
+  "command": [
+    "/Users/kyle.mathews/.n/bin/node",
+    "../../node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/tmp/collection-publication-core.vitest.config.mts",
+    "--coverage.enabled=false",
+    "--typecheck.enabled=false",
+    "--maxWorkers=1",
+    "--fileParallelism=false",
+    "tests/query/includes-publication-oracle.test.ts",
+    "-t",
+    "compares the final"
+  ]
+}

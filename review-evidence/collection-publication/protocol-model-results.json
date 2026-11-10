@@ -1,0 +1,206 @@
+{
+  "scope": "bounded design model only; no production or receiving evidence",
+  "cases": 12,
+  "results": [
+    {
+      "protocol": "current",
+      "outcome": "success",
+      "writes": 1,
+      "unsafe": {
+        "trace": [
+          "stage",
+          "public-apply-and-receipt"
+        ],
+        "faults": [
+          "public replacement before provider success"
+        ]
+      },
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "public-apply-and-receipt",
+          "provider-success"
+        ]
+      ]
+    },
+    {
+      "protocol": "current",
+      "outcome": "success",
+      "writes": 2,
+      "unsafe": {
+        "trace": [
+          "stage",
+          "public-apply-and-receipt"
+        ],
+        "faults": [
+          "public replacement before provider success"
+        ]
+      },
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "public-apply-and-receipt",
+          "provider-success"
+        ]
+      ]
+    },
+    {
+      "protocol": "current",
+      "outcome": "failure",
+      "writes": 1,
+      "unsafe": {
+        "trace": [
+          "stage",
+          "public-apply-and-receipt"
+        ],
+        "faults": [
+          "public replacement before provider success"
+        ]
+      },
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "public-apply-and-receipt",
+          "provider-failure"
+        ]
+      ]
+    },
+    {
+      "protocol": "current",
+      "outcome": "failure",
+      "writes": 2,
+      "unsafe": {
+        "trace": [
+          "stage",
+          "public-apply-and-receipt"
+        ],
+        "faults": [
+          "public replacement before provider success"
+        ]
+      },
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "public-apply-and-receipt",
+          "provider-failure"
+        ]
+      ]
+    },
+    {
+      "protocol": "hold-existing-commit",
+      "outcome": "success",
+      "writes": 1,
+      "unsafe": null,
+      "deadlock": [
+        "stage"
+      ],
+      "terminalTraces": [
+        [
+          "stage"
+        ]
+      ]
+    },
+    {
+      "protocol": "hold-existing-commit",
+      "outcome": "success",
+      "writes": 2,
+      "unsafe": null,
+      "deadlock": [
+        "stage"
+      ],
+      "terminalTraces": [
+        [
+          "stage"
+        ]
+      ]
+    },
+    {
+      "protocol": "hold-existing-commit",
+      "outcome": "failure",
+      "writes": 1,
+      "unsafe": null,
+      "deadlock": [
+        "stage"
+      ],
+      "terminalTraces": [
+        [
+          "stage"
+        ]
+      ]
+    },
+    {
+      "protocol": "hold-existing-commit",
+      "outcome": "failure",
+      "writes": 2,
+      "unsafe": null,
+      "deadlock": [
+        "stage"
+      ],
+      "terminalTraces": [
+        [
+          "stage"
+        ]
+      ]
+    },
+    {
+      "protocol": "private-staging",
+      "outcome": "success",
+      "writes": 1,
+      "unsafe": null,
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "provider-success",
+          "public-apply-and-receipt"
+        ]
+      ]
+    },
+    {
+      "protocol": "private-staging",
+      "outcome": "success",
+      "writes": 2,
+      "unsafe": null,
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "provider-success",
+          "public-apply-and-receipt"
+        ]
+      ]
+    },
+    {
+      "protocol": "private-staging",
+      "outcome": "failure",
+      "writes": 1,
+      "unsafe": null,
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "provider-failure",
+          "discard-unaccepted-candidate"
+        ]
+      ]
+    },
+    {
+      "protocol": "private-staging",
+      "outcome": "failure",
+      "writes": 2,
+      "unsafe": null,
+      "deadlock": null,
+      "terminalTraces": [
+        [
+          "stage",
+          "provider-failure",
+          "discard-unaccepted-candidate"
+        ]
+      ]
+    }
+  ]
+}

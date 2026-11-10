@@ -1,0 +1,679 @@
+{
+  "mode": "exploratory; provisional preservation contract; no exact equivalence or implementation claim",
+  "source": {
+    "head": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+    "workspace": "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db",
+    "target": "Source sync transactions, truncate replay, consumer publication, and existing adapter acknowledgements",
+    "sha256": {
+      "packages/db/src/types.ts": "152fd447c615a76398e0f8e4f0714957df7879a77cb51f89b4fef40f83bcc367",
+      "packages/db/src/collection/state.ts": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+      "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+      "packages/db/src/collection/changes.ts": "3a8878ab58df162f8108c5cdd6470562af7e6ed65a7b3e720f6b329bc0378628",
+      "packages/db/src/query/live/ARCHITECTURE.md": "5b5aa10c6672e7e60e38c1d2f5f28fa1f956d60741fb75965808050a256130b1",
+      "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+      "packages/db-sqlite-persistence-core/src/persisted.ts": "1a3bc05bbf10646c8d75fb062799c8335a181a8d3a5e91d61a9244c1a4f5027a",
+      "review-evidence/collection-publication/design-grammar-v1/PublicationGrammar.tla": "15d923e58a36ac89fa8365f14f416558a31ebbed515e38e3e2a684f92c78f606"
+    }
+  },
+  "preservation": [
+    [
+      "P1",
+      "user-required",
+      "Publish atomic coherent updates; do not expose intermediate graph states that are invalid as public results."
+    ],
+    [
+      "P2",
+      "user-required",
+      "Subscribers receive changes that keep their promised view current."
+    ],
+    [
+      "P3",
+      "user-preference",
+      "Avoid a new adapter API. Interface spelling and behavioral compatibility must be distinguished."
+    ],
+    [
+      "P4",
+      "source-stated",
+      "Applied receipt means transaction writes and events became visible; successful exact subset load awaits its establishing receipts."
+    ],
+    [
+      "P5",
+      "source-stated",
+      "Accepted transactions apply in commit order; a later load rejection does not withdraw them."
+    ],
+    [
+      "P6",
+      "source-stated",
+      "Full snapshot transaction carries every synced row; partial subset transactions cannot make that declaration."
+    ],
+    [
+      "P7",
+      "source-stated",
+      "Materialized query replay retains its complete prior result through failure; initial/progressive loads are not all replacements."
+    ],
+    [
+      "P8",
+      "source-stated",
+      "Optimistic causal queue, persistence acceptance/durability and sync-run/ownership cancellation boundaries remain distinct."
+    ],
+    [
+      "P9",
+      "analyst-inferred/unresolved",
+      "Every source Collection read and every raw subscriber must retain the old snapshot through all replay load promise settlements, including failure. This is the strong draft oracle interpretation, not a conclusion of this extraction."
+    ],
+    [
+      "P10",
+      "source-stated",
+      "Completeness applies only to the declared scope; a promise settlement is not provider exhaustion or global source authority."
+    ]
+  ],
+  "evidence": [
+    [
+      "E1",
+      "packages/db/src/types.ts:384-407,450-475",
+      "exact-load and commit contract"
+    ],
+    [
+      "E2",
+      "packages/db/src/collection/state.ts:1159-1164,1467-1523",
+      "current source commit installs rows/indexes, delivers events, then resolves receipt"
+    ],
+    [
+      "E3",
+      "packages/db/src/collection/subscription.ts:714-821,1295-1311",
+      "consumer replay barrier and private row buffer"
+    ],
+    [
+      "E4",
+      "packages/db/src/collection/changes.ts:210-284",
+      "event-only deferral; publication context"
+    ],
+    [
+      "E5",
+      "packages/query-db-collection/src/query.ts:1941-1949,2802-2875",
+      "actual result application precedes load fulfillment"
+    ],
+    [
+      "E6",
+      "packages/db/src/query/live/ARCHITECTURE.md:1484-1575,1668-1740,1844-1868",
+      "replay scope and coherent current-input graph result; source-to-result boundaries"
+    ],
+    [
+      "E7",
+      "packages/db-sqlite-persistence-core/src/persisted.ts:1387-1438,4475-4500,6304-6315",
+      "mutex, durable step and outward receipt distinction"
+    ],
+    [
+      "E8",
+      "docs/contributing/glossary.md:35-58,114-153",
+      "canonical terms and many-to-many ownership/work/publication graph"
+    ],
+    [
+      "E9",
+      "review-evidence/collection-publication/query-receiving-red.md",
+      "real Query held read/fold divergence, successful progress; existing authored test interpretation"
+    ],
+    [
+      "E10",
+      "review-evidence/collection-publication/persisted-public-snapshot-evidence.md",
+      "real wrapper held visibility divergence and separately recorded receipt/mutex progress"
+    ]
+  ],
+  "model": {
+    "primitives": [
+      [
+        "M1",
+        "Sync transaction and its acceptance/application obligation",
+        [
+          "E1",
+          "E2"
+        ],
+        "Removal loses FIFO/no-withdrawal and coherent-batch reconstruction."
+      ],
+      [
+        "M2",
+        "Exact acquisition and its response, receipt dependencies and final outcome",
+        [
+          "E1",
+          "E5",
+          "E8"
+        ],
+        "Removal loses cycle and distinction between response completeness and load settlement."
+      ],
+      [
+        "M3",
+        "Public view with declared scope, rows and subscriber fold",
+        [
+          "E2",
+          "E3",
+          "E4",
+          "E8"
+        ],
+        "Removal hides source/read/fold mismatch and source-versus-query distinction."
+      ],
+      [
+        "M4",
+        "Replacement authority over current owned demand",
+        [
+          "E3",
+          "E6",
+          "E8"
+        ],
+        "Removal lets partial source coverage or failed/obsolete attempt certify replacement."
+      ]
+    ],
+    "activeOverlaps": [
+      [
+        "O1",
+        "M1×M2: applied receipt links visible source changes to successful load settlement"
+      ],
+      [
+        "O2",
+        "M1×M3: source state, indexes, subscriber notification and receipt form one ordered application boundary"
+      ],
+      [
+        "O3",
+        "M2×M4: exact current-demand outcomes authorize a larger replacement; ownership change alters its membership"
+      ],
+      [
+        "O4",
+        "M3×M4: each consumer's declared complete result is withheld until its required work is authoritative"
+      ],
+      [
+        "O5",
+        "M1×M4: wrapper durability, optimistic causal holds and sync-run lifetime constrain application; not independent queue details"
+      ]
+    ],
+    "rules": [
+      [
+        "R1",
+        "source",
+        "Accept precedes application; application exposes transaction state/events before applied receipt; successful exact load follows receipts."
+      ],
+      [
+        "R2",
+        "source",
+        "A successful load establishes only its exact demand; a full snapshot explicitly declares every row."
+      ],
+      [
+        "R3",
+        "source",
+        "A materialized query may advance private graph input while its public result remains held."
+      ],
+      [
+        "R4",
+        "source",
+        "Failed authoritative replay and obsolete/aborted work cannot certify current materialized replacement."
+      ],
+      [
+        "R5",
+        "inference",
+        "Changing the boundary can preserve API spelling while changing the semantic contract. Such loss must be named."
+      ],
+      [
+        "R6",
+        "inference",
+        "Precommit buffering can combine known complete responses using existing transaction calls, only if the producer knows the full replacement scope and completion; core cannot invent this premise from partial commits."
+      ]
+    ],
+    "conflicts": [
+      [
+        "C1",
+        "P9 reverses R1 when the load awaits its visibility receipt. Preserving both creates a wait cycle."
+      ],
+      [
+        "C2",
+        "P2 says keep subscribers current, but source-commit visibility and retained whole-replacement view have different scopes. Must declare which public view each subscriber represents."
+      ],
+      [
+        "C3",
+        "Provider response completeness need not equal successful load settlement, nor prove global source replacement; no implicit priority."
+      ]
+    ],
+    "reconstruction": [
+      [
+        "K1",
+        "Current healthy source commit",
+        "M1 application -> M3 source state/index; source notifications; receipt -> M2 load success"
+      ],
+      [
+        "K2",
+        "Current replay divergence",
+        "M1 source application advances direct view; O4 retains subscriber/query view until M4 current-demand verdict"
+      ],
+      [
+        "K3",
+        "Receipt withholding",
+        "Move application behind M4 verdict while O1 still places verdict behind receipt: dependency cycle"
+      ],
+      [
+        "K4",
+        "Current persistence",
+        "Wrapper mutex can cover core application wait and durable work; outward receipt needs durable and visible; optimistic exception is retained as an extra premise"
+      ],
+      [
+        "K5",
+        "Failure/retirement/retry",
+        "M4 scopes verdict to current ownership and sync/replay identity; accepted M1 transactions remain obligations"
+      ]
+    ],
+    "ablation": [
+      [
+        "M1",
+        "retained: removing it admits receipt fulfillment without visible writes and withdrawal of accepted writes"
+      ],
+      [
+        "M2",
+        "retained: removing it merges provider response and successful load settlement, hiding cycle"
+      ],
+      [
+        "M3",
+        "retained: removing it conflates source transaction atomicity with complete query publication"
+      ],
+      [
+        "M4",
+        "retained: removing it certifies replay from one fragment or obsolete acquisition"
+      ],
+      [
+        "raw event array",
+        "demoted to representation: no separate primitive needed"
+      ],
+      [
+        "per-demand queue implementation",
+        "excluded: source semantics require dependencies, not current queue layout"
+      ],
+      [
+        "shared coordinator object",
+        "not admitted: a possible implementation, not a primitive established by source"
+      ],
+      [
+        "new staging receipt",
+        "not admitted: proposal to vary, not part of frozen source"
+      ]
+    ],
+    "boundary": "One source Collection, one unfiltered raw subscriber, one retained materialized result, one/two pre-enrolled demands, one transaction per response; owned-demand changes, mutex, optimism and native host remain source constraints outside executable abstraction.",
+    "range": "No held-out marginal case supplied. Query and persisted witnesses were used for extraction and cannot count as independent range evidence.",
+    "negative": "An applied receipt with the old public source rows/events, or a partial demand masquerading as a full snapshot, must be rejected.",
+    "forms": [
+      {
+        "id": "F1",
+        "name": "Publish source transactions; retain complete query results",
+        "route": "split existing source and derived-result publication scopes",
+        "changes": "Raw source subscriber folds follow each source commit; query publication retains its separate replay/window barrier.",
+        "preserves": [
+          "P1 at a valid committed batch/current-input graph scope",
+          "P2 for source reads and raw source subscribers",
+          "P4",
+          "P5",
+          "P7",
+          "P10"
+        ],
+        "losses": [
+          "Revises established direct-subscriber replay buffering behavior.",
+          "Does not retain the prior complete source replacement through replay failure (P9).",
+          "Does not establish that arbitrary user projections cannot throw on partial source inputs."
+        ],
+        "support": [
+          "E1",
+          "E2",
+          "E3",
+          "E6"
+        ],
+        "newStructure": "Explicit distinction between source-batch consumers and complete materialized-result consumers; not a new adapter callback.",
+        "coordination": "All source read/index/event paths must share application; complete graph publication stays separate.",
+        "boundary": "Needs a product choice about direct source subscription replay behavior. Not a drop-in fix for the stronger draft oracle."
+      },
+      {
+        "id": "F2",
+        "name": "Buffer known complete responses before an existing sync transaction",
+        "route": "rule combination: response completion + one existing atomic transaction + applied settlement",
+        "changes": "Producer gathers its declared complete replacement before begin/truncate/write/commit; demands then await that existing shared applied receipt.",
+        "preserves": [
+          "P1 for declared source replacement scope under the complete-cohort premise",
+          "P2",
+          "P3 interface shape",
+          "P4",
+          "P5",
+          "P6",
+          "P7",
+          "P10"
+        ],
+        "losses": [
+          "Requires producer knowledge of complete replacement scope; ordinary partial commits do not provide it.",
+          "Buffer/coordination costs move earlier; bundled adapter implementations may change.",
+          "Publication precedes load-promise fulfillment, so it fails strict promise-timing P9 even for complete valid data.",
+          "A rejection after an accepted visible commit cannot restore Old without revising P5."
+        ],
+        "support": [
+          "E1",
+          "E5",
+          "E6",
+          "E8"
+        ],
+        "newStructure": "Precommit producer coordination, using one existing transaction rather than a new core staging callback.",
+        "coordination": "Unknown dynamic demand membership or independent adapters cannot be assumed coordinated. Full snapshot semantics require actual full-source authority.",
+        "boundary": "TLA passing cases assume fixed known cohort and before-commit failures; after-commit failure still has complete rows but violates failed-source-retention law."
+      }
+    ],
+    "exclusions": [
+      {
+        "id": "X1",
+        "design": "Resolve existing receipt while source stays private",
+        "result": "Rejected by current ReceiptVisibility contract; same signatures still change semantic API."
+      },
+      {
+        "id": "X2",
+        "design": "Hold ordinary applied receipts until their loads succeed",
+        "result": "Circular wait in fixed-cohort model; accepted commits remain pending with no enabled Next application action."
+      },
+      {
+        "id": "X3",
+        "design": "Treat one subset result or an empty source as complete global replacement",
+        "result": "Rejected by exact-scope/snapshot law; no provider exhaustion or coverage inferred."
+      }
+    ]
+  },
+  "process": {
+    "selectedBy": "user: design grammar",
+    "savesFieldLog": false,
+    "productionEdits": false,
+    "sourceReaders": [
+      "grammar_commit_boundary",
+      "grammar_publication_structure"
+    ],
+    "status": "FROZEN v3: source extraction, reconstruction, per-component ablation, 20 TLC configurations, exclusion, two adjacent forms and layer reconstruction complete. Independent range untested. Primary brief has not yet been drafted.",
+    "losses": [
+      "Decomposition represents coherent rows abstractly and does not execute arbitrary user projections, include discovery, optimistic snapshots, dynamic peer enrollment, callback reentry or storage recovery."
+    ],
+    "encodingCorrections": [
+      {
+        "version": 2,
+        "reason": "Make the stronger draft timing promise and stranded accepted commits explicit; v1 only tested complete source replacement versus progressive source, leaving strict pre-load visibility implicit.",
+        "preservedV1": true
+      },
+      {
+        "version": 3,
+        "reason": "Source-reader check found application over-approximation: encode FIFO using acceptedOrder; clarify one-coalesced-transaction abstraction, pre/postcommit failure bounds, and Spec stuttering.",
+        "preserved": "PublicationGrammar.before-fifo.tla.txt",
+        "effect": "Corrected encoding and labels; no product law or invariant relaxed.",
+        "finalAllConfigurationsRerun": true
+      }
+    ],
+    "modelCheck": {
+      "tool": "TLC2 2.19 (2024-08-08, rev 5a47802), official tla2tools v1.7.4 pinned by bundled checksum; container image sha256:985e5be2bfcb9a07189650114cd8839dd11f0e94d32407e91b9c77d69e7825e3",
+      "source": "designGrammarExecutableSourceV2",
+      "cases": 30,
+      "positiveControl": "source-commit publication preserves modeled receipt/read-fold/query laws; complete-response buffering preserves complete source data before publication when failures precede commit",
+      "negativeControls": [
+        [
+          "source reads differ from raw subscriber fold"
+        ],
+        [
+          "receipt fulfilled before source write visible"
+        ],
+        [
+          "source is incomplete full replacement"
+        ]
+      ],
+      "limits": "TLC explores only the encoded finite grammar; no arbitrary projection validation, dynamic membership, abort, optimism, durability, reentry or eventual-response guarantee. Current split-view failure is reconstructed in Init, not generated by a truncate transition.",
+      "configs": [
+        {
+          "name": "source-success-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "source-before-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "source-after-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-success-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-before-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-after-1",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "source-success-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "source-before-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "source-after-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-success-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-before-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "buffer-after-2",
+          "expect": "pass",
+          "exit": 0,
+          "matched": true
+        },
+        {
+          "name": "hold-success-1",
+          "expect": "deadlock",
+          "exit": 11,
+          "matched": true
+        },
+        {
+          "name": "current-success-1",
+          "expect": "ReadEventAgreement",
+          "exit": 12,
+          "matched": true
+        },
+        {
+          "name": "acceptance-success-1",
+          "expect": "ReceiptVisibility",
+          "exit": 12,
+          "matched": true
+        },
+        {
+          "name": "hold-success-2",
+          "expect": "deadlock",
+          "exit": 11,
+          "matched": true
+        },
+        {
+          "name": "current-success-2",
+          "expect": "ReadEventAgreement",
+          "exit": 12,
+          "matched": true
+        },
+        {
+          "name": "acceptance-success-2",
+          "expect": "ReceiptVisibility",
+          "exit": 12,
+          "matched": true
+        },
+        {
+          "name": "buffer-strict-timing-2",
+          "expect": "StrictReplayTiming",
+          "exit": 12,
+          "matched": true
+        },
+        {
+          "name": "buffer-failed-retention-2",
+          "expect": "FailedRetainsOldSource",
+          "exit": 12,
+          "matched": true
+        }
+      ],
+      "passingConfigurations": 12,
+      "expectedCounterexamples": 8,
+      "noFairness": true
+    },
+    "runtimeCorrections": [
+      {
+        "kind": "setup",
+        "reason": "Docker denied in ordinary sandbox; exact read-only engine access allowed through normal escalation."
+      },
+      {
+        "kind": "setup",
+        "reason": "First direct runs incorrectly used Docker config digest as local image ID; no model executed (exit125). Resolved image's manifest ID and reran all configs; no failure credited as counterexample."
+      }
+    ],
+    "layerReconstruction": [
+      {
+        "property": "source vs subscriber agreement",
+        "where": [
+          "P2",
+          "M3",
+          "O2",
+          "F1",
+          "TLC ReadEventAgreement"
+        ],
+        "retained": true
+      },
+      {
+        "property": "applied receipt source visibility vs whole replacement vs promise timing",
+        "where": [
+          "P4",
+          "P9",
+          "C1",
+          "F2",
+          "ReceiptVisibility",
+          "SourceComplete",
+          "StrictReplayTiming"
+        ],
+        "retained": true
+      },
+      {
+        "property": "accepted obligation and exact/full-source authority",
+        "where": [
+          "P5",
+          "P6",
+          "R1",
+          "R2",
+          "F2",
+          "X1",
+          "X3"
+        ],
+        "retained": true
+      },
+      {
+        "property": "prior query result across failed replay",
+        "where": [
+          "P7",
+          "M4",
+          "F1",
+          "F2",
+          "QueryAuthority"
+        ],
+        "retained": true
+      },
+      {
+        "property": "optimistic/persisted ordering and dynamic ownership",
+        "where": [
+          "P8",
+          "O5",
+          "boundary",
+          "limits"
+        ],
+        "retained": "source constraints recorded; excluded from executable formal control"
+      },
+      {
+        "property": "non-erroring real user projections and additional receiving hosts",
+        "where": [
+          "P1",
+          "F1.losses",
+          "limits"
+        ],
+        "retained": "not established by abstract rows; no implementation claim"
+      }
+    ],
+    "briefSupportMap": [
+      [
+        "B1",
+        "Separate source-transaction visibility, completeness of declared replacement, and successful load promise settlement.",
+        [
+          "E1",
+          "E2",
+          "E5",
+          "M1",
+          "M2",
+          "C1",
+          "TLC buffer-strict-timing-2"
+        ]
+      ],
+      [
+        "B2",
+        "Two generated no-new-callback forms, each with consequential limits.",
+        [
+          "F1",
+          "F2"
+        ]
+      ],
+      [
+        "B3",
+        "Receipt withholding deadlocks; acceptance-only receipt violates existing semantic contract.",
+        [
+          "X1",
+          "X2",
+          "TLC hold-success-1",
+          "TLC hold-success-2",
+          "TLC acceptance-success-1",
+          "TLC acceptance-success-2"
+        ]
+      ],
+      [
+        "B4",
+        "20 bounded configurations have expected outcomes: 12 passing, 8 counterexamples.",
+        [
+          "process.modelCheck.configs"
+        ]
+      ],
+      [
+        "B5",
+        "No source proof or universal repair/no-error guarantee; no production edits.",
+        [
+          "process.layerReconstruction",
+          "model.boundary",
+          "model.range",
+          "process.losses"
+        ]
+      ]
+    ]
+  },
+  "version": 3
+}
+

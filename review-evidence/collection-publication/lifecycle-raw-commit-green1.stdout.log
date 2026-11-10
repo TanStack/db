@@ -1,0 +1,47 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts (96 tests | 25 failed) 4404ms
+     × 'default-eager' source with 'absent' loader, 'empty' replacement, and 'truncate' 8ms
+     × 'default-eager' source with 'present' loader, 'empty' replacement, and 'truncate' 4ms
+     × 'eager' source with 'absent' loader, 'empty' replacement, and 'truncate' 4ms
+     × 'eager' source with 'present' loader, 'empty' replacement, and 'truncate' 3ms
+     × 'default-eager' source with 'absent' loader, 'row' replacement, and 'truncate' 3ms
+     × 'default-eager' source with 'present' loader, 'row' replacement, and 'truncate' 2ms
+     × 'eager' source with 'absent' loader, 'row' replacement, and 'truncate' 3ms
+     × 'eager' source with 'present' loader, 'row' replacement, and 'truncate' 3ms
+     × retains an earlier peer failure after aborting it while another peer will resolve 14ms
+     × retains an earlier peer failure after aborting it while another peer will reject 12ms
+     × holds detached callers for their peer until reject 9ms
+     × covers every required command and cross-phase transition 31ms
+     × does not wait for an aborted load to settle for 'duplicate owners after overlapping re…' 11ms
+     × releases exact ownership while older replay work is pending 20ms
+     × tracks 'manual' cancellation across 1 replay(s) ending in 'reject' 6ms
+     × tracks 'manual' cancellation across 2 replay(s) ending in 'reject' 7ms
+     × tracks 'reject' cancellation across 1 replay(s) ending in 'reject' 6ms
+     × tracks 'reject' cancellation across 2 replay(s) ending in 'reject' 7ms
+     × publishes a raw snapshot after failed restart 16ms
+     × judges a replay once after a change that retires a replacement and a pending owner 13ms
+     × keeps a replay failed when 'a replacement aborted after its repla…' 13ms
+     × keeps a replay failed when 'a replacement aborted after a peer lo…' 12ms
+     × matches the pure lifecycle model for a random or replayed seed (with seed=122217675) 254ms
+     × judges a replay once per demand change for a fixed seed (with seed=1657005) 655ms
+     × judges a replay once per demand change for a random or replayed seed (with seed=1530656390) 538ms
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-oracle.test.ts (112 tests | 11 failed) 1111ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'resolve' / 'during' 7ms
+     × observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'resolve' / 'during' 3ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'reject' / 'during' 3ms
+     × observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'reject' / 'during' 3ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'release' / 'during' 3ms
+     × observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'release' / 'during' 3ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'unsubscribe' / 'during' 3ms
+     × observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'unsubscribe' / 'during' 3ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'cleanup' / 'during' 4ms
+     × observes unavailable demand synchronously: 'limited' / 'cleaned-up' / 'cleanup' / 'during' 4ms
+     × observes unavailable demand synchronously: 'snapshot' / 'cleaned-up' / 'abort' / 'during' 3ms
+
+ Test Files  2 failed (2)
+      Tests  36 failed | 172 passed (208)
+   Start at  11:08:19
+   Duration  8.02s (transform 683ms, setup 129ms, import 1.68s, tests 5.51s, environment 495ms)
+

@@ -1,0 +1,841 @@
+import { fc } from '@fast-check/vitest'
+import { QueryClient } from '@tanstack/query-core'
+import { IR, createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { expect, it } from 'vitest'
+import { createDeferred } from '../../db/src/deferred.js'
+import {
+  checkPublicSnapshotObservation,
+  publicSnapshotHistoryArbitrary,
+  publicSnapshotHistoryExamples,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleReplayTest,
+  oracleRuns,
+  readOracleRunConfig,
+  recordOracleReplay,
+} from '../../db/tests/oracle-config.js'
+import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { queryCollectionOptions } from '../src/query.js'
+import { flushPromises } from '../../db/tests/utils.js'
+import {
+  ReplayPublicationModel,
+  normalize,
+} from '../../db/tests/query/replay-publication-oracle.js'
+import type { PublicRow } from '../../db/tests/query/replay-publication-oracle.js'
+import type {
+  PublicSnapshotCommit,
+  PublicSnapshotHistory,
+  PublicSnapshotObservation,
+  PublicSnapshotRow,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
+
+/**
+ * # Do actual Query commits reach every raw Collection observation?
+ *
+ * The shared model owns the maintainer's 2026-10-30 law: raw Collection reads
+ * and a full-state raw subscriber reflect applied source transactions. A later
+ * acquisition rejection cannot retract accepted writes. Live-query coherent
+ * publication is a separate contract and is not judged by this raw driver.
+ *
+ * Real QueryClient and queryCollectionOptions author sync transactions. The
+ * recorder clones those transaction inputs before forwarding them unchanged.
+ * Only the exact core applied receipt advances the model's applied prefix.
+ * Query cache reapplications remain explicit transactions; no read or private
+ * Query classifier supplies expected row truth. This receives the Collection
+ * publication law through Query, not Query result or ownership correctness.
+ *
+ * Two exact retained demands partition a–d in one raw subscription. A truncate
+ * starts replay; both queryFn calls enter before the left result returns while
+ * the right remains held. Reads and the subscriber fold are captured at the
+ * left result's applied receipt, then again after replay fulfills or rejects.
+ * Receipts are forwarded exactly. Progress and exact error identity are checked
+ * separately, preserving the first row mismatch through completion and cleanup.
+ */
+
+const property = `query-db.collection-public-snapshot`
+const states = [
+  `initial-real-query-loads-settled`,
+  `both-replay-query-functions-entered`,
+  `real-query-replay-commit-forwarded`,
+  `held-public-snapshot-compared`,
+  `successful-replay-progressed`,
+  `failed-replay-progressed`,
+] as const
+type ReachState = (typeof states)[number]
+type Scope = `left` | `right`
+const rowIds = [`a`, `b`, `c`, `d`] as const
+const clone = (rows: ReadonlyArray<PublicSnapshotRow>) =>
+  rows.map(({ id, value }) => ({ id, value }))
+
+async function progress<T>(work: Promise<T>, boundary: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Query receiving protocol did not progress: ${boundary}`,
+              ),
+            ),
+          2_000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+async function receiveQueryPublicSnapshot(
+  history: PublicSnapshotHistory,
+  record: (state: ReachState) => void = () => {},
+): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+    },
+  })
+  const predicates = {
+    left: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`a`, `c`])]),
+    right: new IR.Func(`in`, [
+      new IR.PropRef([`id`]),
+      new IR.Value([`b`, `d`]),
+    ]),
+  }
+  const scopes = new Map<unknown, Scope>([
+    [predicates.left, `left`],
+    [predicates.right, `right`],
+  ])
+  const selected = (rows: ReadonlyArray<PublicSnapshotRow>, scope: Scope) =>
+    clone(
+      rows.filter(({ id }) =>
+        scope === `left` ? id === `a` || id === `c` : id === `b` || id === `d`,
+      ),
+    )
+  const gates = {
+    left: createDeferred<Array<PublicSnapshotRow>>(),
+    right: createDeferred<Array<PublicSnapshotRow>>(),
+  }
+  // Every controlled rejection is observed, even if teardown retires a fetch.
+  void gates.left.promise.catch(() => {})
+  void gates.right.promise.catch(() => {})
+  const entered = new Set<Scope>()
+  const bothEntered = createDeferred<void>()
+  const firstCommitted = createDeferred<PublicSnapshotObservation>()
+  const folded = new Map<PublicSnapshotRow[`id`], PublicSnapshotRow>()
+  const errors: Array<unknown> = []
+  const receipts: Array<{
+    receipt: SyncAppliedReceipt
+    state: `pending` | `fulfilled` | `rejected`
+  }> = []
+  let replaying = false
+  let captureNextCommit = false
+  let operations!: Parameters<SyncConfig<PublicSnapshotRow>[`sync`]>[0]
+  type AuthoredTransaction = {
+    truncate?: boolean
+    rows: Array<PublicSnapshotRow>
+    deleted: Array<PublicSnapshotRow[`id`]>
+  }
+  let transaction: AuthoredTransaction | undefined
+  const committed: Array<{ input: PublicSnapshotCommit; applied: boolean }> = []
+  const config = queryCollectionOptions<PublicSnapshotRow>({
+    id: `collection-publication-query`,
+    queryClient: client,
+    queryKey: ({ where }) => {
+      const scope = scopes.get(where)
+      return scope === undefined
+        ? [`collection-publication-query`]
+        : [`collection-publication-query`, scope]
+    },
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    queryFn: ({ queryKey }) => {
+      const scope = queryKey[1]
+      if (scope !== `left` && scope !== `right`)
+        throw new Error(`Query receiver lost its exact request scope`)
+      if (!replaying) return Promise.resolve(selected(history.initial, scope))
+      entered.add(scope)
+      if (entered.size === 2) bothEntered.resolve()
+      return gates[scope].promise.then((rows) => {
+        // The next commit is observed only after the held provider returned.
+        // Replay startup and cached-result commits cannot open this recorder.
+        if (scope === `left`) captureNextCommit = true
+        return rows
+      })
+    },
+  })
+  const source = createCollection({
+    ...config,
+    sync: {
+      ...config.sync,
+      sync: (params) => {
+        const boundary: typeof params = {
+          ...params,
+          begin: (options) => {
+            transaction = { rows: [], deleted: [] }
+            return params.begin(options)
+          },
+          write: (message) => {
+            if (transaction === undefined)
+              throw new Error(`Query authored a write outside a transaction`)
+            if (message.type === `delete`) {
+              const key = `value` in message ? message.value.id : message.key
+              if (!rowIds.some((id) => id === key))
+                throw new Error(`Query authored an unknown row key`)
+              transaction.deleted.push(key as PublicSnapshotRow[`id`])
+            } else transaction.rows.push({ ...message.value })
+            return params.write(message)
+          },
+          truncate: () => {
+            if (transaction === undefined)
+              throw new Error(`Query authored truncate outside a transaction`)
+            transaction.truncate = true
+            transaction.rows = []
+            transaction.deleted = []
+            return params.truncate()
+          },
+          commit: (signal) => {
+            if (transaction === undefined)
+              throw new Error(`Query authored commit outside a transaction`)
+            // Append before forwarding: truncate can synchronously reenter the
+            // adapter and author cached-result transactions in this same call.
+            const entry = { input: transaction, applied: false }
+            committed.push(entry)
+            transaction = undefined
+            const capture = captureNextCommit
+            captureNextCommit = false
+            const receipt = params.commit(signal)
+            const observed: (typeof receipts)[number] = {
+              receipt,
+              state: receipt === true ? `fulfilled` : `pending`,
+            }
+            receipts.push(observed)
+            const applied = () => {
+              entry.applied = true
+              observed.state = `fulfilled`
+              if (capture) firstCommitted.resolve(observe())
+            }
+            if (receipt === true) applied()
+            else
+              void receipt.then(applied, () => {
+                observed.state = `rejected`
+              })
+            return receipt
+          },
+        }
+        operations = boundary
+        return config.sync.sync(boundary)
+      },
+    },
+  })
+  function observe(): PublicSnapshotObservation {
+    return {
+      appliedCommits: committed
+        .filter(({ applied }) => applied)
+        .map(({ input }) => ({
+          ...input,
+          rows: clone(input.rows),
+          deleted: [...(input.deleted ?? [])],
+        })),
+      reads: {
+        toArray: clone(source.toArray),
+        values: clone([...source.values()]),
+        get: rowIds.flatMap((id) => {
+          const row = source.get(id)
+          return row === undefined ? [] : clone([row])
+        }),
+      },
+      foldedRows: clone([...folded.values()]),
+      sizes: { size: source.size },
+    }
+  }
+  const subscription = source.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) folded.delete(change.value.id)
+        else folded.set(change.value.id, { ...change.value })
+      }
+    },
+    { includeInitialState: false },
+  )
+  subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+  let primary: unknown
+  let completion: `unobserved` | `fulfilled` | `rejected` = `unobserved`
+  const secondary: Array<unknown> = []
+  try {
+    const initial: Array<Promise<void>> = []
+    for (const scope of [`left`, `right`] as const)
+      subscription.requestSnapshot({
+        where: predicates[scope],
+        refetch: true,
+        onLoadSubsetResult: (receipt) => {
+          initial.push(Promise.resolve(receipt).then(() => undefined))
+        },
+      })
+    await progress(Promise.all(initial), `initial Query loads`)
+    // The shared history starts at the independently established baseline.
+    // Initial Query delivery was already awaited; later commits stay explicit.
+    committed.length = 0
+    record(`initial-real-query-loads-settled`)
+    checkPublicSnapshotObservation(history, `initial`, observe())
+
+    replaying = true
+    operations.begin()
+    operations.truncate()
+    const truncateReceipt = operations.commit()
+    if (truncateReceipt !== true) void truncateReceipt.catch(() => {})
+    const afterTruncate = observe()
+    const replay = subscription.pendingTruncateReplacement
+    if (replay === undefined)
+      throw new Error(`Query receiver did not enter an authoritative replay`)
+    const replayResult = Promise.resolve(replay).then(
+      () => {
+        completion = `fulfilled`
+      },
+      (error: unknown) => {
+        completion = `rejected`
+        return error
+      },
+    )
+    await progress(bothEntered.promise, `both replay queryFn entries`)
+    record(`both-replay-query-functions-entered`)
+    gates.left.resolve(selected(history.replacement, `left`))
+    const afterQueryCommit = await progress(
+      firstCommitted.promise,
+      `first real Query result commit`,
+    )
+    record(`real-query-replay-commit-forwarded`)
+    record(`held-public-snapshot-compared`)
+    try {
+      checkPublicSnapshotObservation(history, `held`, afterQueryCommit)
+      checkPublicSnapshotObservation(history, `held`, afterTruncate)
+    } catch (error) {
+      primary = error
+    }
+
+    let settledRead: PublicSnapshotObservation | undefined
+    const failure = new Error(`Query replacement failed`)
+    if (history.outcome === `resolve`)
+      gates.right.resolve(selected(history.replacement, `right`))
+    else gates.right.reject(failure)
+    try {
+      const rejection = await progress(
+        replayResult,
+        `replay completion after both provider results`,
+      )
+      if (history.outcome === `resolve`) {
+        record(`successful-replay-progressed`)
+        expect(completion, `successful Query replay completion`).toBe(
+          `fulfilled`,
+        )
+        settledRead = observe()
+        checkPublicSnapshotObservation(history, `complete`, settledRead)
+      } else {
+        record(`failed-replay-progressed`)
+        expect(completion, `failed Query replay completion`).toBe(`rejected`)
+        expect(
+          Object.is(rejection, failure),
+          `exact Query replay rejection`,
+        ).toBe(true)
+        expect(
+          errors.some((error) => Object.is(error, failure)),
+          `exact Query load error event`,
+        ).toBe(true)
+        settledRead = observe()
+        checkPublicSnapshotObservation(history, `failed`, settledRead)
+      }
+    } catch (error) {
+      secondary.push(error)
+    }
+    process.stdout.write(
+      `${JSON.stringify({ property, history, outcome: history.outcome, entered: [...entered], completion, queryReceipts: receipts.map(({ state }) => state), afterTruncate, heldRead: afterQueryCommit, settledRead, rawPublicationFailed: primary !== undefined, secondaryFailures: secondary.map(String) })}\n`,
+    )
+  } catch (error) {
+    primary ??= error
+  } finally {
+    gates.left.resolve([])
+    gates.right.resolve([])
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      secondary.push(error)
+    }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      secondary.push(error)
+    }
+    try {
+      client.clear()
+    } catch (error) {
+      secondary.push(error)
+    }
+  }
+  if (primary !== undefined) {
+    if (secondary.length === 0) throw primary
+    throw new AggregateError(
+      [primary, ...secondary],
+      `Query public snapshot and later progress failed`,
+      { cause: primary },
+    )
+  }
+  if (secondary.length > 0)
+    throw new AggregateError(
+      secondary,
+      `Query replay receiving progress failed`,
+      { cause: secondary[0] },
+    )
+}
+
+const runConfig = readOracleRunConfig()
+declareOracle({
+  grammar: [publicSnapshotHistoryArbitrary, publicSnapshotHistoryExamples],
+  check: [
+    receiveQueryPublicSnapshot,
+    runQueryPublicSnapshotCampaign,
+    checkPublicSnapshotObservation,
+  ],
+})
+
+async function runQueryPublicSnapshotCampaign(
+  campaign: `fixed` | `random` | `replay`,
+): Promise<void> {
+  const reach = createOracleReach(property, states, { minimum: 5 })
+  const samples: Array<Set<ReachState>> = []
+  const details = await fc.check(
+    fc.asyncProperty(publicSnapshotHistoryArbitrary, async (history) => {
+      reach.beginHistory()
+      const entered = new Set<ReachState>()
+      samples.push(entered)
+      await receiveQueryPublicSnapshot(history, (state) => {
+        entered.add(state)
+        reach.reach(state)
+      })
+    }),
+    campaign === `fixed`
+      ? { seed: 20261030, numRuns: oracleRuns(60) }
+      : oraclePropertyOptions(60, property),
+  )
+  recordOracleReplay(property, details)
+  const count = (histories: Array<Set<ReachState>>) =>
+    Object.fromEntries(
+      states.map((state) => [
+        state,
+        histories.filter((entered) => entered.has(state)).length,
+      ]),
+    )
+  process.stdout.write(
+    `${JSON.stringify({ property, campaign, seed: details.seed, path: details.counterexamplePath, runs: details.numRuns, shrinks: details.numShrinks, failed: details.failed, generatedReach: count(samples.slice(0, details.numRuns)), additionalExecutionReach: count(samples.slice(details.numRuns)), reach: Object.fromEntries(reach.counts()) })}\n`,
+  )
+  if (details.failed)
+    throw new Error(
+      fc.defaultReportMessage(details) ?? `Query public snapshot failed`,
+      { cause: details.errorInstance },
+    )
+  reach.assertReached()
+}
+
+it.skipIf(oracleReplayRequested())(
+  `reflects real Query applied commits in raw observations (fixed campaign)`,
+  async () => runQueryPublicSnapshotCampaign(`fixed`),
+  60_000,
+)
+it.skipIf(oracleReplaySkips(property))(
+  `reflects real Query applied commits in raw observations (random or replay campaign)`,
+  async () =>
+    runQueryPublicSnapshotCampaign(
+      runConfig.replayPath === undefined ? `random` : `replay`,
+    ),
+  60_000,
+)
+
+oracleReplayTest(it).each(publicSnapshotHistoryExamples)(
+  `receives the shared Query public snapshot history %#`,
+  async (history) => receiveQueryPublicSnapshot(history),
+)
+
+const liveProperty = `query-db.collection-live-replay`
+const liveStates = [
+  `initial-compiled-query-settled`,
+  `real-query-replay-provider-held`,
+  `ordinary-source-replacement-applied`,
+  `held-live-publication-compared`,
+  `failed-live-publication-compared`,
+  `successful-live-publication-compared`,
+  `recovered-live-publication-compared`,
+] as const
+type LiveReachState = (typeof liveStates)[number]
+
+// Full-result rows and accumulated events are separate public observations.
+// Both use the shared graph model; neither may choose its own expected rows.
+function checkQueryLiveObservation(
+  model: ReplayPublicationModel,
+  observations: Record<string, ReadonlyArray<PublicRow>>,
+  checkpoint: string,
+): void {
+  for (const [path, rows] of Object.entries(observations))
+    expect(normalize(rows), `${checkpoint}: compiled Query ${path}`).toEqual(
+      model.visible.get(`main`),
+    )
+}
+
+/**
+ * This receiver uses the graph owner's complete-result model, not the raw
+ * Collection judgment. A real Query acquisition remains held while an ordinary
+ * source transaction installs the generated replacement. Those writes are
+ * deliberately injected source commits, not a partial backend Query result.
+ * Their actual applied receipt settles before the provider returns or rejects.
+ * A function-built key names each authored provider revision, so replay has no
+ * cached result and must await that acquisition. A held background refetch
+ * after an already settled cache replay would not establish this premise.
+ * On success the Query result repeats that already established replacement.
+ * On failure a later successful replay must recover the same live query.
+ *
+ * Callback-time reads and the accumulated event fold use the same shared model
+ * as drained held, failed and successful reads. No optimistic receipt is held
+ * in this bounded receiver. Query's actual result commits and replay completion
+ * still await their original receipts. The provider gate establishes the held
+ * premise; draining promises merely lets cached synchronous commits finish.
+ */
+async function receiveQueryLiveReplay(
+  history: PublicSnapshotHistory,
+  record: (state: LiveReachState) => void = () => {},
+): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+    },
+  })
+  const project = (rows: ReadonlyArray<PublicSnapshotRow>) =>
+    normalize(rows.map(({ id, value }) => ({ id, value, version: 0 })))
+  const model = new ReplayPublicationModel(project(history.initial))
+  model.retire(`peer`)
+  let providerPhase: `initial` | `replay` | `recovery` = `initial`
+  let providerEntered = createDeferred<void>()
+  let providerGate = createDeferred<Array<PublicSnapshotRow>>()
+  void providerGate.promise.catch(() => {})
+  let operations!: Parameters<SyncConfig<PublicSnapshotRow>[`sync`]>[0]
+  const receipts: Array<SyncAppliedReceipt> = []
+  const config = queryCollectionOptions<PublicSnapshotRow>({
+    id: `collection-live-replay-query`,
+    queryClient: client,
+    queryKey: () => [`collection-live-replay-query`, providerPhase],
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    queryFn: () => {
+      if (providerPhase === `initial`)
+        return Promise.resolve(clone(history.initial))
+      providerEntered.resolve()
+      return providerGate.promise
+    },
+  })
+  const source = createCollection({
+    ...config,
+    sync: {
+      ...config.sync,
+      sync: (params) => {
+        operations = {
+          ...params,
+          commit: (signal) => {
+            const receipt = params.commit(signal)
+            receipts.push(receipt)
+            if (receipt !== true) void receipt.catch(() => {})
+            return receipt
+          },
+        }
+        return config.sync.sync(operations)
+      },
+    },
+  })
+  let sourceSubscription: ReturnType<typeof source.subscribeChanges> | undefined
+  const originalSubscribe = source.subscribeChanges.bind(source)
+  source.subscribeChanges = (callback, options) => {
+    const subscription = originalSubscribe(callback, options)
+    sourceSubscription = subscription
+    return subscription
+  }
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .select(({ row }) => ({ id: row.id, value: row.value })),
+  )
+  const folded = new Map<PublicSnapshotRow[`id`], PublicSnapshotRow>()
+  const failures: Array<unknown> = []
+  const observations: Array<{
+    checkpoint: string
+    read: ReturnType<typeof project>
+    fold: ReturnType<typeof project>
+  }> = []
+  let checking = false
+  let checkpoint = `initial`
+  const compare = (label: string) => {
+    const read = project(live.toArray)
+    const fold = project([...folded.values()])
+    observations.push({ checkpoint: label, read, fold })
+    checkQueryLiveObservation(
+      model,
+      { directRead: read, subscriberFold: fold },
+      label,
+    )
+  }
+  const subscription = live.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) folded.delete(change.value.id)
+        else folded.set(change.value.id, { ...change.value })
+      }
+      if (checking) {
+        try {
+          compare(`callback during ${checkpoint}`)
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+    },
+    { includeInitialState: true },
+  )
+  let primary: unknown
+  const cleanupFailures: Array<unknown> = []
+  const completed: Array<{ phase: string; outcome: string }> = []
+  try {
+    await progress(live.preload(), `initial compiled Query preload`)
+    await flushPromises()
+    compare(`initial`)
+    checking = true
+    record(`initial-compiled-query-settled`)
+
+    const replay = async (outcome: `resolve` | `reject`, recovery: boolean) => {
+      providerPhase = recovery ? `recovery` : `replay`
+      providerEntered = createDeferred<void>()
+      providerGate = createDeferred<Array<PublicSnapshotRow>>()
+      void providerGate.promise.catch(() => {})
+      const attempt = model.start()
+      checkpoint = recovery ? `recovery held` : `replay held`
+      operations.begin()
+      operations.truncate()
+      const truncateReceipt = operations.commit()
+      if (truncateReceipt !== true) void truncateReceipt.catch(() => {})
+      const pending = sourceSubscription?.pendingTruncateReplacement
+      if (pending === undefined)
+        throw new Error(`Compiled Query receiver did not enter source replay`)
+      let replaySettled = false
+      const settlement = Promise.resolve(pending).then(
+        () => ({ outcome: `fulfilled` as const }),
+        (error: unknown) => ({ outcome: `rejected` as const, error }),
+      )
+      await progress(
+        providerEntered.promise,
+        `actual Query replay provider entry`,
+      )
+      void settlement.then(() => {
+        replaySettled = true
+      })
+      await flushPromises()
+      expect(replaySettled, `held provider is a replay participant`).toBe(false)
+      record(`real-query-replay-provider-held`)
+      const receiptId = `ordinary:${attempt}`
+      model.accept(receiptId, project(history.replacement))
+      operations.begin()
+      for (const id of rowIds)
+        if (source.has(id) && !history.replacement.some((row) => row.id === id))
+          operations.write({ type: `delete`, key: id })
+      for (const value of clone(history.replacement))
+        operations.write({
+          type: source.has(value.id) ? `update` : `insert`,
+          value,
+        })
+      await progress(
+        Promise.resolve(operations.commit()),
+        `ordinary replacement applied receipt`,
+      )
+      model.apply(receiptId)
+      record(`ordinary-source-replacement-applied`)
+      await flushPromises()
+      compare(checkpoint)
+      record(`held-live-publication-compared`)
+
+      const failure = new Error(`Actual Query replay rejected`)
+      // The complete source result already applied. This authored participant
+      // settles only now; Query subsequently repeats those rows on success.
+      model.settle(attempt, `main`, outcome === `reject`)
+      checkpoint = recovery ? `recovery settling` : `${outcome} settling`
+      if (outcome === `resolve`)
+        providerGate.resolve(clone(history.replacement))
+      else providerGate.reject(failure)
+      const result = await progress(
+        settlement,
+        `compiled Query source replay settlement`,
+      )
+      completed.push({ phase: providerPhase, outcome: result.outcome })
+      expect(result.outcome, `actual Query replay outcome`).toBe(
+        outcome === `resolve` ? `fulfilled` : `rejected`,
+      )
+      if (result.outcome === `rejected`)
+        expect(
+          Object.is(result.error, failure),
+          `exact compiled Query replay rejection`,
+        ).toBe(true)
+      await progress(Promise.all(receipts), `all actual Query applied receipts`)
+      await flushPromises()
+      checkpoint = recovery
+        ? `recovered`
+        : outcome === `resolve`
+          ? `complete`
+          : `failed`
+      compare(checkpoint)
+      record(
+        recovery
+          ? `recovered-live-publication-compared`
+          : outcome === `resolve`
+            ? `successful-live-publication-compared`
+            : `failed-live-publication-compared`,
+      )
+    }
+    await replay(history.outcome, false)
+    if (history.outcome === `reject`) await replay(`resolve`, true)
+    primary = failures[0]
+  } catch (error) {
+    // A callback can reveal the defect before the next drained read. Keep
+    // that first checkpoint and preserve the later assertion separately.
+    primary = failures[0] ?? error
+    if (error !== primary) failures.push(error)
+  } finally {
+    checking = false
+    providerGate.resolve([])
+    for (const cleanup of [
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+      () => client.clear(),
+    ]) {
+      try {
+        await cleanup()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+    }
+    process.stdout.write(
+      `${JSON.stringify({ property: liveProperty, history, completed, receiptCount: receipts.length, observations, assertionFailed: primary !== undefined, cleanupFailures: cleanupFailures.map(String) })}\n`,
+    )
+  }
+  if (primary !== undefined) {
+    const secondary = [
+      ...failures.filter((error) => error !== primary),
+      ...cleanupFailures,
+    ]
+    if (secondary.length === 0) throw primary
+    throw new AggregateError(
+      [primary, ...secondary],
+      `Compiled Query receiving and cleanup failed`,
+      { cause: primary },
+    )
+  }
+  if (cleanupFailures.length > 0)
+    throw new AggregateError(cleanupFailures, `Compiled Query cleanup failed`, {
+      cause: cleanupFailures[0],
+    })
+}
+
+async function runQueryLiveReplayCampaign(
+  campaign: `fixed` | `random` | `replay`,
+): Promise<void> {
+  const reach = createOracleReach(liveProperty, liveStates, { minimum: 5 })
+  const samples: Array<Set<LiveReachState>> = []
+  const details = await fc.check(
+    fc.asyncProperty(publicSnapshotHistoryArbitrary, async (history) => {
+      reach.beginHistory()
+      const entered = new Set<LiveReachState>()
+      samples.push(entered)
+      await receiveQueryLiveReplay(history, (state) => {
+        entered.add(state)
+        reach.reach(state)
+      })
+    }),
+    campaign === `fixed`
+      ? { seed: 20261030, numRuns: oracleRuns(60) }
+      : oraclePropertyOptions(60, liveProperty),
+  )
+  recordOracleReplay(liveProperty, details)
+  const count = (histories: Array<Set<LiveReachState>>) =>
+    Object.fromEntries(
+      liveStates.map((state) => [
+        state,
+        histories.filter((entered) => entered.has(state)).length,
+      ]),
+    )
+  process.stdout.write(
+    `${JSON.stringify({ property: liveProperty, campaign, seed: details.seed, path: details.counterexamplePath, runs: details.numRuns, shrinks: details.numShrinks, failed: details.failed, generatedReach: count(samples.slice(0, details.numRuns)), additionalExecutionReach: count(samples.slice(details.numRuns)) })}\n`,
+  )
+  if (details.failed)
+    throw new Error(
+      fc.defaultReportMessage(details) ?? `Compiled Query replay failed`,
+      { cause: details.errorInstance },
+    )
+  reach.assertReached()
+}
+
+declareOracle({
+  check: [
+    receiveQueryLiveReplay,
+    runQueryLiveReplayCampaign,
+    checkQueryLiveObservation,
+  ],
+  model: [ReplayPublicationModel],
+  grammar: [publicSnapshotHistoryArbitrary, publicSnapshotHistoryExamples],
+})
+
+it.skipIf(oracleReplayRequested())(
+  `keeps compiled Query results coherent through replay (fixed campaign)`,
+  async () => runQueryLiveReplayCampaign(`fixed`),
+  60_000,
+)
+it.skipIf(oracleReplaySkips(liveProperty))(
+  `keeps compiled Query results coherent through replay (random or replay campaign)`,
+  async () =>
+    runQueryLiveReplayCampaign(
+      runConfig.replayPath === undefined ? `random` : `replay`,
+    ),
+  60_000,
+)
+oracleReplayTest(it).each(publicSnapshotHistoryExamples)(
+  `receives the shared compiled Query replay history %#`,
+  async (history) => receiveQueryLiveReplay(history),
+)
+
+// Calibration challenges the same comparison at a held replay. The grammar's
+// initial keys never contain d. Publishing that unestablished row in reads or
+// events is a plausible early-replacement fault, even when replacement is empty.
+oracleReplayTest(it).each(publicSnapshotHistoryExamples)(
+  `rejects an unestablished row in compiled Query observations %#`,
+  (history) => {
+    const model = new ReplayPublicationModel(
+      history.initial.map(({ id, value }) => ({ id, value, version: 0 })),
+    )
+    model.retire(`peer`)
+    model.start()
+    const valid = model.visible.get(`main`)!
+    const early = [...valid, { id: `d`, value: 0, version: 0 }]
+    expect(() =>
+      checkQueryLiveObservation(
+        model,
+        { directRead: early, subscriberFold: valid },
+        `calibration held read`,
+      ),
+    ).toThrow()
+    expect(() =>
+      checkQueryLiveObservation(
+        model,
+        { directRead: valid, subscriberFold: early },
+        `calibration held event fold`,
+      ),
+    ).toThrow()
+  },
+)

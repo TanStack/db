@@ -1,0 +1,25 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db-sqlite-persistence-core
+
+stdout | tests/collection-public-snapshot-persisted-oracle.test.ts > publishes each applied raw commit through persisted reads and subscribers (random)
+persisted-public-snapshot history {"history":{"initial":[{"id":"a","value":0}],"replacement":[],"outcome":"resolve"},"observations":[{"cut":"initial","phase":"initial","observation":{"appliedCommits":[],"reads":{"values":[{"id":"a","value":0}],"entries":[{"id":"a","value":0}],"base":[{"id":"a","value":0}],"get":[{"id":"a","value":0}]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":1}}},{"cut":"raw-truncate-applied-before-candidate","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]}],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}}},{"cut":"durable-held-before-receipt","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[]}],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}}},{"cut":"provider-held-after-real-receipt","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[]}],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[{"id":"a","value":0}],"sizes":{"size":0}}},{"cut":"successful-replay-publication","phase":"complete","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[]}],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[],"sizes":{"size":0}}}],"progress":{"held":{"candidateReceipt":{"status":"pending"},"replay":{"status":"pending"},"persistedScanEntered":false},"afterDurable":{"candidateReceipt":{"status":"fulfilled"},"replay":{"status":"pending"},"persistedScanEntered":true},"verdict":{"outcome":"resolve","reportedExactError":false}},"failures":3,"firstFailure":{"name":"AssertionError","message":"held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []"}}
+
+stdout | tests/collection-public-snapshot-persisted-oracle.test.ts > publishes each applied raw commit through persisted reads and subscribers (random)
+persisted-public-snapshot reach random {
+  'raw-truncate-applied': 1,
+  'real-wrapper-candidate-receipt-pending': 1,
+  'real-wrapper-mutex-scan-held': 1,
+  'held-public-observation': 1,
+  'receipt-and-mutex-progressed': 1,
+  'failed-public-observation': 0,
+  'successful-publication': 1
+}
+
+ ❯ |@tanstack/db-sqlite-persistence-core| tests/collection-public-snapshot-persisted-oracle.test.ts (2 tests | 1 failed | 1 skipped) 16ms
+   × publishes each applied raw commit through persisted reads and subscribers (random) 16ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  10:49:27
+   Duration  1.75s (transform 819ms, setup 0ms, import 1.35s, tests 16ms, environment 273ms)
+

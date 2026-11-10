@@ -1,0 +1,94 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 36)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 37)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/query-db-collection
+      Coverage enabled with istanbul
+
+{"property":"query-db.collection-live-replay","history":{"initial":[],"replacement":[{"id":"a","value":1}],"outcome":"resolve"},"completed":[{"phase":"replay","outcome":"fulfilled"}],"receiptCount":5,"observations":[{"checkpoint":"initial","read":[],"fold":[]},{"checkpoint":"replay held","read":[],"fold":[]},{"checkpoint":"callback during resolve settling","read":[{"id":"a","version":0,"value":1}],"fold":[{"id":"a","version":0,"value":1}]},{"checkpoint":"complete","read":[{"id":"a","version":0,"value":1}],"fold":[{"id":"a","version":0,"value":1}]}],"assertionFailed":false,"cleanupFailures":[]}
+
+ Test Files  2 passed | 1 skipped (2)
+      Tests  1 passed | 23 skipped (24)
+Type Errors  no errors
+   Start at  10:56:25
+   Duration  2.89s (transform 1.04s, setup 0ms, import 1.49s, tests 20ms, environment 205ms, typecheck 1.03s)
+
+ % Coverage report from istanbul
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |    37.2 |     23.8 |   30.88 |   38.83 |                   
+ cleanup.ts        |    37.5 |       25 |      40 |      40 | 15-20,26-32,51    
+ ...-pagination.ts |       0 |        0 |       0 |       0 | 57-238            
+ errors.ts         |       0 |      100 |       0 |       0 | 6-116             
+ manual-sync.ts    |    2.22 |        0 |    3.44 |    2.32 | 102-353,358-438   
+ query.ts          |   42.74 |    26.22 |   38.13 |   44.62 | ...4532-4533,4554 
+-------------------|---------|----------|---------|---------|-------------------
+
+=============================== Coverage summary ===============================
+Statements   : 37.2% ( 743/1997 )
+Branches     : 23.8% ( 329/1382 )
+Functions    : 30.88% ( 101/327 )
+Lines        : 38.83% ( 727/1872 )
+================================================================================

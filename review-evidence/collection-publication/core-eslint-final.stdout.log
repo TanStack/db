@@ -1,0 +1,13 @@
+
+/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts
+  69:7  error  Unnecessary conditional, the types have no overlap  @typescript-eslint/no-unnecessary-condition
+  78:7  error  Unnecessary conditional, the types have no overlap  @typescript-eslint/no-unnecessary-condition
+
+/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts
+  28:3  error  Member 'checkPublicSnapshotObservation' of the import declaration should be sorted alphabetically                                            sort-imports
+  32:1  error  `./collection-public-snapshot-oracle.js` type import should occur after import of `./collection-subscription-lifecycle-publication-support`  import/order
+  35:3  error  Member 'PublicSnapshotObservation' of the import declaration should be sorted alphabetically                                                 sort-imports
+
+✖ 5 problems (5 errors, 0 warnings)
+  3 errors and 0 warnings potentially fixable with the `--fix` option.
+

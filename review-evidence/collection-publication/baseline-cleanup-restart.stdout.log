@@ -1,0 +1,12 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts (138 tests | 1 failed | 137 skipped) 55ms
+     × matches row publications for a random or replayed seed (with seed=-1439698414) 54ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 137 skipped (138)
+Type Errors  no errors
+   Start at  10:10:41
+   Duration  1.53s (transform 514ms, setup 79ms, import 940ms, tests 55ms, environment 362ms)
+

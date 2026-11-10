@@ -1,0 +1,18 @@
+[
+  {
+    "receiver": "core",
+    "exit": 0
+  },
+  {
+    "receiver": "query",
+    "exit": 0
+  },
+  {
+    "receiver": "persisted",
+    "exit": 0
+  },
+  {
+    "receiver": "optimistic",
+    "exit": 0
+  }
+]

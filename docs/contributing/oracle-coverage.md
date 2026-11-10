@@ -2318,21 +2318,60 @@ the plan compiled and a shadowed child could read its local row. The original
 Query-builder paths remain covered by the owner's public-row histories; this
 invariant witness does not claim arbitrary manually constructed IR is valid.
 
-The following related oracles own distinct production paths or observation cuts:
+### Raw Collection publication investigation (2026-10-30)
+
+The maintainer clarified that raw Collection subscribers observe raw source
+commits. Complete graph-result retention belongs to live queries. Direct source
+reads and full-state raw subscriber folds must agree on each applied source
+transaction, including truncate and partial replacement during pending or failed
+replay. A failed load does not retract accepted source writes. The existing
+Collection lifecycle publication owner extends
+`subscription-lifecycle.atomic-public-snapshot`; its shared direct-read judgment
+also receives actual Query and persisted-wrapper paths through
+`query-db.collection-public-snapshot` and
+`persistence.collection-public-snapshot`. These are extensions of the existing
+publication owner, not three independent product models.
+
+The [clarified decision](oracle-reviews/2026-10-30-raw-collection-publication-decision.md)
+records authority and distinguishing predictions before oracle changes. The
+[earlier model/protocol record](oracle-reviews/2026-10-30-atomic-collection-publication.md)
+and its RED results concern the superseded source-retention proposal; they do
+not establish a defect under the clarified law. Current applied receipts keep
+their public-visibility promise. The repair removes raw replay buffering without
+adding an adapter API. New raw-law REDs and live-query barrier checks preceded
+production edits. The [repair evidence](oracle-reviews/2026-10-30-raw-collection-publication-repair.md)
+records generated reach, original failures, final checks, mutants, and limits.
+Cleanup-time direct/subscriber equality, independent consumer enrollment,
+candidate-driven include demand, optimistic overlays and full public index/read
+agreement retain explicit coverage owners and limits in those records. The
+original cleanup/restart comparison mismatch recorded during the #2310
+investigation remains preserved (seed -1439698414, path 1:22). Its old expected
+retention is superseded by the clarified raw law; that same replay now passes.
+This does not establish closure of every behavior reported in #2310.
+
+`subscription-lifecycle.cleanup-optimistic-publication` extends the primary
+owner with cleanup-retained rows, held reacquisition, a disjoint optimistic
+insert, settlement, and a later empty or nonempty source transaction. It checks
+that optimistic publication changes its own row without supplying a source
+verdict for untouched retained rows. Direct reads and the retained subscriber
+fold intentionally differ during this cleanup interval. Both 60-history lanes
+reach all four declared cuts. Overlapping retained-key mutations and multiple
+optimistic transactions remain outside this extension.
+
+The following related oracles own distinct production paths or observation cuts.
+Their raw expectations follow the clarified law; the live-query complete-result
+law remains in force:
 
 - The [Collection lifecycle publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts)
   owns exact public rows and change batches. The
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
   applies that law to competing replay schedules and same-key writes. Both
-  models publish a replay's rows when its last owner is released and its
-  current attempt has not failed, and keep a failed one private; the
-  publication oracle's named histories cover a value written, rewritten or
-  deleted during the replay, a row no demand names, a failed replay, a
-  later request that updates a row still shown at an older value, and a row
-  retained by a failed replay that the source deletes before a later replay
-  retires. The replay oracle's named witnesses fail each synchronous failure
-  site (a replay load, an old lease's unload, a new request) and then release
-  the last owner; removing that site's sticky failure fails its witness.
+  models publish applied source transactions independently of acquisition
+  outcomes and demand retirement. Named histories cover values written,
+  rewritten or deleted during replay, rows no demand names, failed loads,
+  later raw snapshots, and final-owner retirement. Failure no longer selects
+  raw row visibility. The lifecycle model separately judges readiness,
+  acquisition ownership, errors, and consumer replay completion.
   Limit: the generated grammars reach a failed retirement followed by another
   retired replay only rarely (the replay grammar releases one demand, on the
   last attempt), so the named histories own that sequence.

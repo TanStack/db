@@ -1,0 +1,70 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 2 and seed -4175157654926338059 with 1 worker on 1 cores with 112MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.14-linuxkit aarch64, Eclipse Adoptium 21.0.12 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /work/PublicationGrammar.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PublicationGrammar
+Starting... (2026-10-30 16:35:23)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-30 16:35:28.
+Error: Deadlock reached.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"pending", "pending">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"none", "none">>
+
+State 2: <Respond line 60, col 3 to line 63, col 91 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "pending">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"none", "none">>
+
+State 3: <Commit line 72, col 3 to line 77, col 73 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<1>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "pending">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"accepted", "none">>
+
+State 4: <Respond line 60, col 3 to line 63, col 91 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<1>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"accepted", "none">>
+
+State 5: <Commit line 72, col 3 to line 77, col 73 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"accepted", "accepted">>
+
+13 states generated, 10 distinct states found, 1 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 05s at (2026-10-30 16:35:28)
+

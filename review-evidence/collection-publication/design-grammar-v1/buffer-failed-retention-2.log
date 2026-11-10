@@ -1,0 +1,110 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 47 and seed 5259726204065373657 with 1 worker on 1 cores with 112MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.14-linuxkit aarch64, Eclipse Adoptium 21.0.12 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /work/PublicationGrammar.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PublicationGrammar
+Starting... (2026-10-30 16:36:26)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-30 16:36:31.
+Error: Invariant FailedRetainsOldSource is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"pending", "pending">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"none", "none">>
+
+State 2: <Respond line 60, col 3 to line 63, col 91 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "pending">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"none", "none">>
+
+State 3: <Respond line 60, col 3 to line 63, col 91 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"none", "none">>
+
+State 4: <CommitBuffered line 80, col 3 to line 85, col 73 of module PublicationGrammar>
+/\ source = Old
+/\ rawSubscriber = Old
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"accepted", "accepted">>
+
+State 5: <ApplyBuffered line 101, col 3 to line 106, col 65 of module PublicationGrammar>
+/\ source = 1..2
+/\ rawSubscriber = 1..2
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"visible", "visible">>
+
+State 6: <Receipt line 120, col 3 to line 125, col 91 of module PublicationGrammar>
+/\ source = 1..2
+/\ rawSubscriber = 1..2
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {1}
+/\ response = <<"ready", "ready">>
+/\ load = <<"pending", "pending">>
+/\ transaction = <<"visible", "visible">>
+
+State 7: <Settle line 131, col 3 to line 137, col 95 of module PublicationGrammar>
+/\ source = 1..2
+/\ rawSubscriber = 1..2
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {1}
+/\ response = <<"ready", "ready">>
+/\ load = <<"success", "pending">>
+/\ transaction = <<"visible", "visible">>
+
+State 8: <Receipt line 120, col 3 to line 125, col 91 of module PublicationGrammar>
+/\ source = 1..2
+/\ rawSubscriber = 1..2
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {1, 2}
+/\ response = <<"ready", "ready">>
+/\ load = <<"success", "pending">>
+/\ transaction = <<"visible", "visible">>
+
+State 9: <Settle line 131, col 3 to line 137, col 95 of module PublicationGrammar>
+/\ source = 1..2
+/\ rawSubscriber = 1..2
+/\ acceptedOrder = <<1, 2>>
+/\ query = Old
+/\ receipts = {1, 2}
+/\ response = <<"ready", "ready">>
+/\ load = <<"success", "failure">>
+/\ transaction = <<"visible", "visible">>
+
+18 states generated, 14 distinct states found, 1 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 05s at (2026-10-30 16:36:31)
+

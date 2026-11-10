@@ -70,7 +70,7 @@ const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
  */
 describe(`demand created while its Collection is cleaned up`, () => {
   it.each(cleanedRestartDemandCases)(
-    `$syncMode source with $loader loader, $replacement replacement, and $interruption`,
+    `$syncMode source with $loader loader, $replacement replacement, $interruption, and empty commit $emptyReplacementCommit`,
     async (history) => {
       const expected = expectedCleanedRestartDemand(history)
       let syncRuns = 0
@@ -85,6 +85,10 @@ describe(`demand created while its Collection is cleaned up`, () => {
       }
       const publishReplacement = () => {
         if (history.replacement === `row`) publishRow(`replacement`)
+        else if (history.emptyReplacementCommit) {
+          operations.begin()
+          operations.commit()
+        }
       }
       const collection = createCollection<{ id: string }>({
         id: `cleaned-restart-${history.syncMode}-${history.loader}-${history.replacement}`,
@@ -317,9 +321,9 @@ describe(`demand parked behind a failed first load across a reload`, () => {
  * owner's predicate, and a `replace` as `replaceSnapshots()`, the internal
  * call a lazy join's fragmented-churn replacement makes. The comparison runs
  * after the whole change, the checkpoint at which the model judged the
- * replay: a replay judged between the releases publishes early, so a later
- * snapshot request publishes where the model keeps it private, and a waiting
- * caller settles differently.
+ * replay. Raw snapshot callbacks remain independent of that verdict under the
+ * October 30 raw Collection decision. Waiting callers still follow acquisition
+ * completion; source snapshots read applied rows even after replay failure.
  *
  * Row contents and real-provider behavior are outside this controlled adapter
  * driver. The publication oracle checks row contents separately.
@@ -445,6 +449,8 @@ async function runHistory(
   runOptions: {
     acquisitionMode?: `async-pending` | `sync-success`
     cancellation?: `manual` | `reject`
+    completionHandoff?: boolean
+    replayWaitFault?: `early` | `pending`
     continueAfterMismatch?: boolean
     retiredDelivery?: `resolve` | `reject`
     callerFault?: CallerFault
@@ -646,12 +652,35 @@ async function runHistory(
     },
   })
   const publications: Array<unknown> = []
+  const replayWaits: Array<{
+    promise: Promise<void>
+    expected: `pending` | `fulfilled` | `rejected` | `aborted` | `retired`
+    outcome: `pending` | `fulfilled` | `rejected`
+    error?: unknown
+  }> = []
+  let comparedSyncRunGeneration = model.syncRunGeneration
+  let comparedReplayGeneration = model.replayGeneration
+  let expectedReplayFailure = false
   const subscription = collection.subscribeChanges(
     (changes) => {
       publications.push(changes)
       observedTrace.push({ type: `publication` })
     },
-    { includeInitialState: false },
+    {
+      includeInitialState: false,
+      ...(runOptions.completionHandoff
+        ? {
+            // A controlled receiver exercises the internal subscription-to-graph
+            // handoff. No graph result is modeled here; actual live-query
+            // publication has a separate receiving oracle.
+            truncateReplayPublication: {
+              start: () => {},
+              succeed: () => {},
+              siblingReplays: () => undefined,
+            },
+          }
+        : {}),
+    },
   )
   subscription.on(`status:change`, ({ status }) => {
     observedStatuses.push(status)
@@ -667,6 +696,7 @@ async function runHistory(
     const context = JSON.stringify({
       history,
       command,
+      completionHandoff: runOptions.completionHandoff ?? false,
       observedTrace,
       expectedTrace: model.trace,
     })
@@ -720,6 +750,97 @@ async function runHistory(
     check(subscription.status, context).toBe(model.status)
     check(subscription.lastError, context).toBe(model.lastError)
     check(collection.status, context).toBe(model.collectionStatus)
+    // This is the internal subscription-to-graph handoff, not a public graph
+    // result observation. Raw callbacks no longer stand in for its verdict.
+    // Independent owner/attempt state predicts work and completion; getters
+    // supply only the production observation. A failed wait stays rejected
+    // when later demand joins it, until another replay replaces that verdict.
+    const replayWork =
+      model.active &&
+      !model.unsubscribed &&
+      model.attempts.some(
+        ({ gating, inReplacement }) => gating && inReplacement,
+      )
+    const replayOpen =
+      model.active && !model.unsubscribed && model.publicationBarrierOpen
+    if (
+      model.syncRunGeneration !== comparedSyncRunGeneration ||
+      model.replayGeneration !== comparedReplayGeneration ||
+      !replayOpen
+    )
+      expectedReplayFailure = false
+    comparedSyncRunGeneration = model.syncRunGeneration
+    comparedReplayGeneration = model.replayGeneration
+    if (replayOpen && !replayWork) expectedReplayFailure = true
+    check(subscription.hasTruncateReplayWork, context).toBe(replayWork)
+    if (runOptions.completionHandoff) {
+      // The model's barrier combines restart acquisition and truncate replay.
+      // These graph-retention flags describe only the latter: cleanup starts
+      // a fresh graph run rather than retaining its former result here.
+      const truncateOpen = replayOpen && model.replayGeneration > 0
+      check(subscription.hasPendingTruncateReplacement, context).toBe(
+        truncateOpen,
+      )
+      check(subscription.hasFailedTruncateReplacement, context).toBe(
+        truncateOpen && expectedReplayFailure,
+      )
+    }
+    if (runOptions.completionHandoff && replayOpen)
+      model.reach.add(`handoff:${expectedReplayFailure ? `failed` : `pending`}`)
+    for (const wait of replayWaits) {
+      if (wait.expected === `pending`) {
+        if (!model.active || model.unsubscribed) wait.expected = `aborted`
+        else if (!replayOpen)
+          wait.expected = model.owners.length === 0 ? `retired` : `fulfilled`
+        else if (expectedReplayFailure) wait.expected = `rejected`
+      }
+      // No logical demand remains after retirement. Its internal wait must
+      // stop holding work, but either completion or cancellation is allowed.
+      // The original public caller still has its strict owner-specific result.
+      if (wait.expected === `retired`)
+        check(wait.outcome, `retired replay completion: ${context}`).not.toBe(
+          `pending`,
+        )
+      else
+        check(wait.outcome, `replay completion: ${context}`).toBe(
+          wait.expected === `aborted` ? `rejected` : wait.expected,
+        )
+      if (
+        wait.expected === `aborted` ||
+        (wait.expected === `retired` && wait.outcome === `rejected`)
+      )
+        check(wait.error, context).toMatchObject({ name: `AbortError` })
+      if (runOptions.completionHandoff && wait.expected !== `pending`)
+        model.reach.add(`handoff:${wait.expected}`)
+    }
+    const pendingReplay = subscription.pendingTruncateReplacement
+    if (replayOpen && !expectedReplayFailure) {
+      check(pendingReplay, context).toBeInstanceOf(Promise)
+      if (
+        pendingReplay &&
+        !replayWaits.some(({ promise }) => promise === pendingReplay)
+      ) {
+        const wait: (typeof replayWaits)[number] = {
+          promise: pendingReplay,
+          expected: `pending`,
+          outcome:
+            runOptions.replayWaitFault === `early` ? `fulfilled` : `pending`,
+        }
+        replayWaits.push(wait)
+        void pendingReplay.then(
+          () => {
+            if (runOptions.replayWaitFault !== `pending`)
+              wait.outcome = `fulfilled`
+          },
+          (error: unknown) => {
+            wait.outcome = `rejected`
+            wait.error = error
+          },
+        )
+      }
+    } else {
+      check(pendingReplay, context).toBeUndefined()
+    }
     check(publications, context).toEqual(
       Array.from({ length: model.publications }, () => []),
     )
@@ -1042,6 +1163,30 @@ async function runHistory(
   return new Set([...model.reach, ...terminalReach])
 }
 
+// Each generated input exercises the complete default raw history plus the
+// internal completion handoff through the first cleanup or unsubscription.
+// Source cleanup crashes its dependent query, so keeping this controlled graph
+// receiver alive through a source restart would not be a legal public receiving
+// path. Its pre-cleanup prefix uses the same model and judgment; actual graph
+// results remain the responsibility of the live-query receiving owner.
+async function runHistoryPaths(
+  history: ReadonlyArray<LifecycleCommand>,
+  options: Parameters<typeof runHistory>[1] = {},
+): Promise<Set<string>> {
+  const raw = await runHistory(history, options)
+  const retirement = history.findIndex(
+    ({ type }) => type === `cleanup` || type === `unsubscribe`,
+  )
+  const handoff = await runHistory(
+    retirement === -1 ? history : history.slice(0, retirement + 1),
+    {
+      ...options,
+      completionHandoff: true,
+    },
+  )
+  return new Set([...raw, ...handoff])
+}
+
 if (
   !oracleReplayRequested() &&
   process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`
@@ -1058,6 +1203,24 @@ if (
 }
 
 describe(`CollectionSubscription async lifecycle history oracle`, () => {
+  it.each([`early`, `pending`] as const)(
+    `rejects a corrupted %s replay completion observation`,
+    async (replayWaitFault) => {
+      await expect(
+        runHistory(
+          [
+            { type: `request`, demand: `a` },
+            { type: `truncate` },
+            { type: `request`, demand: `b` },
+            settle(`a`, `current`, `oldest`, `resolve`),
+            settle(`b`, `current`, `oldest`, `resolve`),
+          ],
+          { completionHandoff: true, replayWaitFault },
+        ),
+      ).rejects.toThrow(`replay completion`)
+    },
+  )
+
   it.each([`resolve`, `reject`] as const)(
     `retains an earlier peer failure after aborting it while another peer will %s`,
     async (outcome) => {
@@ -1581,9 +1744,10 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     )
   })
 
-  it(`keeps a new snapshot private after failed restart`, async () => {
+  it(`publishes a raw snapshot after failed restart`, async () => {
     // Minimized from seed 317005625 at 100×. The mismatch is an empty
-    // notification, not lost rows: failed replacement must keep reads private.
+    // notification, not lost rows. A failed acquisition verdict cannot suppress
+    // a raw snapshot of the Collection's applied source state.
     await runHistory(
       [
         { type: `request`, demand: `b` },
@@ -1619,6 +1783,11 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   // after the change (ORC-015). The model names them; this property records
   // them for the histories the demand-change grammar generates.
   const demandChangeReachStates = {
+    'raw-snapshot:during-replay': `a raw snapshot publishes during an unresolved replay`,
+    'handoff:pending': `the completion receiver observes pending replay work`,
+    'handoff:rejected': `the completion receiver observes a rejected replay`,
+    'handoff:fulfilled': `the completion receiver observes successful replay completion`,
+    'handoff:aborted': `the completion receiver observes cleanup or unsubscription abort`,
     'change:several-owners-during-replay': `a change retires several owners during a replay`,
     'replacement-decides-failed-owner': `a held replacement covers a failed owner`,
     'change:between-releases-would-publish': `judging between releases would publish a replay the change fails`,
@@ -1628,18 +1797,41 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `subscription-lifecycle.demand-change`,
     Object.values(demandChangeReachStates),
   )
+  const demandChangeCampaignReach = {
+    fixed: new Map<string, number>(),
+    random: new Map<string, number>(),
+  }
   let demandChangeHistoriesRan = false
   afterAll(() => {
-    if (demandChangeHistoriesRan) demandChangeReach.assertReached()
+    if (demandChangeHistoriesRan) {
+      process.stdout.write(
+        `${JSON.stringify({
+          property: `subscription-lifecycle.demand-change`,
+          generatedReach: Object.fromEntries(
+            Object.entries(demandChangeCampaignReach).map(
+              ([campaign, counts]) => [campaign, Object.fromEntries(counts)],
+            ),
+          ),
+        })}\n`,
+      )
+      demandChangeReach.assertReached()
+    }
   })
   const runDemandChangeHistory = async (
     history: ReadonlyArray<LifecycleCommand>,
     cancellation: `manual` | `reject` = `manual`,
+    campaign?: keyof typeof demandChangeCampaignReach,
   ) => {
-    demandChangeReach.beginHistory()
-    const reached = await runHistory(history, { cancellation })
-    for (const [label, state] of Object.entries(demandChangeReachStates))
-      if (reached.has(label)) demandChangeReach.reach(state)
+    if (campaign) demandChangeReach.beginHistory()
+    const reached = await runHistoryPaths(history, { cancellation })
+    if (campaign) {
+      const counts = demandChangeCampaignReach[campaign]
+      for (const [label, state] of Object.entries(demandChangeReachStates)) {
+        if (!reached.has(label)) continue
+        demandChangeReach.reach(state)
+        counts.set(state, (counts.get(state) ?? 0) + 1)
+      }
+    }
   }
 
   it(`judges a replay once after a change that retires a replacement and a pending owner`, async () => {
@@ -1670,7 +1862,8 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   // replacement decides nothing: it never applied, so it covers none of the
   // owners it replaces (law 10: a failed or obsolete replacement cannot
   // retire established coverage). The replaced owner's failure stays, and
-  // the replay keeps its publication private. 30-times counterexamples of
+  // the complete-result replay stays failed. Raw snapshots still publish.
+  // 30-times counterexamples of
   // production, which counted the aborted replacement as covering.
   it.each([
     {
@@ -1720,7 +1913,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })(
     `matches the pure lifecycle model for a fixed seed`,
     async (history, cancellation) => {
-      await runHistory(history, { cancellation })
+      await runHistoryPaths(history, { cancellation })
     },
     120_000,
   )
@@ -1734,7 +1927,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `matches the pure lifecycle model for a random or replayed seed`,
     async (history, cancellation) => {
-      await runHistory(history, { cancellation })
+      await runHistoryPaths(history, { cancellation })
     },
     120_000,
   )
@@ -1745,7 +1938,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `judges a replay once per demand change for a fixed seed`,
     async (history, cancellation) => {
       demandChangeHistoriesRan = true
-      await runDemandChangeHistory(history, cancellation)
+      await runDemandChangeHistory(history, cancellation, `fixed`)
     },
     // Five times the base budget; a run multiplier scales its histories.
     120_000 * multiplier,
@@ -1761,7 +1954,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `judges a replay once per demand change for a random or replayed seed`,
     async (history, cancellation) => {
       demandChangeHistoriesRan = true
-      await runDemandChangeHistory(history, cancellation)
+      await runDemandChangeHistory(history, cancellation, `random`)
     },
     // Five times the base budget; a run multiplier scales its histories.
     120_000 * multiplier,
@@ -1772,7 +1965,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })(
     `matches synchronous success histories for a fixed seed`,
     async (history) => {
-      await runHistory(history, { acquisitionMode: `sync-success` })
+      await runHistoryPaths(history, { acquisitionMode: `sync-success` })
     },
     120_000,
   )
@@ -1782,7 +1975,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `matches synchronous success histories for a random or replayed seed`,
     async (history) => {
-      await runHistory(history, { acquisitionMode: `sync-success` })
+      await runHistoryPaths(history, { acquisitionMode: `sync-success` })
     },
     120_000,
   )

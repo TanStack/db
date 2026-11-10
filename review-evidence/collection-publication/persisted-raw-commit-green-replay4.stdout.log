@@ -1,0 +1,19 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db-sqlite-persistence-core
+
+persisted-public-snapshot history {"history":{"initial":[],"replacement":[{"id":"a","value":1}],"outcome":"reject"},"observations":[{"cut":"initial","phase":"initial","observation":{"appliedCommits":[],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[],"sizes":{"size":0}}},{"cut":"raw-truncate-applied-before-candidate","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]}],"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[],"sizes":{"size":0}}},{"cut":"durable-held-before-receipt","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[{"id":"a","value":1}]}],"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[{"id":"a","value":1}],"sizes":{"size":1}}},{"cut":"provider-held-after-real-receipt","phase":"held","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[{"id":"a","value":1}]}],"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[{"id":"a","value":1}],"sizes":{"size":1}}},{"cut":"quiet-replay-rejection","phase":"failed","observation":{"appliedCommits":[{"truncate":true,"rows":[]},{"rows":[{"id":"a","value":1}]}],"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[{"id":"a","value":1}],"sizes":{"size":1}}}],"progress":{"held":{"candidateReceipt":{"status":"pending"},"replay":{"status":"pending"},"persistedScanEntered":false},"afterDurable":{"candidateReceipt":{"status":"fulfilled"},"replay":{"status":"pending"},"persistedScanEntered":true},"verdict":{"outcome":"reject","reportedExactError":true}},"failures":0}
+persisted-public-snapshot reach random {
+  'raw-truncate-applied': 1,
+  'real-wrapper-candidate-receipt-pending': 1,
+  'real-wrapper-mutex-scan-held': 1,
+  'held-public-observation': 1,
+  'receipt-and-mutex-progressed': 1,
+  'failed-public-observation': 1,
+  'successful-publication': 0
+}
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 1 skipped (2)
+   Start at  11:03:44
+   Duration  2.07s (transform 918ms, setup 0ms, import 1.58s, tests 16ms, environment 355ms)
+

@@ -1,0 +1,4 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db-sqlite-persistence-core
+
+ ❯ |@tanstack/db-sqlite-persistence-core|  TS  tests/collection-public-snapshot-persisted-oracle.test.ts (1 test)

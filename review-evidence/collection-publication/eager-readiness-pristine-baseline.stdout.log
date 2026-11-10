@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts (99 tests | 1 failed | 72 skipped) 102ms
+     × 'on-demand' source with 'present' loader, 'empty' replacement, 'none', and empty commit false 6ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 passed | 72 skipped (99)
+   Start at  11:16:21
+   Duration  1.88s (transform 670ms, setup 122ms, import 1.15s, tests 102ms, environment 389ms)
+

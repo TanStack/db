@@ -1,0 +1,591 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 36)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 38)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: {"history":[{"type":"source","key":"b","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"release","demand":"a"},{"type":"unsubscribe"},{"type":"source","key":"b","action":"upsert","value":1}],"command":{"type":"release","demand":"a"},"commandIndex":4,"observed":[[{"type":"delete","key":"b","value":{"id":"b","value":0}}]],"expected":[]}: expected [ [ { type: 'delete', …(2) } ] ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     {
++       "key": "b",
++       "type": "delete",
++       "value": {
++         "id": "b",
++         "value": 0,
++       },
++     },
++   ],
++ ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 4: {"type":"release","demand":"a"}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 5: {"type":"unsubscribe"}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 6: {"type":"source","key":"b","action":"upsert","value":1}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes restarted source commits while canceled replay work settles
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"abort","demand":"b"},{"type":"truncate"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"unsubscribe"}],"command":{"type":"abort","demand":"b"},"commandIndex":4,"observed":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]],"expected":[]}: expected [ [ { type: 'delete', …(2) } ] ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     {
++       "key": "a",
++       "type": "delete",
++       "value": {
++         "id": "a",
++         "value": 0,
++       },
++     },
++   ],
++ ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes restarted source commits while canceled replay work settles
+AssertionError: consumer state after command 4: {"type":"abort","demand":"b"}: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes restarted source commits while canceled replay work settles
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"abort","demand":"b"},{"type":"truncate"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":5,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes eager restart before a later source reset: undefined
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"truncate"},{"type":"source","key":"a","action":"upsert","value":3},{"type":"unsubscribe"}],"command":{"type":"restart"},"commandIndex":2,"observed":[[]],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [ [] ] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+  [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
++   [],
+  ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2209:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes eager restart before a later source reset: {"id":"a","value":0}
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"truncate","replacement":{"id":"a","value":0}},{"type":"source","key":"a","action":"upsert","value":3},{"type":"unsubscribe"}],"command":{"type":"restart"},"commandIndex":2,"observed":[[]],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [ [] ] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+  [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
++   [],
+  ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2209:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes eager restart before a later source reset: {"id":"a","value":1}
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"truncate","replacement":{"id":"a","value":1}},{"type":"source","key":"a","action":"upsert","value":3},{"type":"unsubscribe"}],"command":{"type":"restart"},"commandIndex":2,"observed":[[]],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [ [] ] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+  [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
++   [],
+  ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2209:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes eager restart before a later source reset: {"id":"c","value":2}
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"truncate","replacement":{"id":"c","value":2}},{"type":"source","key":"a","action":"upsert","value":3},{"type":"unsubscribe"}],"command":{"type":"restart"},"commandIndex":2,"observed":[[]],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [ [] ] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+  [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
++   [],
+  ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2209:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for a fixed seed (with seed=1657005)
+Error: Property failed after 17 tests
+{ seed: 1657005, path: "16:18:1:1", endOnFailure: true }
+Counterexample: [[{"type":"truncate"},{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"cleanup"},{"type":"abort","demand":"a"},{"type":"restart"},{"type":"request","demand":"b"},{"type":"truncate"}]]
+Shrunk 3 time(s)
+Got AssertionError: {"history":[{"type":"truncate"},{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"cleanup"},{"type":"abort","demand":"a"},{"type":"restart"},{"type":"request","demand":"b"},{"type":"truncate"}],"command":{"type":"truncate"},"commandIndex":8,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+    at assertPublications (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40)
+    at runPublicationHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2290:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2290:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for a random or replayed seed (with seed=1568968272)
+Error: Property failed after 31 tests
+{ seed: 1568968272, path: "30:31:0:0:0", endOnFailure: true }
+Counterexample: [[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"request","demand":"b"},{"type":"abort","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"restart"},{"type":"truncate"},{"type":"cleanup"},{"type":"unsubscribe"}]]
+Shrunk 4 time(s)
+Got AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"restart"},{"type":"request","demand":"b"},{"type":"abort","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"restart"},{"type":"truncate"},{"type":"cleanup"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":9,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+    at assertPublications (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40)
+    at runPublicationHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2304:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2304:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > checks atomic Collection public snapshots (fixed campaign)
+Error: Property failed after 7 tests
+{ seed: 20261030, path: "6:0:0", endOnFailure: true }
+Counterexample: [{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"outcome":"reject"}]
+Shrunk 2 time(s)
+Got AggregateError: Atomic snapshot continuations failed
+    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15)
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15
+    2808|       }
+    2809|       if (failures.length > 0)
+    2810|         throw new AggregateError(
+       |               ^
+    2811|           failures,
+    2812|           `Atomic snapshot continuations failed`,
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2834:13
+
+Caused by: AggregateError: Atomic snapshot continuations failed
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errors: [ { stack: 'AggregateError: Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication', cause: { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' }, errors: [ { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' } ], constructor: 'Function<AggregateError>', name: 'AggregateError', toString: 'Function<toString>' } ] }
+Caused by: AggregateError: Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errors: [ { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' } ] }
+Caused by: Error: Collection public snapshot at restarted-authoritative-publication
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+Caused by: AssertionError: complete: public keys through indexedSelection: expected [ 'a', 'c' ] to deeply equal [ 'a', 'b', 'c' ]
+
+- Expected
++ Received
+
+  [
+    "a",
+-   "b",
+    "c",
+  ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:98:71
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/15]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > checks atomic Collection public snapshots (random or replay campaign)
+Error: Property failed after 11 tests
+{ seed: 1781361824, path: "10:0:0", endOnFailure: true }
+Counterexample: [{"initial":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"replacement":[{"id":"a","value":0},{"id":"b","value":1},{"id":"c","value":2}],"outcome":"reject"}]
+Shrunk 2 time(s)
+Got AggregateError: Atomic snapshot continuations failed
+    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15)
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15
+    2808|       }
+    2809|       if (failures.length > 0)
+    2810|         throw new AggregateError(
+       |               ^
+    2811|           failures,
+    2812|           `Atomic snapshot continuations failed`,
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2834:13
+
+Caused by: AggregateError: Atomic snapshot continuations failed
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2810:15
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errors: [ { stack: 'AggregateError: Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication', cause: { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' }, errors: [ { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' } ], constructor: 'Function<AggregateError>', name: 'AggregateError', toString: 'Function<toString>' } ] }
+Caused by: AggregateError: Collection public snapshot mismatches at Collection public snapshot at restarted-authoritative-publication
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errors: [ { stack: 'Error: Collection public snapshot at restarted-authoritative-publication\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20', message: 'Collection public snapshot at restarted-authoritative-publication', cause: { message: 'complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]', actual: '[\n  "a",\n  "c",\n]', expected: '[\n  "a",\n  "b",\n  "c",\n]', showDiff: true, operator: 'deepStrictEqual', diff: '- Expected\n+ Received\n\n  [\n    "a",\n-   "b",\n    "c",\n  ]', name: 'AssertionError', ok: false, stack: 'AssertionError: complete: public keys through indexedSelection: expected [ \'a\', \'c\' ] to deeply equal [ \'a\', \'b\', \'c\' ]\n    at checkPublicSnapshotObservation (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-public-snapshot-oracle.ts:98:71)\n    at checkAtomicPublicSnapshot (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7)\n    at checkHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11)\n    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at checkCampaign (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21)\n    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20' }, constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' } ] }
+Caused by: Error: Collection public snapshot at restarted-authoritative-publication
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+Caused by: AssertionError: complete: public keys through indexedSelection: expected [ 'a', 'c' ] to deeply equal [ 'a', 'b', 'c' ]
+
+- Expected
++ Received
+
+  [
+    "a",
+-   "b",
+    "c",
+  ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:98:71
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ checkHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2804:11
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ checkCampaign tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2816:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/15]⎯
+

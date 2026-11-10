@@ -1,0 +1,10 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+{"property":"subscription-lifecycle.atomic-public-snapshot","campaign":"random","seed":20261030,"path":null,"failed":false,"runs":1,"completedGeneratedReach":{"held-after-truncate":1,"held-after-candidate-commit":1,"held-after-equal-followup":1,"quiet-failure":0,"failed-retirement":0,"successful-retry":0,"successful-publication":1,"cleanup-old-work-fenced":1,"restarted-publication":1},"completedShrinkReach":{"held-after-truncate":0,"held-after-candidate-commit":0,"held-after-equal-followup":0,"quiet-failure":0,"failed-retirement":0,"successful-retry":0,"successful-publication":0,"cleanup-old-work-fenced":0,"restarted-publication":0}}
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 150 skipped (151)
+   Start at  11:31:04
+   Duration  1.42s (transform 558ms, setup 58ms, import 1.02s, tests 36ms, environment 204ms)
+

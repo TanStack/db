@@ -1,0 +1,12 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/query/includes-publication-oracle.test.ts (93 tests | 2 failed | 90 skipped) 30ms
+     × compares the final 'A' to 'A' row with the last public snapshot 19ms
+     × compares the final 'B' to 'A' row with the last public snapshot 6ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 90 skipped (93)
+   Start at  11:31:25
+   Duration  1.24s (transform 476ms, setup 49ms, import 885ms, tests 30ms, environment 188ms)
+

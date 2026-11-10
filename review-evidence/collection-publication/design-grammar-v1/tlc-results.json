@@ -1,0 +1,243 @@
+{
+  "sourceHead": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+  "modelSha256": "15d923e58a36ac89fa8365f14f416558a31ebbed515e38e3e2a684f92c78f606",
+  "image": "sha256:985e5be2bfcb9a07189650114cd8839dd11f0e94d32407e91b9c77d69e7825e3",
+  "TLC": "2.19, rev 5a47802",
+  "models": [
+    {
+      "name": "source-success-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 9,
+        "distinct": 7,
+        "queued": 0
+      },
+      "rawLog": "source-success-1.log"
+    },
+    {
+      "name": "source-before-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 4,
+        "distinct": 3,
+        "queued": 0
+      },
+      "rawLog": "source-before-1.log"
+    },
+    {
+      "name": "source-after-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 7,
+        "distinct": 6,
+        "queued": 0
+      },
+      "rawLog": "source-after-1.log"
+    },
+    {
+      "name": "buffer-success-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 9,
+        "distinct": 7,
+        "queued": 0
+      },
+      "rawLog": "buffer-success-1.log"
+    },
+    {
+      "name": "buffer-before-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 4,
+        "distinct": 3,
+        "queued": 0
+      },
+      "rawLog": "buffer-before-1.log"
+    },
+    {
+      "name": "buffer-after-1",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 7,
+        "distinct": 6,
+        "queued": 0
+      },
+      "rawLog": "buffer-after-1.log"
+    },
+    {
+      "name": "source-success-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 79,
+        "distinct": 48,
+        "queued": 0
+      },
+      "rawLog": "source-success-2.log"
+    },
+    {
+      "name": "source-before-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 29,
+        "distinct": 18,
+        "queued": 0
+      },
+      "rawLog": "source-before-2.log"
+    },
+    {
+      "name": "source-after-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 75,
+        "distinct": 46,
+        "queued": 0
+      },
+      "rawLog": "source-after-2.log"
+    },
+    {
+      "name": "buffer-success-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 22,
+        "distinct": 15,
+        "queued": 0
+      },
+      "rawLog": "buffer-success-2.log"
+    },
+    {
+      "name": "buffer-before-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 7,
+        "distinct": 5,
+        "queued": 0
+      },
+      "rawLog": "buffer-before-2.log"
+    },
+    {
+      "name": "buffer-after-2",
+      "expect": "pass",
+      "exit": 0,
+      "matched": true,
+      "states": {
+        "generated": 20,
+        "distinct": 14,
+        "queued": 0
+      },
+      "rawLog": "buffer-after-2.log"
+    },
+    {
+      "name": "hold-success-1",
+      "expect": "deadlock",
+      "exit": 11,
+      "matched": true,
+      "states": {
+        "generated": 3,
+        "distinct": 3,
+        "queued": 0
+      },
+      "rawLog": "hold-success-1.log"
+    },
+    {
+      "name": "current-success-1",
+      "expect": "ReadEventAgreement",
+      "exit": 12,
+      "matched": true,
+      "states": null,
+      "rawLog": "current-success-1.log"
+    },
+    {
+      "name": "acceptance-success-1",
+      "expect": "ReceiptVisibility",
+      "exit": 12,
+      "matched": true,
+      "states": {
+        "generated": 4,
+        "distinct": 4,
+        "queued": 0
+      },
+      "rawLog": "acceptance-success-1.log"
+    },
+    {
+      "name": "hold-success-2",
+      "expect": "deadlock",
+      "exit": 11,
+      "matched": true,
+      "states": {
+        "generated": 13,
+        "distinct": 10,
+        "queued": 1
+      },
+      "rawLog": "hold-success-2.log"
+    },
+    {
+      "name": "current-success-2",
+      "expect": "ReadEventAgreement",
+      "exit": 12,
+      "matched": true,
+      "states": null,
+      "rawLog": "current-success-2.log"
+    },
+    {
+      "name": "acceptance-success-2",
+      "expect": "ReceiptVisibility",
+      "exit": 12,
+      "matched": true,
+      "states": {
+        "generated": 8,
+        "distinct": 7,
+        "queued": 2
+      },
+      "rawLog": "acceptance-success-2.log"
+    },
+    {
+      "name": "buffer-strict-timing-2",
+      "expect": "StrictReplayTiming",
+      "exit": 12,
+      "matched": true,
+      "states": {
+        "generated": 7,
+        "distinct": 6,
+        "queued": 0
+      },
+      "rawLog": "buffer-strict-timing-2.log"
+    },
+    {
+      "name": "buffer-failed-retention-2",
+      "expect": "FailedRetainsOldSource",
+      "exit": 12,
+      "matched": true,
+      "states": {
+        "generated": 18,
+        "distinct": 14,
+        "queued": 1
+      },
+      "rawLog": "buffer-failed-retention-2.log"
+    }
+  ],
+  "noFairness": true,
+  "scope": "finite design grammar, not production refinement evidence"
+}
+

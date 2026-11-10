@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed | 35 skipped (41)
+   Start at  11:33:29
+   Duration  711ms (transform 53ms, setup 93ms, import 107ms, tests 74ms, environment 336ms)
+

@@ -1,0 +1,10 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+{"property":"subscription-lifecycle.demand-change","generatedReach":{"fixed":{"a raw snapshot publishes during an unresolved replay":209,"the completion receiver observes pending replay work":349,"the completion receiver observes a rejected replay":145,"a change retires several owners during a replay":194,"the completion receiver observes successful replay completion":79,"judging between releases would fail a replay the change publishes":23,"the completion receiver observes cleanup or unsubscription abort":17,"judging between releases would publish a replay the change fails":7,"a held replacement covers a failed owner":14},"random":{"a raw snapshot publishes during an unresolved replay":231,"the completion receiver observes pending replay work":351,"the completion receiver observes a rejected replay":122,"a change retires several owners during a replay":219,"the completion receiver observes successful replay completion":79,"judging between releases would fail a replay the change publishes":30,"the completion receiver observes cleanup or unsubscription abort":17,"judging between releases would publish a replay the change fails":4,"a held replacement covers a failed owner":9}}}
+
+ Test Files  19 passed (19)
+      Tests  1383 passed (1383)
+   Start at  11:27:59
+   Duration  64.43s (transform 989ms, setup 916ms, import 5.78s, tests 50.86s, environment 4.71s)
+

@@ -20,7 +20,7 @@ export type PublicationChange = {
 }
 
 export type PublicationPhase =
-  `public` | `private-pending` | `private-settling` | `private-failed`
+  `public` | `replay-pending` | `replay-settling` | `replay-failed`
 
 export function cloneRow(row: Row): Row {
   return { id: row.id, value: row.value }

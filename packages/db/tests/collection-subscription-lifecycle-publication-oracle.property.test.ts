@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { createTransaction } from '../src/transactions.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
@@ -13,7 +14,22 @@ import {
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRandomParameters,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleRuns,
+  readOracleRunConfig,
+} from './oracle-config.js'
+import { createOracleReach } from './oracle-reach.js'
+import { recordOracleReplay } from './oracle-replay-witness.js'
+import {
+  checkPublicSnapshotObservation,
+  expectedPublicSnapshot,
+  publicSnapshotHistoryArbitrary,
+  publicSnapshotHistoryExamples,
+} from './collection-public-snapshot-oracle.js'
 import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
@@ -22,6 +38,12 @@ import {
   cloneRow,
   normalizePublicationOrder,
 } from './collection-subscription-lifecycle-publication-support'
+import type {
+  PublicSnapshotCommit,
+  PublicSnapshotHistory,
+  PublicSnapshotObservation,
+  PublicSnapshotPhase,
+} from './collection-public-snapshot-oracle.js'
 import type {
   PublicationChange,
   PublicationPhase,
@@ -42,26 +64,17 @@ import type {
 /**
  * # Which lifecycle work may become public rows?
  *
- * The lifecycle grammar decides which acquisition attempt is current. This
- * file adds the row-publication node. A truncate opens a private replacement;
- * source writes accumulate there until every gating attempt succeeds. Replay
- * failure keeps the replacement and later source changes private while the
- * last public snapshot remains visible. Releasing the final logical subset
- * owner retires the replacement, since nothing can complete it. A
- * replacement whose current attempt has not failed then publishes the rows
- * it holds, so the subscriber does not keep values the source replaced or
- * deleted during it. One that failed stays private, as a failed replay does
- * until an authoritative replay succeeds, even after its failed owner was
- * released. A later request delivers its installed row, so a row that the
- * subscriber still shows at an older value is updated then.
+ * The lifecycle grammar decides acquisition authority, readiness and errors.
+ * Raw Collection subscribers observe every applied source transaction, including
+ * truncate and partial replay writes. A failed load does not retract those
+ * writes. Authority: the maintainer's 2026-10-30 raw-commit decision in
+ * docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md.
+ * Complete-result retention belongs to live queries and is unchanged.
  * The `Collection.subscribeChanges` API contract in `../src/collection/index.ts`
- * is the authority for callback batches and their per-key causal order. The
- * public Collection lifecycle and shared lifecycle grammar specify cleanup,
- * restart, and which acquisition attempts can authorize a replacement. The
- * Collection's public reads supply the row observation. The coverage map's
- * Collection lifecycle entry limits this owner to Collection publication; it
- * does not establish compiled live-query includes publication or provider
- * behavior beyond the controlled sync adapter below.
+ * supplies callback batches and their per-key causal order. The public
+ * Collection lifecycle and shared lifecycle grammar supply cleanup, restart,
+ * and acquisition-attempt authority. The coverage map limits this owner to
+ * Collection publication, not compiled includes or provider correctness.
  * `requestLimitedSnapshot` promises not to resend keys. A direct snapshot
  * selects keys for this subscription. A source callback can also publish a key
  * that no snapshot selected. Later ordered local snapshots skip either kind of
@@ -69,11 +82,14 @@ import type {
  *
  * `source` holds currently installed source rows; `visible` is the public
  * snapshot.
- * `replacement` is the private replacement. `retainedKeys` and `sentKeys` are
- * model-only projections of rows retained after cleanup and keys already sent
- * to this subscriber; neither represents a production ownership state.
- * `PublicationPhase` combines the private replacement and acquisition
- * settlement into one test-case label. It is not a Collection status.
+ * `retainedKeys` and `sentKeys` are model-only projections of cleanup-kept rows
+ * and keys already sent to this subscriber. A direct subscription survives
+ * cleanup without a clear callback. Its next applied source transaction
+ * reconciles kept rows against the new run's current source, including when
+ * that transaction is empty. Eager readiness retains its complete-source
+ * reconciliation. Acquisition settlement alone never chooses raw membership.
+ * `PublicationPhase` combines replay acquisition timing and verdict into a
+ * diagnostic label. It is not a Collection status or row-visibility policy.
  *
  * The reference state uses plain Maps and batches. It does not copy the
  * subscription implementation. After every command, the driver compares exact
@@ -126,23 +142,11 @@ type RuntimeOwner = {
   attemptId?: number
 }
 
-type Replacement = {
-  syncRunGeneration: number
-  replayGeneration: number
-  rows: Map<RowKey, Row>
-  failed: boolean
-  // A current attempt failed, even if its owner has been released since.
-  // Only full retirement reads it: with owners left, a released owner's
-  // failure cannot stop a successful replacement.
-  everFailed: boolean
-}
-
 type PublicationModel = {
   source: Map<RowKey, Row>
   visible: Map<RowKey, Row>
-  // Public rows carried across a discarded source/replay, not yet refreshed.
+  // Public rows carried across cleanup, before the new source reconciles them.
   retainedKeys: Set<RowKey>
-  replacement?: Replacement
   batches: Array<Array<PublicationChange>>
   sentKeys: Set<RowKey>
 }
@@ -186,12 +190,14 @@ type PublicationRunOptions = {
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
   // This driver requests raw future changes (includeInitialState: false).
-  // After retiring private work, an unseen source row can still be updated.
-  // Retained public rows take precedence when reconciling a stale snapshot.
-  const previous =
-    publication.visible.get(row.id) ?? publication.source.get(row.id)
+  // Cleanup-kept rows reconcile at the next applied source transaction.
+  const previous = publication.source.get(row.id)
   publication.source.set(row.id, cloneRow(row))
-  publication.retainedKeys.delete(row.id)
+  if (publication.retainedKeys.size > 0) {
+    publishIfChanged(publication, new Map(publication.source))
+    publication.retainedKeys.clear()
+    return
+  }
   if (previous?.value === row.value) return
   publication.visible.set(row.id, cloneRow(row))
   publication.sentKeys.add(row.id)
@@ -214,22 +220,22 @@ const mapsEqual = (
   left.size === right.size &&
   [...left].every(([id, row]) => right.get(id)?.value === row.value)
 
-function publicationPhase(
-  publication: PublicationModel,
-  lifecycle: LifecycleModel,
-): PublicationPhase {
-  if (!publication.replacement) return `public`
-  if (publication.replacement.failed) return `private-failed`
+// Replay timing is diagnostic: the raw source fold has no replay buffer.
+function publicationPhase(lifecycle: LifecycleModel): PublicationPhase {
+  if (!lifecycle.publicationBarrierOpen) return `public`
   const currentAttemptIds = new Set(
     lifecycle.owners.flatMap(({ aborted, attemptId }) =>
       aborted || attemptId === undefined ? [] : [attemptId],
     ),
   )
-  return lifecycle.attempts.some(
-    ({ id, outcome }) => currentAttemptIds.has(id) && outcome !== undefined,
+  const current = lifecycle.attempts.filter(({ id }) =>
+    currentAttemptIds.has(id),
   )
-    ? `private-settling`
-    : `private-pending`
+  if (current.some(({ outcome }) => outcome === `reject`))
+    return `replay-failed`
+  return current.some(({ outcome }) => outcome !== undefined)
+    ? `replay-settling`
+    : `replay-pending`
 }
 
 function publicationDiff(
@@ -272,48 +278,11 @@ function publishIfChanged(
   publication.sentKeys = new Set(next.keys())
 }
 
-function finishReplacement(
-  publication: PublicationModel,
-  lifecycle: LifecycleModel,
-): void {
-  const replacement = publication.replacement
-  if (!replacement) return
-  const currentAttempts = lifecycle.owners.flatMap(({ aborted, attemptId }) =>
-    aborted || attemptId === undefined ? [] : [lifecycle.attempts[attemptId]!],
-  )
-  replacement.failed = currentAttempts.some(
-    ({ outcome }) => outcome === `reject`,
-  )
-  replacement.everFailed ||= replacement.failed
-  if (lifecycle.publicationBarrierOpen) return
-  if (replacement.failed) {
-    replacement.failed = true
-    if (currentAttempts.length === 0) {
-      publication.replacement = undefined
-    }
-  } else if (
-    // A canceled-only reset can establish an empty replacement once older
-    // transports settle. Releasing every owner instead retires the work.
-    lifecycle.owners.length > 0 &&
-    currentAttempts.every(({ outcome }) => outcome === `resolve`)
-  ) {
-    publishIfChanged(publication, new Map(replacement.rows))
-    publication.retainedKeys.clear()
-    publication.replacement = undefined
-  } else if (lifecycle.owners.length === 0 && !replacement.everFailed) {
-    // Releasing the final owner retires a replay that has not failed. Nothing
-    // can complete it, so it publishes the rows it holds rather than keep
-    // values the source has replaced or deleted.
-    publishIfChanged(publication, new Map(replacement.rows))
-    publication.retainedKeys.clear()
-    publication.replacement = undefined
-  } else {
-    // Retire private publication work, not the source's independently applied state.
-    publication.replacement = undefined
-    publication.retainedKeys = new Set(publication.visible.keys())
-  }
-}
-
+/** Authored source transactions choose raw rows. Acquisition outcomes choose
+ * only whether a current attempt authors a source write; they do not keep an
+ * applied transaction private or retract it. Cleanup is the sole retained-fold
+ * distinction: it clears source without notifying this surviving subscriber.
+ */
 function projectPublication(
   publication: PublicationModel,
   lifecycle: LifecycleModel,
@@ -329,62 +298,33 @@ function projectPublication(
   ) {
     const previousSource = new Map(publication.source)
     publication.source.clear()
-    if (command.replacement) {
+    if (command.replacement)
       publication.source.set(
         command.replacement.id,
         cloneRow(command.replacement),
       )
-    }
-    if (lifecycle.publicationBarrierOpen) {
-      publication.replacement = {
-        syncRunGeneration: lifecycle.syncRunGeneration,
-        replayGeneration: lifecycle.replayGeneration,
-        rows: new Map(publication.source),
-        failed: false,
-        everFailed: false,
-      }
+    if (publication.retainedKeys.size > 0) {
+      publishIfChanged(publication, new Map(publication.source))
     } else {
-      publication.replacement = undefined
-      if (
-        publication.retainedKeys.size === 0 &&
-        (eagerRestart || lifecycle.owners.length === 0)
-      ) {
-        // Without held publications or replay demand this is a raw source
-        // transaction: all old source rows are deleted, even if never shown.
-        // A same-key replacement keeps its delete/insert pair in one callback.
-        const changes: Array<PublicationChange> = [
-          ...[...previousSource].map(([key, value]) => ({
-            type: `delete` as const,
-            key,
-            value: cloneRow(value),
-          })),
-          ...[...publication.source].map(([key, value]) => ({
-            type: `insert` as const,
-            key,
-            value: cloneRow(value),
-          })),
-        ]
-        if (changes.length > 0) publication.batches.push(changes)
-        publication.visible = new Map(publication.source)
-        publication.sentKeys = new Set(publication.source.keys())
-      } else {
-        // Held publications need a replacement diff, not raw source deletes.
-        publishIfChanged(publication, new Map(publication.source))
-      }
-      publication.retainedKeys.clear()
+      // Truncate and its replacement writes form one raw sync transaction.
+      // Keep delete/insert order for the same key, even for an equal value.
+      const changes: Array<PublicationChange> = [
+        ...[...previousSource].map(([key, value]) => ({
+          type: `delete` as const,
+          key,
+          value: cloneRow(value),
+        })),
+        ...[...publication.source].map(([key, value]) => ({
+          type: `insert` as const,
+          key,
+          value: cloneRow(value),
+        })),
+      ]
+      if (changes.length > 0) publication.batches.push(changes)
+      publication.visible = new Map(publication.source)
+      publication.sentKeys = new Set(publication.source.keys())
     }
-  } else if (
-    command.type === `restart` &&
-    lifecycle.publications > priorPublicationCount &&
-    lifecycle.publicationBarrierOpen
-  ) {
-    publication.replacement = {
-      syncRunGeneration: lifecycle.syncRunGeneration,
-      replayGeneration: lifecycle.replayGeneration,
-      rows: new Map(),
-      failed: false,
-      everFailed: false,
-    }
+    publication.retainedKeys.clear()
   } else if (
     command.type === `source` &&
     lifecycle.active &&
@@ -393,68 +333,34 @@ function projectPublication(
     const previousValue = publication.source.get(command.key)
     if (command.action === `delete`) {
       publication.source.delete(command.key)
-      publication.replacement?.rows.delete(command.key)
-      if (!publication.replacement && previousValue) {
-        const deletedValue = publication.retainedKeys.has(command.key)
-          ? (publication.visible.get(command.key) ?? previousValue)
-          : previousValue
+      if (publication.retainedKeys.size > 0) {
+        publishIfChanged(publication, new Map(publication.source))
+        publication.retainedKeys.clear()
+      } else if (previousValue) {
         publication.visible.delete(command.key)
-        publication.retainedKeys.delete(command.key)
         publication.sentKeys.delete(command.key)
         publication.batches.push([
-          {
-            type: `delete`,
-            key: command.key,
-            value: cloneRow(deletedValue),
-          },
+          { type: `delete`, key: command.key, value: cloneRow(previousValue) },
         ])
       }
     } else {
-      const row = {
-        id: command.key,
-        value: command.value,
-      }
-      if (publication.replacement) {
-        publication.source.set(command.key, row)
-        publication.replacement.rows.set(command.key, row)
-      } else {
-        recordSourceWrite(publication, row)
-      }
+      recordSourceWrite(publication, { id: command.key, value: command.value })
     }
   } else if (command.type === `cleanup`) {
     publication.retainedKeys = new Set(publication.visible.keys())
     publication.source.clear()
-    publication.replacement = undefined
-  } else if (command.type === `release` || command.type === `abort`) {
-    // Release changes demand, not source retention. Releasing alone never
-    // changes the subscriber's rows; a source write, a successful
-    // replacement, or a later request does. An abort ends the owner's load
-    // (maintainer decision): the replacement no longer waits for it.
-    finishReplacement(publication, lifecycle)
   } else if (command.type === `settle` && effect.attemptId !== undefined) {
     const attempt = lifecycle.attempts[effect.attemptId]!
     const isCurrent = lifecycle.owners.some(
       ({ attemptId }) => attemptId === attempt.id,
     )
-    if (command.outcome === `resolve` && isCurrent && !attempt.aborted) {
-      const row = { id: attempt.demand, value: attempt.id }
-      const replacement = publication.replacement
-      if (
-        replacement &&
-        replacement.syncRunGeneration === attempt.syncRunGeneration &&
-        replacement.replayGeneration === attempt.replayGeneration
-      ) {
-        publication.source.set(row.id, row)
-        replacement.rows.set(row.id, row)
-      } else {
-        recordSourceWrite(publication, row)
-      }
-    }
-    finishReplacement(publication, lifecycle)
+    if (command.outcome === `resolve` && isCurrent && !attempt.aborted)
+      recordSourceWrite(publication, { id: attempt.demand, value: attempt.id })
   }
 
-  // This fixture marks an eager restart ready with its complete (empty) source.
-  // Unlike on-demand restart, that is authority to retire the retained snapshot.
+  // An eager-ready restart declares its complete source. On-demand readiness
+  // alone supplies no such full-source evidence, so it retains cleanup's fold
+  // until an authored transaction or the existing snapshot path reconciles it.
   if (
     eagerRestart &&
     command.type === `restart` &&
@@ -478,10 +384,6 @@ function projectPublication(
         .length === 1
         ? publication.source.get(command.demand)
         : undefined
-    // A request delivers its installed row: an insert when the subscriber
-    // does not show it, an update when it shows an older value, such as a
-    // row a failed replay kept, and nothing when it shows the same value.
-    // Either way the row is no longer retained.
     const shown = requested && publication.visible.get(requested.id)
     const row =
       requested && requested.value !== shown?.value ? requested : undefined
@@ -495,11 +397,7 @@ function projectPublication(
                   value: cloneRow(row),
                   previousValue: cloneRow(shown),
                 }
-              : {
-                  type: `insert`,
-                  key: row.id,
-                  value: cloneRow(row),
-                },
+              : { type: `insert`, key: row.id, value: cloneRow(row) },
           ]
         : [],
     )
@@ -523,7 +421,7 @@ const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
 // including before the first and after the last lifecycle command. Keys a/b
 // can overlap demand; c/d distinguish independent source work. Upsert/delete
 // and values 0–5 distinguish insert, update, delete, and unchanged writes.
-// Removing insertion position loses public/private timing; removing either
+// Removing insertion position loses replay timing; removing either
 // key class loses demand overlap or independent publication. Without delete,
 // a source row cannot retract; without repeated writes and distinct values,
 // unchanged-write silence cannot be distinguished from an actual update. The
@@ -780,7 +678,7 @@ async function runPublicationHistory(
   try {
     for (const [index, command] of history.entries()) {
       const priorPublicationCount = lifecycle.publications
-      const phaseBefore = publicationPhase(publication, lifecycle)
+      const phaseBefore = publicationPhase(lifecycle)
       const pendingAttemptsBefore = [...attempts.values()].filter(
         ({ current, settled }) => current && !settled,
       ).length
@@ -939,7 +837,7 @@ async function runPublicationHistory(
         priorPublicationCount,
         runOptions.withoutLoader ?? false,
       )
-      // Public retention never rewrites the independently installed source.
+      // The expected callback fold never rewrites the independently installed source.
       // The publication model stops tracking source commands after unsubscribe;
       // its callback-silence assertions below still cover that suffix.
       if (!lifecycle.unsubscribed)
@@ -1091,7 +989,7 @@ function createPublicationProductCase(
   const history: Array<PublicationCommand> = []
   const push = (command: PublicationCommand): number =>
     history.push(command) - 1
-  const hasPeer = phase === `private-settling` || phase === `private-failed`
+  const hasPeer = phase === `replay-settling` || phase === `replay-failed`
 
   if (priorIndependentRow === `present`) {
     push({ type: `source`, key: `d`, action: `upsert`, value: 30 })
@@ -1102,9 +1000,9 @@ function createPublicationProductCase(
     push(settleCurrent(`a`, `resolve`))
     if (hasPeer) push(settleCurrent(`b`, `resolve`))
     push({ type: `truncate` })
-    if (phase === `private-settling`) {
+    if (phase === `replay-settling`) {
       push(settleCurrent(`b`, `resolve`))
-    } else if (phase === `private-failed`) {
+    } else if (phase === `replay-failed`) {
       push(settleCurrent(`b`, `reject`))
     }
   }
@@ -1163,9 +1061,9 @@ function createPublicationProductCase(
 
 const publicationPhases = [
   `public`,
-  `private-pending`,
-  `private-settling`,
-  `private-failed`,
+  `replay-pending`,
+  `replay-settling`,
+  `replay-failed`,
 ] as const
 
 const sourceEffects = [`insert`, `update`, `delete`] as const
@@ -1201,14 +1099,14 @@ const publicationProductCases = publicationPhases.flatMap((phase) =>
 
 const successfulReplacementCases = publicationProductCases.filter(
   ({ phase, sourceEffect, settlement }) =>
-    (phase === `private-pending` || phase === `private-settling`) &&
+    (phase === `replay-pending` || phase === `replay-settling`) &&
     sourceEffect !== `delete` &&
     settlement === `resolve`,
 )
 
 const replacementOrderingCases = publicationProductCases.filter(
   ({ phase, sourceEffect, settlement, suffix, priorIndependentRow }) =>
-    (phase === `private-pending` || phase === `private-settling`) &&
+    (phase === `replay-pending` || phase === `replay-settling`) &&
     sourceEffect === `delete` &&
     settlement === `resolve` &&
     suffix !== `release` &&
@@ -1267,11 +1165,7 @@ async function runPublicationProduct(
         command: `settle`,
         executed: true,
         settlement: scenario.settlement,
-        publications:
-          scenario.settlement === `resolve` &&
-          scenario.phase !== `private-failed`
-            ? 1
-            : 0,
+        publications: scenario.settlement === `resolve` ? 1 : 0,
       })
     }
 
@@ -1288,8 +1182,8 @@ async function runPublicationProduct(
       expect(suffix.syncRuns, scenario.name).toBe(1)
     } else {
       const ownerCount =
-        scenario.phase === `private-settling` ||
-        scenario.phase === `private-failed`
+        scenario.phase === `replay-settling` ||
+        scenario.phase === `replay-failed`
           ? 2
           : 1
       expect(suffix.unloads, scenario.name).toBe(ownerCount)
@@ -1464,7 +1358,6 @@ declareOracle({
     publicationDiff,
     publishIfChanged,
     recordSourceWrite,
-    finishReplacement,
     expectedSelection,
   ],
   grammar: [deferralCleanupHistories, publicationProductCases],
@@ -1472,8 +1365,8 @@ declareOracle({
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // A local snapshot selects source rows for this subscriber. Selection and
-  // publication are distinct: replay can hold a selection privately, while
-  // every subscription mode tracks keys delivered through public callbacks.
+  // source application are distinct: snapshots select keys, while each
+  // subscription mode also tracks keys delivered through raw source callbacks.
   // For these static, distinct-ranked rows, the reference model selects the
   // requested predicate's rows, then the first unselected ordered row. A
   // callback consumer must never receive a second insert for a present key.
@@ -1724,7 +1617,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `release`, demand: `b` },
     ])
   })
-  it(`does not invent a publication for an unchanged private row`, async () => {
+  it(`does not republish an unchanged raw source row`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       { type: `cleanup` },
@@ -1838,17 +1731,17 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       expectNoPublicationMismatches(await runPublicationProduct(scenarios))
     },
   )
-  it(`preserves independent source work when a successful replay publishes`, async () => {
+  it(`preserves independent source commits while replay acquisitions settle`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(successfulReplacementCases),
     )
   })
-  it(`publishes complete replacement batches regardless of independent key order`, async () => {
+  it(`publishes raw transactions regardless of independent key order`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementOrderingCases),
     )
   })
-  it(`retires incomplete or failed replacement without changing independent public rows`, async () => {
+  it(`retires replay demand without retracting applied source rows`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementRetirementCases),
     )
@@ -1894,7 +1787,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-  it(`publishes independent source changes with a successful replay`, async () => {
+  it(`publishes independent source changes before a successful replay settles`, async () => {
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -1958,7 +1851,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-  it(`keeps later source changes private after a failed replay`, async () => {
+  it(`publishes later source changes after a failed replay`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       {
@@ -1979,8 +1872,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `source`, key: `b`, action: `upsert`, value: 51 },
     ])
   })
-  // Releasing the final owner retires a replay that has not failed; it
-  // publishes the rows it holds, so none of these rows stays stale.
+  // Demand retirement cannot retract applied source commits. These histories
+  // keep same-key writes, deletes and undemanded rows visible at every commit.
   it.each([
     [
       `a value written during the replay`,
@@ -2030,7 +1923,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ],
     ],
     [
-      `a row retained by a failed replay and deleted before the next one`,
+      `a row deleted during a failed replay before the next one`,
       [
         { type: `source`, key: `a`, action: `upsert`, value: 1 },
         { type: `request`, demand: `a` },
@@ -2064,7 +1957,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ],
     ],
     [
-      `an undemanded row retained by a failed replay and deleted before the next one`,
+      `an undemanded row deleted during a failed replay before the next one`,
       [
         { type: `source`, key: `c`, action: `upsert`, value: 1 },
         { type: `request`, demand: `a` },
@@ -2103,9 +1996,9 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       await runPublicationHistory(history)
     },
   )
-  // Law 9: a failed replay stays private until an authoritative replay
-  // succeeds, even after its failed owner is released and nothing remains.
-  it(`keeps a failed replay private when its final owner releases`, async () => {
+  // Replay failure decides acquisition authority, not applied raw membership.
+  // Retiring its failed owner does not retract or republish source rows.
+  it(`keeps applied rows when a failed replay final owner releases`, async () => {
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
       { type: `request`, demand: `a` },
@@ -2128,7 +2021,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `release`, demand: `a` },
     ])
   })
-  it(`retires failed private replacement rows when its final owner releases`, async () => {
+  it(`keeps publishing source writes after failed replay retirement`, async () => {
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: 7 },
@@ -2172,9 +2065,9 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-  it(`keeps a restarted snapshot private while canceled replay work settles`, async () => {
+  it(`publishes restarted source commits while canceled replay work settles`, async () => {
     // Seed 2018803696, path 65:10:2:10:13:12:12:0:0:0. A canceled-only
-    // truncate does not discharge the earlier replay's publication wait.
+    // truncate does not discharge the earlier replay's acquisition wait.
     await runPublicationHistory(
       [
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2411,6 +2304,915 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     async (history) => {
       await runPublicationHistory(history)
     },
+    120_000,
+  )
+})
+
+/** Raw source commits have one public result for reads and full-state raw
+ * subscribers. The shared companion owns the clarified maintainer law.
+ * This driver authors source transactions, records their applied prefixes and
+ * every public callback, and never reads replay state to predict public rows.
+ * The primary model above enacts the same law with exact callback batches.
+ * This companion driver adds every public read path at applied transaction cuts.
+ */
+type AtomicSnapshotCut = {
+  label: string
+  history: PublicSnapshotHistory
+  phase: PublicSnapshotPhase
+  observation: PublicSnapshotObservation
+}
+const atomicSnapshotReachStates = [
+  `held-after-truncate`,
+  `held-after-candidate-commit`,
+  `held-after-equal-followup`,
+  `quiet-failure`,
+  `failed-retirement`,
+  `successful-retry`,
+  `successful-publication`,
+  `cleanup-old-work-fenced`,
+  `restarted-publication`,
+] as const
+
+async function receiveAtomicPublicSnapshot(
+  history: PublicSnapshotHistory,
+  retireFailure = false,
+): Promise<{
+  cuts: Array<AtomicSnapshotCut>
+  reached: Set<(typeof atomicSnapshotReachStates)[number]>
+  progress: Array<string>
+  receipts: Array<{ applied: boolean; rejected?: unknown }>
+}> {
+  const cuts: Array<AtomicSnapshotCut> = []
+  const reached = new Set<(typeof atomicSnapshotReachStates)[number]>()
+  const progress: Array<string> = []
+  const fold = new Map<RowKey, Row>()
+  const keys: Array<RowKey> = [`a`, `b`, `c`, `d`]
+  const where = new Map<DemandName, Func>([
+    [`a`, new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])],
+    [`b`, new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])],
+  ])
+  type Load = {
+    options: { signal?: AbortSignal }
+    deferred: ReturnType<typeof createDeferred<void>>
+    group: number
+    outcome: `pending` | `resolve` | `reject`
+  }
+  const loads: Array<Load> = []
+  const receipts: Array<{ applied: boolean; rejected?: unknown }> = []
+  const appliedCommits: Array<PublicSnapshotCommit> = []
+  let publishingCommit: PublicSnapshotCommit | undefined
+  const errors: Array<unknown> = []
+  let operations!: SyncOperations
+  let replaying = false
+  let currentHistory = history
+  let currentPhase: PublicSnapshotPhase = `initial`
+  const phase = () => currentPhase
+  let recording = false
+  let run = 0
+  let group = 0
+  const collection = createCollection<Row, RowKey>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (next) => {
+        operations = next
+        run++
+        next.markReady()
+        return {
+          loadSubset: (options) => {
+            if (!replaying) return true
+            const deferred = createDeferred<void>()
+            void deferred.promise.catch(() => undefined)
+            loads.push({ options, deferred, group, outcome: `pending` })
+            return deferred.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  let index = collection.createIndex((row) => row.value, {
+    indexType: BTreeIndex,
+  })
+  const observe = (): PublicSnapshotObservation => ({
+    appliedCommits: [
+      ...appliedCommits,
+      ...(publishingCommit ? [publishingCommit] : []),
+    ],
+    reads: {
+      get: keys.flatMap((key) => {
+        const row = collection.get(key)
+        return row === undefined ? [] : [cloneRow(row)]
+      }),
+      values: [...collection.values()].map(cloneRow),
+      entries: [...collection.entries()].map(([, row]) => cloneRow(row)),
+      toArray: collection.toArray.map(cloneRow),
+    },
+    keys: {
+      has: keys.filter((key) => collection.has(key)),
+      keys: [...collection.keys()],
+      indexedSelection: [...index.lookup(`gte`, Number.NEGATIVE_INFINITY)],
+    },
+    sizes: { size: collection.size },
+    foldedRows: [...fold.values()].map(cloneRow),
+  })
+  const record = (label: string) => {
+    if (collection.indexes.get(index.id) !== index)
+      throw new Error(
+        `Public index observation requires an active registered index`,
+      )
+    cuts.push({
+      label,
+      history: currentHistory,
+      phase: currentPhase,
+      observation: observe(),
+    })
+  }
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) fold.delete(change.key)
+        else fold.set(change.key, cloneRow(change.value))
+      }
+      if (recording) record(`callback:${cuts.length}`)
+    },
+    { includeInitialState: false },
+  )
+  subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+
+  // Submission is independent of receipt fulfillment. Adapter load success
+  // below still waits for the exact applied receipt; changing that promise
+  // into acceptance would make a different protocol pass this driver.
+  const commit = (
+    rows: ReadonlyArray<Row>,
+    truncate = false,
+    update = false,
+  ) => {
+    const authored: PublicSnapshotCommit = {
+      ...(truncate ? { truncate: true } : {}),
+      rows: rows.map(cloneRow),
+    }
+    operations.begin()
+    if (truncate) operations.truncate()
+    for (const row of rows)
+      operations.write({
+        type: update ? `update` : `insert`,
+        value: cloneRow(row),
+      })
+    // Core calls a raw subscriber while this authored transaction publishes,
+    // before returning its receipt. That callback cut includes this commit.
+    publishingCommit = authored
+    let receipt: ReturnType<SyncOperations[`commit`]>
+    try {
+      receipt = operations.commit()
+    } finally {
+      publishingCommit = undefined
+    }
+    if (receipt === true) appliedCommits.push(authored)
+    const observation: { applied: boolean; rejected?: unknown } = {
+      applied: receipt === true,
+    }
+    receipts.push(observation)
+    const applied =
+      receipt === true
+        ? Promise.resolve()
+        : receipt.then(
+            () => {
+              observation.applied = true
+              appliedCommits.push(authored)
+            },
+            (error: unknown) => {
+              observation.rejected = error
+              throw error
+            },
+          )
+    void applied.catch(() => undefined)
+    return applied
+  }
+  const flush = async () => {
+    await flushPromises()
+    await flushPromises()
+  }
+  const succeed = (load: Load, rows: ReadonlyArray<Row>) => {
+    const applied = commit(rows)
+    // Provider success still waits for its exact applied receipt. The raw
+    // commit is public before the whole replay's provider work succeeds.
+    void applied.then(
+      () => {
+        if (load.options.signal?.aborted) return
+        load.outcome = `resolve`
+        if (
+          loads
+            .filter((candidate) => candidate.group === load.group)
+            .every((candidate) => candidate.outcome === `resolve`)
+        )
+          currentPhase = `complete`
+        load.deferred.resolve()
+      },
+      (error: unknown) => load.deferred.reject(error),
+    )
+  }
+  const startReplay = async () => {
+    replaying = true
+    group++
+    currentPhase = `held`
+    const start = loads.length
+    void commit([], true)
+    await flush()
+    if (loads.length - start !== 2)
+      throw new Error(
+        `Replay setup did not acquire both retained demands: ${loads.length - start}`,
+      )
+    return loads.slice(start)
+  }
+  const failure = new Error(`controlled replay failure`)
+  const cleanupFailures: Array<unknown> = []
+  try {
+    // Initial source delivery is complete before either logical demand starts.
+    recording = true
+    await commit(history.initial)
+    await flush()
+    record(`initial-publication`)
+    for (const predicate of where.values())
+      subscription.requestSnapshot({ where: predicate })
+    await flush()
+    const replay = await startReplay()
+    reached.add(`held-after-truncate`)
+    record(`after-truncate-before-provider-delivery`)
+    const firstRows = history.replacement.filter(({ id }) => id !== `b`)
+    const lastRows = history.replacement.filter(({ id }) => id === `b`)
+    succeed(replay[0]!, firstRows)
+    await flush()
+    reached.add(`held-after-candidate-commit`)
+    record(`candidate-applied-while-sibling-held`)
+    // An equal follow-up cannot repair a missing earlier raw publication.
+    const equal = firstRows[0]
+    if (equal) {
+      void commit([equal], false, true)
+      await flush()
+      reached.add(`held-after-equal-followup`)
+      record(`equal-followup-while-sibling-held`)
+    }
+    if (history.outcome === `reject`) {
+      replay[1]!.outcome = `reject`
+      replay[1]!.deferred.reject(failure)
+      await flush()
+      const quietFailure = replay.every((load) => load.outcome !== `pending`)
+      currentPhase = quietFailure ? `failed` : `held`
+      record(
+        quietFailure
+          ? `quiet-failure`
+          : `failed-response-with-first-load-pending`,
+      )
+      if (quietFailure) reached.add(`quiet-failure`)
+      else
+        progress.push(
+          `Applied receipt held the first load before replay failure could be judged`,
+        )
+      if (quietFailure && !errors.includes(failure))
+        progress.push(`Replay did not report its exact injected Error`)
+      if (retireFailure) {
+        // Retire successful demand first, failed demand last. This cannot
+        // manufacture a successful remaining-demand verdict between releases.
+        subscription.releaseSnapshot(where.get(`a`)!)
+        subscription.releaseSnapshot(where.get(`b`)!)
+        await flush()
+        if (!replay.every((load) => load.options.signal?.aborted))
+          throw new Error(
+            `Final-owner retirement did not abort each acquisition`,
+          )
+        currentPhase = `failed`
+        reached.add(`failed-retirement`)
+        record(`quiet-failed-final-owner-retirement`)
+      } else {
+        currentHistory = { ...history, outcome: `resolve` }
+        const retry = await startReplay()
+        succeed(retry[0]!, firstRows)
+        await flush()
+        record(`retry-sibling-held`)
+        succeed(retry[1]!, lastRows)
+        await flush()
+        record(`successful-authoritative-retry`)
+        if (phase() === `complete`) reached.add(`successful-retry`)
+        else
+          progress.push(
+            `Applied receipt held a load needed by successful replay: retry`,
+          )
+      }
+    } else {
+      succeed(replay[1]!, lastRows)
+      await flush()
+      record(`successful-coherent-publication`)
+      if (phase() === `complete`) reached.add(`successful-publication`)
+      else
+        progress.push(
+          `Applied receipt held a load needed by successful replay: initial`,
+        )
+    }
+    // Cleanup-time fold/direct equality is not asserted. Old provider work
+    // must still lose authority, and a new run must publish only its own rows.
+    recording = false
+    await collection.cleanup()
+    expect(collection.toArray, `cleanup clears direct rows`).toEqual([])
+    for (const load of loads) load.deferred.resolve()
+    await flush()
+    expect(collection.toArray, `old work stays fenced after cleanup`).toEqual(
+      [],
+    )
+    reached.add(`cleanup-old-work-fenced`)
+    const beforeRun = run
+    replaying = false
+    collection.startSyncImmediate()
+    await flush()
+    expect(run, `restart starts a new sync run`).toBe(beforeRun + 1)
+    // Cleanup removes index registration. Observe the new run through an active
+    // index, created before its source transaction so maintenance stays tested.
+    index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    // A new authoritative snapshot establishes a coherent active-run cut.
+    currentHistory = { ...history, outcome: `resolve` }
+    currentPhase = `complete`
+    replaying = false
+    await commit(history.replacement, true)
+    await flush()
+    recording = true
+    record(`restarted-authoritative-publication`)
+    reached.add(`restarted-publication`)
+  } finally {
+    recording = false
+    for (const load of loads) load.deferred.resolve()
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length > 0)
+    throw new AggregateError(
+      cleanupFailures,
+      `Atomic public snapshot cleanup failed`,
+    )
+  return { cuts, reached, progress, receipts }
+}
+
+function checkAtomicPublicSnapshot(
+  result: Awaited<ReturnType<typeof receiveAtomicPublicSnapshot>>,
+): void {
+  const failures: Array<Error> = []
+  for (const cut of result.cuts) {
+    try {
+      checkPublicSnapshotObservation(cut.history, cut.phase, cut.observation)
+    } catch (error) {
+      failures.push(
+        new Error(`Collection public snapshot at ${cut.label}`, {
+          cause: error,
+        }),
+      )
+    }
+  }
+  if (failures.length > 0) {
+    process.stdout.write(
+      `PUBLIC_SNAPSHOT_COUNTEREXAMPLE ${JSON.stringify({
+        cuts: result.cuts,
+        progress: result.progress,
+        receipts: result.receipts,
+      })}\n`,
+    )
+    throw new AggregateError(
+      failures,
+      `Collection public snapshot mismatches at ${failures.map(({ message }) => message).join(`; `)}`,
+      { cause: failures[0] },
+    )
+  }
+  expect(
+    result.progress,
+    `Applied-receipt protocol progress is a separate obligation`,
+  ).toEqual([])
+}
+
+declareOracle({
+  check: [checkAtomicPublicSnapshot],
+  grammar: [publicSnapshotHistoryArbitrary],
+})
+
+describe(`Collection atomic public snapshot`, () => {
+  it(`rejects stale, missing, extra and absent raw public observations`, () => {
+    const history = publicSnapshotHistoryExamples.find(
+      ({ initial, replacement, outcome }) =>
+        initial.length > 0 &&
+        replacement.some(
+          ({ value }, index) => value !== initial[index]?.value,
+        ) &&
+        outcome === `resolve`,
+    )!
+    const appliedCommits: Array<PublicSnapshotCommit> = [
+      { truncate: true, rows: history.replacement },
+    ]
+    const expected = expectedPublicSnapshot(history, appliedCommits)
+    const valid = {
+      appliedCommits,
+      reads: { values: expected },
+      foldedRows: expected,
+    }
+    checkPublicSnapshotObservation(history, `held`, valid)
+    // A later load failure cannot retract a source transaction that applied.
+    checkPublicSnapshotObservation(
+      { ...history, outcome: `reject` },
+      `failed`,
+      valid,
+    )
+    for (const rows of [
+      history.initial,
+      expected.slice(1),
+      [...expected, { id: `d` as const, value: 999 }],
+    ])
+      expect(() =>
+        checkPublicSnapshotObservation(history, `held`, {
+          ...valid,
+          reads: { values: rows },
+        }),
+      ).toThrow()
+    expect(() =>
+      checkPublicSnapshotObservation(history, `held`, {
+        ...valid,
+        foldedRows: history.initial,
+      }),
+    ).toThrow()
+    expect(() =>
+      checkPublicSnapshotObservation(history, `held`, { ...valid, reads: {} }),
+    ).toThrow()
+    expect(() =>
+      checkPublicSnapshotObservation(history, `held`, {
+        appliedCommits,
+        reads: valid.reads,
+      } as unknown as PublicSnapshotObservation),
+    ).toThrow()
+    expect(() =>
+      checkPublicSnapshotObservation(history, `held`, {
+        reads: valid.reads,
+        foldedRows: expected,
+      } as unknown as PublicSnapshotObservation),
+    ).toThrow()
+    expect(() =>
+      checkPublicSnapshotObservation(history, `held`, {
+        ...valid,
+        keys: { indexedSelection: [] },
+      }),
+    ).toThrow()
+  })
+  // Named replay inputs use the same provider driver and shared judgment.
+  // They do not contribute to the generated campaign's reach counters.
+  it.each(
+    publicSnapshotHistoryExamples.map((history, index) => ({ history, index })),
+  )(`replays atomic public snapshot input $index`, async ({ history }) => {
+    const failures: Array<unknown> = []
+    for (const retire of history.outcome === `reject`
+      ? [false, true]
+      : [false]) {
+      const result = await receiveAtomicPublicSnapshot(history, retire)
+      try {
+        checkAtomicPublicSnapshot(result)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    if (failures.length > 0)
+      throw new AggregateError(
+        failures,
+        `Atomic snapshot replay inputs failed`,
+        { cause: failures[0] },
+      )
+  })
+  const property = `subscription-lifecycle.atomic-public-snapshot`
+  const checkCampaign = async (campaign: `fixed` | `random`) => {
+    const reach = createOracleReach(property, atomicSnapshotReachStates, {
+      minimum: 5,
+    })
+    const samples: Array<
+      Array<Set<(typeof atomicSnapshotReachStates)[number]>>
+    > = []
+    const checkHistory = async (history: PublicSnapshotHistory) => {
+      const sample: (typeof samples)[number] = []
+      samples.push(sample)
+      const failures: Array<unknown> = []
+      // Run both continuations even when the first visibility comparison is
+      // RED. Failure cannot silently remove the retirement receiving path.
+      for (const retire of history.outcome === `reject`
+        ? [false, true]
+        : [false]) {
+        reach.beginHistory()
+        const result = await receiveAtomicPublicSnapshot(history, retire)
+        sample.push(result.reached)
+        for (const state of result.reached) reach.reach(state)
+        try {
+          checkAtomicPublicSnapshot(result)
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      if (failures.length > 0)
+        throw new AggregateError(
+          failures,
+          `Atomic snapshot continuations failed`,
+          { cause: failures[0] },
+        )
+    }
+    const details = await fc.check(
+      fc.asyncProperty(publicSnapshotHistoryArbitrary, checkHistory),
+      campaign === `fixed`
+        ? { seed: 20261030, numRuns: oracleRuns(60) }
+        : oraclePropertyOptions(60, property),
+    )
+    recordOracleReplay(property, details)
+    const counts = (records: typeof samples) =>
+      Object.fromEntries(
+        atomicSnapshotReachStates.map((state) => [
+          state,
+          records.flat().filter((states) => states.has(state)).length,
+        ]),
+      )
+    process.stdout.write(
+      `${JSON.stringify({ property, campaign, seed: details.seed, path: details.counterexamplePath, failed: details.failed, runs: details.numRuns, completedGeneratedReach: counts(samples.slice(0, details.numRuns)), completedShrinkReach: counts(samples.slice(details.numRuns)) })}\n`,
+    )
+    if (details.failed)
+      throw new Error(
+        fc.defaultReportMessage(details) ?? `Atomic Collection snapshot failed`,
+        { cause: details.errorInstance },
+      )
+    reach.assertReached()
+  }
+  it.skipIf(oracleReplayRequested())(
+    `checks atomic Collection public snapshots (fixed campaign)`,
+    () => checkCampaign(`fixed`),
+    120_000,
+  )
+  it.skipIf(oracleReplaySkips(property))(
+    `checks atomic Collection public snapshots (random or replay campaign)`,
+    () => checkCampaign(`random`),
+    120_000,
+  )
+})
+
+/**
+ * Cleanup leaves a surviving raw subscriber's fold intact until an applied
+ * source transaction reconciles it. An optimistic transaction is a different
+ * boundary: it publishes its own intent and drops that intent at settlement.
+ * It supplies no evidence that untouched cleanup-retained rows disappeared.
+ * Authority: Collection.cleanup() in ../src/collection/index.ts documents
+ * source clearing, surviving direct subscriptions, and reacquisition after
+ * restart. The 2026-10-30 raw-collection-publication-decision.md distinguishes
+ * applied source transactions from acquisition and graph-result completion.
+ * Together with cleanup's established no-clear-callback contract, this makes
+ * absent-row reconciliation source-only. Transaction.when(`settled`) supplies
+ * optimistic settlement drop, also enacted by optimistic-history-oracle.ts.
+ *
+ * This receiving extension uses the same publication Map and diff. Its only
+ * extra model fact is whether the disjoint optimistic row is present. Direct
+ * reads use the cleared source plus that row; the callback fold also retains
+ * the old rows. Those observations intentionally differ until source applies.
+ * Bootstrap callback grouping, overlapping retained-key mutations, multiple
+ * optimistic transactions, providers, and live queries are outside this law.
+ */
+type CleanupOptimisticHistory = {
+  initial: Array<Row & { id: DemandName }>
+  optimisticValue: number
+  outcome: `resolve` | `reject`
+  sourceNonempty: boolean
+  sourceValue: number
+}
+
+// One to three unique a/b/c rows ensure a retained key exists. Disjoint d
+// isolates untouched-row retention from the mutation's own effects. Values
+// 0..5 exercise equal and changed rows. Both settlement outcomes drop d.
+// Empty and nonempty later transactions distinguish source origin from a
+// nonempty change batch. The driver never authors a source transaction during
+// reacquisition, so a source-applied optimistic checkpoint is not legal here.
+// Removing cleanup, the pending load, or d loses the reported witness. The
+// minimal a=0/d=1 input reconstructs it without a separate expected answer.
+const cleanupOptimisticHistoryArbitrary: fc.Arbitrary<CleanupOptimisticHistory> =
+  fc.record({
+    initial: fc.uniqueArray(
+      fc.record({
+        id: fc.constantFrom(`a` as const, `b` as const, `c` as const),
+        value: fc.integer({ min: 0, max: 5 }),
+      }),
+      { minLength: 1, maxLength: 3, selector: ({ id }) => id },
+    ),
+    optimisticValue: fc.integer({ min: 0, max: 5 }),
+    outcome: fc.constantFrom(`resolve` as const, `reject` as const),
+    sourceNonempty: fc.boolean(),
+    sourceValue: fc.integer({ min: 0, max: 5 }),
+  })
+
+const cleanupOptimisticReachStates = [
+  `restart-source-pending`,
+  `optimistic-before-source`,
+  `settlement-before-source`,
+  `later-source-applied`,
+] as const
+
+type CleanupOptimisticCut = {
+  label: string
+  directRows: Array<Row>
+  expectedDirectRows: Array<Row>
+  foldedRows: Array<Row>
+  expectedFoldedRows: Array<Row>
+  batches: Array<Array<PublicationChange>>
+  expectedBatches: Array<Array<PublicationChange>>
+}
+
+function checkCleanupOptimisticPublication(cut: CleanupOptimisticCut): void {
+  const sorted = (rows: ReadonlyArray<Row>) =>
+    [...rows].sort((left, right) => left.id.localeCompare(right.id))
+  expect(cut.directRows, `${cut.label}: direct current rows`).toEqual(
+    sorted(cut.expectedDirectRows),
+  )
+  expect(
+    normalizePublicationOrder(cut.batches),
+    `${cut.label}: exact callback batches`,
+  ).toEqual(normalizePublicationOrder(cut.expectedBatches))
+  expect(
+    sorted(cut.foldedRows),
+    `${cut.label}: surviving subscriber fold`,
+  ).toEqual(sorted(cut.expectedFoldedRows))
+}
+
+async function receiveCleanupOptimisticPublication(
+  history: CleanupOptimisticHistory,
+): Promise<{
+  cuts: Array<CleanupOptimisticCut>
+  reached: Set<(typeof cleanupOptimisticReachStates)[number]>
+}> {
+  const publication: PublicationModel = {
+    source: new Map(history.initial.map((row) => [row.id, cloneRow(row)])),
+    visible: new Map(history.initial.map((row) => [row.id, cloneRow(row)])),
+    retainedKeys: new Set(),
+    sentKeys: new Set(history.initial.map(({ id }) => id)),
+    batches: [],
+  }
+  const lifecycle = createLifecycleModel()
+  const cuts: Array<CleanupOptimisticCut> = []
+  const reached = new Set<(typeof cleanupOptimisticReachStates)[number]>()
+  const fold = new Map<RowKey, Row>()
+  const batches: Array<Array<PublicationChange>> = []
+  const operations: Array<SyncOperations> = []
+  const loads: Array<{
+    generation: number
+    signal: AbortSignal | undefined
+    done: ReturnType<typeof createDeferred<void>>
+  }> = []
+  const mutation = createDeferred<void>()
+  void mutation.promise.catch(() => undefined)
+  let sourceTransactions = 0
+  let bootstrapBatches = 0
+  let optimisticVisible = false
+  const optimistic: Row = { id: `d`, value: history.optimisticValue }
+  const collection = createCollection<Row, RowKey>({
+    id: `cleanup-optimistic-publication`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (ownOperations) => {
+        const generation = operations.push(ownOperations)
+        ownOperations.markReady()
+        return {
+          loadSubset: ({ signal }) => {
+            const done = createDeferred<void>()
+            void done.promise.catch(() => undefined)
+            loads.push({ generation, signal, done })
+            // Pending means no provider row was delivered, not merely that a
+            // promise remains pending after source writes already applied.
+            return done.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      const batch = changes.map((change): PublicationChange => ({
+        type: change.type,
+        key: change.key,
+        value: cloneRow(change.value),
+        ...(change.previousValue === undefined
+          ? {}
+          : { previousValue: cloneRow(change.previousValue) }),
+      }))
+      batches.push(batch)
+      for (const change of batch) {
+        if (change.type === `delete`) fold.delete(change.key)
+        else fold.set(change.key, cloneRow(change.value))
+      }
+    },
+    { includeInitialState: false },
+  )
+  const record = (label: string) => {
+    const current = new Map(publication.source)
+    if (optimisticVisible) current.set(optimistic.id, cloneRow(optimistic))
+    cuts.push({
+      label,
+      directRows: [...collection.values()]
+        .map(cloneRow)
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      expectedDirectRows: [...current.values()].map(cloneRow),
+      foldedRows: [...fold.values()].map(cloneRow),
+      expectedFoldedRows: [...publication.visible.values()].map(cloneRow),
+      batches: clonePublicationBatches(batches.slice(bootstrapBatches)),
+      expectedBatches: clonePublicationBatches(publication.batches),
+    })
+  }
+  const assertHeldSource = () => {
+    expect(operations).toHaveLength(2)
+    expect(
+      loads.some(
+        ({ generation, signal }) => generation === 2 && !signal?.aborted,
+      ),
+    ).toBe(true)
+    expect(sourceTransactions).toBe(1)
+  }
+  let transaction: ReturnType<typeof createTransaction<Row>> | undefined
+  const failures: Array<unknown> = []
+  try {
+    const first = operations[0]!
+    first.begin()
+    for (const row of history.initial)
+      first.write({ type: `insert`, value: cloneRow(row) })
+    const receipt = first.commit()
+    sourceTransactions++
+    if (receipt !== true) await receipt
+    reduceLifecycle(lifecycle, {
+      type: `request`,
+      demand: history.initial[0]!.id,
+    })
+    subscription.requestSnapshot({
+      where: new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(history.initial[0]!.id),
+      ]),
+    })
+    await flushPromises()
+    bootstrapBatches = batches.length
+    record(`bootstrap`)
+
+    await collection.cleanup()
+    const cleanup: PublicationCommand = { type: `cleanup` }
+    const beforeCleanup = lifecycle.publications
+    projectPublication(
+      publication,
+      lifecycle,
+      cleanup,
+      reduceLifecycle(lifecycle, cleanup),
+      beforeCleanup,
+      false,
+    )
+    const restart: PublicationCommand = { type: `restart` }
+    const beforeRestart = lifecycle.publications
+    const restartEffect = reduceLifecycle(lifecycle, restart)
+    collection.startSyncImmediate()
+    await flushPromises()
+    // Readiness has its own empty callback in the shared lifecycle model. It
+    // announces ready without declaring the on-demand source complete.
+    projectPublication(
+      publication,
+      lifecycle,
+      restart,
+      restartEffect,
+      beforeRestart,
+      false,
+    )
+    assertHeldSource()
+    reached.add(`restart-source-pending`)
+    record(`restart before source transaction`)
+
+    // The independent expectation changes only d. Missing source rows have
+    // not received a source verdict, so this publication cannot delete them.
+    const withOptimistic = new Map(publication.visible)
+    withOptimistic.set(optimistic.id, cloneRow(optimistic))
+    publishIfChanged(publication, withOptimistic)
+    optimisticVisible = true
+    transaction = createTransaction<Row>({ mutationFn: () => mutation.promise })
+    transaction.mutate(() => collection.insert(cloneRow(optimistic)))
+    assertHeldSource()
+    reached.add(`optimistic-before-source`)
+    record(`same-turn optimistic insert before source transaction`)
+    await flushPromises()
+    record(`held optimistic insert before source transaction`)
+
+    if (history.outcome === `resolve`) mutation.resolve()
+    else mutation.reject(new Error(`controlled optimistic rejection`))
+    await transaction.when(`settled`).catch(() => undefined)
+    await flushPromises()
+    optimisticVisible = false
+    const withoutOptimistic = new Map(publication.visible)
+    withoutOptimistic.delete(optimistic.id)
+    publishIfChanged(publication, withoutOptimistic)
+    assertHeldSource()
+    reached.add(`settlement-before-source`)
+    record(`optimistic settlement before source transaction`)
+
+    const sourceRows: Array<Row> = history.sourceNonempty
+      ? [{ id: history.initial[0]!.id, value: history.sourceValue }]
+      : []
+    const latest = operations[1]!
+    latest.begin()
+    for (const row of sourceRows)
+      latest.write({ type: `insert`, value: cloneRow(row) })
+    const laterReceipt = latest.commit()
+    sourceTransactions++
+    if (laterReceipt !== true) await laterReceipt
+    publication.source = new Map(
+      sourceRows.map((row) => [row.id, cloneRow(row)]),
+    )
+    publishIfChanged(publication, new Map(publication.source))
+    publication.retainedKeys.clear()
+    reached.add(`later-source-applied`)
+    record(`later applied source transaction`)
+  } catch (error) {
+    failures.push(error)
+  } finally {
+    mutation.resolve()
+    if (transaction) await transaction.when(`settled`).catch(() => undefined)
+    subscription.unsubscribe()
+    for (const { done } of loads) done.resolve()
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      failures.push(
+        new Error(`Cleanup optimistic publication teardown`, { cause: error }),
+      )
+    }
+  }
+  if (failures.length > 0)
+    throw new AggregateError(
+      failures,
+      `Cleanup optimistic publication driver failed`,
+      {
+        cause: failures[0],
+      },
+    )
+  return { cuts, reached }
+}
+
+declareOracle({
+  check: [checkCleanupOptimisticPublication],
+  model: [publishIfChanged],
+  grammar: [cleanupOptimisticHistoryArbitrary],
+})
+
+describe(`Collection cleanup and optimistic publication`, () => {
+  const property = `subscription-lifecycle.cleanup-optimistic-publication`
+  const checkCampaign = async (campaign: `fixed` | `random`) => {
+    const reach = createOracleReach(property, cleanupOptimisticReachStates, {
+      minimum: 5,
+    })
+    const samples: Array<Set<(typeof cleanupOptimisticReachStates)[number]>> =
+      []
+    const details = await fc.check(
+      fc.asyncProperty(cleanupOptimisticHistoryArbitrary, async (history) => {
+        reach.beginHistory()
+        const result = await receiveCleanupOptimisticPublication(history)
+        samples.push(result.reached)
+        for (const state of result.reached) reach.reach(state)
+        for (const cut of result.cuts) checkCleanupOptimisticPublication(cut)
+      }),
+      campaign === `fixed`
+        ? { seed: 20261030, numRuns: oracleRuns(60) }
+        : oraclePropertyOptions(60, property),
+    )
+    recordOracleReplay(property, details)
+    const counts = (records: typeof samples) =>
+      Object.fromEntries(
+        cleanupOptimisticReachStates.map((state) => [
+          state,
+          records.filter((states) => states.has(state)).length,
+        ]),
+      )
+    process.stdout.write(
+      `${JSON.stringify({ property, campaign, seed: details.seed, path: details.counterexamplePath, failed: details.failed, runs: details.numRuns, completedGeneratedReach: counts(samples.slice(0, details.numRuns)), completedShrinkReach: counts(samples.slice(details.numRuns)) })}\n`,
+    )
+    if (details.failed)
+      throw new Error(
+        fc.defaultReportMessage(details) ??
+          `Cleanup optimistic publication failed`,
+        { cause: details.errorInstance },
+      )
+    reach.assertReached()
+  }
+  it.skipIf(oracleReplayRequested())(
+    `keeps cleanup-retained rows through optimistic publication (fixed campaign)`,
+    () => checkCampaign(`fixed`),
+    120_000,
+  )
+  it.skipIf(oracleReplaySkips(property))(
+    `keeps cleanup-retained rows through optimistic publication (random or replay campaign)`,
+    () => checkCampaign(`random`),
     120_000,
   )
 })

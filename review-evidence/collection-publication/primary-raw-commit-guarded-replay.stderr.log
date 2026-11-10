@@ -1,0 +1,2528 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 37)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 36)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 61 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"resolve","order":"oldest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"resolve","order":"newest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"reject","order":"oldest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"reject","order":"newest-first"}
+AssertionError: {"history":[{"type":"source","key":"c","action":"upsert","value":42},{"type":"request","demand":"a"},{"type":"truncate"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"c","value":{"id":"c","value":42}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "c",
+-       "type": "delete",
+-       "value": {
+-         "id": "c",
+-         "value": 42,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1548:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"resolve","order":"oldest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"resolve","order":"newest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"reject","order":"oldest-first"}
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"reject","order":"newest-first"}
+AssertionError: {"history":[{"type":"source","key":"c","action":"upsert","value":42},{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"truncate"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"c","value":{"id":"c","value":42}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "c",
+-       "type": "delete",
+-       "value": {
+-         "id": "c",
+-         "value": 42,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1548:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps raw source updates after retiring the final replay owner
+AssertionError: {"history":[{"type":"cleanup"},{"type":"release","demand":"b"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"abort","demand":"b"},{"type":"release","demand":"b"},{"type":"abort","demand":"b"},{"type":"source","key":"d","action":"upsert","value":4},{"type":"release","demand":"b"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"source","key":"d","action":"upsert","value":0},"commandIndex":4,"observed":[],"expected":[[{"type":"insert","key":"d","value":{"id":"d","value":0}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "d",
+-       "type": "insert",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1562:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps raw truncate deletes after retiring the final replay owner
+AssertionError: {"history":[{"type":"settle","demand":"a","scope":"obsolete","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"restart"},{"type":"truncate"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":5,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1578:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > records requested snapshot rows before a canceled reset
+AssertionError: {"history":[{"type":"request","demand":"b"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":0},{"type":"release","demand":"b"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"abort","demand":"a"},{"type":"abort","demand":"b"},{"type":"restart"},{"type":"truncate"},{"type":"restart"},{"type":"unsubscribe"},{"type":"release","demand":"b"}],"command":{"type":"source","key":"b","action":"upsert","value":0},"commandIndex":2,"observed":[],"expected":[[{"type":"insert","key":"b","value":{"id":"b","value":0}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "b",
+-       "type": "insert",
+-       "value": {
+-         "id": "b",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1603:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not invent a publication for an unchanged private row
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1620:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'none'/'delete'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"a","action":"delete","value":0},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'none'/'empty'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'none'/'same'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate","replacement":{"id":"a","value":5}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'none'/'other'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate","replacement":{"id":"c","value":6}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'retained'/'delete'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"a","action":"delete","value":0},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'retained'/'empty'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'retained'/'same'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate","replacement":{"id":"a","value":5}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'retained'/'other'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"truncate","replacement":{"id":"c","value":6}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'refreshed'/'delete'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"source","key":"a","action":"delete","value":0},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'refreshed'/'empty'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'refreshed'/'same'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate","replacement":{"id":"a","value":5}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'refreshed'/'other'
+AssertionError: {"history":[{"type":"source","key":"d","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate","replacement":{"id":"c","value":6}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":4,"observed":[],"expected":[[{"type":"delete","key":"d","value":{"id":"d","value":0}},{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-     {
+-       "key": "d",
+-       "type": "delete",
+-       "value": {
+-         "id": "d",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'new'/'delete'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"source","key":"a","action":"delete","value":0},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'new'/'empty'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'new'/'same'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate","replacement":{"id":"a","value":5}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > distinguishes raw source resets from retained replacements: 'new'/'other'
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"release","demand":"a"},{"type":"source","key":"d","action":"upsert","value":0},{"type":"truncate","replacement":{"id":"c","value":6}},{"type":"unsubscribe"}],"command":{"type":"source","key":"a","action":"upsert","value":5},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":5}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "insert",
+-       "value": {
+-         "id": "a",
+-         "value": 5,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1640:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > reconciles a repeated reset after the last replay owner aborts
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"abort","demand":"a"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"obsolete","age":"newest","outcome":"resolve"},{"type":"cleanup"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1667:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps independent source rows when a replay settles after redundant restart calls
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":1},{"type":"restart"},{"type":"settle","demand":"b","scope":"current","age":"newest","outcome":"reject"},{"type":"restart"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"request","demand":"b"},{"type":"cleanup"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1684:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for lifecycle control cells '52-102'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for lifecycle control cells '103-153'
+AssertionError: consumer state after command 2: {"type":"truncate"}: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ runPublicationProduct tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1146:26
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1730:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for lifecycle control cells '154-204'
+AssertionError: consumer state after command 5: {"type":"truncate"}: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "b",
++     "value": 1,
++   },
++   {
++     "id": "d",
++     "value": 30,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ runPublicationProduct tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1146:26
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1730:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > preserves independent source work when a successful replay publishes
+AssertionError: consumer state after command 2: {"type":"truncate"}: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ runPublicationProduct tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1146:26
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1735:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes complete replacement batches regardless of independent key order
+AssertionError: consumer state after command 3: {"type":"truncate"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "d",
++     "value": 30,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ runPublicationProduct tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1146:26
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1740:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires incomplete or failed replacement without changing independent public rows
+AssertionError: consumer state after command 2: {"type":"truncate"}: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ runPublicationProduct tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1146:26
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1745:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > maps every canonical green lifecycle history to public rows
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"request","demand":"b"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"cleanup"},{"type":"restart"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"reject"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"reject"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},"commandIndex":6,"observed":[],"expected":[[{"type":"update","key":"a","value":{"id":"a","value":2},"previousValue":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'update', …(3) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "previousValue": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-       "type": "update",
+-       "value": {
+-         "id": "a",
+-         "value": 2,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1750:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes independent source changes with a successful replay
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":50},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1790:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes independent source changes with a successful replay
+AssertionError: consumer state after command 2: {"type":"truncate"}: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1790:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes independent source changes with a successful replay
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":50},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"source","key":"b","action":"upsert","value":50},"commandIndex":3,"observed":[],"expected":[[{"type":"insert","key":"b","value":{"id":"b","value":50}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "b",
+-       "type": "insert",
+-       "value": {
+-         "id": "b",
+-         "value": 50,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1790:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes independent source changes with a successful replay
+AssertionError: consumer state after command 3: {"type":"source","key":"b","action":"upsert","value":50}: expected [ { id: 'a', value: +0 } ] to deeply equal [ { id: 'b', value: 50 } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "id": "b",
+-     "value": 50,
++     "id": "a",
++     "value": 0,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1790:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > publishes independent source changes with a successful replay
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":50},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},"commandIndex":4,"observed":[[{"type":"update","key":"a","value":{"id":"a","value":1},"previousValue":{"id":"a","value":0}},{"type":"insert","key":"b","value":{"id":"b","value":50}}]],"expected":[[{"type":"insert","key":"a","value":{"id":"a","value":1}}]]}: expected [ [ { type: 'update', …(3) }, …(1) ] ] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+  [
+    [
+      {
+        "key": "a",
+-       "type": "insert",
++       "previousValue": {
++         "id": "a",
++         "value": 0,
++       },
++       "type": "update",
+        "value": {
+          "id": "a",
+          "value": 1,
++       },
++     },
++     {
++       "key": "b",
++       "type": "insert",
++       "value": {
++         "id": "b",
++         "value": 50,
+        },
+      },
+    ],
+  ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1790:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps later source changes private after a failed replay
+AssertionError: {"history":[{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"source","key":"b","action":"upsert","value":51}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1854:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: a value written during the replay
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"abort","demand":"a"},{"type":"source","key":"a","action":"upsert","value":0},{"type":"release","demand":"a"},{"type":"request","demand":"a"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":1}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 1,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: a value written again after the replay retired
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"abort","demand":"a"},{"type":"source","key":"a","action":"upsert","value":2},{"type":"release","demand":"a"},{"type":"source","key":"a","action":"upsert","value":2}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":1}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 1,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: a row no demand names
+AssertionError: {"history":[{"type":"source","key":"c","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"abort","demand":"a"},{"type":"source","key":"c","action":"upsert","value":2},{"type":"release","demand":"a"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"c","value":{"id":"c","value":1}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "c",
+-       "type": "delete",
+-       "value": {
+-         "id": "c",
+-         "value": 1,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: a row deleted during the replay
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"abort","demand":"a"},{"type":"source","key":"a","action":"delete","value":0},{"type":"release","demand":"a"},{"type":"request","demand":"a"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":1}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 1,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: a row retained by a failed replay and deleted before the next one
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"a","action":"delete","value":0},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"request","demand":"b"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"release","demand":"b"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > leaves no stale row after a retired replay: an undemanded row retained by a failed replay and deleted before the next one
+AssertionError: {"history":[{"type":"source","key":"c","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"c","action":"delete","value":0},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"request","demand":"b"},{"type":"settle","demand":"b","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"release","demand":"b"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"c","value":{"id":"c","value":1}},{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-     {
+-       "key": "c",
+-       "type": "delete",
+-       "value": {
+-         "id": "c",
+-         "value": 1,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:1995:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps a failed replay private when its final owner releases
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":1},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"a","action":"upsert","value":5},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2001:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: {"history":[{"type":"source","key":"b","action":"upsert","value":7},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":51},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"source","key":"b","action":"upsert","value":8},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":3,"observed":[],"expected":[[{"type":"delete","key":"b","value":{"id":"b","value":7}},{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) }, …(1) ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-     {
+-       "key": "b",
+-       "type": "delete",
+-       "value": {
+-         "id": "b",
+-         "value": 7,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 3: {"type":"truncate"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "b",
++     "value": 7,
++   },
++ ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: {"history":[{"type":"source","key":"b","action":"upsert","value":7},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":51},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"source","key":"b","action":"upsert","value":8},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"source","key":"b","action":"upsert","value":51},"commandIndex":4,"observed":[],"expected":[[{"type":"insert","key":"b","value":{"id":"b","value":51}}]]}: expected [] to deeply equal [ [ { type: 'insert', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "b",
+-       "type": "insert",
+-       "value": {
+-         "id": "b",
+-         "value": 51,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 4: {"type":"source","key":"b","action":"upsert","value":51}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 51 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+-     "value": 51,
++     "value": 7,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 5: {"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 51 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+-     "value": 51,
++     "value": 7,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 6: {"type":"release","demand":"a"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 51 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+-     "value": 51,
++     "value": 7,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: {"history":[{"type":"source","key":"b","action":"upsert","value":7},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"truncate"},{"type":"source","key":"b","action":"upsert","value":51},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"reject"},{"type":"release","demand":"a"},{"type":"source","key":"b","action":"upsert","value":8},{"type":"cleanup"},{"type":"restart"},{"type":"unsubscribe"}],"command":{"type":"source","key":"b","action":"upsert","value":8},"commandIndex":7,"observed":[[{"type":"update","key":"b","value":{"id":"b","value":8},"previousValue":{"id":"b","value":7}}]],"expected":[[{"type":"update","key":"b","value":{"id":"b","value":8},"previousValue":{"id":"b","value":51}}]]}: expected [ [ { type: 'update', …(3) } ] ] to deeply equal [ [ { type: 'update', …(3) } ] ]
+
+- Expected
++ Received
+
+@@ -2,11 +2,11 @@
+    [
+      {
+        "key": "b",
+        "previousValue": {
+          "id": "b",
+-         "value": 51,
++         "value": 7,
+        },
+        "type": "update",
+        "value": {
+          "id": "b",
+          "value": 8,
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 7: {"type":"source","key":"b","action":"upsert","value":8}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 8 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+      "value": 8,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 8: {"type":"cleanup"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 8 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+      "value": 8,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 9: {"type":"restart"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 8 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+      "value": 8,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > retires failed private replacement rows when its final owner releases
+AssertionError: consumer state after command 10: {"type":"unsubscribe"}: expected [ { id: 'a', value: +0 }, …(1) ] to deeply equal [ { id: 'b', value: 8 } ]
+
+- Expected
++ Received
+
+  [
+    {
++     "id": "a",
++     "value": 0,
++   },
++   {
+      "id": "b",
+      "value": 8,
+    },
+  ]
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2024:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[54/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: {"history":[{"type":"source","key":"b","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"cleanup"},{"type":"restart"},{"type":"release","demand":"a"},{"type":"unsubscribe"},{"type":"source","key":"b","action":"upsert","value":1}],"command":{"type":"release","demand":"a"},"commandIndex":4,"observed":[[{"type":"delete","key":"b","value":{"id":"b","value":0}}]],"expected":[]}: expected [ [ { type: 'delete', …(2) } ] ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     {
++       "key": "b",
++       "type": "delete",
++       "value": {
++         "id": "b",
++         "value": 0,
++       },
++     },
++   ],
++ ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[55/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 4: {"type":"release","demand":"a"}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[56/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 5: {"type":"unsubscribe"}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[57/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not delete an independent public row when releasing a restarted demand
+AssertionError: consumer state after command 6: {"type":"source","key":"b","action":"upsert","value":1}: expected [] to deeply equal [ { id: 'b', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2054:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[58/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps a restarted snapshot private while canceled replay work settles
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"abort","demand":"b"},{"type":"truncate"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"unsubscribe"}],"command":{"type":"abort","demand":"b"},"commandIndex":4,"observed":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]],"expected":[]}: expected [ [ { type: 'delete', …(2) } ] ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     {
++       "key": "a",
++       "type": "delete",
++       "value": {
++         "id": "a",
++         "value": 0,
++       },
++     },
++   ],
++ ]
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[59/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps a restarted snapshot private while canceled replay work settles
+AssertionError: consumer state after command 4: {"type":"abort","demand":"b"}: expected [] to deeply equal [ { id: 'a', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:864:9
+    862|         ),
+    863|         `consumer state after command ${index}: ${JSON.stringify(comma…
+    864|       ).toEqual(
+       |         ^
+    865|         [...publication.visible.values()].sort((left, right) =>
+    866|           left.id.localeCompare(right.id),
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[60/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > keeps a restarted snapshot private while canceled replay work settles
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"cleanup"},{"type":"request","demand":"b"},{"type":"restart"},{"type":"abort","demand":"b"},{"type":"truncate"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"settle","demand":"b","scope":"obsolete","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"release","demand":"b"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":5,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2070:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[61/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > resets retained rows after the last replay owner retires
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"b"},{"type":"truncate"},{"type":"release","demand":"b"},{"type":"truncate"},{"type":"release","demand":"a"},{"type":"truncate"},{"type":"request","demand":"a"},{"type":"settle","demand":"a","scope":"current","age":"oldest","outcome":"resolve"},{"type":"release","demand":"a"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2247:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[62/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > does not restore source rows when the final replay owner retires
+AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"restart"},{"type":"truncate"},{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"b"},{"type":"truncate"},{"type":"release","demand":"b"},{"type":"source","key":"a","action":"delete","value":0},{"type":"source","key":"a","action":"upsert","value":1},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":5,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+
+- Expected
++ Received
+
+- [
+-   [
+-     {
+-       "key": "a",
+-       "type": "delete",
+-       "value": {
+-         "id": "a",
+-         "value": 0,
+-       },
+-     },
+-   ],
+- ]
++ []
+
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2269:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[63/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for a fixed seed (with seed=1657005)
+Error: Property failed after 8 tests
+{ seed: 1657005, path: "7:1:2:4:6:2:2:0:0", endOnFailure: true }
+Counterexample: [[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}]]
+Shrunk 8 time(s)
+Got AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+    at assertPublications (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40)
+    at runPublicationHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2290:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2290:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ buildError ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15
+ ❯ asyncThrowIfFailed ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[64/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > CollectionSubscription lifecycle publication oracle > matches row publications for a random or replayed seed (with seed=1657005)
+Error: Property failed after 1 tests
+{ seed: 1657005, path: "7:1:2:4:6:2:2:0:0", endOnFailure: true }
+Counterexample: [[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}]]
+Shrunk 0 time(s)
+Got AssertionError: {"history":[{"type":"source","key":"a","action":"upsert","value":0},{"type":"request","demand":"a"},{"type":"truncate"},{"type":"unsubscribe"}],"command":{"type":"truncate"},"commandIndex":2,"observed":[],"expected":[[{"type":"delete","key":"a","value":{"id":"a","value":0}}]]}: expected [] to deeply equal [ [ { type: 'delete', …(2) } ] ]
+    at assertPublications (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40)
+    at runPublicationHistory (/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7)
+    at /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2304:7
+    at AsyncProperty.run (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+    at asyncRunIt (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+    at file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@vitest+runner@4.1.12/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ assertPublications tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:660:40
+    658|       return
+    659|     }
+    660|     check(normalizedObserved, context).toEqual(expected)
+       |                                        ^
+    661|   }
+    662|
+ ❯ runPublicationHistory tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:853:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2304:7
+ ❯ AsyncProperty.run ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28
+ ❯ asyncRunIt ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21
+ ❯ ../../../../../../programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/@fast-check+vitest@0.4.1_vitest@4.1.12/node_modules/@fast-check/vitest/lib/vitest-fast-check.js:78:4
+ ❯ rethrow tests/oracle-replay-witness.ts:100:19
+ ❯ Object.asyncReporter tests/oracle-replay-witness.ts:125:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[65/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input +0
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at candidate-applied-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[66/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 1
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[67/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 2
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 6
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 6
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[68/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 3
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "b",
++     "value": 1,
++   },
++   {
++     "id": "c",
++     "value": 2,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[69/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 4
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at retry-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at candidate-applied-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[70/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 4
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at quiet-failed-final-owner-retirement
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at candidate-applied-while-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [] to deeply equal [ { id: 'a', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "a",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[71/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 5
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at retry-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[72/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 5
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at quiet-failed-final-owner-retirement
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[73/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 7
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at retry-sibling-held
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "b",
++     "value": 1,
++   },
++   {
++     "id": "c",
++     "value": 2,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[74/84]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts > Collection atomic public snapshot > replays atomic public snapshot input 7
+AggregateError: Collection public snapshot mismatches at Collection public snapshot at after-truncate-before-provider-delivery; Collection public snapshot at candidate-applied-while-sibling-held; Collection public snapshot at equal-followup-while-sibling-held; Collection public snapshot at quiet-failure; Collection public snapshot at quiet-failed-final-owner-retirement
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2677:11
+    2675|       })}\n`,
+    2676|     )
+    2677|     throw new AggregateError(
+       |           ^
+    2678|       failures,
+    2679|       `Collection public snapshot mismatches at ${failures.map(({ mess…
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: Error: Collection public snapshot at after-truncate-before-provider-delivery
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2663:9
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+Caused by: AssertionError: held: full-state subscriber fold: expected [ { id: 'a', value: +0 }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "a",
++     "value": 0,
++   },
++   {
++     "id": "b",
++     "value": 1,
++   },
++   {
++     "id": "c",
++     "value": 2,
++   },
++ ]
+
+ ❯ checkPublicSnapshotObservation tests/collection-public-snapshot-oracle.ts:96:5
+ ❯ checkAtomicPublicSnapshot tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2660:7
+ ❯ tests/collection-subscription-lifecycle-publication-oracle.property.test.ts:2770:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[75/84]⎯
+
+oracle replay property failed: subscription-lifecycle.publication-history

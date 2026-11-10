@@ -1,0 +1,174 @@
+------------------------- MODULE PublicationGrammar -------------------------
+EXTENDS Naturals, FiniteSets
+
+(* Exploratory design control, not an executable product oracle.
+   Source head: c351fc04d7f70dc59bf92ecbed310f899b9511cd.
+   M1 transaction/receipt -> transaction, receipts; M2 acquisition -> response,
+   load; M3 declared public view -> source, rawSubscriber, query; M4 authority
+   -> successful exact load cohort. See analytical-state.json for source IDs.
+
+   One/two demands are pre-enrolled. Each establishes one abstract row; Old is
+   the previous complete result. A set is a candidate replacement. Source and
+   current policies start after an already-applied truncate, so their source
+   is empty. The other designs retain Old while beginning replacement work.
+   Indexes are assumed installed with source state, not independently modeled.
+   Ownership churn, cancellation, optimism, wrapper durability, callback errors,
+   multiple Collections and demand discovery are outside this finite control.
+   No fairness or temporal liveness claim is encoded. Terminal stuttering is
+   allowed only after all modeled obligations finish; circular waits deadlock.
+*)
+CONSTANTS N, Policy, Outcome, Old
+Requests == 1..N
+Policies == {"source", "current", "hold", "buffer", "acceptance"}
+Outcomes == {"success", "before", "after"}
+
+VARIABLES response, transaction, receipts, load, source, rawSubscriber, query
+vars == <<response, transaction, receipts, load, source, rawSubscriber, query>>
+
+AllResponsesReady == \A i \in Requests : response[i] = "ready"
+AllResponsesArrived == \A i \in Requests : response[i] # "pending"
+AllLoadsSucceeded == \A i \in Requests : load[i] = "success"
+AllLoadsSettled == \A i \in Requests : load[i] # "pending"
+SomeLoadFailed == \E i \in Requests : load[i] = "failure"
+CandidateWith(i) == (IF source = Old THEN {} ELSE source) \cup {i}
+
+Init ==
+  /\ N \in {1, 2}
+  /\ Policy \in Policies
+  /\ Outcome \in Outcomes
+  /\ response = [i \in Requests |-> "pending"]
+  /\ transaction = [i \in Requests |-> "none"]
+  /\ receipts = {}
+  /\ load = [i \in Requests |-> "pending"]
+  /\ source = IF Policy \in {"source", "current"} THEN {} ELSE Old
+  /\ rawSubscriber = IF Policy = "source" THEN {} ELSE Old
+  /\ query = Old
+
+(* E1/E5: provider response is earlier than applied load settlement. A failed
+   response before commit establishes no accepted transaction. *)
+Respond(i) ==
+  /\ response[i] = "pending"
+  /\ response' = [response EXCEPT ![i] =
+       IF Outcome = "before" /\ i = N THEN "failed" ELSE "ready"]
+  /\ UNCHANGED <<transaction, receipts, load, source, rawSubscriber, query>>
+
+(* R1/E1/E2: ordinary commit accepts. Application, receipt and load are separate
+   events. The buffer form assumes the producer knows the complete cohort;
+   that is an added premise, not information inferred from a subset commit. *)
+Commit(i) ==
+  /\ Policy # "buffer"
+  /\ response[i] = "ready"
+  /\ transaction[i] = "none"
+  /\ transaction' = [transaction EXCEPT ![i] = "accepted"]
+  /\ UNCHANGED <<response, receipts, load, source, rawSubscriber, query>>
+
+CommitBuffered ==
+  /\ Policy = "buffer"
+  /\ AllResponsesReady
+  /\ \A i \in Requests : transaction[i] = "none"
+  /\ transaction' = [i \in Requests |-> "accepted"]
+  /\ UNCHANGED <<response, receipts, load, source, rawSubscriber, query>>
+
+(* O2/E2/E3: the existing split view changes source while its raw subscriber
+   retains Old. The source form aligns that subscriber with source application.
+   Holding ordinary receipts also holds application behind the load verdict. *)
+Apply(i) ==
+  /\ Policy \in {"source", "current", "hold"}
+  /\ transaction[i] = "accepted"
+  /\ (Policy # "hold" \/ AllLoadsSucceeded)
+  /\ transaction' = [transaction EXCEPT ![i] = "visible"]
+  /\ source' = CandidateWith(i)
+  /\ rawSubscriber' = IF Policy = "current" THEN rawSubscriber ELSE source'
+  /\ UNCHANGED <<response, receipts, load, query>>
+
+ApplyBuffered ==
+  /\ Policy = "buffer"
+  /\ \A i \in Requests : transaction[i] = "accepted"
+  /\ transaction' = [i \in Requests |-> "visible"]
+  /\ source' = Requests
+  /\ rawSubscriber' = Requests
+  /\ UNCHANGED <<response, receipts, load, query>>
+
+(* Deliberately changed receipt meaning: acknowledgment at acceptance permits
+   loads to finish before rows are visible. ReceiptVisibility must reject it. *)
+ApplyAfterAcceptanceAcknowledgment ==
+  /\ Policy = "acceptance"
+  /\ AllLoadsSucceeded
+  /\ \E i \in Requests : transaction[i] = "accepted"
+  /\ transaction' = [i \in Requests |-> "visible"]
+  /\ source' = Requests
+  /\ rawSubscriber' = Requests
+  /\ UNCHANGED <<response, receipts, load, query>>
+
+Receipt(i) ==
+  /\ i \notin receipts
+  /\ IF Policy = "acceptance"
+        THEN transaction[i] = "accepted"
+        ELSE transaction[i] = "visible"
+  /\ receipts' = receipts \cup {i}
+  /\ UNCHANGED <<response, transaction, load, source, rawSubscriber, query>>
+
+(* E1: success waits for establishing receipts. The existing API does not
+   prohibit a rejection after a committed response. That failure is retained
+   as a distinct boundary, rather than silently forbidden to help buffering. *)
+Settle(i) ==
+  /\ load[i] = "pending"
+  /\ ~(Policy = "buffer" /\ Outcome = "before")
+  /\ (response[i] = "failed" \/ i \in receipts)
+  /\ load' = [load EXCEPT ![i] =
+       IF response[i] = "failed" \/ (Outcome = "after" /\ i = N)
+       THEN "failure" ELSE "success"]
+  /\ UNCHANGED <<response, transaction, receipts, source, rawSubscriber, query>>
+
+FailBuffered ==
+  /\ Policy = "buffer"
+  /\ AllResponsesArrived
+  /\ \E i \in Requests : response[i] = "failed"
+  /\ \A i \in Requests : transaction[i] = "none" /\ load[i] = "pending"
+  /\ load' = [i \in Requests |-> "failure"]
+  /\ UNCHANGED <<response, transaction, receipts, source, rawSubscriber, query>>
+
+(* E6/R3/R4: the larger graph result has its own publication boundary. *)
+PublishQuery ==
+  /\ AllLoadsSucceeded
+  /\ query = Old
+  /\ Policy # "acceptance" \/ source = Requests
+  /\ query' = source
+  /\ rawSubscriber' = IF Policy = "current" THEN source ELSE rawSubscriber
+  /\ UNCHANGED <<response, transaction, receipts, load, source>>
+
+Done ==
+  /\ AllLoadsSettled
+  /\ \A i \in Requests : transaction[i] # "accepted"
+  /\ IF AllLoadsSucceeded THEN query # Old ELSE query = Old
+
+Finish == Done /\ UNCHANGED vars
+
+Next ==
+  \/ \E i \in Requests : Respond(i) \/ Commit(i) \/ Apply(i) \/ Receipt(i) \/ Settle(i)
+  \/ CommitBuffered
+  \/ ApplyBuffered
+  \/ ApplyAfterAcceptanceAcknowledgment
+  \/ FailBuffered
+  \/ PublishQuery
+  \/ Finish
+
+Spec == Init /\ [][Next]_vars
+
+TypeOK ==
+  /\ response \in [Requests -> {"pending", "ready", "failed"}]
+  /\ transaction \in [Requests -> {"none", "accepted", "visible"}]
+  /\ receipts \subseteq Requests
+  /\ load \in [Requests -> {"pending", "success", "failure"}]
+  /\ source \in {Old} \cup SUBSET Requests
+  /\ rawSubscriber \in {Old} \cup SUBSET Requests
+  /\ query \in {Old} \cup SUBSET Requests
+
+ReadEventAgreement == source = rawSubscriber
+ReceiptVisibility == \A i \in receipts : transaction[i] = "visible"
+QueryComplete == query = Old \/ query = Requests
+QueryAuthority == query = Old \/ AllLoadsSucceeded
+SourceComplete == source = Old \/ source = Requests
+StrictReplayTiming == source = Old \/ AllLoadsSucceeded
+FailedRetainsOldSource == ~(AllLoadsSettled /\ SomeLoadFailed) \/ source = Old
+=============================================================================

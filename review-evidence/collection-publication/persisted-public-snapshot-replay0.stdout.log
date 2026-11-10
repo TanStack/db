@@ -1,0 +1,24 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db-sqlite-persistence-core
+
+stdout | tests/collection-public-snapshot-persisted-oracle.test.ts > retains one public snapshot through the real persisted wrapper (random)
+persisted-public-snapshot history {"history":{"initial":[],"replacement":[{"id":"a","value":1}],"outcome":"resolve"},"observations":[{"cut":"initial","phase":"initial","observation":{"reads":{"values":[],"entries":[],"base":[],"get":[]},"foldedRows":[],"sizes":{"size":0}}},{"cut":"durable-held-before-receipt","phase":"held","observation":{"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}}},{"cut":"provider-held-after-real-receipt","phase":"held","observation":{"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[],"sizes":{"size":1}}},{"cut":"successful-replay-publication","phase":"complete","observation":{"reads":{"values":[{"id":"a","value":1}],"entries":[{"id":"a","value":1}],"base":[{"id":"a","value":1}],"get":[{"id":"a","value":1}]},"foldedRows":[{"id":"a","value":1}],"sizes":{"size":1}}}],"progress":{"held":{"candidateReceipt":{"status":"pending"},"replay":{"status":"pending"},"persistedScanEntered":false},"afterDurable":{"candidateReceipt":{"status":"fulfilled"},"replay":{"status":"pending"},"persistedScanEntered":true},"verdict":{"outcome":"resolve","reportedExactError":false}},"failures":2}
+
+stdout | tests/collection-public-snapshot-persisted-oracle.test.ts > retains one public snapshot through the real persisted wrapper (random)
+persisted-public-snapshot reach random {
+  'real-wrapper-candidate-receipt-pending': 1,
+  'real-wrapper-mutex-scan-held': 1,
+  'held-public-observation': 1,
+  'receipt-and-mutex-progressed': 1,
+  'failed-public-observation': 0,
+  'successful-publication': 1
+}
+
+ ❯ |@tanstack/db-sqlite-persistence-core| tests/collection-public-snapshot-persisted-oracle.test.ts (2 tests | 1 failed | 1 skipped) 18ms
+   × retains one public snapshot through the real persisted wrapper (random) 17ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  10:21:18
+   Duration  2.52s (transform 1.07s, setup 0ms, import 1.75s, tests 18ms, environment 575ms)
+

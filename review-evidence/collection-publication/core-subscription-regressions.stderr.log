@@ -1,0 +1,534 @@
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json". See below for details. To disable this message, set the `ignoreConfigErrors` option to true.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 30)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/shopping-list/tsconfig.json'
+}
+[tsconfig-paths] An error occurred while parsing "/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json". See below for details.
+TSConfckParseError: failed to resolve "extends":"expo/tsconfig.base" in /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+    at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:262:8)
+    at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+    ... 3 lines matching cause stack trace ...
+    at async Promise.all (index 1)
+    at async resolveConfig (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:35933:2)
+    at async _createServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lightningcss@1.33.0_sass@1.90.0_terser@5.51.2_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:25612:67)
+    at async createViteServer (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:8902:17)
+    at async createVitest (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vitest@4.1.12_@types+node@25.2.2_@vitest+coverage-istanbul@4.1.12_@vitest+ui@4.1.12_jsd_b90327b761ce141e1ae16ba35ba02577/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14288:18) {
+  code: 'EXTENDS_RESOLVE',
+  cause: Error: Cannot find module 'expo/tsconfig.base/tsconfig.json'
+  Require stack:
+  - /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at require.resolve (node:internal/modules/helpers:171:31)
+      at resolveExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:256:15)
+      at parseExtends (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:197:24)
+      at Module.parse (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/tsconfck@3.1.6_typescript@5.9.3/node_modules/tsconfck/src/parse.js:54:23)
+      at async Promise.all (index 28)
+      at async BasicMinimalPluginContext.configResolved (file:///Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-misfits-replay-latest-main-v3/node_modules/.pnpm/vite-tsconfig-paths@5.1.4_typescript@5.9.3_vite@7.3.7_@types+node@25.2.2_jiti@2.7.0_lig_2efa8e7e5ac07b4922e9bf9c759a46e4/node_modules/vite-tsconfig-paths/dist/index.js:117:9)
+      at async Promise.all (index 1) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+    ]
+  },
+  tsconfigFile: '/Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/examples/react-native/offline-transactions/tsconfig.json'
+}
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 36 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > retires replay setup when its adapter cleans up before return
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > retires replay setup when its adapter cleans up before throw
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > retires replay setup when its adapter cleans up before resolve
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > retires replay setup when its adapter cleans up before reject
+AssertionError: expected [ { id: 'row', version: 2 } ] to deeply equal [ { id: 'row', version: 1 } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "row",
+-     "version": 1,
++     "version": 2,
+    },
+  ]
+
+ ❯ tests/collection-subscription-lifecycle.test.ts:667:37
+    665|
+    666|       expect(collection.status).toBe(`cleaned-up`)
+    667|       expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }…
+       |                                     ^
+    668|       expect(errors).toEqual([])
+    669|       expect(subscription.lastError).toBeUndefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'initial' work before publishing or readiness, 'resolve', 'old-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'initial' work before publishing or readiness, 'resolve', 'current-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'initial' work before publishing or readiness, 'reject', 'old-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'initial' work before publishing or readiness, 'reject', 'current-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'replay' work before publishing or readiness, 'resolve', 'old-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'replay' work before publishing or readiness, 'resolve', 'current-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'replay' work before publishing or readiness, 'reject', 'old-first'
+ FAIL  |@tanstack/db| tests/collection-subscription-lifecycle.test.ts > CollectionSubscription demand lifecycle oracle > does not wait for aborted 'replay' work before publishing or readiness, 'reject', 'current-first'
+AssertionError: expected [] to deeply equal [ { id: 'b', version: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "b",
+-     "version": 0,
+-   },
+- ]
++ []
+
+ ❯ tests/collection-subscription-lifecycle.test.ts:788:39
+    786|         const current = loads.at(-1)!
+    787|         expect(old.options.signal?.aborted).toBe(true)
+    788|         expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }…
+       |                                       ^
+    789|         if (order === `old-first`) {
+    790|           await settle(old, oldOutcome)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > starts a replacement that lets canceled replay resolve
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > starts a replacement that lets canceled replay reject
+AssertionError: expected [] to deeply equal [ { id: 'one', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "one",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ tests/collection-subscription-replay.test.ts:108:39
+    106|         expect(loads).toHaveLength(2)
+    107|         expect(oldReplay.isPending()).toBe(true)
+    108|         expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }…
+       |                                       ^
+    109|
+    110|         truncate()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > keeps the published replacement after a reentrant replay fails
+AssertionError: expected [ { id: 'one', value: 1 } ] to deeply equal [ { id: 'one', value: 2 } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "one",
+-     "value": 2,
++     "value": 1,
+    },
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:299:35
+    297|       commit()
+    298|
+    299|       expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+       |                                   ^
+    300|     } finally {
+    301|       subscription.unsubscribe()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > requests a safe ordered provider prefix after replay: 'asc throw'
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > requests a safe ordered provider prefix after replay: 'asc reject'
+AssertionError: expected [ [ 'one' ], [ 'two' ], …(2) ] to have a length of 3 but got 4
+
+- Expected
++ Received
+
+- 3
++ 4
+
+ ❯ tests/collection-subscription-replay.test.ts:553:30
+    551|         expect(loadOptions[4]?.cursor?.lastKey).toBeUndefined()
+    552|         if (succeeds) expect(batches.at(-1)).toEqual([])
+    553|         else expect(batches).toHaveLength(batchCount)
+       |                              ^
+    554|       } finally {
+    555|         subscription.unsubscribe()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > requests a safe ordered provider prefix after replay: 'desc throw'
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > requests a safe ordered provider prefix after replay: 'desc reject'
+AssertionError: expected [ [ 'two' ], [ 'one' ], …(2) ] to have a length of 3 but got 4
+
+- Expected
++ Received
+
+- 3
++ 4
+
+ ❯ tests/collection-subscription-replay.test.ts:553:30
+    551|         expect(loadOptions[4]?.cursor?.lastKey).toBeUndefined()
+    552|         if (succeeds) expect(batches.at(-1)).toEqual([])
+    553|         else expect(batches).toHaveLength(batchCount)
+       |                              ^
+    554|       } finally {
+    555|         subscription.unsubscribe()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > continues after buffered rows when ordered snapshots repeat during a replay
+AssertionError: expected [ [ 'insert:one' ], …(2) ] to deeply equal [ [ 'insert:one' ] ]
+
+- Expected
++ Received
+
+  [
+    [
+      "insert:one",
+    ],
++   [
++     "delete:one",
++   ],
++   [
++     "insert:one",
++     "insert:two",
++     "insert:three",
++   ],
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:787:23
+    785|       commit()
+    786|       await flushPromises()
+    787|       expect(batches).toEqual([[`insert:one`]])
+       |                       ^
+    788|
+    789|       const before = loadOptions.length
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > keeps a replay private at retirement after a synchronous failure, except a throwing release: replay load throws
+AssertionError: expected [ { id: 'one', value: 5 } ] to deeply equal [ { id: 'one', value: 1 } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "one",
+-     "value": 1,
++     "value": 5,
+    },
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:910:37
+    908|         // the rows it holds: the truncate removed `one`, and the adap…
+    909|         // wrote `two` before it threw.
+    910|         expect(sortedRows(visible)).toEqual(
+       |                                     ^
+    911|           site === `old lease unload throws`
+    912|             ? [{ id: `two`, value: 2 }]
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > keeps a replay private at retirement after a synchronous failure, except a throwing release: new request throws
+AssertionError: expected [ { id: 'two', value: 2 } ] to deeply equal [ { id: 'one', value: 1 } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "id": "one",
+-     "value": 1,
++     "id": "two",
++     "value": 2,
+    },
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:910:37
+    908|         // the rows it holds: the truncate removed `one`, and the adap…
+    909|         // wrote `two` before it threw.
+    910|         expect(sortedRows(visible)).toEqual(
+       |                                     ^
+    911|           site === `old lease unload throws`
+    912|             ? [{ id: `two`, value: 2 }]
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > aborts a replay acquisition before a reentrant newer truncate starts
+AssertionError: expected [] to deeply equal [ { id: 'one', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "one",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ tests/collection-subscription-replay.test.ts:1186:37
+    1184|         expect(replaySignals).toHaveLength(start === `replay` ? 2 : 3)
+    1185|         expect(replaySignals[0]?.aborted).toBe(true)
+    1186|         expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+       |                                     ^
+    1187|
+    1188|         install(2)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > aborts a additional demand acquisition before a reentrant newer truncate starts
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > aborts a additional pending demand acquisition before a reentrant newer truncate starts
+AssertionError: expected [] to deeply equal [ { id: 'one', value: +0 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "one",
+-     "value": 0,
+-   },
+- ]
++ []
+
+ ❯ tests/collection-subscription-replay.test.ts:1176:39
+    1174|             )
+    1175|           }
+    1176|           expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }…
+       |                                       ^
+    1177|           subscription.requestSnapshot({
+    1178|             where: new Func(`eq`, [new PropRef([`id`]), new Value(`two…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > finishes replay state and surfaces an async subscriber failure
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/collection-subscription-replay.test.ts:1363:34
+    1361|         expect(subscription.status).toBe(`ready`)
+    1362|         expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+    1363|         expect(queuedMicrotasks).toHaveLength(1)
+       |                                  ^
+    1364|         expect(() => queuedMicrotasks[0]!()).toThrow(listenerFailure)
+    1365|       } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > retains successful peer rows after failed replay demand retires
+AssertionError: expected [ { id: 'one', value: 2 }, …(1) ] to deeply equal [ { id: 'one', value: 1 }, …(1) ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "one",
+-     "value": 1,
++     "value": 2,
+    },
+    {
+      "id": "two",
+-     "value": 1,
++     "value": 2,
+    },
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:2388:35
+    2386|       successful.resolve()
+    2387|       await flushPromises()
+    2388|       expect(sortedRows(visible)).toEqual([
+       |                                   ^
+    2389|         { id: `one`, value: 1 },
+    2390|         { id: `two`, value: 1 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > waits for a new async demand acquired while unloading a replay acquisition lease
+AssertionError: expected [ { id: 'one', value: 2 }, …(1) ] to deeply equal [ { id: 'one', value: 1 } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "id": "one",
+-     "value": 1,
++     "value": 2,
++   },
++   {
++     "id": "two",
++     "value": 2,
+    },
+  ]
+
+ ❯ tests/collection-subscription-replay.test.ts:2616:35
+    2614|       expect(ready).not.toHaveBeenCalled()
+    2615|       expect(settled).not.toHaveBeenCalled()
+    2616|       expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+       |                                   ^
+    2617|       expect(publications).toEqual([])
+    2618|       nested.resolve()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > reacquires a final released replay demand after-release without waiting for obsolete work
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > reacquires a final released replay demand during-ready without waiting for obsolete work
+ FAIL  |@tanstack/db| tests/collection-subscription-replay.test.ts > CollectionSubscription replay oracle > reacquires a final released replay demand during-unload without waiting for obsolete work
+AssertionError: expected [ Array(1) ] to deeply equal [ Array(1) ]
+
+- Expected
++ Received
+
+@@ -1,13 +1,9 @@
+  [
+    {
+      "key": "one",
+-     "previousValue": {
+-       "id": "one",
+-       "value": 1,
+-     },
+-     "type": "update",
++     "type": "insert",
+      "value": {
+        "id": "one",
+        "value": 2,
+      },
+    },
+
+ ❯ tests/collection-subscription-replay.test.ts:2776:11
+    2774|         expect(
+    2775|           sortedChanges(batches.filter((batch) => batch.length > 0).at…
+    2776|         ).toEqual([
+       |           ^
+    2777|           {
+    2778|             type: `update`,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription.test.ts > CollectionSubscription status tracking > waits for every logical demand that shares one replay promise
+AssertionError: expected [] to deeply equal [ { id: 'one', value: 1 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "id": "one",
+-     "value": 1,
+-   },
+- ]
++ []
+
+ ❯ tests/collection-subscription.test.ts:2198:9
+    2196|       expect(
+    2197|         [...visible.values()].map(({ id, value }) => ({ id, value })),
+    2198|       ).toEqual([{ id: `one`, value: 1 }])
+       |         ^
+    2199|     } finally {
+    2200|       replay.resolve()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription.test.ts > CollectionSubscription status tracking > does not publish a pending replay after collection cleanup
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ tests/collection-subscription.test.ts:2413:43
+    2411|       await flushPromises()
+    2412|
+    2413|       expect(visible.get(`row`)?.version).toBe(1)
+       |                                           ^
+    2414|       expect(statusEvents).toEqual(eventsAfterCleanup)
+    2415|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription.test.ts > CollectionSubscription status tracking > keeps the last published snapshot when truncate replay fails ('throw')
+ FAIL  |@tanstack/db| tests/collection-subscription.test.ts > CollectionSubscription status tracking > keeps the last published snapshot when truncate replay fails ('reject')
+AssertionError: expected [] to deeply equal [ 'one' ]
+
+- Expected
++ Received
+
+- [
+-   "one",
+- ]
++ []
+
+ ❯ tests/collection-subscription.test.ts:2532:35
+    2530|
+    2531|       expect(subscription.lastError).toBe(error)
+    2532|       expect([...visible.keys()]).toEqual([`one`])
+       |                                   ^
+    2533|
+    2534|       begin()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/36]⎯
+
+ FAIL  |@tanstack/db| tests/collection-subscription.test.ts > CollectionSubscription status tracking > does not become ready between reentrant truncate replacements
+AssertionError: expected 3 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 3
+
+ ❯ tests/collection-subscription.test.ts:2701:43
+    2699|       await flushPromises()
+    2700|       expect(loadCount).toBe(3)
+    2701|       expect(visible.get(`row`)?.version).toBe(2)
+       |                                           ^
+    2702|       expect(subscription.status).toBe(`loadingSubset`)
+    2703|       expect(statusEvents).toEqual([`loadingSubset`])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/36]⎯
+

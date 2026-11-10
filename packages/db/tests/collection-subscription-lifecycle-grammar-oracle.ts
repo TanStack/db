@@ -26,9 +26,15 @@ import { declareOracle } from './oracle-declaration.js'
  *
  * The model is intentionally one graph rather than one model per assertion.
  * Ownership decides which attempts are live; attempts decide readiness and
- * replacement authority; authority decides publication. Splitting those laws
- * would hide the cross-boundary histories this oracle exists to test. Row
+ * replacement authority; authority decides complete-result publication.
+ * Splitting those laws would hide the cross-boundary histories this oracle
+ * exists to test. Row
  * contents remain outside this grammar and have their own publication model.
+ * Raw local snapshots do not wait for that authority. The October 30 raw
+ * Collection decision in docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md
+ * requires their callbacks to reflect applied source state, even while replay
+ * acquisition is pending or failed. `publications` counts those local callbacks;
+ * `publicationBarrierOpen` projects the separate complete-result verdict.
  *
  * Pinned histories name important paths. Generated histories explore adjacent
  * legal commands with fixed and random seeds. The drivers compare production
@@ -328,8 +334,9 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
   }
 }
 
-// Settled failure is not an authoritative replacement. Keep subsequent reads
-// private until the failed owner retires or a new replay succeeds. A held
+// Settled failure is not an authoritative complete replacement. Keep the
+// complete-result verdict failed until its owner retires or a replay succeeds.
+// Raw Collection snapshots still read applied source state. A held
 // replacement whose own acquisition did not fail covers the owners it
 // replaces, so their failure does not fail the replay; a replacement whose
 // attempt an abort ended before it settled loaded nothing, so it covers
@@ -569,10 +576,10 @@ export function reduceLifecycle(
       model.trace.push({ type: `result`, ...result })
     }
     setStatus(model)
-    if (!model.publicationBarrierOpen) {
-      model.publications++
-      model.trace.push({ type: `publication` })
-    }
+    if (model.publicationBarrierOpen)
+      model.reach.add(`raw-snapshot:during-replay`)
+    model.publications++
+    model.trace.push({ type: `publication` })
     return { ownerId: owner.id, requestResult: true }
   }
 
@@ -803,7 +810,8 @@ export const syncLifecycleHistoryArbitrary = fc.array(
  * Each history first requests all three demands in any order, names a
  * replacement, and truncates soon after. A few current settlements and then
  * a change meet the open replay, and a snapshot request right after the
- * change observes whether the replay still holds publication. The change
+ * change observes raw source state while replay completion stays separate.
+ * The change
  * often retires the replacement and the third owner, keeping the replaced
  * one; a later `replace` may name another. The suffix weights
  * settlements and changes, the commands whose order decides the verdict;
@@ -927,8 +935,8 @@ export const demandChangeLifecycleHistoryArbitrary: fc.Arbitrary<
           return fc.shuffledSubarray(present, { minLength: present.length })
         }),
       changeArbitrary(replace),
-      // A snapshot request observes whether the replay still holds
-      // publication.
+      // A raw snapshot must publish even while the replay's complete-result
+      // verdict remains pending or failed.
       anyDemand.map((demand): LifecycleCommand => ({
         type: `request`,
         demand,
@@ -952,7 +960,7 @@ export const demandChangeLifecycleHistoryArbitrary: fc.Arbitrary<
  * fails `a`, and one change retires `c`, whose replay load is still pending,
  * and then `b`. Judged after `c` alone, `b` still covers `a` and the replay
  * would publish; judged after the whole change, `a` is held and failed, so
- * the replay fails and a later snapshot stays private.
+ * the replay fails. A later raw snapshot still reflects applied source state.
  */
 export const changeRetiresReplacementHistory: ReadonlyArray<LifecycleCommand> =
   [
@@ -1138,14 +1146,16 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
  * A demand created while its Collection is cleaned up waits for the next sync
  * run's evidence. An eager source supplies that evidence through Collection
  * readiness and starts no physical acquisition. An on-demand source supplies
- * it through one settled acquisition. Either mode must reconcile the complete
- * replacement rows before the direct subscription's `onLoadSubsetResult`
- * promise fulfills.
+ * it through one settled acquisition. The waiting `onLoadSubsetResult` promise
+ * follows that evidence. Raw rows follow applied source transactions. An
+ * on-demand empty load with no transaction leaves cleanup-retained rows;
+ * the adjacent empty-commit history must reconcile those rows when it applies.
  *
  * These cases are a bounded history grammar, not a projection of the
  * subscription implementation. Explicit and default eager configuration must
- * have the same behavior. Empty and nonempty replacements must remove an older
- * public row. An optional eager loader proves that eager mode bypasses it; the
+ * have the same behavior. Applied replacements must remove an older public
+ * row; eager readiness independently establishes its complete source. An
+ * optional eager loader proves that eager mode bypasses it; the
  * absent-loader cases preserve the valid Query Collection boundary. Truncate
  * can revise the restarted run's private replacement, and `error` can pause it
  * for legal same-run recovery; neither is eager readiness. The model predicts
@@ -1159,6 +1169,7 @@ export type CleanedRestartDemandCase = {
   syncMode: `default-eager` | `eager` | `on-demand`
   loader: `absent` | `present`
   replacement: `empty` | `row`
+  emptyReplacementCommit: boolean
   interruption: `none` | `truncate` | `failed-then-reload`
 }
 
@@ -1172,18 +1183,24 @@ export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> 
               syncMode,
               loader,
               replacement,
+              emptyReplacementCommit: false,
               interruption,
             }),
           ),
         ),
       ),
     ),
-    ...([`empty`, `row`] as const).map((replacement) => ({
-      syncMode: `on-demand` as const,
-      loader: `present` as const,
-      replacement,
-      interruption: `none` as const,
-    })),
+    ...([`empty`, `row`] as const).flatMap((replacement) =>
+      (replacement === `empty` ? [false, true] : [false]).map(
+        (emptyReplacementCommit) => ({
+          syncMode: `on-demand` as const,
+          loader: `present` as const,
+          replacement,
+          emptyReplacementCommit,
+          interruption: `none` as const,
+        }),
+      ),
+    ),
   ]
 
 export function expectedCleanedRestartDemand(
@@ -1237,7 +1254,12 @@ export function expectedCleanedRestartDemand(
       physicalAcquisitions: history.syncMode === `on-demand` ? 1 : 0,
       result: `fulfilled`,
       status: `ready`,
-      rows: history.replacement === `row` ? [{ id: `replacement` }] : [],
+      rows:
+        history.replacement === `row`
+          ? [{ id: `replacement` }]
+          : history.syncMode === `on-demand` && !history.emptyReplacementCommit
+            ? [{ id: `old` }]
+            : [],
       collectionStatus: `ready`,
     },
   }

@@ -51,6 +51,7 @@ export class CollectionChangesManager<
         publications: Array<{
           changes: Array<ChangeMessage<TOutput, TKey>>
           layoutChanged: boolean
+          sourceApplied: boolean
         }>
       }
     | undefined
@@ -156,6 +157,7 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
     layoutChanged = false,
+    sourceApplied = false,
   ): void {
     // The visible state was already committed by the caller, so the revision
     // advances even when the events below end up batched for later emission.
@@ -200,11 +202,15 @@ export class CollectionChangesManager<
     }
 
     if (this.deferral) {
-      this.deferral.publications.push({ changes: rawEvents, layoutChanged })
+      this.deferral.publications.push({
+        changes: rawEvents,
+        layoutChanged,
+        sourceApplied,
+      })
       return
     }
 
-    this.publishEvents(rawEvents, layoutChanged)
+    this.publishEvents(rawEvents, layoutChanged, sourceApplied)
   }
 
   /**
@@ -242,6 +248,7 @@ export class CollectionChangesManager<
       this.publishEvents(
         publications.flatMap(({ changes }) => changes),
         publications.some(({ layoutChanged }) => layoutChanged),
+        publications.some(({ sourceApplied }) => sourceApplied),
       )
     }
 
@@ -254,8 +261,12 @@ export class CollectionChangesManager<
   private publishEvents(
     rawEvents: Array<ChangeMessage<TOutput, TKey>>,
     layoutChanged: boolean,
+    sourceApplied: boolean,
   ): void {
-    if (rawEvents.length === 0 && !layoutChanged) {
+    // A commit can replace cleanup-retained subscriber rows even when the
+    // current source was already empty. Subscriptions reconcile that cut and
+    // suppress an empty semantic batch when they have nothing to reconcile.
+    if (rawEvents.length === 0 && !layoutChanged && !sourceApplied) {
       return
     }
 
@@ -271,9 +282,13 @@ export class CollectionChangesManager<
     const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
       const callbacks: Array<() => void> = subscriptions.map(
-        (subscription) => () => subscription.emitEvents(enrichedEvents),
+        (subscription) => () =>
+          subscription.emitEvents(enrichedEvents, {
+            sourceApplied,
+            layoutChanged,
+          }),
       )
-      if (rawEvents.length === 0) {
+      if (rawEvents.length === 0 && layoutChanged) {
         callbacks.unshift(...layoutListeners)
       }
       try {

@@ -15,6 +15,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
  * acquisition, release, restart, and replay examples whose expectations are
  * written by hand. The law, its model, and the generated scenario checks are
  * owned by collection-subscription-lifecycle-oracle.test.ts.
+ * Raw row expectations follow the October 30 maintainer decision in
+ * docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md:
+ * applied source transactions publish independently of acquisition settlement.
  */
 
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
@@ -664,7 +667,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
 
       expect(collection.status).toBe(`cleaned-up`)
-      expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }])
+      // The replay applied version 2 before reentrant cleanup. Cleanup keeps
+      // that raw subscriber fold; the obsolete load's result cannot retract it.
+      expect([...visible.values()]).toEqual([{ id: `row`, version: 2 }])
       expect(errors).toEqual([])
       expect(subscription.lastError).toBeUndefined()
       expect(subscription.status).toBe(`ready`)
@@ -785,11 +790,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         await truncate()
         const current = loads.at(-1)!
         expect(old.options.signal?.aborted).toBe(true)
-        expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+        // The applied truncate publishes its delete before any replacement
+        // transaction. Neither pending work nor an obsolete result retains b.
+        expect([...visible.values()]).toEqual([])
         if (order === `old-first`) {
           await settle(old, oldOutcome)
           expect(subscription.status).toBe(`loadingSubset`)
-          expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+          expect([...visible.values()]).toEqual([])
         }
         await settle(current, `resolve`)
         expect([...visible.values()]).toEqual([{ id: `b`, version: 2 }])

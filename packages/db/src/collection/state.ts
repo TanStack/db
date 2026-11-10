@@ -1492,7 +1492,7 @@ export class CollectionStateManager<
       const emit = () => {
         emitted = true
         capture(() =>
-          this.changes.emitEvents(events, true, visibleLayoutChanged),
+          this.changes.emitEvents(events, true, visibleLayoutChanged, true),
         )
       }
       // A truncate that makes the Collection ready publishes its batch after

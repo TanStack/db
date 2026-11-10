@@ -1,0 +1,63 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-publication-oracle.property.test.ts (149 tests | 53 failed | 11 skipped) 2734ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"resolve","order":"oldest-first"} 10ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"resolve","order":"newest-first"} 6ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"reject","order":"oldest-first"} 6ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":1,"outcome":"reject","order":"newest-first"} 6ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"resolve","order":"oldest-first"} 7ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"resolve","order":"newest-first"} 7ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"reject","order":"oldest-first"} 7ms
+     × observes retired transports without subscriber activity: {"phase":"replay","demandCount":2,"outcome":"reject","order":"newest-first"} 7ms
+     × keeps raw source updates after retiring the final replay owner 7ms
+     × keeps raw truncate deletes after retiring the final replay owner 10ms
+     × records requested snapshot rows before a canceled reset 6ms
+     × does not invent a publication for an unchanged private row 7ms
+     × distinguishes raw source resets from retained replacements: 'none'/'delete' 7ms
+     × distinguishes raw source resets from retained replacements: 'none'/'empty' 7ms
+     × distinguishes raw source resets from retained replacements: 'none'/'same' 7ms
+     × distinguishes raw source resets from retained replacements: 'none'/'other' 7ms
+     × distinguishes raw source resets from retained replacements: 'retained'/'delete' 14ms
+     × distinguishes raw source resets from retained replacements: 'retained'/'empty' 9ms
+     × distinguishes raw source resets from retained replacements: 'retained'/'same' 9ms
+     × distinguishes raw source resets from retained replacements: 'retained'/'other' 8ms
+     × distinguishes raw source resets from retained replacements: 'refreshed'/'delete' 9ms
+     × distinguishes raw source resets from retained replacements: 'refreshed'/'empty' 7ms
+     × distinguishes raw source resets from retained replacements: 'refreshed'/'same' 9ms
+     × distinguishes raw source resets from retained replacements: 'refreshed'/'other' 9ms
+     × distinguishes raw source resets from retained replacements: 'new'/'delete' 5ms
+     × distinguishes raw source resets from retained replacements: 'new'/'empty' 5ms
+     × distinguishes raw source resets from retained replacements: 'new'/'same' 5ms
+     × distinguishes raw source resets from retained replacements: 'new'/'other' 5ms
+     × reconciles a repeated reset after the last replay owner aborts 4ms
+     × keeps independent source rows when a replay settles after redundant restart calls 5ms
+     × matches row publications for lifecycle control cells '52-102' 269ms
+     × matches row publications for lifecycle control cells '103-153' 6ms
+     × matches row publications for lifecycle control cells '154-204' 10ms
+     × preserves independent source work when a successful replay publishes 7ms
+     × publishes complete replacement batches regardless of independent key order 8ms
+     × retires incomplete or failed replacement without changing independent public rows 5ms
+     × maps every canonical green lifecycle history to public rows 30ms
+     × publishes independent source changes with a successful replay 16ms
+     × keeps later source changes private after a failed replay 7ms
+     × leaves no stale row after a retired replay: a value written during the replay 7ms
+     × leaves no stale row after a retired replay: a value written again after the replay retired 7ms
+     × leaves no stale row after a retired replay: a row no demand names 5ms
+     × leaves no stale row after a retired replay: a row deleted during the replay 5ms
+     × leaves no stale row after a retired replay: a row retained by a failed replay and deleted before the next one 8ms
+     × leaves no stale row after a retired replay: an undemanded row retained by a failed replay and deleted before the next one 8ms
+     × keeps a failed replay private when its final owner releases 8ms
+     × retires failed private replacement rows when its final owner releases 23ms
+     × does not delete an independent public row when releasing a restarted demand 12ms
+     × keeps a restarted snapshot private while canceled replay work settles 20ms
+     × resets retained rows after the last replay owner retires 6ms
+     × does not restore source rows when the final replay owner retires 10ms
+     × matches row publications for a fixed seed (with seed=1657005) 391ms
+     × matches row publications for a random or replayed seed (with seed=2043981345) 672ms
+
+ Test Files  1 failed (1)
+      Tests  53 failed | 85 passed | 11 skipped (149)
+   Start at  10:57:30
+   Duration  3.97s (transform 496ms, setup 54ms, import 874ms, tests 2.73s, environment 211ms)
+

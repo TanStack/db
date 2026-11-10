@@ -1,0 +1,1557 @@
+{
+  "head": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+  "sourceHashes": {
+    "packages/query-db-collection/tests/collection-publication-query-oracle.test.ts": "529bfe871b69905528cd1165c2fed9705f93f9ea32210bdccd6bc27640bd53d7",
+    "packages/db/tests/collection-public-snapshot-oracle.ts": "3bf6f366340fc149e285efdf8adde0b2519f5964a854a3785d6f6b946c9c0c6e",
+    "packages/db/src/collection/subscription.ts": "315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b",
+    "packages/db/src/collection/state.ts": "932dac87a91546169b25c5300d041a7f3e3247779646aec15301e003c33935c8",
+    "packages/db/src/collection/sync.ts": "12120489cabc124acd52a4ed690fce1ddd903602c8cda373b910f9fa744b4697",
+    "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf"
+  },
+  "campaigns": [
+    {
+      "property": "query-db.collection-public-snapshot",
+      "campaign": "fixed",
+      "seed": 20261030,
+      "path": "0:0:0:0:1:1",
+      "runs": 1,
+      "shrinks": 5,
+      "failed": true,
+      "generatedReach": {
+        "initial-real-query-loads-settled": 1,
+        "both-replay-query-functions-entered": 1,
+        "real-query-replay-commit-forwarded": 1,
+        "held-public-snapshot-compared": 1,
+        "successful-replay-progressed": 0,
+        "failed-replay-progressed": 1
+      },
+      "additionalExecutionReach": {
+        "initial-real-query-loads-settled": 8,
+        "both-replay-query-functions-entered": 8,
+        "real-query-replay-commit-forwarded": 8,
+        "held-public-snapshot-compared": 8,
+        "successful-replay-progressed": 2,
+        "failed-replay-progressed": 6
+      },
+      "reach": {
+        "initial-real-query-loads-settled": 9,
+        "both-replay-query-functions-entered": 9,
+        "real-query-replay-commit-forwarded": 9,
+        "held-public-snapshot-compared": 9,
+        "successful-replay-progressed": 2,
+        "failed-replay-progressed": 7
+      }
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "campaign": "random",
+      "seed": 184679171,
+      "path": "1:0:0:1",
+      "runs": 2,
+      "shrinks": 3,
+      "failed": true,
+      "generatedReach": {
+        "initial-real-query-loads-settled": 2,
+        "both-replay-query-functions-entered": 2,
+        "real-query-replay-commit-forwarded": 2,
+        "held-public-snapshot-compared": 2,
+        "successful-replay-progressed": 0,
+        "failed-replay-progressed": 2
+      },
+      "additionalExecutionReach": {
+        "initial-real-query-loads-settled": 5,
+        "both-replay-query-functions-entered": 5,
+        "real-query-replay-commit-forwarded": 5,
+        "held-public-snapshot-compared": 5,
+        "successful-replay-progressed": 2,
+        "failed-replay-progressed": 3
+      },
+      "reach": {
+        "initial-real-query-loads-settled": 7,
+        "both-replay-query-functions-entered": 7,
+        "real-query-replay-commit-forwarded": 7,
+        "held-public-snapshot-compared": 7,
+        "successful-replay-progressed": 2,
+        "failed-replay-progressed": 5
+      }
+    }
+  ],
+  "receivingExecutions": [
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": -1
+          },
+          {
+            "id": "b",
+            "value": 0
+          },
+          {
+            "id": "c",
+            "value": 1
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 2
+          },
+          {
+            "id": "d",
+            "value": 5
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 2
+            },
+            {
+              "id": "b",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 2
+            },
+            {
+              "id": "b",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 2
+            },
+            {
+              "id": "b",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": -1
+          },
+          {
+            "id": "c",
+            "value": 1
+          },
+          {
+            "id": "b",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 2
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 2 }, \u2026(1) ] to deeply equal [ { id: 'a', value: -1 }, \u2026(2) ]"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "b",
+            "value": 1
+          },
+          {
+            "id": "c",
+            "value": 2
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 3
+          },
+          {
+            "id": "d",
+            "value": 6
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "c",
+            "value": 2
+          },
+          {
+            "id": "b",
+            "value": 1
+          }
+        ],
+        "sizes": {
+          "size": 2
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 3 }, \u2026(1) ] to deeply equal [ { id: 'a', value: +0 }, \u2026(2) ]"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "b",
+            "value": 1
+          },
+          {
+            "id": "c",
+            "value": 2
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 1
+          },
+          {
+            "id": "d",
+            "value": 4
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 1
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 1
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 1
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "c",
+            "value": 2
+          },
+          {
+            "id": "b",
+            "value": 1
+          }
+        ],
+        "sizes": {
+          "size": 2
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 1 }, \u2026(1) ] to deeply equal [ { id: 'a', value: +0 }, \u2026(2) ]"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 1
+          },
+          {
+            "id": "d",
+            "value": 4
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 1 } ] to deeply equal []"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: +0 } ] to deeply equal []"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: +0 } ] to deeply equal []"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "d",
+            "value": 3
+          }
+        ],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": false,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 1
+          }
+        ],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "b",
+            "value": 1
+          },
+          {
+            "id": "c",
+            "value": 2
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 3
+          },
+          {
+            "id": "d",
+            "value": 5
+          }
+        ],
+        "outcome": "resolve"
+      },
+      "outcome": "resolve",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "fulfilled",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "c",
+            "value": 2
+          },
+          {
+            "id": "b",
+            "value": 1
+          }
+        ],
+        "sizes": {
+          "size": 2
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 1
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 1 } ] to deeply equal []"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [],
+          "values": [],
+          "get": []
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 0
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [] to deeply equal [ { id: 'a', value: +0 } ]"
+      ]
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 0
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          }
+        ],
+        "sizes": {
+          "size": 1
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": []
+    },
+    {
+      "property": "query-db.collection-public-snapshot",
+      "history": {
+        "initial": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "b",
+            "value": 1
+          },
+          {
+            "id": "c",
+            "value": 2
+          }
+        ],
+        "replacement": [
+          {
+            "id": "a",
+            "value": 3
+          },
+          {
+            "id": "d",
+            "value": 5
+          }
+        ],
+        "outcome": "reject"
+      },
+      "outcome": "reject",
+      "entered": [
+        "left",
+        "right"
+      ],
+      "completion": "rejected",
+      "queryReceipts": [
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled"
+      ],
+      "heldRead": {
+        "reads": {
+          "toArray": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "values": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ],
+          "get": [
+            {
+              "id": "a",
+              "value": 3
+            },
+            {
+              "id": "b",
+              "value": 1
+            }
+          ]
+        },
+        "foldedRows": [
+          {
+            "id": "a",
+            "value": 0
+          },
+          {
+            "id": "c",
+            "value": 2
+          },
+          {
+            "id": "b",
+            "value": 1
+          }
+        ],
+        "sizes": {
+          "size": 2
+        }
+      },
+      "privacyFailed": true,
+      "secondaryFailures": [
+        "AssertionError: failed: public snapshot through toArray: expected [ { id: 'a', value: 3 }, \u2026(1) ] to deeply equal [ { id: 'a', value: +0 }, \u2026(2) ]"
+      ]
+    }
+  ]
+}

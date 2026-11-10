@@ -1,0 +1,17 @@
+{
+  "head": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+  "sourceHashes": {
+    "packages/db/src/collection/subscription.ts": "31fde05bf653f129cffd5cfe1a2a28db9505921b59674f4ddcf1abc39285c0cb",
+    "packages/db/src/collection/state.ts": "2d21ad6000e43e98db607da9773de4ebf7a50f0e3cd504d0e2558439adb83d61",
+    "packages/db/src/collection/sync.ts": "12120489cabc124acd52a4ed690fce1ddd903602c8cda373b910f9fa744b4697",
+    "packages/query-db-collection/src/query.ts": "4eeb41006fb92e57cf166012c42a81b013e11b2bef8af907fcf08cebe7b583bf",
+    "packages/query-db-collection/tests/collection-publication-query-oracle.test.ts": "ab4325d88fbed2bfc6a01394c5966aa2639e4b8ef86124b59917d6cd28d09cc5",
+    "packages/db/tests/collection-public-snapshot-oracle.ts": "7b0e07736adf5f7e8836d5f716ca632f29718b63556131dee7ec3677b84aabf4",
+    "packages/db/tests/query/replay-publication-oracle.ts": "86f85186d61273f98cbdeefa6145d6e2e2eca25e0c237ad02d3600e139b34089",
+    "packages/db/tests/query/load-subset-joint-replay-oracle.property.test.ts": "567c4b235884b574e65e9170c41dcf2c950826f383d1fd432b7c350ca5a68990"
+  },
+  "unchangedAcrossFinalVerification": true,
+  "additionalFinalBoundarySourceHash": {
+    "packages/db/src/collection/changes.ts": "49e23f8156bbb7a73cd88d5862e86ee8be4203685154565506ae0cde2964a00c"
+  }
+}

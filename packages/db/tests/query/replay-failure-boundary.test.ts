@@ -151,7 +151,11 @@ describe.each([`direct`, `query`] as const)(
             { status: `rejected`, reason: failure },
           ])
           await flushPromises()
-          expect(read()).toBe(1)
+          // Under the raw-publication maintainer decision, a failed load does
+          // not retract accepted source writes. Live queries retain their
+          // previous complete result; direct subscribers observe those writes.
+          // See docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md.
+          expect(read()).toBe(live ? 1 : partialWrite ? 2 : undefined)
           expect(peer.get(2)?.version).toBe(2)
           if (!live) expect(errors).toEqual([failure])
           if (retainedChild) expect(retainedChild.get(1)?.version).toBe(1)
@@ -169,7 +173,7 @@ describe.each([`direct`, `query`] as const)(
             childSync.commit()
           }
           await flushPromises()
-          expect(read()).toBe(1)
+          expect(read()).toBe(live ? 1 : 3)
           expect(peer.get(2)?.version).toBe(3)
           expect(source.status).toBe(`ready`)
           if (retainedChild) expect(retainedChild.get(1)?.version).toBe(1)

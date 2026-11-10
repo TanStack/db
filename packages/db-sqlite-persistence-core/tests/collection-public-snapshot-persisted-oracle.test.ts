@@ -1,0 +1,428 @@
+import { fc } from '@fast-check/vitest'
+import { createCollection } from '@tanstack/db'
+import { expect, it, vi } from 'vitest'
+import {
+  checkPublicSnapshotObservation,
+  publicSnapshotHistoryArbitrary,
+  publicSnapshotHistoryExamples,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+} from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { persistedCollectionOptions } from '../src/index.js'
+import {
+  atPersistedOracleCheckpoint,
+  createEventGate,
+  createRecordingAdapter,
+  flushAsyncWork,
+  observeSettlement,
+} from './persisted-support.js'
+import type {
+  PublicSnapshotCommit,
+  PublicSnapshotHistory,
+  PublicSnapshotObservation,
+  PublicSnapshotPhase,
+  PublicSnapshotRow,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import type { SyncConfig } from '@tanstack/db'
+
+/**
+ * Raw persisted Collection reads and full-state subscriber folds expose every
+ * applied source transaction. Authority: the maintainer's clarified raw commit
+ * decision, recorded in persisted-raw-commit-evidence.md and the shared model.
+ * A truncate publishes empty rows; an applied candidate publishes its rows.
+ * A later load rejection reports an error without retracting applied rows.
+ * Live-query coherence remains a separate, higher-level promise.
+ *
+ * This receiving driver uses actual persistedCollectionOptions over the existing
+ * in-memory persistence host. It does not emulate the wrapper's receipt or
+ * apply mutex. A legal upstream loader awaits its real commit receipt before
+ * answering. The held cut precedes that await's fulfillment: a tagged durable
+ * adapter call holds the real wrapper turn. A separate persisted scan must
+ * cross that same mutex after release. Without an optimistic transaction,
+ * this wrapper reaches durable storage only after core application settles
+ * (persisted.ts, applyBufferedSyncTransactionUnsafe). Thus its held durable
+ * call certifies that the authored candidate commit belongs to the applied
+ * prefix, even though its wrapping receipt still waits for durability. These
+ * are progress/premise observations. A timeout is a progress/setup failure,
+ * never the public-snapshot assertion RED.
+ *
+ * Values, membership, empty baselines/replacements and resolve/reject outcomes
+ * come from the shared grammar. This path has one retained whole-source demand,
+ * one replay and one candidate transaction. It does not claim native SQLite,
+ * peer coordinators, optimistic settlement, scoped recovery, or cross-source
+ * joins. Candidate metadata tags only identify the durable hold, including a
+ * candidate with no rows; they do not choose expected public rows.
+ */
+
+const PROPERTY = `persistence.collection-public-snapshot`
+const CANDIDATE_TAG = `public-snapshot-receiving-candidate`
+const IDS = [`a`, `b`, `c`, `d`] as const
+const REACH_STATES = [
+  `raw-truncate-applied`,
+  `real-wrapper-candidate-receipt-pending`,
+  `real-wrapper-mutex-scan-held`,
+  `held-public-observation`,
+  `receipt-and-mutex-progressed`,
+  `failed-public-observation`,
+  `successful-publication`,
+] as const
+type ReachState = (typeof REACH_STATES)[number]
+type Source = Parameters<SyncConfig<PublicSnapshotRow, string>[`sync`]>[0]
+
+// Capture every observed row; never filter an iteration by expected membership.
+// The finite get domain is the shared grammar's entire legal key domain.
+const copyRow = ({ id, value }: PublicSnapshotRow): PublicSnapshotRow => ({
+  id,
+  value,
+})
+
+async function runPersistedHistory(
+  history: PublicSnapshotHistory,
+  reached: (state: ReachState) => void,
+): Promise<void> {
+  const adapter = createRecordingAdapter()
+  const store = adapter.applyCommittedTx.bind(adapter)
+  const scan = adapter.scanRows!.bind(adapter)
+  const durableEntered = createEventGate()
+  const releaseDurable = createEventGate()
+  const releaseProvider = createEventGate()
+  const initialLoadEntered = createEventGate()
+  const replayLoadEntered = createEventGate()
+  const releaseCandidate = createEventGate()
+  const candidateSubmitted = createEventGate()
+  const receiptFulfilled = createEventGate()
+  const sourceFailure = new Error(`replayed subset failed`)
+  const folded = new Map<string, PublicSnapshotRow>()
+  const observations: Array<{
+    cut: string
+    phase: PublicSnapshotPhase
+    observation: PublicSnapshotObservation
+  }> = []
+  const progress: Record<string, unknown> = {}
+  const failures: Array<unknown> = []
+  const appliedCommits: Array<PublicSnapshotCommit> = []
+  const loadErrors: Array<unknown> = []
+  let source!: Source
+  let replay = false
+  let candidateTask: Promise<void> | undefined
+  let candidateReceipt: ReturnType<typeof observeSettlement> | undefined
+  let scanArmed = false
+  let scanEntered = false
+  let scanTask: Promise<unknown> | undefined
+
+  adapter.applyCommittedTx = async (target, transaction) => {
+    if (
+      transaction.collectionMetadataMutations?.some(
+        (mutation) => mutation.key === CANDIDATE_TAG,
+      )
+    ) {
+      durableEntered.resolve()
+      await releaseDurable.promise
+    }
+    await store(target, transaction)
+  }
+  adapter.scanRows = (...args) => {
+    if (scanArmed) scanEntered = true
+    return scan(...args)
+  }
+
+  const collection = createCollection(
+    persistedCollectionOptions<PublicSnapshotRow, string>({
+      id: `persisted-public-snapshot`,
+      gcTime: 0,
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      persistence: { adapter },
+      sync: {
+        sync: (params) => {
+          source = params
+          params.begin()
+          for (const row of history.initial)
+            params.write({ type: `insert`, value: copyRow(row) })
+          void Promise.resolve(params.commit()).then(
+            () => params.markReady(),
+            (error: unknown) => params.fail(error),
+          )
+          return {
+            loadSubset: () => {
+              if (!replay) {
+                initialLoadEntered.resolve()
+                return true
+              }
+              // First isolate the raw truncate cut. Then keep the real
+              // receipt-before-load-success rule for the authored candidate.
+              candidateTask = (async () => {
+                replayLoadEntered.resolve()
+                await releaseCandidate.promise
+                params.begin()
+                for (const row of history.replacement)
+                  params.write({ type: `insert`, value: copyRow(row) })
+                params.metadata!.collection.set(CANDIDATE_TAG, true)
+                const receipt = Promise.resolve(params.commit()).then(
+                  () => undefined,
+                )
+                candidateReceipt = observeSettlement(receipt)
+                candidateSubmitted.resolve()
+                await receipt
+                receiptFulfilled.resolve()
+                await releaseProvider.promise
+                if (history.outcome === `reject`) throw sourceFailure
+              })()
+              void candidateTask.catch(() => undefined)
+              return candidateTask
+            },
+          }
+        },
+      },
+    }),
+  )
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+
+  const capture = (cut: string, phase: PublicSnapshotPhase) => {
+    const observation: PublicSnapshotObservation = {
+      appliedCommits: appliedCommits.map((commit) => ({
+        ...commit,
+        rows: commit.rows.map(copyRow),
+      })),
+      reads: {
+        values: [...collection.values()].map(copyRow),
+        entries: [...collection.entries()].map(([, row]) => copyRow(row)),
+        base: [...collection.base.values()].map(copyRow),
+        get: IDS.flatMap((id) => {
+          const row = collection.get(id)
+          return row === undefined ? [] : [copyRow(row)]
+        }),
+      },
+      foldedRows: [...folded.values()].map(copyRow),
+      sizes: { size: collection.size },
+    }
+    observations.push({ cut, phase, observation })
+    try {
+      checkPublicSnapshotObservation(history, phase, observation)
+    } catch (error) {
+      // Preserve this exact law/cut while still releasing real provider work
+      // and measuring receipt/mutex progress. Cleanup cannot replace its RED.
+      failures.push(error)
+    }
+  }
+
+  try {
+    collection.startSyncImmediate()
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `initial persisted source ready`,
+    )
+    subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) folded.delete(change.key)
+          else folded.set(change.key, copyRow(change.value))
+        }
+      },
+      {
+        includeInitialState: true,
+        onLoadSubsetError: ({ error }) => loadErrors.push(error),
+      },
+    )
+    await atPersistedOracleCheckpoint(
+      initialLoadEntered.promise,
+      `initial source load forwarded through real wrapper`,
+    )
+    await vi.waitFor(() => expect(subscription?.status).toBe(`ready`))
+    capture(`initial`, `initial`)
+
+    replay = true
+    source.begin()
+    source.truncate()
+    const truncateReceipt = Promise.resolve(source.commit())
+    void truncateReceipt.catch(() => undefined)
+    await atPersistedOracleCheckpoint(truncateReceipt, `raw truncate receipt`)
+    await atPersistedOracleCheckpoint(
+      replayLoadEntered.promise,
+      `replay source held before candidate submission`,
+    )
+    appliedCommits.push({ truncate: true, rows: [] })
+    reached(`raw-truncate-applied`)
+    capture(`raw-truncate-applied-before-candidate`, `held`)
+    releaseCandidate.resolve()
+    await atPersistedOracleCheckpoint(
+      candidateSubmitted.promise,
+      `replay candidate submitted`,
+    )
+    await atPersistedOracleCheckpoint(
+      durableEntered.promise,
+      `candidate durable call holds wrapper apply mutex`,
+    )
+    // This real wrapper starts the tagged durable operation after the core
+    // applied receipt. The expected transaction is authored input, not reads.
+    appliedCommits.push({ rows: history.replacement.map(copyRow) })
+    const completion = subscription.pendingTruncateReplacement
+    if (!completion) throw new Error(`The retained demand has no active replay`)
+    const replaySettlement = observeSettlement(completion)
+    const completionOutcome = completion.then(
+      () => ({ outcome: `resolve` as const }),
+      (error: unknown) => ({ outcome: `reject` as const, error }),
+    )
+    const persistence = source.metadata?.persistence
+    if (!persistence) throw new Error(`The real persisted capability is absent`)
+    scanArmed = true
+    scanTask = persistence.scanPersistedRows()
+    void scanTask.catch(() => undefined)
+    await flushAsyncWork()
+    progress.held = {
+      candidateReceipt: candidateReceipt?.read(),
+      replay: replaySettlement.read(),
+      persistedScanEntered: scanEntered,
+    }
+    expect(
+      candidateReceipt?.read().status,
+      `real provider awaits receipt`,
+    ).toBe(`pending`)
+    expect(
+      scanEntered,
+      `persisted scan waits behind the held durable turn`,
+    ).toBe(false)
+    reached(`real-wrapper-candidate-receipt-pending`)
+    reached(`real-wrapper-mutex-scan-held`)
+    reached(`held-public-observation`)
+    capture(`durable-held-before-receipt`, `held`)
+
+    releaseDurable.resolve()
+    await atPersistedOracleCheckpoint(
+      receiptFulfilled.promise,
+      `source receipt`,
+    )
+    await atPersistedOracleCheckpoint(scanTask, `queued persisted scan`)
+    progress.afterDurable = {
+      candidateReceipt: candidateReceipt?.read(),
+      replay: replaySettlement.read(),
+      persistedScanEntered: scanEntered,
+    }
+    expect(
+      scanEntered,
+      `persisted scan crosses the real mutex after release`,
+    ).toBe(true)
+    reached(`receipt-and-mutex-progressed`)
+    capture(`provider-held-after-real-receipt`, `held`)
+
+    releaseProvider.resolve()
+    const result = await atPersistedOracleCheckpoint(
+      completionOutcome,
+      `retained replay verdict`,
+    )
+    await flushAsyncWork()
+    progress.verdict = {
+      outcome: result.outcome,
+      reportedExactError: loadErrors.includes(sourceFailure),
+    }
+    if (history.outcome === `reject`) {
+      if (result.outcome !== `reject` || result.error !== sourceFailure)
+        throw new Error(
+          `The failed observation lacks the real replay rejection`,
+        )
+      expect(
+        loadErrors,
+        `retained demand reports the provider error`,
+      ).toContain(sourceFailure)
+      reached(`failed-public-observation`)
+      capture(`quiet-replay-rejection`, `failed`)
+    } else {
+      if (result.outcome !== `resolve`)
+        throw new Error(`The complete observation lacks a successful replay`)
+      reached(`successful-publication`)
+      capture(`successful-replay-publication`, `complete`)
+    }
+  } catch (error) {
+    failures.push(error)
+  } finally {
+    releaseCandidate.resolve()
+    releaseDurable.resolve()
+    releaseProvider.resolve()
+    subscription?.unsubscribe()
+    for (const [label, action] of [
+      [`candidate source task`, () => candidateTask?.catch(() => undefined)],
+      [`persisted scan`, () => scanTask],
+      [`Collection cleanup`, () => collection.cleanup()],
+    ] as const) {
+      try {
+        await atPersistedOracleCheckpoint(Promise.resolve(action()), label)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+  }
+  console.info(
+    `persisted-public-snapshot history`,
+    JSON.stringify({
+      history,
+      observations,
+      progress,
+      failures: failures.length,
+      firstFailure:
+        failures[0] instanceof Error
+          ? { name: failures[0].name, message: failures[0].message }
+          : failures[0],
+    }),
+  )
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(
+      failures,
+      `Raw Collection notification assertion and separate progress/cleanup diagnostics`,
+      { cause: failures[0] },
+    )
+}
+
+declareOracle({
+  model: [],
+  check: [checkPublicSnapshotObservation],
+  grammar: [publicSnapshotHistoryArbitrary, publicSnapshotHistoryExamples],
+})
+
+async function runCampaign(campaign: `fixed` | `random`): Promise<void> {
+  const reach = createOracleReach(PROPERTY, REACH_STATES, {
+    fixedHistories: publicSnapshotHistoryExamples.length,
+  })
+  let ordinal = 0
+  const property = fc.asyncProperty(
+    publicSnapshotHistoryArbitrary,
+    async (history) => {
+      reach.beginHistory({
+        fixed: ordinal++ < publicSnapshotHistoryExamples.length,
+      })
+      await runPersistedHistory(history, reach.reach)
+    },
+  )
+  const options = oraclePropertyOptions(12, PROPERTY, {
+    examples: publicSnapshotHistoryExamples.map((history) => [history]),
+  })
+  try {
+    await fc.assert(property, {
+      ...options,
+      ...(campaign === `fixed` ? { seed: 30102026 } : {}),
+    })
+    reach.assertReached()
+  } finally {
+    console.info(
+      `persisted-public-snapshot reach`,
+      campaign,
+      Object.fromEntries(reach.counts()),
+    )
+  }
+}
+
+it.skipIf(oracleReplayRequested())(
+  `publishes each applied raw commit through persisted reads and subscribers (fixed)`,
+  () => runCampaign(`fixed`),
+  15000,
+)
+it.skipIf(oracleReplaySkips(PROPERTY))(
+  `publishes each applied raw commit through persisted reads and subscribers (random)`,
+  () => runCampaign(`random`),
+  15000,
+)

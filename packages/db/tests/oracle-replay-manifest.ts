@@ -195,7 +195,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `publication-history`,
+    `publication-history atomic-public-snapshot cleanup-optimistic-publication`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
@@ -311,6 +311,16 @@ const ownerGroups: ReadonlyArray<
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `retained-demand`,
+  ],
+  [
+    `query-db-collection/tests/collection-publication-query-oracle.test.ts`,
+    `query-db`,
+    `collection-public-snapshot collection-live-replay`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/collection-public-snapshot-persisted-oracle.test.ts`,
+    `persistence`,
+    `collection-public-snapshot`,
   ],
   // Owners of properties that a module names and a host file runs carry
   // that module as the fourth element.
@@ -855,6 +865,14 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `subscription-lifecycle.atomic-public-snapshot`)
+    return `checks atomic Collection public snapshots.*replay`
+  if (property === `subscription-lifecycle.cleanup-optimistic-publication`)
+    return `keeps cleanup-retained rows through optimistic publication.*replay`
+  if (property === `query-db.collection-public-snapshot`)
+    return `reflects real Query applied commits in raw observations.*replay`
+  if (property === `query-db.collection-live-replay`)
+    return `keeps compiled Query results coherent through replay.*replay`
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
   if (property === `replay.ordered-failed-replay`)

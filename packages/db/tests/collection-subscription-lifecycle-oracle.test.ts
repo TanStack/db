@@ -203,6 +203,14 @@ async function runAsyncRestartScenario(
   const settlements: Array<SettlementEvent> = []
   const settledAttempts = new Set<Attempt>()
   const publishedBeforeRetirement = new Set<number>()
+  // The October 30 raw Collection decision separates applied source commits
+  // from acquisition completion. Cleanup retains the subscriber's old fold;
+  // the next applied transaction reconciles it to that run's source prefix.
+  // These Maps contain authored rows, never values read from production.
+  const expectedSource = new Map<DemandName, Row>()
+  let expectedVisible = new Map<DemandName, Row>()
+  const expectedRows = () =>
+    [...expectedVisible.values()].sort((a, b) => a.id.localeCompare(b.id))
   const failures = scenario.syncRunOutcomes.map((_, restartIndex) =>
     scenario.demands.map(
       (demand) => new Error(`sync run ${restartIndex + 1} ${demand} failed`),
@@ -221,9 +229,25 @@ async function runAsyncRestartScenario(
 
   const settleAttempt = async (attempt: Attempt): Promise<void> => {
     const outcome = outcomeFor(attempt)
+    const publicationStart = publications.length
+    const applies =
+      attempt.syncRunGeneration === syncRunGeneration && outcome === `resolve`
+    if (applies) {
+      expectedSource.set(attempt.demand, {
+        id: attempt.demand,
+        version: attempt.syncRunGeneration + 1,
+      })
+      expectedVisible = new Map(expectedSource)
+    }
     if (outcome === `resolve`) attempt.deferred.resolve()
     else attempt.deferred.reject(failureFor(attempt))
     await flushPromises()
+    expect(
+      [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(expectedRows())
+    expect(publications.slice(publicationStart)).toEqual(
+      applies ? [expectedRows()] : [],
+    )
     settlements.push({
       attempt,
       syncRunGeneration: attempt.syncRunGeneration,
@@ -314,6 +338,9 @@ async function runAsyncRestartScenario(
       attempt.deferred.resolve()
     }
     await flushPromises()
+    for (const id of scenario.demands)
+      expectedSource.set(id, { id, version: 1 })
+    expectedVisible = new Map(expectedSource)
     expect(
       [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
     ).toEqual(
@@ -329,24 +356,20 @@ async function runAsyncRestartScenario(
     ) {
       const discardedSyncRunGeneration = syncRunGeneration
       const prefixStart = publications.length
-      const retainedVersion = publishedBeforeRetirement.size
-        ? Math.max(...publishedBeforeRetirement) + 1
-        : 1
-      const retainedRows = [...scenario.demands]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({ id, version: retainedVersion }))
+      const retainedRows = expectedRows()
       const assertRetainedPrefix = () => {
         expect(
           [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
         ).toEqual(retainedRows)
-        // Repeated coherent notifications are legal; each copied snapshot
-        // must retain the last complete publication until replacement settles.
+        // Cleanup alone sends no source transaction. Its retained subscriber
+        // fold lasts until a new run applies its first source transaction.
         for (const snapshot of publications.slice(prefixStart)) {
           expect(snapshot).toEqual(retainedRows)
         }
       }
       assertRetainedPrefix()
       await collection.cleanup()
+      expectedSource.clear()
       assertRetainedPrefix()
       for (const attempt of attempts.filter(
         ({ syncRunGeneration: attemptSyncRunGeneration }) =>
@@ -388,20 +411,18 @@ async function runAsyncRestartScenario(
           (outcome) => outcome === `resolve`,
         )
       if (publishesBeforeLaterRestart) {
-        const publicationCount = publications.length
         for (const attempt of attempts.filter(
           ({ syncRunGeneration: attemptSyncRunGeneration }) =>
             attemptSyncRunGeneration === expectedSyncRunGeneration,
         )) {
           await settleAttempt(attempt)
         }
-        const expectedRows = [...scenario.demands]
+        const completeRows = [...scenario.demands]
           .sort((a, b) => a.localeCompare(b))
           .map((id) => ({ id, version: expectedSyncRunGeneration + 1 }))
         expect(
           [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-        ).toEqual(expectedRows)
-        expect(publications.slice(publicationCount)).toEqual([expectedRows])
+        ).toEqual(completeRows)
         publishedBeforeRetirement.add(expectedSyncRunGeneration)
       }
     }
@@ -448,26 +469,12 @@ async function runAsyncRestartScenario(
               )
 
     const settledCurrent: Array<Attempt> = []
-    const publicationTraceStart = publications.length
     const statusTraceStart = statuses.length
-    const retainedVersion = publishedBeforeRetirement.size
-      ? Math.max(...publishedBeforeRetirement) + 1
-      : 1
     const assertObservableState = () => {
       const currentComplete = settledCurrent.length === current.length
-      const currentSucceeded = current.every(
-        (attempt) => outcomeFor(attempt) === `resolve`,
-      )
-      const visibleVersion =
-        currentComplete && currentSucceeded
-          ? currentSyncRunGeneration + 1
-          : retainedVersion
-      const expectedRows = [...scenario.demands]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({ id, version: visibleVersion }))
       expect(
         [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-      ).toEqual(expectedRows)
+      ).toEqual(expectedRows())
       const expectedFailedAttempts = settledCurrent.filter(
         (attempt) => outcomeFor(attempt) === `reject`,
       )
@@ -485,9 +492,6 @@ async function runAsyncRestartScenario(
       expect(subscription.status).toBe(
         currentComplete ? `ready` : `loadingSubset`,
       )
-      expect(publications.slice(publicationTraceStart)).toEqual(
-        currentComplete && currentSucceeded ? [expectedRows] : [],
-      )
       expect(statuses.slice(statusTraceStart)).toEqual(
         currentComplete ? [`ready`] : [],
       )
@@ -503,16 +507,9 @@ async function runAsyncRestartScenario(
     const currentSucceeded = current.every(
       (attempt) => outcomeFor(attempt) === `resolve`,
     )
-    const expectedVersion = currentSucceeded
-      ? currentSyncRunGeneration + 1
-      : retainedVersion
     expect(
       [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-    ).toEqual(
-      [...scenario.demands]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({ id, version: expectedVersion })),
-    )
+    ).toEqual(expectedRows())
     if (currentSucceeded) {
       expect(errors).toEqual([])
       expect(subscription.lastError).toBeUndefined()
@@ -1099,7 +1096,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           expect(loads).toHaveLength(1)
           if (outcome !== `return` && outcome !== `throw`) {
             expect(settlements).toEqual([])
-            expect([...rows.values()]).toEqual([])
+            // The fixture applied this row before returning its held load.
+            // Raw visibility follows that transaction independently of the
+            // acquisition verdict or the waiting caller's settlement.
+            expect([...rows.values()].map(({ id }) => id)).toEqual([`row`])
           }
         }
         if (outcome === `release`) release!()
@@ -1116,7 +1116,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         } else if (outcome === `throw` || outcome === `reject`) {
           expect(settlements).toHaveLength(1)
           expect(settlements[0]).toBe(failure)
-          expect([...rows.values()]).toEqual([])
+          expect([...rows.values()].map(({ id }) => id)).toEqual(
+            outcome === `throw` ? [] : [`row`],
+          )
         } else {
           expect(settlements).toEqual([
             expect.objectContaining({ name: `AbortError` }),

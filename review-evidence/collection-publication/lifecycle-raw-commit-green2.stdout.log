@@ -1,0 +1,23 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle-history-oracle.property.test.ts (96 tests | 13 failed) 7133ms
+     × 'default-eager' source with 'absent' loader, 'empty' replacement, and 'truncate' 7ms
+     × 'default-eager' source with 'present' loader, 'empty' replacement, and 'truncate' 3ms
+     × 'eager' source with 'absent' loader, 'empty' replacement, and 'truncate' 3ms
+     × 'eager' source with 'present' loader, 'empty' replacement, and 'truncate' 3ms
+     × 'default-eager' source with 'absent' loader, 'row' replacement, and 'truncate' 3ms
+     × 'default-eager' source with 'present' loader, 'row' replacement, and 'truncate' 3ms
+     × 'eager' source with 'absent' loader, 'row' replacement, and 'truncate' 3ms
+     × 'eager' source with 'present' loader, 'row' replacement, and 'truncate' 2ms
+     × 'on-demand' source with 'present' loader, 'empty' replacement, and 'none' 2ms
+     × matches the pure lifecycle model for a fixed seed (with seed=1657003) 596ms
+     × matches the pure lifecycle model for a random or replayed seed (with seed=-76766724) 1269ms
+     × judges a replay once per demand change for a fixed seed (with seed=1657005) 1129ms
+     × judges a replay once per demand change for a random or replayed seed (with seed=-111289415) 383ms
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  13 failed | 195 passed (208)
+   Start at  11:10:43
+   Duration  11.13s (transform 747ms, setup 137ms, import 1.86s, tests 8.26s, environment 602ms)
+

@@ -130,7 +130,7 @@ The detailed loading and publication laws below still apply.
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | Subscription acquisition          | Retires the old acquisition lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
 | OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                               | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay               | Counts setup and logical demand participants; checks completion after reentrant release callbacks; success releases the source replacement hold         | Success of a previously failed window operation           |
+| Subscription replay               | Counts setup and logical demand participants; checks completion after reentrant release callbacks; success releases the consumer's replacement hold     | Success of a previously failed window operation           |
 | Query builder                     | Tracks ordered publication participants in one sync run and accepts a window only for its operation generation                                          | Physical adapter ownership or cancellation                |
 | D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                      | Source completeness merely because graph work drained     |
 
@@ -141,9 +141,11 @@ separate.
 
 `hasPendingTruncateReplacement` means publication is still withheld, including
 after replay failure. `pendingTruncateReplacement` exposes only an unsettled
-completion promise. Neither is a general readiness flag. A direct subscriber
-buffers and diffs its own replacement rows; a query subscription delegates
-publication to the builder while the graph keeps its private contributions.
+completion promise. Neither is a general readiness flag. Raw Collection
+subscribers receive each applied source transaction, including during replay.
+A query subscription delegates complete-result publication to the builder
+while the graph keeps its private contributions. A failed load does not retract
+accepted source writes (maintainer decision, 2026-10-30).
 
 ## Identity
 
@@ -807,21 +809,21 @@ then acquire a fresh one only if the logical demand and replay are still current
 A load throw leaves the logical demand detached; a later authoritative replay
 can reacquire it. Neither path restores an already released lease. A sole adapter
 resource may stop and restart in this gap; adapters must not tear down resources
-held by another owner. The public replacement barrier remains closed throughout
-the gap and through failed startup, so visible results do not flicker. Once a
+held by another owner. The live-query or Effect replacement barrier stays closed
+throughout the gap and through failed startup, so its result does not flicker. Once a
 new load returns successfully, its lease is active before status callbacks run.
 Reentrant callbacks therefore see either detached demand, tentative startup,
 or one active lease, not an old and new lease being transferred together.
 
 Request predicates describe acquisition, not row ownership. Releasing a demand
 does not delete matching rows from either the public snapshot or an unfinished
-replacement. The source controls retention through actual row writes; a
-successful authoritative replacement reconciles the retained public snapshot.
-This rule also applies when another demand overlaps the released predicate or
-an independent source write happens to match it. Source deletions during replay
-stay private until successful publication; failure preserves the last complete
-snapshot. Query filters and routes, not demand retirement, decide which retained
-source rows belong in a query result.
+replacement. The source controls retention through actual row writes, which
+update raw subscribers as they apply. This rule also applies when another demand
+overlaps the released predicate or an independent source write matches it.
+Source deletions during replay enter the graph, but the query's result stays
+private until successful publication; failure preserves its last complete
+snapshot. Query filters and routes, not demand retirement, decide which source
+rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
@@ -870,7 +872,8 @@ Demand requested while the Collection is cleaned up remains detached
 rather than pretending that a physical acquisition succeeded. When the
 Collection starts a new sync run, the subscription enters `loadingSubset`
 before it queues reacquisition, then reacquires all detached demand through a
-fresh private publication barrier. Settlements from the old sync run cannot
+fresh replay. Its raw source transactions publish as they apply; a consumer's
+complete-result barrier is separate. Settlements from the old sync run cannot
 publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
@@ -902,8 +905,10 @@ not retain the old caller's unfinished wait.
 Eager collections have no subset reacquisition barrier. After cleanup, their
 next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch
-also reconciles an empty replacement. On-demand sources cannot infer absence
-from their partial installed state; their replay barrier owns replacement.
+also reconciles an empty replacement. Raw on-demand subscribers likewise
+reconcile cleanup-retained rows against the current source at its next applied
+transaction, including an empty transaction. A local snapshot request while
+cleaned up does not itself clear the retained rows.
 
 ### Source cancellation and applied settlement
 
@@ -1472,7 +1477,8 @@ initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure
 
-A truncate replay is one publication barrier. Every acquisition started while
+For live queries and Effects, a truncate replay is one publication barrier.
+Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
 barrier. Success publishes only after all current acquisitions settle. A
 released demand stops participating even if its canceled transport promise
@@ -1503,8 +1509,9 @@ the same status label. Subscription teardown is a one-shot logical transition:
 it stops the listener set already being walked, emits no later status, and
 removes subscriber ownership once. A later `unsubscribe()` is a no-op, including
 after an acquisition release failed.
-Failure keeps the last complete result visible and partly replayed source state
-private for both direct subscribers and query graphs. Ordinary source deltas or
+Failure keeps the query's last complete result visible and partly replayed graph
+state private. Raw Collection subscribers continue to receive source commits.
+Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. Replay failure is scoped to the logical demand that failed. If
@@ -1515,12 +1522,9 @@ retire the last logical demand, and its new demand joins the open replay. If the
 last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
 graph; unrelated parent or sibling changes may then publish. A direct
-subscriber's replay whose current attempt has not failed instead publishes the
-rows it holds at that retirement and resolves its completion, because nothing
-can complete it and keeping the old snapshot would leave values the source
-replaced or deleted. A replay whose
-current attempt failed keeps the last public snapshot, even after its failed
-owner was released; a later request reconciles a row it still shows. If release
+subscriber's replay whose current attempt has not failed instead resolves its
+completion at retirement; its raw rows already followed the source commits.
+A failed replay does not withhold raw source rows. If release
 publication or adapter unload synchronously acquires new demand, core checks
 completion after that callback: the new demand joins the private replacement,
 while the retired transport can no longer gate it. A genuine replay failure is
@@ -1847,7 +1851,8 @@ every row before the top-K (a recorded limit).
    its demand: graph output that waited for that load publishes at once, and
    the failure shows as a request error (law 16). A demand change counts as
    one step, so a change that asks for data again leaves the replay its new
-   demand.
+   demand. This graph-result barrier does not withhold raw source Collection
+   transactions from their direct subscribers.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered and every eager source is ready; obsolete demand does not block
     it, and an on-demand source's own Collection readiness does not gate it.

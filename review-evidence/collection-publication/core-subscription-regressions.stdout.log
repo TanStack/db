@@ -1,0 +1,48 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db
+
+ ❯ |@tanstack/db| tests/collection-subscription-replay.test.ts (65 tests | 19 failed) 196ms
+     × starts a replacement that lets canceled replay resolve 11ms
+     × starts a replacement that lets canceled replay reject 3ms
+     × keeps the published replacement after a reentrant replay fails 5ms
+     × requests a safe ordered provider prefix after replay: 'asc throw' 4ms
+     × requests a safe ordered provider prefix after replay: 'asc reject' 2ms
+     × requests a safe ordered provider prefix after replay: 'desc throw' 3ms
+     × requests a safe ordered provider prefix after replay: 'desc reject' 3ms
+     × continues after buffered rows when ordered snapshots repeat during a replay 3ms
+     × keeps a replay private at retirement after a synchronous failure, except a throwing release: replay load throws 5ms
+     × keeps a replay private at retirement after a synchronous failure, except a throwing release: new request throws 6ms
+     × aborts a replay acquisition before a reentrant newer truncate starts 2ms
+     × aborts a additional demand acquisition before a reentrant newer truncate starts 3ms
+     × aborts a additional pending demand acquisition before a reentrant newer truncate starts 3ms
+     × finishes replay state and surfaces an async subscriber failure 4ms
+     × retains successful peer rows after failed replay demand retires 8ms
+     × waits for a new async demand acquired while unloading a replay acquisition lease 4ms
+     × reacquires a final released replay demand after-release without waiting for obsolete work 3ms
+     × reacquires a final released replay demand during-ready without waiting for obsolete work 3ms
+     × reacquires a final released replay demand during-unload without waiting for obsolete work 5ms
+ ❯ |@tanstack/db| tests/collection-subscription.test.ts (83 tests | 5 failed) 161ms
+     × waits for every logical demand that shares one replay promise 9ms
+     × does not publish a pending replay after collection cleanup 3ms
+     × keeps the last published snapshot when truncate replay fails ('throw') 2ms
+     × keeps the last published snapshot when truncate replay fails ('reject') 1ms
+     × does not become ready between reentrant truncate replacements 3ms
+ ❯ |@tanstack/db| tests/collection-subscription-lifecycle.test.ts (26 tests | 12 failed) 79ms
+     × retires replay setup when its adapter cleans up before return 6ms
+     × retires replay setup when its adapter cleans up before throw 3ms
+     × retires replay setup when its adapter cleans up before resolve 3ms
+     × retires replay setup when its adapter cleans up before reject 3ms
+     × does not wait for aborted 'initial' work before publishing or readiness, 'resolve', 'old-first' 3ms
+     × does not wait for aborted 'initial' work before publishing or readiness, 'resolve', 'current-first' 2ms
+     × does not wait for aborted 'initial' work before publishing or readiness, 'reject', 'old-first' 3ms
+     × does not wait for aborted 'initial' work before publishing or readiness, 'reject', 'current-first' 3ms
+     × does not wait for aborted 'replay' work before publishing or readiness, 'resolve', 'old-first' 5ms
+     × does not wait for aborted 'replay' work before publishing or readiness, 'resolve', 'current-first' 5ms
+     × does not wait for aborted 'replay' work before publishing or readiness, 'reject', 'old-first' 5ms
+     × does not wait for aborted 'replay' work before publishing or readiness, 'reject', 'current-first' 5ms
+
+ Test Files  3 failed | 6 passed (9)
+      Tests  36 failed | 612 passed (648)
+   Start at  11:21:53
+   Duration  8.30s (transform 887ms, setup 461ms, import 2.40s, tests 2.36s, environment 2.10s)
+

@@ -2157,6 +2157,7 @@ describe(`CollectionSubscription status tracking`, () => {
         },
       },
     })
+    const errors: Array<unknown> = []
     const visible = new Map<string | number, Row>()
     const subscription = collection.subscribeChanges(
       (changes) => {
@@ -2167,6 +2168,7 @@ describe(`CollectionSubscription status tracking`, () => {
       },
       { includeInitialState: false },
     )
+    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
 
     try {
@@ -2186,16 +2188,23 @@ describe(`CollectionSubscription status tracking`, () => {
       // Replay creates a fresh abortable acquisition for each logical demand,
       // even when the adapter happens to return the same promise for both.
       expect(transportCalls).toBe(3)
+      // The applied truncate removes raw rows while replay stays pending.
+      expect(collection.toArray).toEqual([])
+      expect([...visible.values()]).toEqual([])
+      expect(subscription.status).toBe(`loadingSubset`)
 
       subscription.releaseSnapshot(where)
+      expect(subscription.status).toBe(`loadingSubset`)
       const failure = new Error(`shared replay failed`)
       replay.reject(failure)
       await flushPromises()
 
       expect(subscription.lastError).toBe(failure)
-      expect(
-        [...visible.values()].map(({ id, value }) => ({ id, value })),
-      ).toEqual([{ id: `one`, value: 1 }])
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toBe(failure)
+      expect(subscription.status).toBe(`ready`)
+      expect(collection.toArray).toEqual([])
+      expect([...visible.values()]).toEqual([])
     } finally {
       replay.resolve()
       subscription.unsubscribe()
@@ -2348,11 +2357,12 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`does not publish a pending replay after collection cleanup`, async () => {
+  it(`ignores an obsolete replay settlement after collection cleanup`, async () => {
     type Row = { id: string; version: number }
     const replay = createDeferred<void>()
     const visible = new Map<string | number, Row>()
     const statusEvents: Array<string> = []
+    let callbackCount = 0
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
     let commit!: () => void
@@ -2385,6 +2395,7 @@ describe(`CollectionSubscription status tracking`, () => {
     })
     const subscription = collection.subscribeChanges(
       (changes) => {
+        callbackCount++
         for (const change of changes) {
           if (change.type === `delete`) visible.delete(change.key)
           else visible.set(change.key, change.value)
@@ -2404,13 +2415,20 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
       expect(subscription.status).toBe(`loadingSubset`)
+      // The replay's source transaction applied before its promise settled.
+      expect(loadCount).toBe(2)
+      expect(visible.get(`row`)?.version).toBe(2)
+      expect(collection.get(`row`)?.version).toBe(2)
+      expect(statusEvents).toEqual([`loadingSubset`])
 
       await collection.cleanup()
       const eventsAfterCleanup = [...statusEvents]
+      const callbacksAfterCleanup = callbackCount
       replay.resolve()
       await flushPromises()
 
-      expect(visible.get(`row`)?.version).toBe(1)
+      expect(visible.get(`row`)?.version).toBe(2)
+      expect(callbackCount).toBe(callbacksAfterCleanup)
       expect(statusEvents).toEqual(eventsAfterCleanup)
     } finally {
       replay.resolve()
@@ -2472,7 +2490,7 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it.each([`throw`, `reject`] as const)(
-    `keeps the last published snapshot when truncate replay fails ($0)`,
+    `keeps applied raw source changes when truncate replay fails ($0)`,
     async (delivery) => {
       type Row = { id: string }
       const error = new Error(`truncate replay failed before replacement`)
@@ -2483,7 +2501,7 @@ describe(`CollectionSubscription status tracking`, () => {
       let loadCount = 0
       let failReplay = true
       const collection = createCollection<Row>({
-        id: `truncate-replay-preserves-snapshot`,
+        id: `truncate-replay-raw-commits`,
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         sync: {
@@ -2509,6 +2527,7 @@ describe(`CollectionSubscription status tracking`, () => {
           },
         },
       })
+      const errors: Array<unknown> = []
       const visible = new Map<string | number, Row>()
       const subscription = collection.subscribeChanges(
         (changes) => {
@@ -2520,6 +2539,9 @@ describe(`CollectionSubscription status tracking`, () => {
         { includeInitialState: false },
       )
 
+      subscription.on(`loadSubset:error`, ({ error: failure }) =>
+        errors.push(failure),
+      )
       subscription.requestSnapshot({ optimizedOnly: false })
       expect([...visible.keys()]).toEqual([`one`])
 
@@ -2529,16 +2551,24 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect(subscription.lastError).toBe(error)
-      expect([...visible.keys()]).toEqual([`one`])
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toBe(error)
+      expect(subscription.status).toBe(`ready`)
+      expect(collection.toArray).toEqual([])
+      expect([...visible.keys()]).toEqual([])
 
       begin()
       write({ type: `insert`, value: { id: `two` } })
       commit()
       await flushPromises()
 
-      // Ordinary source changes do not establish a complete replacement.
-      // Keep the last coherent generation until a later replay succeeds.
-      expect([...visible.keys()]).toEqual([`one`])
+      // Acquisition failure does not retract an accepted raw source commit.
+      expect(collection.toArray.map(({ id }) => ({ id }))).toEqual([
+        { id: `two` },
+      ])
+      expect([...visible.keys()]).toEqual([`two`])
+      expect(subscription.status).toBe(`ready`)
+      expect(subscription.lastError).toBe(error)
 
       failReplay = false
       begin()
@@ -2547,6 +2577,11 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect([...visible.keys()]).toEqual([`one`])
+      expect(loadCount).toBe(3)
+      expect(subscription.status).toBe(`ready`)
+      expect(subscription.lastError).toBe(error)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toBe(error)
 
       subscription.unsubscribe()
       await collection.cleanup()
@@ -2693,12 +2728,20 @@ describe(`CollectionSubscription status tracking`, () => {
       truncate()
       commit()
       await flushPromises()
+      // Raw version 2 publishes at commit, so its callback starts the nested
+      // replay before the first provider promise settles. Version 3 also applies
+      // while its own replay remains pending.
+      expect(startedNestedReplay).toBe(true)
+      expect(loadCount).toBe(3)
+      expect(visible.get(`row`)?.version).toBe(3)
+      expect(collection.get(`row`)?.version).toBe(3)
       expect(subscription.status).toBe(`loadingSubset`)
+      expect(statusEvents).toEqual([`loadingSubset`])
 
       replays[0]!.resolve()
       await flushPromises()
       expect(loadCount).toBe(3)
-      expect(visible.get(`row`)?.version).toBe(2)
+      expect(visible.get(`row`)?.version).toBe(3)
       expect(subscription.status).toBe(`loadingSubset`)
       expect(statusEvents).toEqual([`loadingSubset`])
 

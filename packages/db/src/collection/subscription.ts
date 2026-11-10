@@ -98,11 +98,6 @@ type TruncateReplayPublicationControl = NonNullable<
   SubscribeChangesOptions[`truncateReplayPublication`]
 >
 
-type TruncatePublicationState = {
-  loadedInitialState: boolean
-  snapshotSent: boolean
-}
-
 /** Internal record spanning a tentative attempt and any accepted acquisition. */
 type SubsetAcquisitionRecord = {
   options: LoadSubsetOptions
@@ -139,9 +134,6 @@ type TruncateReplayParticipant = {
 
 type TruncateReplayState = {
   syncRunGeneration: number
-  publicationState: TruncatePublicationState
-  /** Direct subscribers buffer the replacement here; delegated publication has no buffer. */
-  privateRows: Map<string | number, object> | undefined
   pending: Set<TruncateReplayParticipant>
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
@@ -192,10 +184,6 @@ export class CollectionSubscription
   // requestSnapshot to still work even when filtering is skipped.
   private skipFiltering = false
 
-  // Flag to indicate that we have sent at least 1 snapshot.
-  // While `snapshotSent` is false we filter out all changes from subscription to the collection.
-  private snapshotSent = false
-
   /**
    * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
@@ -230,8 +218,8 @@ export class CollectionSubscription
   private collectionCleanup: (() => void) | undefined
   private collectionRestartCleanup: (() => void) | undefined
 
-  // One replay state owns the publication baseline, overlapping attempts,
-  // and buffered changes until every attempt settles.
+  // Replay owns acquisition completion. Raw source transactions keep publishing;
+  // live queries and Effects own their complete-result publication barriers.
   private truncateReplayState: TruncateReplayState | undefined
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
@@ -450,18 +438,7 @@ export class CollectionSubscription
     const joins = open?.syncRunGeneration === syncRunGeneration
     const replayState = joins
       ? open
-      : this.createTruncateReplayState(syncRunGeneration, () => {
-          const currentRows = this.collection.currentStateAsChanges({
-            optimizedOnly: false,
-          })
-          return new Map(
-            // The API returns void for unavailable snapshots, not just undefined.
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            (currentRows ?? [])
-              .filter((change) => change.type !== `delete`)
-              .map((change) => [change.key, change.value]),
-          )
-        })
+      : this.createTruncateReplayState(syncRunGeneration)
     if (joins) {
       open.pendingSetups++
       if (open.failed) {
@@ -481,10 +458,8 @@ export class CollectionSubscription
    * Handle collection truncate event by resetting state and re-requesting subsets.
    * This is called when the sync layer receives a must-refetch and clears all data.
    *
-   * To prevent a flash of missing content, we buffer all changes (deletes from truncate
-   * and inserts from refetch) until all loadSubset calls succeed, then emit them together.
-   * A failed replay keeps the last published snapshot private until a later
-   * authoritative replay succeeds.
+   * Raw subscribers receive each applied source transaction. The replay tracks
+   * reacquisition and delegates complete-result publication to its query or Effect.
    */
   private handleTruncate(retired = false) {
     // A reload's replay, or a snapshot, can start inside the new run's
@@ -492,8 +467,9 @@ export class CollectionSubscription
     // it has.
     const demandsToReload = this.replaysDemand() ? [...this.subsetDemands] : []
 
-    // Retained rows still need the committed replacement even without demand.
-    if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
+    // Raw rows reconcile with the source transaction. Without reacquisition
+    // there is no replay to complete; eager demand still waits for readiness.
+    if (demandsToReload.length === 0) {
       this.resetSnapshotTracking()
       return
     }
@@ -511,10 +487,9 @@ export class CollectionSubscription
       replayState.failed = false
       replayState.currentAttempt = { pendingCount: 0, setupComplete: false }
     } else {
-      // Every overlapping attempt shares one publication baseline and buffer.
+      // Overlapping attempts share acquisition completion.
       replayState = this.createTruncateReplayState(
         this.collection._sync.getSyncRunGeneration(),
-        () => new Map(this.publishedRows),
       )
       this.truncateReplayState = replayState
     }
@@ -539,8 +514,8 @@ export class CollectionSubscription
     // either replaces them or proves they are absent.
     this.resetSnapshotTracking()
 
-    // Defer the requests so the truncate commit's deletes enter the replay state
-    // buffer before a synchronous adapter can publish replacement rows.
+    // Deliver the truncate commit before a synchronous adapter can publish
+    // replacement rows from its reacquisition.
     queueMicrotask(() => {
       if (this.truncateReplayState !== replayState) return
       if (!this.isSyncRunGenerationCurrent(replayState.syncRunGeneration)) {
@@ -760,97 +735,23 @@ export class CollectionSubscription
     const first = replayState.completion.isPending()
     replayState.completion.reject(failures[0])
     if (first) this.options.truncateReplayPublication?.fail?.(failures)
-    // Delegated publication already delivered its rows. Only a private buffer
-    // returns the caller's pagination position to the public snapshot; the
-    // private rows and their sent-key tracking stay together for a retry.
-    if (!replayState.privateRows) return
-    const publicationState = replayState.publicationState
-    this.loadedInitialState = publicationState.loadedInitialState
-    this.snapshotSent = publicationState.snapshotSent
   }
 
-  /** Publish the buffered replacement as one batch, or release the delegate. */
+  /** Complete acquisition and release the consumer's publication barrier. */
   private flushTruncateReplay(replayState: TruncateReplayState): void {
     if (this.truncateReplayState !== replayState) return
     this.truncateReplayState = undefined
     this.truncateReplacementPending = false
     try {
-      this.publishReplayRows(replayState.privateRows)
+      this.restorePublishedSnapshotTracking()
     } finally {
       replayState.completion.resolve()
       this.options.truncateReplayPublication?.succeed()
     }
   }
 
-  /** Replace the public snapshot with a replay's private rows in one batch. */
-  private publishReplayRows(
-    privateRows: Map<string | number, object> | undefined,
-  ): void {
-    // Retained rows the source never re-delivered leave the replacement.
-    for (const key of this.stalePublishedRows.keys()) privateRows?.delete(key)
-    this.stalePublishedRows.clear()
-    try {
-      if (privateRows) {
-        // Diff the retained public snapshot against the applied source replacement.
-        const replacement = this.createStateDiff(
-          this.publishedRows,
-          privateRows,
-        )
-        if (replacement.length > 0) this.filteredCallback(replacement)
-      }
-    } finally {
-      // Restore tracking even when a subscriber rejects the replacement.
-      this.restorePublishedSnapshotTracking()
-    }
-  }
-
   private restorePublishedSnapshotTracking(): void {
     this.sentKeys = new Set(this.publishedRows.keys())
-  }
-
-  /** Fold changes into the private replacement; false when they publish now. */
-  private bufferPrivately(
-    changes: ReadonlyArray<ChangeMessage<any, any>>,
-  ): boolean {
-    const privateRows = this.truncateReplayState?.privateRows
-    if (!privateRows) return false
-    for (const change of changes) {
-      if (change.type === `delete`) privateRows.delete(change.key)
-      else privateRows.set(change.key, change.value)
-    }
-    return true
-  }
-
-  private createStateDiff(
-    baseline: ReadonlyMap<string | number, object>,
-    finalRows: ReadonlyMap<string | number, object>,
-  ): Array<ChangeMessage<any, any>> {
-    const replacement: Array<ChangeMessage<any, any>> = []
-    for (const [key, previousValue] of baseline) {
-      const value = finalRows.get(key)
-      if (value === undefined) {
-        replacement.push({
-          type: `delete`,
-          key,
-          value: previousValue,
-        })
-      } else if (!deepEquals(value, previousValue)) {
-        replacement.push({
-          type: `update`,
-          key,
-          value,
-          previousValue,
-        })
-      }
-    }
-    for (const [key, value] of finalRows) {
-      if (!baseline.has(key)) replacement.push({ type: `insert`, key, value })
-    }
-    return replacement
-  }
-
-  private get isBufferingForTruncate(): boolean {
-    return this.truncateReplayState !== undefined
   }
 
   private setReadyIfIdle(): void {
@@ -885,7 +786,6 @@ export class CollectionSubscription
     if (this.truncateReplayState) return
     const replayState = this.createTruncateReplayState(
       this.collection._sync.getSyncRunGeneration(),
-      () => new Map(),
     )
     replayState.pendingSetups = 0
     replayState.failed = true
@@ -930,24 +830,15 @@ export class CollectionSubscription
   }
 
   private resetSnapshotTracking(): void {
-    this.snapshotSent = false
     this.loadedInitialState = false
   }
 
-  /** One replay state; only direct subscribers buffer a private replacement. */
+  /** One replay state tracks the current acquisitions and their verdict. */
   private createTruncateReplayState(
     syncRunGeneration: number,
-    privateRows: () => Map<string | number, object>,
   ): TruncateReplayState {
     return {
       syncRunGeneration,
-      publicationState: {
-        loadedInitialState: this.loadedInitialState,
-        snapshotSent: this.snapshotSent,
-      },
-      privateRows: this.options.truncateReplayPublication
-        ? undefined
-        : privateRows(),
       pending: new Set(),
       // Setup itself holds publication: adapter/status callbacks may reenter
       // before a request returns its promise and joins the pending set.
@@ -1292,23 +1183,28 @@ export class CollectionSubscription
     return normalized
   }
 
-  emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+  emitEvents(
+    changes: Array<ChangeMessage<any, any>>,
+    {
+      sourceApplied = false,
+      layoutChanged = false,
+    }: { sourceApplied?: boolean; layoutChanged?: boolean } = {},
+  ): boolean {
     if (this.unsubscribed) return false
-    const newChanges = this.filterAndFlipChanges(changes)
+    const newChanges = this.filterAndFlipChanges(
+      changes,
+      sourceApplied || this.collection.config.syncMode !== `on-demand`,
+    )
 
     // Reconciliation can reduce a source delta to no visible change. Do not
     // wake subscribers for an empty semantic batch.
-    if (changes.length > 0 && newChanges.length === 0) return false
+    if (
+      (changes.length > 0 || (sourceApplied && !layoutChanged)) &&
+      newChanges.length === 0
+    )
+      return false
 
-    // A direct subscriber sees the replacement as one batch, not a flash of
-    // missing content. Delegated publication keeps its private D2 contributions.
-    if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
-  }
-
-  /** Keep direct snapshot reads private while an authoritative replay is open. */
-  private publishSnapshot(changes: Array<ChangeMessage<any, any>>): void {
-    if (!this.bufferPrivately(changes)) this.callback(changes)
   }
 
   /**
@@ -1425,29 +1321,19 @@ export class CollectionSubscription
       return false
     }
 
-    // Skip known rows, except retained rows from an abandoned replay: a new
-    // snapshot must reconcile those with the source, not suppress their update.
-    const knownRows =
-      this.truncateReplayState?.privateRows ?? this.publishedRows
+    // Cleanup-retained rows must reconcile with the new source transaction.
     const filteredSnapshot = snapshot.filter(
       (change) =>
-        (!this.isBufferingForTruncate &&
-          this.stalePublishedRows.has(change.key)) ||
-        (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
+        this.stalePublishedRows.has(change.key) ||
+        (!this.sentKeys.has(change.key) && !this.publishedRows.has(change.key)),
     )
 
-    // Reserve the selected keys before publication. A truncate replay can keep
-    // this snapshot private, so callback tracking cannot reserve it yet.
+    // Reserve selected keys before user code can request another snapshot.
     for (const change of filteredSnapshot) {
       this.sentKeys.add(change.key)
     }
 
-    this.snapshotSent = true
-    this.publishSnapshot(
-      this.isBufferingForTruncate
-        ? filteredSnapshot
-        : this.reconcileStalePublishedChanges(filteredSnapshot),
-    )
+    this.callback(this.reconcileStalePublishedChanges(filteredSnapshot))
     return true
   }
 
@@ -1541,22 +1427,22 @@ export class CollectionSubscription
   }
 
   /**
-   * A replay with no remaining logical demand cannot establish more rows. One
-   * that has not failed publishes the rows it holds, so the subscriber does
-   * not keep values the source has replaced or deleted. A failed replay keeps
-   * the last public snapshot until an authoritative replay succeeds.
+   * A replay with no remaining logical demand cannot establish more rows.
+   * Raw rows already published; a graph's remaining replay participants decide
+   * when its complete result may publish.
    */
   private retireEmptyReplay(): void {
     const replayState = this.truncateReplayState
     if (this.subsetDemands.length !== 0 || !replayState) return
-    if (replayState.privateRows && !replayState.failed) {
+    if (!this.options.truncateReplayPublication && !replayState.failed) {
       this.flushTruncateReplay(replayState)
       return
     }
     if (this.awaitsSiblingReplays(replayState, () => this.retireEmptyReplay()))
       return
     this.discardTruncateReplay()
-    this.stalePublishedRows = new Map(this.publishedRows)
+    if (this.options.truncateReplayPublication)
+      this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()
   }
@@ -1728,13 +1614,12 @@ export class CollectionSubscription
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
-    // Reserve rows before publication. A direct truncate replay keeps them in
-    // the private replacement, but repeated ordered snapshots must continue.
+    // Reserve rows before callback reentry can request another ordered snapshot.
     for (const change of changes) {
       this.sentKeys.add(change.key)
     }
 
-    this.publishSnapshot(changes)
+    this.callback(this.reconcileStalePublishedChanges(changes))
     // A subscriber callback can synchronously tear down this subscription.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.unsubscribed) return
@@ -1823,19 +1708,17 @@ export class CollectionSubscription
    * Updates are flipped into inserts for keys that have not been sent yet.
    * Duplicate inserts are filtered out to prevent D2 multiplicity > 1.
    */
-  private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
-    changes = this.reconcileStalePublishedChanges(changes)
+  private filterAndFlipChanges(
+    changes: Array<ChangeMessage<any, any>>,
+    reconcileMissing: boolean,
+  ) {
+    changes = this.reconcileStalePublishedChanges(changes, reconcileMissing)
 
     if (this.loadedInitialState || this.skipFiltering) {
       // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
       return changes
     }
-
-    // A former full-state subscription is reset before truncate deletes arrive.
-    // Pass even unreserved deletes into its private replacement so stale
-    // published rows do not survive the replay.
-    const skipDeleteFilter = this.isBufferingForTruncate
 
     // sentKeys covers snapshot selections and callback rows. Keys inserted
     // earlier in this batch are tracked locally, so a row the where clause
@@ -1852,11 +1735,8 @@ export class CollectionSubscription
           newChange = { ...change, type: `insert`, previousValue: undefined }
           insertedInBatch.add(change.key)
         } else if (change.type === `delete`) {
-          // Filter out deletes for keys that have not been sent,
-          // UNLESS we're buffering for truncate (where all deletes should pass through)
-          if (!skipDeleteFilter) {
-            continue
-          }
+          // A raw subscriber cannot lose a key it never received.
+          continue
         } else {
           insertedInBatch.add(change.key)
         }
@@ -1881,13 +1761,12 @@ export class CollectionSubscription
   }
 
   /**
-   * After a failed replay, the source collection is empty but subscribers still
-   * hold the last good publication. Reconcile the first later source delta for
-   * each retained key against that publication instead of treating it as a
-   * duplicate insert.
+   * Cleanup clears source rows without publishing deletes. Reconcile the next
+   * transaction against retained subscriber rows, including keys that are absent.
    */
   private reconcileStalePublishedChanges(
     changes: Array<ChangeMessage<any, any>>,
+    reconcileMissing = false,
   ): Array<ChangeMessage<any, any>> {
     if (this.stalePublishedRows.size === 0) return changes
 
@@ -1914,12 +1793,9 @@ export class CollectionSubscription
         })
       }
     }
-    // Cleanup discards rows without publishing deletes. Eager sources publish
-    // their installed state; subset sources must first finish reacquisition.
-    if (
-      this.collection.config.syncMode !== `on-demand` &&
-      !this.isBufferingForTruncate
-    ) {
+    // Raw membership follows the current source, including partial on-demand
+    // state; a consumer's complete-result barrier is separate.
+    if (reconcileMissing) {
       for (const [key, value] of this.stalePublishedRows) {
         if (this.collection.has(key)) continue
         this.stalePublishedRows.delete(key)

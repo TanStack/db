@@ -1,0 +1,411 @@
+import { fc } from '@fast-check/vitest'
+import { QueryClient } from '@tanstack/query-core'
+import { IR, createCollection } from '@tanstack/db'
+import { expect, it } from 'vitest'
+import { createDeferred } from '../../db/src/deferred.js'
+import {
+  checkPublicSnapshotObservation,
+  publicSnapshotHistoryArbitrary,
+  publicSnapshotHistoryExamples,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleReplayTest,
+  oracleRuns,
+  readOracleRunConfig,
+  recordOracleReplay,
+} from '../../db/tests/oracle-config.js'
+import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { queryCollectionOptions } from '../src/query.js'
+import type {
+  PublicSnapshotHistory,
+  PublicSnapshotObservation,
+  PublicSnapshotRow,
+} from '../../db/tests/collection-public-snapshot-oracle.js'
+import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
+
+/**
+ * # Does a real Query result respect the Collection's public snapshot?
+ *
+ * The Collection lifecycle publication owner and its shared companion above
+ * own the maintainer's 2026-10-30 law. This receiving driver supplies a real
+ * QueryClient and queryCollectionOptions, their real commit receipts, and two
+ * exact retained demands in one direct subscription. It changes neither Query
+ * cache identity nor receipt settlement. The two predicates partition a–d;
+ * no global policy for independent subscriptions is assumed.
+ *
+ * A truncate starts replay. Both queryFn calls enter before the first returns
+ * its replacement rows. The other queryFn remains held, so this is a private
+ * replacement even if the first commit returns true. The driver captures
+ * reads immediately after forwarding that commit, before Query can await its
+ * receipt. The shared judgment compares those reads and the subscriber fold
+ * with the prior public snapshot. Empty results still run this same path.
+ *
+ * Afterwards the driver releases or rejects the held queryFn and records
+ * forward progress separately. A receipt/publication cycle is a protocol
+ * blocker, not a substitute for the privacy assertion. The first assertion
+ * survives any later completion or cleanup error. This receives the Query
+ * adapter boundary; persisted wrappers, compiled graphs and native hosts are
+ * separate receiving obligations.
+ */
+
+const property = `query-db.collection-public-snapshot`
+const states = [
+  `initial-real-query-loads-settled`,
+  `both-replay-query-functions-entered`,
+  `real-query-replay-commit-forwarded`,
+  `held-public-snapshot-compared`,
+  `successful-replay-progressed`,
+  `failed-replay-progressed`,
+] as const
+type ReachState = (typeof states)[number]
+type Scope = `left` | `right`
+const rowIds = [`a`, `b`, `c`, `d`] as const
+const clone = (rows: ReadonlyArray<PublicSnapshotRow>) =>
+  rows.map(({ id, value }) => ({ id, value }))
+
+async function progress<T>(work: Promise<T>, boundary: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Query receiving protocol did not progress: ${boundary}`,
+              ),
+            ),
+          2_000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+async function receiveQueryPublicSnapshot(
+  history: PublicSnapshotHistory,
+  record: (state: ReachState) => void = () => {},
+): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+    },
+  })
+  const predicates = {
+    left: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`a`, `c`])]),
+    right: new IR.Func(`in`, [
+      new IR.PropRef([`id`]),
+      new IR.Value([`b`, `d`]),
+    ]),
+  }
+  const scopes = new Map<unknown, Scope>([
+    [predicates.left, `left`],
+    [predicates.right, `right`],
+  ])
+  const selected = (rows: ReadonlyArray<PublicSnapshotRow>, scope: Scope) =>
+    clone(
+      rows.filter(({ id }) =>
+        scope === `left` ? id === `a` || id === `c` : id === `b` || id === `d`,
+      ),
+    )
+  const gates = {
+    left: createDeferred<Array<PublicSnapshotRow>>(),
+    right: createDeferred<Array<PublicSnapshotRow>>(),
+  }
+  // Every controlled rejection is observed, even if teardown retires a fetch.
+  void gates.left.promise.catch(() => {})
+  void gates.right.promise.catch(() => {})
+  const entered = new Set<Scope>()
+  const bothEntered = createDeferred<void>()
+  const firstCommitted = createDeferred<PublicSnapshotObservation>()
+  const folded = new Map<PublicSnapshotRow[`id`], PublicSnapshotRow>()
+  const errors: Array<unknown> = []
+  const receipts: Array<{
+    receipt: SyncAppliedReceipt
+    state: `pending` | `fulfilled` | `rejected`
+  }> = []
+  let replaying = false
+  let captureNextCommit = false
+  let operations!: Parameters<SyncConfig<PublicSnapshotRow>[`sync`]>[0]
+  const config = queryCollectionOptions<PublicSnapshotRow>({
+    id: `collection-publication-query`,
+    queryClient: client,
+    queryKey: ({ where }) => {
+      const scope = scopes.get(where)
+      return scope === undefined
+        ? [`collection-publication-query`]
+        : [`collection-publication-query`, scope]
+    },
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    queryFn: ({ queryKey }) => {
+      const scope = queryKey[1]
+      if (scope !== `left` && scope !== `right`)
+        throw new Error(`Query receiver lost its exact request scope`)
+      if (!replaying) return Promise.resolve(selected(history.initial, scope))
+      entered.add(scope)
+      if (entered.size === 2) bothEntered.resolve()
+      return gates[scope].promise.then((rows) => {
+        // The next commit is observed only after the held provider returned.
+        // Replay startup and cached-result commits cannot open this recorder.
+        if (scope === `left`) captureNextCommit = true
+        return rows
+      })
+    },
+  })
+  const source = createCollection({
+    ...config,
+    sync: {
+      ...config.sync,
+      sync: (params) => {
+        operations = params
+        return config.sync.sync({
+          ...params,
+          commit: (signal) => {
+            const receipt = params.commit(signal)
+            const observed: (typeof receipts)[number] = {
+              receipt,
+              state:
+                receipt === true
+                  ? (`fulfilled` as const)
+                  : (`pending` as const),
+            }
+            receipts.push(observed)
+            if (receipt !== true)
+              void receipt.then(
+                () => {
+                  observed.state = `fulfilled`
+                },
+                () => {
+                  observed.state = `rejected`
+                },
+              )
+            if (captureNextCommit) {
+              captureNextCommit = false
+              firstCommitted.resolve(observe())
+            }
+            return receipt
+          },
+        })
+      },
+    },
+  })
+  function observe(): PublicSnapshotObservation {
+    return {
+      reads: {
+        toArray: clone(source.toArray),
+        values: clone([...source.values()]),
+        get: rowIds.flatMap((id) => {
+          const row = source.get(id)
+          return row === undefined ? [] : clone([row])
+        }),
+      },
+      foldedRows: clone([...folded.values()]),
+      sizes: { size: source.size },
+    }
+  }
+  const subscription = source.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) folded.delete(change.value.id)
+        else folded.set(change.value.id, { ...change.value })
+      }
+    },
+    { includeInitialState: false },
+  )
+  subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+  let primary: unknown
+  let completion: `unobserved` | `fulfilled` | `rejected` = `unobserved`
+  const secondary: Array<unknown> = []
+  try {
+    const initial: Array<Promise<void>> = []
+    for (const scope of [`left`, `right`] as const)
+      subscription.requestSnapshot({
+        where: predicates[scope],
+        refetch: true,
+        onLoadSubsetResult: (receipt) => {
+          initial.push(Promise.resolve(receipt).then(() => undefined))
+        },
+      })
+    await progress(Promise.all(initial), `initial Query loads`)
+    record(`initial-real-query-loads-settled`)
+    checkPublicSnapshotObservation(history, `initial`, observe())
+
+    replaying = true
+    operations.begin()
+    operations.truncate()
+    const truncateReceipt = operations.commit()
+    if (truncateReceipt !== true) void truncateReceipt.catch(() => {})
+    const afterTruncate = observe()
+    const replay = subscription.pendingTruncateReplacement
+    if (replay === undefined)
+      throw new Error(`Query receiver did not enter an authoritative replay`)
+    const replayResult = Promise.resolve(replay).then(
+      () => {
+        completion = `fulfilled`
+      },
+      (error: unknown) => {
+        completion = `rejected`
+        return error
+      },
+    )
+    await progress(bothEntered.promise, `both replay queryFn entries`)
+    record(`both-replay-query-functions-entered`)
+    gates.left.resolve(selected(history.replacement, `left`))
+    const afterQueryCommit = await progress(
+      firstCommitted.promise,
+      `first real Query result commit`,
+    )
+    record(`real-query-replay-commit-forwarded`)
+    record(`held-public-snapshot-compared`)
+    try {
+      checkPublicSnapshotObservation(history, `held`, afterQueryCommit)
+      checkPublicSnapshotObservation(history, `held`, afterTruncate)
+    } catch (error) {
+      primary = error
+    }
+
+    const failure = new Error(`Query replacement failed`)
+    if (history.outcome === `resolve`)
+      gates.right.resolve(selected(history.replacement, `right`))
+    else gates.right.reject(failure)
+    try {
+      const rejection = await progress(
+        replayResult,
+        `replay completion after both provider results`,
+      )
+      if (history.outcome === `resolve`) {
+        record(`successful-replay-progressed`)
+        expect(completion, `successful Query replay completion`).toBe(
+          `fulfilled`,
+        )
+        checkPublicSnapshotObservation(history, `complete`, observe())
+      } else {
+        record(`failed-replay-progressed`)
+        expect(completion, `failed Query replay completion`).toBe(`rejected`)
+        expect(
+          Object.is(rejection, failure),
+          `exact Query replay rejection`,
+        ).toBe(true)
+        expect(
+          errors.some((error) => Object.is(error, failure)),
+          `exact Query load error event`,
+        ).toBe(true)
+        checkPublicSnapshotObservation(history, `failed`, observe())
+      }
+    } catch (error) {
+      secondary.push(error)
+    }
+    process.stdout.write(
+      `${JSON.stringify({ property, history, outcome: history.outcome, entered: [...entered], completion, queryReceipts: receipts.map(({ state }) => state), heldRead: afterQueryCommit, privacyFailed: primary !== undefined, secondaryFailures: secondary.map(String) })}\n`,
+    )
+  } catch (error) {
+    primary ??= error
+  } finally {
+    gates.left.resolve([])
+    gates.right.resolve([])
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      secondary.push(error)
+    }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      secondary.push(error)
+    }
+    try {
+      client.clear()
+    } catch (error) {
+      secondary.push(error)
+    }
+  }
+  if (primary !== undefined) {
+    if (secondary.length === 0) throw primary
+    throw new AggregateError(
+      [primary, ...secondary],
+      `Query public snapshot and later progress failed`,
+      { cause: primary },
+    )
+  }
+  if (secondary.length > 0)
+    throw new AggregateError(
+      secondary,
+      `Query replay receiving progress failed`,
+      { cause: secondary[0] },
+    )
+}
+
+const config = readOracleRunConfig()
+declareOracle({
+  grammar: [publicSnapshotHistoryArbitrary, publicSnapshotHistoryExamples],
+  check: [
+    receiveQueryPublicSnapshot,
+    runQueryPublicSnapshotCampaign,
+    checkPublicSnapshotObservation,
+  ],
+})
+
+async function runQueryPublicSnapshotCampaign(
+  campaign: `fixed` | `random` | `replay`,
+): Promise<void> {
+  const reach = createOracleReach(property, states, { minimum: 5 })
+  const samples: Array<Set<ReachState>> = []
+  const details = await fc.check(
+    fc.asyncProperty(publicSnapshotHistoryArbitrary, async (history) => {
+      reach.beginHistory()
+      const entered = new Set<ReachState>()
+      samples.push(entered)
+      await receiveQueryPublicSnapshot(history, (state) => {
+        entered.add(state)
+        reach.reach(state)
+      })
+    }),
+    campaign === `fixed`
+      ? { seed: 20261030, numRuns: oracleRuns(60) }
+      : oraclePropertyOptions(60, property),
+  )
+  recordOracleReplay(property, details)
+  const count = (histories: Array<Set<ReachState>>) =>
+    Object.fromEntries(
+      states.map((state) => [
+        state,
+        histories.filter((entered) => entered.has(state)).length,
+      ]),
+    )
+  process.stdout.write(
+    `${JSON.stringify({ property, campaign, seed: details.seed, path: details.counterexamplePath, runs: details.numRuns, shrinks: details.numShrinks, failed: details.failed, generatedReach: count(samples.slice(0, details.numRuns)), additionalExecutionReach: count(samples.slice(details.numRuns)), reach: Object.fromEntries(reach.counts()) })}\n`,
+  )
+  if (details.failed)
+    throw new Error(
+      fc.defaultReportMessage(details) ?? `Query public snapshot failed`,
+      { cause: details.errorInstance },
+    )
+  reach.assertReached()
+}
+
+it.skipIf(oracleReplayRequested())(
+  `keeps real Query replacements private (fixed campaign)`,
+  async () => runQueryPublicSnapshotCampaign(`fixed`),
+  60_000,
+)
+it.skipIf(oracleReplaySkips(property))(
+  `keeps real Query replacements private (random or replay campaign)`,
+  async () =>
+    runQueryPublicSnapshotCampaign(
+      config.replayPath === undefined ? `random` : `replay`,
+    ),
+  60_000,
+)
+
+oracleReplayTest(it).each(publicSnapshotHistoryExamples)(
+  `receives the shared Query public snapshot history %#`,
+  async (history) => receiveQueryPublicSnapshot(history),
+)

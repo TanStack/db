@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /Users/kyle.mathews/.codex/worktrees/collection-publication/tanstack-db/packages/db-sqlite-persistence-core
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 1 skipped (2)
+   Start at  11:31:04
+   Duration  1.55s (transform 722ms, setup 0ms, import 1.24s, tests 12ms, environment 213ms)
+

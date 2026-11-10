@@ -1,6 +1,9 @@
 // Ordinary tests moved out of collection-subscription-replay-oracle.property.test.ts.
 // They keep literal expectations for replay publication, retirement, and ordering;
 // the replay laws and the scenario grammar stay in the oracle file.
+// Raw subscribers observe each applied source transaction, including a truncate
+// and writes from a load that later fails. Acquisition readiness remains separate.
+// See docs/contributing/oracle-reviews/2026-10-30-raw-collection-publication-decision.md.
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -105,13 +108,13 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
         expect(loads).toHaveLength(2)
         expect(oldReplay.isPending()).toBe(true)
-        expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }])
+        expect([...visible.values()]).toEqual([])
 
         truncate()
         await flushPromises()
         expect(events).toEqual([`load:1`, `load:2`, `load:3`, `old:settled`])
         expect(oldReplay.isPending()).toBe(false)
-        expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }])
+        expect([...visible.values()]).toEqual([])
         expect(subscription.status).toBe(`loadingSubset`)
         expect(subscription.lastError).toBeUndefined()
         expect(completed).toBe(false)
@@ -217,7 +220,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`keeps the published replacement after a reentrant replay fails`, async () => {
+  it(`publishes later source commits after a reentrant replay fails`, async () => {
     let begin!: () => void
     let write!: (
       message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -289,14 +292,16 @@ describe(`CollectionSubscription replay oracle`, () => {
       replayLoads[0]?.resolve()
       await flushPromises()
       expect(startedNestedReplay).toBe(true)
+      expect(sortedRows(visible)).toEqual([])
 
       replayLoads[1]?.reject(new Error(`nested replay failed`))
       await flushPromises()
+      expect(sortedRows(visible)).toEqual([])
       begin()
       write({ type: `insert`, value: { id: `one`, value: 1 } })
       commit()
 
-      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -549,8 +554,8 @@ describe(`CollectionSubscription replay oracle`, () => {
         })
         expect(loadOptions[4]).toMatchObject({ offset: 0 })
         expect(loadOptions[4]?.cursor?.lastKey).toBeUndefined()
-        if (succeeds) expect(batches.at(-1)).toEqual([])
-        else expect(batches).toHaveLength(batchCount)
+        expect(batches).toHaveLength(batchCount + 1)
+        expect(batches.at(-1)).toEqual([])
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -685,11 +690,10 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  // A direct subscriber buffers ordered rows privately while a replay is
-  // pending. Each row still counts once: repeated ordered snapshots during the
-  // replay continue after the rows already chosen. Those private selections
-  // widen the provider prefix without claiming a provider cursor boundary.
-  it(`continues after buffered rows when ordered snapshots repeat during a replay`, async () => {
+  // Applied rows reach a direct subscriber while replay is pending. Each row
+  // still counts once: repeated ordered snapshots continue after delivered rows
+  // and widen the provider prefix without claiming a provider cursor boundary.
+  it(`continues after applied rows when ordered snapshots repeat during a replay`, async () => {
     type Row = { id: string; value: number }
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
@@ -744,8 +748,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       indexType: BTreeIndex,
     })
     const orderBy = valueOrderBy()
-    // The public subscriber model starts with one visible row. Replay adds
-    // the other two as one replacement batch, without re-inserting that row.
+    // The initial snapshot selects one row. Truncate deletes it, then the next
+    // applied transaction inserts all three rows before acquisition settles.
     const publicRows = new Map<string, Row>()
     const batches: Array<Array<string>> = []
     const invalidChanges: Array<string> = []
@@ -784,7 +788,12 @@ describe(`CollectionSubscription replay oracle`, () => {
       for (const value of rows) write({ type: `insert`, value })
       commit()
       await flushPromises()
-      expect(batches).toEqual([[`insert:one`]])
+      const appliedBatches = [
+        [`insert:one`],
+        [`delete:one`],
+        [`insert:one`, `insert:two`, `insert:three`],
+      ]
+      expect(batches).toEqual(appliedBatches)
 
       const before = loadOptions.length
       subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
@@ -793,12 +802,13 @@ describe(`CollectionSubscription replay oracle`, () => {
       expect(loadOptions[before + 2]).toMatchObject({ offset: 0 })
       expect(loadOptions[before + 2]?.limit).toBeGreaterThanOrEqual(4)
       expect(loadOptions[before + 2]?.cursor?.lastKey).toBeUndefined()
-      expect(batches).toEqual([[`insert:one`]])
+      expect(batches).toEqual(appliedBatches)
       heldReplay.resolve()
       await flushPromises()
       expect(batches.map((batch) => [...batch].sort())).toEqual([
         [`insert:one`],
-        [`insert:three`, `insert:two`],
+        [`delete:one`],
+        [`insert:one`, `insert:three`, `insert:two`],
       ])
       expect(invalidChanges).toEqual([])
       expect([...publicRows.keys()].sort()).toEqual(
@@ -811,16 +821,14 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  // Law 9 at retirement: a failure in the current attempt keeps the replay
-  // private even after the last owner is released. Each site writes a row
-  // before it fails, so publishing the private rows would show that row.
-  // A throwing release is not such a failure; the next test owns that site.
+  // A synchronous acquisition or release failure does not retract the source
+  // transaction applied before it. Retiring demand ends its replay ownership.
   it.each([
     `replay load throws`,
     `old lease unload throws`,
     `new request throws`,
   ])(
-    `keeps a replay private at retirement after a synchronous failure, except a throwing release: %s`,
+    `keeps applied rows at replay retirement after a synchronous failure: %s`,
     async (site) => {
       let begin!: () => void
       let write!: (message: {
@@ -904,13 +912,12 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()
-        // A release error fails no replay, so the retired replay publishes
-        // the rows it holds: the truncate removed `one`, and the adapter
-        // wrote `two` before it threw.
+        // The truncate removed the initial row. The failing adapter call's
+        // committed write is already visible, independent of retirement.
         expect(sortedRows(visible)).toEqual(
-          site === `old lease unload throws`
-            ? [{ id: `two`, value: 2 }]
-            : [{ id: `one`, value: 1 }],
+          site === `replay load throws`
+            ? [{ id: `one`, value: 5 }]
+            : [{ id: `two`, value: 2 }],
         )
         expect(
           uncaught.errors.map((error) => (error as Error).message),
@@ -1126,8 +1133,8 @@ describe(`CollectionSubscription replay oracle`, () => {
                   if (start === `additional pending demand`) {
                     return predecessor.promise
                   }
-                  // A failed replay retains its public baseline after setup and
-                  // all participants finish. Start the extra demand in that gap.
+                  // Fail this replay after setup. Start the extra demand before
+                  // the next source transaction; it still owns readiness.
                   throw new Error(`retain the failed replay`)
                 }
                 replaySignals.push(signal)
@@ -1173,7 +1180,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               new Error(`retain the failed replay`),
             )
           }
-          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          expect(sortedRows(visible)).toEqual([])
           subscription.requestSnapshot({
             where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
             optimizedOnly: false,
@@ -1183,21 +1190,21 @@ describe(`CollectionSubscription replay oracle`, () => {
 
         expect(replaySignals).toHaveLength(start === `replay` ? 2 : 3)
         expect(replaySignals[0]?.aborted).toBe(true)
-        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+        expect(sortedRows(visible)).toEqual([])
 
         install(2)
         newerReplay.resolve()
         await flushPromises()
         if (start === `additional pending demand`) {
-          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
           predecessor.resolve()
           await flushPromises()
-          // The returning extra demand joined the retained old attempt. Its
-          // transport still holds publication after that attempt's prior work.
-          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          // The returning extra demand still holds readiness after the old
+          // attempt's prior work; applied source rows are already public.
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
           expect(subscription.status).toBe(`loadingSubset`)
         } else {
-          // A startup superseded before return does not hold publication. An
+          // A startup superseded before return does not hold readiness. An
           // ordinary demand still owns its separate readiness participant.
           expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
           expect(subscription.status).toBe(
@@ -1295,7 +1302,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`finishes replay state and surfaces an async subscriber failure`, async () => {
+  it(`finishes replay after surfacing a subscriber failure at an applied commit`, async () => {
     let begin!: () => void
     let write!: (
       message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -1304,7 +1311,6 @@ describe(`CollectionSubscription replay oracle`, () => {
     let truncate!: () => void
     const replay = createDeferred<void>()
     const listenerFailure = new Error(`replay subscriber failed`)
-    const queuedMicrotasks: Array<VoidFunction> = []
     let loadCount = 0
     let rejectReplacement = false
     const collection = createCollection<ReplayRow>({
@@ -1347,24 +1353,33 @@ describe(`CollectionSubscription replay oracle`, () => {
       commit()
       await flushPromises()
 
+      const completion = subscription.pendingTruncateReplacement
+      expect(completion).toBeInstanceOf(Promise)
+      const settled = vi.fn()
+      void completion!.then(settled, settled)
+      rejectReplacement = true
       begin()
       write({ type: `insert`, value: { id: `one`, value: 2 } })
-      commit()
-      rejectReplacement = true
-      const queueMicrotaskSpy = vi
-        .spyOn(globalThis, `queueMicrotask`)
-        .mockImplementation((callback) => queuedMicrotasks.push(callback))
+      // Raw callback failure belongs to source publication, before replay
+      // settlement. The applied write survives and acquisition can finish.
+      let publishedFailure: unknown
       try {
-        replay.resolve()
-        await flushPromises()
-
-        expect(subscription.status).toBe(`ready`)
-        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
-        expect(queuedMicrotasks).toHaveLength(1)
-        expect(() => queuedMicrotasks[0]!()).toThrow(listenerFailure)
-      } finally {
-        queueMicrotaskSpy.mockRestore()
+        commit()
+      } catch (error) {
+        publishedFailure = error
       }
+      expect(publishedFailure).toBe(listenerFailure)
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+      expect(subscription.status).toBe(`loadingSubset`)
+      expect(settled).not.toHaveBeenCalled()
+      rejectReplacement = false
+      replay.resolve()
+      await expect(completion).resolves.toBeUndefined()
+      await flushPromises()
+
+      expect(subscription.status).toBe(`ready`)
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+      expect(settled).toHaveBeenCalledTimes(1)
     } finally {
       replay.resolve()
       await flushPromises()
@@ -2386,8 +2401,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       successful.resolve()
       await flushPromises()
       expect(sortedRows(visible)).toEqual([
-        { id: `one`, value: 1 },
-        { id: `two`, value: 1 },
+        { id: `one`, value: 2 },
+        { id: `two`, value: 2 },
       ])
       subscription.releaseSnapshot(firstWhere)
       await flushPromises()
@@ -2613,8 +2628,21 @@ describe(`CollectionSubscription replay oracle`, () => {
       expect(subscription.status).not.toBe(`ready`)
       expect(ready).not.toHaveBeenCalled()
       expect(settled).not.toHaveBeenCalled()
-      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
-      expect(publications).toEqual([])
+      expect(sortedRows(visible)).toEqual([
+        { id: `one`, value: 2 },
+        { id: `two`, value: 2 },
+      ])
+      const appliedPublications = [
+        [],
+        [{ id: `two`, value: 2 }],
+        // The nested snapshot also calls back after its committed row is sent.
+        [{ id: `two`, value: 2 }],
+        [
+          { id: `one`, value: 2 },
+          { id: `two`, value: 2 },
+        ],
+      ]
+      expect(publications).toEqual(appliedPublications)
       nested.resolve()
       await completion
       await flushPromises()
@@ -2625,12 +2653,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         { id: `one`, value: 2 },
         { id: `two`, value: 2 },
       ])
-      expect(publications).toEqual([
-        [
-          { id: `one`, value: 2 },
-          { id: `two`, value: 2 },
-        ],
-      ])
+      expect(publications).toEqual(appliedPublications)
     } finally {
       replay.resolve()
       nested.resolve()
@@ -2734,8 +2757,8 @@ describe(`CollectionSubscription replay oracle`, () => {
         reacquireOnReady = reacquireTiming === `during-ready`
         reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
-        // Releasing the final demand retires the replay, which publishes the
-        // row it holds, so the replacement resolves.
+        // Releasing the final demand retires the replay, so the replacement
+        // resolves without waiting for the obsolete load. Its row is public.
         if (reacquireTiming === `after-release`) {
           await expect(settlement).resolves.toEqual({ status: `resolved` })
           subscription.requestSnapshot({ where })
@@ -2769,19 +2792,23 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedChanges(batches[0]!)).toEqual([
           { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
         ])
-        // Retiring the replay publishes its applied row at the release; the
-        // reacquired demand then has nothing new to deliver.
+        // Truncate and its replacement write publish separate applied batches;
+        // retiring and reacquiring demand have no new source rows to deliver.
+        expect(
+          sortedChanges(batches.filter((batch) => batch.length > 0)[1]!),
+        ).toEqual([
+          { type: `delete`, key: `one`, value: { id: `one`, value: 1 } },
+        ])
         expect(
           sortedChanges(batches.filter((batch) => batch.length > 0).at(-1)!),
         ).toEqual([
           {
-            type: `update`,
+            type: `insert`,
             key: `one`,
             value: { id: `one`, value: 2 },
-            previousValue: { id: `one`, value: 1 },
           },
         ])
-        expect(batches.filter((batch) => batch.length > 0)).toHaveLength(2)
+        expect(batches.filter((batch) => batch.length > 0)).toHaveLength(3)
         expect(loads).toHaveLength(3)
         expect(loads.map(({ where: requestWhere }) => requestWhere)).toEqual([
           where,
