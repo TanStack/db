@@ -549,7 +549,7 @@
     "localLockfileSha256": "b6f0cb62284b844f8dc7bb7790149a62822a6a607b88ea75d1e4837a9a7ec009",
     "legacyDriverPrefixUnchanged": true,
     "limits": [
-      "Raw BEFORE/AFTER reports were lost during host restart. The committed complete48-key comparison and its report hashes survive.",
+      "Raw BEFORE/AFTER reports were lost during host restart. The committed complete 48-key comparison and its report hashes survive.",
       "Tracked source/receiving-driver/owner-layout snapshots and pins match the recorded compatible baseline. Current dependency package metadata is preserved; the original environment was not byte-hashed, so whole-environment byte equality is not claimed."
     ]
   },
@@ -610,7 +610,7 @@
     "lintChanged": {
       "status": 1,
       "newOracleViolations": 0,
-      "warning": "Earlier window conversion replaces generic preact.window-render budget6 with12 concrete property IDs, each6; already explained in committed window conversion evidence."
+      "warning": "Earlier window conversion replaces generic preact.window-render budget 6 with 12 concrete property IDs, each 6; already explained in committed window conversion evidence."
     },
     "logs": {
       "preact-schema-final-suite.log": {
