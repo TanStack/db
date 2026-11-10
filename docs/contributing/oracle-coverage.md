@@ -8097,6 +8097,16 @@ that evidence. Gaps in changed functions close by a kill or an explicit
 maintainer allowance for their anchored gaps; a coverage-map entry alone does
 not close them.
 
+The reversed-index owner now registers generated reads through
+`reverse-index.reads` and its four existing large histories through the finite
+`reverse-index.large-reads` property. The independent order and filter-work
+judgments, 200-run fixed/random campaigns, and twelve declared states remain.
+Every fresh constructed history retains its reach obligations; incomplete
+traces preserve actual driver failures. The [conversion record](oracle-reviews/2026-11-10-reverse-index-property-conversion.md)
+binds the complete 49-site comparison and all 23 retained named order
+rejections. Its five survivors, fifteen unreached sites and six runtime
+crashes are unchanged gaps; this refactor claims no closure of them.
+
 The structural-hash graph and failed-getter-retry owners are now
 `ivm.hash-graph` and `ivm.hash-failure-retry` properties. Their arithmetic
 read-count and independent graph-topology/unfolding judgments retain the

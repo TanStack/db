@@ -642,7 +642,11 @@ const ownerGroups: ReadonlyArray<
     `includes-work`,
     `ordered-window`,
   ],
-  [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
+  [
+    `db/tests/reverse-index-oracle.property.test.ts`,
+    `reverse-index`,
+    `reads large-reads`,
+  ],
   [
     `db/tests/optimistic-history-oracle.property.test.ts`,
     `optimistic-history`,
@@ -1249,6 +1253,7 @@ const reseededProperties = new Set([`evaluators.like`])
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `reverse-index.large-reads`,
   `preact.bound-options`,
   `preact.bound-schema-options`,
   `oracle-replay.enumerated-calibration`,

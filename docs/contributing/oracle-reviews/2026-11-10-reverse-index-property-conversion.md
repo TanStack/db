@@ -67,3 +67,16 @@ Checked exact replay:
 ```sh
 TANSTACK_DB_ORACLE_PROPERTY=reverse-index.reads TANSTACK_DB_ORACLE_SEED=42 TANSTACK_DB_ORACLE_PATH=9:0:0:0:0:0:0 pnpm_config_verify_deps_before_run=false pnpm --filter @tanstack/db exec vitest run tests/reverse-index-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
 ```
+
+## Integration review
+
+Independent review verified all 49 static site identities against both raw
+reports, all 23 retained named `order` rejections, the framework and source
+hashes, and the preserved laws, histories, budgets and failure priority.
+The review found that the author's branch registered the finite
+`reverse-index.large-reads` property without a replay owner. Integration adds
+it to the existing owner group and enumerated-property set. Its advertised
+direct command passes all four cases and its determinism check (five tests),
+with seven unrelated tests skipped and no type errors. The full owner still
+passes all 12 tests. This changes replay discovery only; the source-bound
+mutation pair above remains unchanged.
