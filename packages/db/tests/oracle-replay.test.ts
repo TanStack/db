@@ -752,24 +752,25 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
-  it(`reseeds a property from its campaign seed alone`, () => {
-    // The LIKE oracle draws its cases from its own seeded generator, so the
-    // guarded runner, which witnesses a seed and a path, cannot witness it.
+  it(`gives LIKE a direct seed-and-path assertion replay`, () => {
     expect(
-      oracleReplayManifest
-        .filter(({ status }) => status === `reseeded-campaign`)
-        .map(({ property, command, environment }) => ({
-          property,
-          command,
-          environment,
-        })),
-    ).toEqual([
-      {
-        property: `evaluators.like`,
-        command: `pnpm exec vitest run tests/query/compiler/evaluators-oracle.test.ts`,
-        environment: [`TANSTACK_DB_ORACLE_SEED`],
-      },
-    ])
+      oracleReplayManifest.filter(
+        ({ status }) => status === `reseeded-campaign`,
+      ),
+    ).toEqual([])
+    expect(
+      oracleReplayManifest.find(
+        ({ property }) => property === `evaluators.like`,
+      ),
+    ).toMatchObject({
+      status: `assertion`,
+      testNamePattern: `evaluators\\.like > random seed`,
+      environment: [
+        `TANSTACK_DB_ORACLE_SEED`,
+        `TANSTACK_DB_ORACLE_PATH`,
+        `TANSTACK_DB_ORACLE_PROPERTY`,
+      ],
+    })
   })
 
   it(`gives every index and pagination matrix property a direct test selector`, () => {

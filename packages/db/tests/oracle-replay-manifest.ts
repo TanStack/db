@@ -1038,6 +1038,8 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`evaluators.like`, `evaluators\\.like > random seed`],
+  [`evaluators.in`, `evaluators\\.in > random seed`],
   [
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
@@ -1282,7 +1284,7 @@ const replayTestNames = new Map([
 
 // Properties whose own seeded generator replaces fast-check, so they have no
 // shrink path.
-const reseededProperties = new Set([`evaluators.like`])
+const reseededProperties = new Set<string>()
 
 // Enumerated oracleProperty sources have no random campaign or shrink path.
 // Keep their literal registry names here; the owner groups still supply their
