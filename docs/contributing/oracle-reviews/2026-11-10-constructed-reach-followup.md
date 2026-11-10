@@ -37,6 +37,8 @@ From the relevant package directory, with `pnpm_config_verify_deps_before_run=fa
 
 Results: TopK 27 tests, Preact 93 tests, and the full OP-SQLite package 306 tests pass, with no type errors. The RN command retains coverage and typechecking. All original TopK base run budgets remain 25, all RN base budgets remain 50, and all 12 Preact window cells remain six histories per campaign. Each Preact cell reports seven entered histories for each state in both campaigns.
 
+ESLint, Prettier and `git diff --check` pass. `pnpm lint:changed` exits 1 with two branch budget reports: `preact.window-render` removed its old six-run key, and OP-SQLite removed the old 20-run meta calibration at seed 165903. The Preact key is replaced by 12 separately registered cells, each retaining six runs. The RN calibration moved unchanged to an ordinary driver test. These earlier conversion changes are explained in their owner reports; this follow-up lowers no budget.
+
 The finite bound-options check remains unchanged. The new requirements supplement the existing product judgments; they do not change row equality, alias key order, source reference identity or work-count expectations. Existing conversion mutation comparisons remain earlier evidence; no new final-source mutation census was run in this follow-up. Device/JSI execution, arbitrary framework schedules and changes to the external framework remain outside this bounded repair.
 
 The [companion evidence](2026-11-10-constructed-reach-followup.json) records the exact source hashes and every normal-run state count. The ignored worktree evidence directory additionally retains the commands, raw logs and temporary control sources.

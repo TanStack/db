@@ -325,5 +325,23 @@
       "case": "repaired RN default whole-package command",
       "result": "306 pass, coverage/typechecking enabled, no type errors"
     }
-  ]
+  ],
+  "lintChanged": {
+    "exitCode": 1,
+    "reports": [
+      {
+        "file": "packages/preact-db/tests/window-render-oracle.test.tsx",
+        "key": "preact.window-render",
+        "removedBudget": 6,
+        "explanation": "Replaced by 12 separately registered cells, each retaining six runs."
+      },
+      {
+        "file": "packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts",
+        "seed": 165903,
+        "removedBudget": 20,
+        "explanation": "Existing meta calibration moved unchanged to an ordinary driver test."
+      }
+    ],
+    "followupBudgetReduction": false
+  }
 }
