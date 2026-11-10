@@ -197,3 +197,11 @@ all four surrounding package commands pass 2,026 checks. Explicit ESLint has
 zero errors and two require-await warnings in the Promise-returning PowerSync
 host factories. Formatting, `git diff --check` and staged `pnpm lint:changed`
 pass. No lowered or removed oracle run budget is reported.
+
+The validated all-adapter implementation is commit
+`a0d7d49e54d820ee342443fdb10f74dab23a55db`. This reference update changes prose
+only. A later commit-hook automatic install also hit HTTP 403 for
+`@tailwindcss/postcss` 4.3.5. An isolated install of the nearest earlier version,
+4.3.4, succeeds. Its local override also remains uncommitted. The commit runs
+the normal lint-staged hook with pnpm's automatic pre-run installation disabled;
+no hook or check is skipped.
