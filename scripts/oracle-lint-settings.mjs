@@ -37,7 +37,7 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/db/tests/declared-reach-oracle.property.test.ts`,
-        reason: `campaign helper with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
+        reason: `compatibility helpers are the implementation under test; the outer campaign uses oracleProperty and preserves the complete independent ledger self-test.`,
       },
       {
         file: `packages/db/tests/indexed-db/cross-tab-history-oracle.test.ts`,

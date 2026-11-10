@@ -968,7 +968,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/proxy-detachment-contract-oracle.test.ts`,
     `proxy`,
-    `json-data-keys`,
+    `ordinary-field-copies json-data-keys`,
   ],
   [
     `db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts`,
@@ -1096,7 +1096,13 @@ const ownerGroups: ReadonlyArray<
   [
     `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
     `offline`,
-    `serializer.mutation-wire serializer.date-marker serializer.version-two serializer.malformed-object serializer.mutation-codec`,
+    `serializer.mutation-wire serializer.date-marker serializer.version-two`,
+    `offline-transactions/tests/transaction-serializer-oracle.ts`,
+  ],
+  [
+    `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
+    `offline`,
+    `serializer.malformed-object serializer.mutation-codec`,
   ],
   [
     `offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
@@ -1600,19 +1606,19 @@ const replayTestNames = new Map([
   ],
   [
     `index-update.reference-model`,
-    `matches a reference model across valid operation sequences \\(seed undefined\\)`,
+    `index-update\\.reference-model > random seed`,
   ],
   [
     `index-update.nullish-membership`,
-    `refines nullish membership histories \\(seed undefined\\)`,
+    `index-update\\.nullish-membership > random seed`,
   ],
   [
     `index-update.exact-identity`,
-    `preserves exact equality while ordered traversal retains every row \\(seed undefined\\)`,
+    `index-update\\.exact-identity > random seed`,
   ],
   [
     `index-update.custom-comparator`,
-    `matches an independent custom-comparator model \\(seed undefined\\)`,
+    `index-update\\.custom-comparator > random seed`,
   ],
   [`ivm.hash-identity`, `ivm\\.hash-identity > random seed`],
   [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
