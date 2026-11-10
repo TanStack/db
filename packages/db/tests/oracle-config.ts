@@ -12,6 +12,11 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `persisted-readiness.history`,
+  `persisted-sync-problem.history`,
+  `opfs-worker.diagnostics-fixed`,
+  `sqlite-reload.class-fixed`,
+  `sqlite-reload.class.electron-fixed`,
   `persisted-reload-replacement.history`,
   `sqlite-persistence.logical-scheduling`,
   `oracle.declared-reach`,

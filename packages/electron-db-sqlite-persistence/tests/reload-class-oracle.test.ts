@@ -250,7 +250,6 @@ oracleProperty({
     arbitrary: reloadHistoryArb,
     runs: 12,
     fixedSeeds: [2205],
-    fixed: fixedReloadHistories.map(([name, history]) => ({ name, history })),
   },
   model,
   driver: async (history, observe) => {
@@ -258,4 +257,24 @@ oracleProperty({
   },
   check,
   timeout: 300_000,
+})
+
+// Retain the fixed host histories separately from the bounded random grammar.
+oracleProperty({
+  id: `sqlite-reload.class.electron-fixed`,
+  law: {
+    statement: `The retained host reload histories satisfy every existing setup, row, budget, and ordering comparison.`,
+    authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `The named fixed histories on this existing in-process receiving driver.`,
+    owner: `SQLite persistence`,
+  },
+  histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
+  label: (entry) => entry.name,
+  resolve: (entry) => entry.history,
+  model,
+  driver: async (history, observe) => {
+    observe(`reload`, await observeReload(electronHost(), history))
+  },
+  check,
+  timeout: 30_000,
 })
