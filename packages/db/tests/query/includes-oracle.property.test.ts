@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import {
   concat,
   createLiveQueryCollection,
@@ -18,13 +19,10 @@ import {
   oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
-  oracleReplaySkips,
   oracleRoute,
-  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { hash } from '../../../db-ivm/src/hashing/hash.js'
 import {
   DISTINCT_REACH_STATES,
@@ -34,6 +32,7 @@ import {
 import { routeKey } from '../../src/query/live/public-key-reduction.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
 import { runTrace } from '../trace-runner.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   cleanupPendingWork,
   createControlledCollection,
@@ -219,19 +218,7 @@ const depthArbitrary = fc.constantFrom<IncludeDepth>(1, 2, 3, 4)
 // a fresh seed at the same budget. A seed-and-path replay runs only its named
 // property; other matrix cells cannot delay or obscure that reproduction.
 function generatedCampaigns(runs: number, property: string, fixedSeed: number) {
-  if (oracleReplayRequested()) {
-    return oracleReplaySkips(property)
-      ? []
-      : [{ label: `replay`, options: oraclePropertyOptions(runs, property) }]
-  }
-
-  return [
-    {
-      label: `fixed`,
-      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(runs) }),
-    },
-    { label: `random`, options: oraclePropertyOptions(runs, property) },
-  ]
+  return [{ label: `fixed and random`, options: { runs, property, fixedSeed } }]
 }
 
 function levelArbitrary(
@@ -1619,7 +1606,9 @@ function expectEveryHistoryStepVisible(
     const after = relationshipOnly(
       recomputeFullRowBatchScenario(scenario, stepIndex + 1),
     )
-    expect(after).not.toEqual(before)
+    oracleAssertion('includes oracle.property comparison 1610', () =>
+      expect(after).not.toEqual(before),
+    )
   }
 }
 
@@ -1633,7 +1622,9 @@ function expectEveryRouteTransitionVisible(
     const after = relationshipOnly(
       recomputeFullRowBatchScenario(scenario, stepIndex + 1),
     )
-    expect(after).not.toEqual(before)
+    oracleAssertion('includes oracle.property comparison 1624', () =>
+      expect(after).not.toEqual(before),
+    )
   }
 }
 
@@ -2828,7 +2819,9 @@ function flatMaterializationProjection(
     recompute: ({ roots, levels }) =>
       recomputeFlatMaterialization(materialization, roots, levels[0]!),
     assertEqual: (observed, expected) => {
-      expect(observed).toEqual(expected)
+      oracleAssertion('includes oracle.property comparison 2819', () =>
+        expect(observed).toEqual(expected),
+      )
       return undefined
     },
   }
@@ -2860,7 +2853,9 @@ const structuralProjection: TraceProjection<
   observe: ({ incremental }) => stripVirtualProperties(incremental.toArray),
   recompute: ({ roots, levels, depth }) => recompute(roots, levels, depth),
   assertEqual: (observed, expected) => {
-    expect(observed).toEqual(expected)
+    oracleAssertion('includes oracle.property comparison 2851', () =>
+      expect(observed).toEqual(expected),
+    )
   },
 }
 
@@ -3099,7 +3094,9 @@ const materializeProjection: TraceProjection<
       models.leaves,
     ),
   assertEqual: (observed, expected) => {
-    expect(observed).toEqual(expected)
+    oracleAssertion('includes oracle.property comparison 3090', () =>
+      expect(observed).toEqual(expected),
+    )
   },
 }
 
@@ -3859,10 +3856,11 @@ describe(`includes recompute oracle`, () => {
       property,
       1734 + shapeIndex,
     )) {
-      fcTest.prop([arbitrary], options)(
+      registerIncludesProperty(
+        [arbitrary],
+        options,
         `matches recomputation for independent ${shape} relationship targets [${property}, ${label}]`,
         async (scenario) => {
-          oracleRoute(oracleRouteOf(options))
           expectEveryRouteTransitionVisible(scenario)
           await expectFullRowBatchScenarioMatches(scenario)
         },
@@ -3878,10 +3876,11 @@ describe(`includes recompute oracle`, () => {
       property,
       1740 + historyIndex,
     )) {
-      fcTest.prop([arbitrary], options)(
+      registerIncludesProperty(
+        [arbitrary],
+        options,
         `matches recomputation for the ${history} route destination history [${property}, ${label}]`,
         async (scenario) => {
-          oracleRoute(oracleRouteOf(options))
           expectEveryRouteTransitionVisible(scenario)
           await expectFullRowBatchScenarioMatches(scenario)
         },
@@ -4007,10 +4006,11 @@ describe(`includes recompute oracle`, () => {
         retiredProperty,
         1726 + depth * 10 + sourceBranch,
       )) {
-        fcTest.prop([retiredArbitrary], options)(
+        registerIncludesProperty(
+          [retiredArbitrary],
+          options,
           `reuses a retired route at depth ${depth}, branch ${sourceBranch} [${retiredProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
-            oracleRoute(oracleRouteOf(options))
             return expectHistoryScenarioPairMatches(...args)
           },
         )
@@ -4027,10 +4027,11 @@ describe(`includes recompute oracle`, () => {
         intraBatchProperty,
         1733 + depth * 10 + sourceBranch,
       )) {
-        fcTest.prop([intraBatchArbitrary], options)(
+        registerIncludesProperty(
+          [intraBatchArbitrary],
+          options,
           `handles intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch} [${intraBatchProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
-            oracleRoute(oracleRouteOf(options))
             return expectHistoryScenarioPairMatches(...args)
           },
         )
@@ -4064,10 +4065,11 @@ describe(`includes recompute oracle`, () => {
           property,
           1727 + depth * 100 + targetLevel * 10 + sourceBranch,
         )) {
-          fcTest.prop([arbitrary], options)(
+          registerIncludesProperty(
+            [arbitrary],
+            options,
             `matches forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch} [${property}, ${label}]`,
             async (scenarios) => {
-              oracleRoute(oracleRouteOf(options))
               for (const deliveryOrder of branchDeliveryOrders) {
                 await expectHistoryScenarioPairMatches(scenarios[deliveryOrder])
               }
@@ -4093,10 +4095,11 @@ describe(`includes recompute oracle`, () => {
           property,
           1738 + publicIdIndex * 100 + routeIndex * 10 + updateIndex,
         )) {
-          fcTest.prop([relationshipBatchFixtureArbitrary], options)(
+          registerIncludesProperty(
+            [relationshipBatchFixtureArbitrary],
+            options,
             `matches the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate} [${property}, ${label}]`,
             async (fixture) => {
-              oracleRoute(oracleRouteOf(options))
               const cells = createRelationshipBatchShapeMatrix(
                 fixture,
                 publicId,
@@ -4112,9 +4115,14 @@ describe(`includes recompute oracle`, () => {
 
               // Delivery boundaries and change order must not affect the final
               // recompute semantics for one generated fixture.
-              expect(finalStates.length).toBeGreaterThan(1)
+              oracleAssertion('includes oracle.property comparison 4109', () =>
+                expect(finalStates.length).toBeGreaterThan(1),
+              )
               for (const finalState of finalStates.slice(1)) {
-                expect(finalState).toEqual(finalStates[0])
+                oracleAssertion(
+                  'includes oracle.property comparison 4111',
+                  () => expect(finalState).toEqual(finalStates[0]),
+                )
               }
 
               for (const {
@@ -4143,10 +4151,11 @@ describe(`includes recompute oracle`, () => {
     flatMaterializationProperty,
     1721,
   )) {
-    fcTest.prop(flatMaterializationArbitraries, options)(
+    registerIncludesProperty(
+      flatMaterializationArbitraries,
+      options,
       `matches recomputation for flat materializations [${flatMaterializationProperty}, ${label}]`,
       (kind, scenario) => {
-        oracleRoute(oracleRouteOf(options))
         return expectFlatMaterializationScenarioMatches(kind, scenario)
       },
     )
@@ -4160,10 +4169,11 @@ describe(`includes recompute oracle`, () => {
       property,
       1719 + depth,
     )) {
-      fcTest.prop([arbitrary], options)(
+      registerIncludesProperty(
+        [arbitrary],
+        options,
         `matches recomputation for visible multi-row batches at depth ${depth} [${property}, ${label}]`,
         (...args: Parameters<typeof expectFullRowBatchScenarioMatches>) => {
-          oracleRoute(oracleRouteOf(options))
           return expectFullRowBatchScenarioMatches(...args)
         },
       )
@@ -4186,10 +4196,11 @@ describe(`includes recompute oracle`, () => {
           visibleProperty,
           1721 + depth + targetLevel,
         )) {
-          fcTest.prop([visibleArbitrary], options)(
+          registerIncludesProperty(
+            [visibleArbitrary],
+            options,
             `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel} [${visibleProperty}, ${label}]`,
             async (scenarios) => {
-              oracleRoute(oracleRouteOf(options))
               for (const scenario of [
                 scenarios.transitionOnly,
                 scenarios.stateful,
@@ -4203,7 +4214,10 @@ describe(`includes recompute oracle`, () => {
                   scenario.transitionStepIndex + 1,
                 )
 
-                expect(result).not.toEqual(beforeTransition)
+                oracleAssertion(
+                  'includes oracle.property comparison 4203',
+                  () => expect(result).not.toEqual(beforeTransition),
+                )
                 await expectFullRowBatchScenarioMatches(scenario)
               }
             },
@@ -4243,10 +4257,11 @@ describe(`includes recompute oracle`, () => {
               secondIndex * 2 +
               sourceBranch,
           )) {
-            fcTest.prop([arbitrary], options)(
+            registerIncludesProperty(
+              [arbitrary],
+              options,
               `matches recomputation for ${firstTransition} → ${secondTransition} histories at depth ${depth}, branch ${sourceBranch} [${property}, ${label}]`,
               async (scenarios) => {
-                oracleRoute(oracleRouteOf(options))
                 for (const scenario of scenarios) {
                   expectEveryHistoryStepVisible(scenario)
                   await expectFullRowBatchScenarioMatches(scenario)
@@ -4373,10 +4388,11 @@ describe(`includes recompute oracle`, () => {
     `includes.incremental-history`,
     1711,
   )) {
-    fcTest.prop([scenarioArbitrary], options)(
+    registerIncludesProperty(
+      [scenarioArbitrary],
+      options,
       `matches naive recomputation after every incremental change [${label}]`,
       (...args: Parameters<typeof expectScenarioMatches>) => {
-        oracleRoute(oracleRouteOf(options))
         return expectScenarioMatches(...args)
       },
     )
@@ -4390,10 +4406,11 @@ describe(`includes recompute oracle`, () => {
     `includes.nested-scalar-materialization`,
     1712,
   )) {
-    fcTest.prop([distinctMaterializationArbitrary], options)(
+    registerIncludesProperty(
+      [distinctMaterializationArbitrary],
+      options,
       `matches recomputation for nested scalar materialization [${label}]`,
       (...args: Parameters<typeof expectMaterializeScenarioMatches>) => {
-        oracleRoute(oracleRouteOf(options))
         return expectMaterializeScenarioMatches(...args)
       },
     )
@@ -4428,10 +4445,11 @@ describe(`includes recompute oracle`, () => {
     `includes.alpha-renaming`,
     1713,
   )) {
-    fcTest.prop(alphaArbitraries, options)(
+    registerIncludesProperty(
+      alphaArbitraries,
+      options,
       `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling [${label}]`,
       async (rootRows, childRows) => {
-        oracleRoute(oracleRouteOf(options))
         const roots = createControlledCollection<RootRow>(
           `metamorphic-roots`,
           rootRows,
@@ -4521,18 +4539,24 @@ describe(`includes recompute oracle`, () => {
           // The outer queries have no orderBy: this retains their traversal
           // equivalence witness, not a general root-order contract. Child order
           // remains explicit and must not be normalized away.
-          expect(stripVirtualProperties(renamed)).toEqual(
-            stripVirtualProperties(baseline),
-          )
-          expect(
-            stripVirtualProperties(
-              withUnrelatedSibling.map(
-                ({ unrelated: _unrelated, ...row }) => row,
-              ),
+          oracleAssertion('includes oracle.property comparison 4525', () =>
+            expect(stripVirtualProperties(renamed)).toEqual(
+              stripVirtualProperties(baseline),
             ),
-          ).toEqual(stripVirtualProperties(baseline))
-          expect(stripVirtualProperties(withReorderedSiblings)).toEqual(
-            stripVirtualProperties(withUnrelatedSibling),
+          )
+          oracleAssertion('includes oracle.property comparison 4528', () =>
+            expect(
+              stripVirtualProperties(
+                withUnrelatedSibling.map(
+                  ({ unrelated: _unrelated, ...row }) => row,
+                ),
+              ),
+            ).toEqual(stripVirtualProperties(baseline)),
+          )
+          oracleAssertion('includes oracle.property comparison 4535', () =>
+            expect(stripVirtualProperties(withReorderedSiblings)).toEqual(
+              stripVirtualProperties(withUnrelatedSibling),
+            ),
           )
         } finally {
           await Promise.all([
@@ -4553,10 +4577,11 @@ describe(`includes recompute oracle`, () => {
     `includes.optimistic-convergence`,
     1714,
   )) {
-    fcTest.prop([confirmedValueArbitrary], options)(
+    registerIncludesProperty(
+      [confirmedValueArbitrary],
+      options,
       `optimistic updates converge to confirmed-only state [${label}]`,
       async (confirmedValue) => {
-        oracleRoute(oracleRouteOf(options))
         const roots = createControlledCollection<RootRow>(`convergence-roots`, [
           { id: 1, group: 1, value: 0, position: 0 },
         ])
@@ -4601,9 +4626,11 @@ describe(`includes recompute oracle`, () => {
               transaction,
               children.resolveSync,
             )
-            expect(stripVirtualProperties(live.toArray)).toEqual([
-              { id: 1, children: [{ id: 1, value: confirmedValue }] },
-            ])
+            oracleAssertion('includes oracle.property comparison 4606', () =>
+              expect(stripVirtualProperties(live.toArray)).toEqual([
+                { id: 1, children: [{ id: 1, value: confirmedValue }] },
+              ]),
+            )
 
             children.write(`update`, {
               id: 1,
@@ -4615,9 +4642,11 @@ describe(`includes recompute oracle`, () => {
             releasePendingWork(pending, entry, children.resolveSync)
             await transaction.when(`settled`)
 
-            expect(stripVirtualProperties(live.toArray)).toEqual([
-              { id: 1, children: [{ id: 1, value: confirmedValue }] },
-            ])
+            oracleAssertion('includes oracle.property comparison 4620', () =>
+              expect(stripVirtualProperties(live.toArray)).toEqual([
+                { id: 1, children: [{ id: 1, value: confirmedValue }] },
+              ]),
+            )
           },
         )
       },
@@ -4696,12 +4725,14 @@ async function expectScopedNamingRejected(
   const sources = createScopedSources(scenario)
   let created: ReturnType<typeof createScopedQuery> | undefined
   try {
-    expect(
-      () => {
-        created = createScopedQuery(scenario.shape, scenario.aliases, sources)
-      },
-      `${naming} naming ${JSON.stringify(scenario.aliases)} must be rejected`,
-    ).toThrow()
+    oracleAssertion('includes oracle.property comparison 4701', () =>
+      expect(
+        () => {
+          created = createScopedQuery(scenario.shape, scenario.aliases, sources)
+        },
+        `${naming} naming ${JSON.stringify(scenario.aliases)} must be rejected`,
+      ).toThrow(),
+    )
   } finally {
     await created?.cleanup()
     await Promise.all(
@@ -4736,19 +4767,27 @@ async function expectScopedAlphaRenamingHolds(
 
   const check = (checkpoint: string) => {
     const label = `${checkpoint}, naming ${JSON.stringify(scenario.aliases)}`
-    expect(
-      normalizeScopedRows(canonical.toArray),
-      `${label}: canonical naming against recomputation`,
-    ).toEqual(normalizeScopedRows(recomputeScopedRows(scenario.shape, state)))
-    expect(
-      normalizeScopedRows(renamed.toArray),
-      `${label}: generated naming against canonical naming`,
-    ).toEqual(normalizeScopedRows(canonical.toArray))
-    if (scenario.mode === `onDemand`) {
+    oracleAssertion('includes oracle.property comparison 4741', () =>
       expect(
-        sortedRequests(renamedSources),
-        `${label}: loadSubset requests per Collection`,
-      ).toEqual(sortedRequests(canonicalSources))
+        normalizeScopedRows(canonical.toArray),
+        `${label}: canonical naming against recomputation`,
+      ).toEqual(
+        normalizeScopedRows(recomputeScopedRows(scenario.shape, state)),
+      ),
+    )
+    oracleAssertion('includes oracle.property comparison 4745', () =>
+      expect(
+        normalizeScopedRows(renamed.toArray),
+        `${label}: generated naming against canonical naming`,
+      ).toEqual(normalizeScopedRows(canonical.toArray)),
+    )
+    if (scenario.mode === `onDemand`) {
+      oracleAssertion('includes oracle.property comparison 4750', () =>
+        expect(
+          sortedRequests(renamedSources),
+          `${label}: loadSubset requests per Collection`,
+        ).toEqual(sortedRequests(canonicalSources)),
+      )
     }
   }
 
@@ -4757,8 +4796,10 @@ async function expectScopedAlphaRenamingHolds(
     await Promise.all([canonical.preload(), renamed.preload()])
     await flushPromises()
     if (expectedAfterPreload) {
-      expect(normalizeScopedRows(canonical.toArray)).toEqual(
-        normalizeScopedRows(expectedAfterPreload),
+      oracleAssertion('includes oracle.property comparison 4762', () =>
+        expect(normalizeScopedRows(canonical.toArray)).toEqual(
+          normalizeScopedRows(expectedAfterPreload),
+        ),
       )
     }
     check(`after preload`)
@@ -4992,13 +5033,13 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
     `includes.scoped-alpha-renaming`,
     1715,
   )) {
-    fcTest.prop([scopedScenarioArbitrary], options)(
+    registerIncludesProperty(
+      [scopedScenarioArbitrary],
+      options,
       `is unchanged when lexical scopes reuse alias names [${label}]`,
       (scenario) => {
-        oracleRoute(oracleRouteOf(options))
         return expectScopedAlphaRenamingHolds(scenario)
       },
-      // Each run builds four live queries; scale with the run budget.
       Math.max(5_000, oracleRuns(80) * 50),
     )
   }
@@ -5030,107 +5071,126 @@ for (const campaign of generatedCampaigns(
   2309,
 ))
   for (const form of [`inline`, `collection`] as const)
-    fcTest(
-      `preserves colliding active buckets ${form} (${campaign.label})`,
-      async () => {
-        const groups = collidingRouteGroups()
-        const reach = createOracleReach(
-          `includes.bucket-collisions`,
-          DISTINCT_REACH_STATES,
-        )
-        oracleRoute(oracleRouteOf(campaign.options))
-        await fc.assert(
-          fc.asyncProperty(distinctHistory, async (worlds) => {
-            reach.beginHistory()
-            const sources = createSources()
-            const children = new Map(
-              groups.map((group, id) => [id, batchChild(id, group)]),
-            )
-            const roots = new Map<number, RootRow>()
-            const live =
-              form === `inline`
-                ? createIncrementalQuery(1, sources)
-                : createLiveQueryCollection((q) =>
-                    q
-                      .from({ root: sources.roots.collection })
-                      .orderBy(({ root }) => root.position)
-                      .orderBy(({ root }) => root.id)
-                      .select(({ root }) => ({
-                        id: root.id,
-                        group: root.group,
-                        value: root.value,
-                        position: root.position,
-                        children: include(
-                          q
-                            .from({ child: sources.levels[0].collection })
-                            .where(({ child }) =>
-                              eq(child.parentGroup, root.group),
-                            )
-                            .orderBy(({ child }) => child.position)
-                            .orderBy(({ child }) => child.id)
-                            .select(({ child }) => ({
-                              id: child.id,
-                              group: child.group,
-                              value: child.value,
-                              position: child.position,
-                            })),
-                        ),
-                      })),
-                  )
-            await withOracleCleanup(async () => {
-              await live.preload()
-              sources.levels[0].writeBatch(
-                [...children.values()].map((value) => ({
-                  type: `insert`,
-                  value,
-                })),
-              )
-              for (const [checkpoint, world] of worlds.entries()) {
-                const next = new Map(
-                  world.map((label, id) => [id, batchRoot(id, groups[label]!)]),
+    (() => {
+      let groups: Array<number> | undefined
+      const counts = new Map<string, number>(
+        DISTINCT_REACH_STATES.map((state) => [state, 0]),
+      )
+      registerIncludesProperty(
+        [distinctHistory],
+        {
+          ...campaign.options,
+          beforeCampaign: () => {
+            groups = collidingRouteGroups()
+            for (const state of counts.keys()) counts.set(state, 0)
+          },
+          afterCampaign: () => {
+            if (!oracleReplayRequested()) {
+              const missed = [...counts]
+                .filter(([, count]) => count < 1)
+                .map(([state, count]) => `${state} (${count})`)
+              if (missed.length)
+                throw new Error(
+                  `includes.bucket-collisions: generated histories reached these states fewer than 1 times, so their laws were not enforced there: ${missed.join(', ')}`,
                 )
-                const changes: Array<{
-                  type: `delete` | `insert` | `update`
-                  value: RootRow
-                }> = []
-                for (const [id, value] of roots)
-                  if (!next.has(id)) changes.push({ type: `delete`, value })
-                for (const [id, value] of next)
-                  changes.push({
-                    type: roots.has(id) ? `update` : `insert`,
-                    value,
-                  })
-                sources.roots.writeBatch(changes)
-                roots.clear()
-                for (const [id, value] of next) roots.set(id, value)
-                const observed = live.toArray.map((row) => ({
-                  ...row,
-                  children: Array.isArray(row.children)
-                    ? row.children
-                    : row.children.toArray,
-                }))
+            }
+            process.stdout.write(
+              `includes bucket ${form} reach ${JSON.stringify(Object.fromEntries(counts))}\n`,
+            )
+          },
+        },
+        `preserves colliding active buckets ${form} (${campaign.label})`,
+        async (worlds) => {
+          const resolvedGroups = (groups ??= collidingRouteGroups())
+
+          const sources = createSources()
+          const children = new Map(
+            resolvedGroups.map((group, id) => [id, batchChild(id, group)]),
+          )
+          const roots = new Map<number, RootRow>()
+          const live =
+            form === `inline`
+              ? createIncrementalQuery(1, sources)
+              : createLiveQueryCollection((q) =>
+                  q
+                    .from({ root: sources.roots.collection })
+                    .orderBy(({ root }) => root.position)
+                    .orderBy(({ root }) => root.id)
+                    .select(({ root }) => ({
+                      id: root.id,
+                      group: root.group,
+                      value: root.value,
+                      position: root.position,
+                      children: include(
+                        q
+                          .from({ child: sources.levels[0].collection })
+                          .where(({ child }) =>
+                            eq(child.parentGroup, root.group),
+                          )
+                          .orderBy(({ child }) => child.position)
+                          .orderBy(({ child }) => child.id)
+                          .select(({ child }) => ({
+                            id: child.id,
+                            group: child.group,
+                            value: child.value,
+                            position: child.position,
+                          })),
+                      ),
+                    })),
+                )
+          await withOracleCleanup(async () => {
+            await live.preload()
+            sources.levels[0].writeBatch(
+              [...children.values()].map((value) => ({
+                type: `insert`,
+                value,
+              })),
+            )
+            for (const [checkpoint, world] of worlds.entries()) {
+              const next = new Map(
+                world.map((label, id) => [
+                  id,
+                  batchRoot(id, resolvedGroups[label]!),
+                ]),
+              )
+              const changes: Array<{
+                type: `delete` | `insert` | `update`
+                value: RootRow
+              }> = []
+              for (const [id, value] of roots)
+                if (!next.has(id)) changes.push({ type: `delete`, value })
+              for (const [id, value] of next)
+                changes.push({
+                  type: roots.has(id) ? `update` : `insert`,
+                  value,
+                })
+              sources.roots.writeBatch(changes)
+              roots.clear()
+              for (const [id, value] of next) roots.set(id, value)
+              const observed = live.toArray.map((row) => ({
+                ...row,
+                children: Array.isArray(row.children)
+                  ? row.children
+                  : row.children.toArray,
+              }))
+              oracleAssertion('includes oracle.property comparison 5137', () =>
                 expect(
                   stripVirtualProperties(observed),
                   `${form} checkpoint ${checkpoint}`,
-                ).toEqual(recompute(roots, [children], 1))
-              }
-              for (const state of distinctReachStates(worlds))
-                reach.reach(state)
-            }, [
-              () => live.cleanup(),
-              () => sources.roots.collection.cleanup(),
-              ...sources.levels.map(
-                ({ collection }) =>
-                  () =>
-                    collection.cleanup(),
-              ),
-            ])
-          }),
-          campaign.options,
-        )
-        reach.assertReached()
-        process.stdout.write(
-          `includes bucket ${form} ${campaign.label} reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-        )
-      },
-    )
+                ).toEqual(recompute(roots, [children], 1)),
+              )
+            }
+            for (const state of distinctReachStates(worlds))
+              counts.set(state, counts.get(state)! + 1)
+          }, [
+            () => live.cleanup(),
+            () => sources.roots.collection.cleanup(),
+            ...sources.levels.map(
+              ({ collection }) =>
+                () =>
+                  collection.cleanup(),
+            ),
+          ])
+        },
+      )
+    })()

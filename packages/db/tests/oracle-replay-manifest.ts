@@ -89,6 +89,81 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
+    `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
+    `opfs`,
+    `page-lifecycle-fixed mixed-execute-fixed terminal-event-fixed close-fixed failure-cleanup-fixed`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts`,
+    `opfs`,
+    `request-order-fixed`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`,
+    `persisted-readiness`,
+    `history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-sync-problem-oracle.test.ts`,
+    `persisted-sync-problem`,
+    `history`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts`,
+    `opfs-worker`,
+    `diagnostics-fixed`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class-fixed`,
+  ],
+  [
+    `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class.electron-fixed`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-reload-replacement-oracle.test.ts`,
+    `persisted-reload-replacement`,
+    `history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/shared-logical-scheduling-oracle.test.ts`,
+    `sqlite-persistence`,
+    `logical-scheduling`,
+  ],
+  [
+    `db-ivm/tests/murmur-stream-oracle.property.test.ts`,
+    `ivm`,
+    `murmur-stream`,
+  ],
+  [
+    `db-ivm/tests/operators/reduce-fast-path-oracle.property.test.ts`,
+    `ivm`,
+    `reduce-fast-path`,
+  ],
+  [
+    `solid-db/tests/row-materialization-oracle.test.tsx`,
+    `solid`,
+    `row-materialization native-parent-materialization descriptor-visibility live-getters shared-graph-calibration shared-graphs callable-fields reserved-fields array-methods`,
+  ],
+  [
+    `svelte-db/tests/cache-options-oracle.svelte.test.ts`,
+    `svelte`,
+    `cache-options`,
+  ],
+  [
+    `svelte-db/tests/descriptor-start-release-oracle.svelte.test.ts`,
+    `svelte`,
+    `descriptor-start-release`,
+  ],
+  [
+    `query-db-collection/tests/optimistic-ordered-refetch-oracle.test.ts`,
+    `query`,
+    `ordered-mutation-outcome`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -183,7 +258,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
     `live-query-observer`,
-    `hydration-subset-handoff`,
+    `hydration-subset-handoff.granular hydration-subset-handoff.wholesale`,
   ],
   [
     `react-db/tests/window-render-oracle.test.tsx`,
@@ -194,6 +269,41 @@ const ownerGroups: ReadonlyArray<
     `react-db/tests/suspense-lifecycle-oracle.test.tsx`,
     `react`,
     `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
+  ],
+  [
+    `react-db/tests/bound-schema-options-oracle.test.tsx`,
+    `react.bound-schema-options`,
+    `live suspense`,
+  ],
+  [
+    `react-db/tests/cache-options-oracle.test.tsx`,
+    `react.cache-options`,
+    `client-render suspense-render server-render`,
+  ],
+  [
+    `react-db/tests/descriptor-start-release-oracle.test.tsx`,
+    `react.descriptor-start-release`,
+    `live infinite suspense`,
+  ],
+  [
+    `react-db/tests/source-id-reuse-oracle.test.tsx`,
+    `react`,
+    `source-id-inline-options source-id-deferred-release`,
+  ],
+  [
+    `react-db/tests/cache-first-registration-oracle.test.tsx`,
+    `react`,
+    `cache-first-registration`,
+  ],
+  [
+    `react-db/tests/suspense-local-options-oracle.test.tsx`,
+    `react`,
+    `suspense-local-options`,
+  ],
+  [
+    `react-db/tests/suspense-indexing-config-oracle.test.tsx`,
+    `react`,
+    `suspense-indexing-config`,
   ],
   [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
@@ -229,6 +339,7 @@ const ownerGroups: ReadonlyArray<
       `ssr-effects-current-ordinary-provider ssr-effects-current-ordinary-explicit`,
       `ssr-effects-current-suspense-provider ssr-effects-current-suspense-explicit`,
       `ssr-effects-current-standalone ssr-effects-current-supplied`,
+      `ssr-effects-react18-disabled ssr-effects-current-disabled`,
     ].join(` `),
   ],
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
@@ -266,22 +377,22 @@ const ownerGroups: ReadonlyArray<
   [
     `react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx`,
     `react`,
-    `ssr-runtime-ordinary ssr-runtime-infinite`,
+    `ssr-runtime-ordinary ssr-runtime-infinite ssr-runtime-ordinary.cases ssr-runtime-infinite.cases`,
   ],
   [
     `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-snapshot`,
+    `ssr-snapshot ssr-snapshot.cases`,
   ],
   [
     `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-handoff ssr-receiving-reader`,
+    `ssr-handoff ssr-handoff.cases ssr-receiving-reader ssr-receiving-reader.cases`,
   ],
   [
     `svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-runtime-errors`,
+    `ssr-runtime-errors ssr-runtime-errors.cases`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
@@ -349,6 +460,11 @@ const ownerGroups: ReadonlyArray<
     `db/tests/optimistic-history-outcomes-oracle.test.ts`,
     `collection-state`,
     `optimistic-outcomes`,
+  ],
+  [
+    `db/tests/query/ir-stable-identity-oracle.test.ts`,
+    `ir-identity`,
+    `canonical-expressions reference-expressions membership-set lexical-aliases projected-results output-denotation union-output-aliases reference-queries`,
   ],
   [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
@@ -508,9 +624,14 @@ const ownerGroups: ReadonlyArray<
     `startup-generation source-progress`,
   ],
   [
+    `db/tests/query/compiler/group-by-pipeline-oracle.test.ts`,
+    `compiler.group-by`,
+    `batch`,
+  ],
+  [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
-    `membership-work`,
+    `membership-work membership-work-fixed`,
   ],
   [
     `db/tests/query/includes-collection-oracle.property.test.ts`,
@@ -984,17 +1105,17 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
     `ivm`,
-    `distinct-collisions`,
+    `distinct-collisions distinct-collisions-tuple`,
   ],
   [
     `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
     `ivm`,
-    `distinct-representatives`,
+    `distinct-representatives distinct-representatives-unit-split`,
   ],
   [
     `db/tests/query/distinct-collision-oracle.test.ts`,
     `query`,
-    `distinct-collisions`,
+    `distinct-collisions distinct-collisions-ordered`,
   ],
   [
     `db-ivm/tests/operators/topk-batch-contract-oracle.test.ts`,
@@ -1054,7 +1175,15 @@ const ownerGroups: ReadonlyArray<
   [
     `db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `reference`,
+    [
+      `reference reference.per-change reference.outage`,
+      `reference.ablation.snapshot.first-ready reference.ablation.changes.change-batch`,
+      `reference.ablation.fail.failure-after-ready reference.ablation.restart.restart`,
+      `reference.ablation.wait.wait-before-evidence-fulfilled reference.ablation.disconnect.reconnect`,
+      `reference.ablation.reconnect.reconnect reference.ablation.renew.renewal`,
+      `reference.ablation.transient-failure.transient-failure-reported reference.ablation.changes.change-before-ready`,
+      `reference.ablation.notes reference.ablation.live-values reference.ablation.read-point`,
+    ].join(` `),
   ],
   [
     `db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
@@ -1079,12 +1208,12 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `electric`,
+    `electric electric.no-on-error`,
   ],
   [
     `convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `convex`,
+    `convex convex.react convex.wrapped`,
   ],
 ]
 
@@ -1182,6 +1311,45 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`evaluators.like`, `evaluators\\.like > random seed`],
+  [`evaluators.in`, `evaluators\\.in > random seed`],
+  ...[
+    `ir-identity.canonical-expressions`,
+    `ir-identity.reference-expressions`,
+    `ir-identity.membership-set`,
+    `ir-identity.lexical-aliases`,
+    `ir-identity.projected-results`,
+    `ir-identity.output-denotation`,
+    `ir-identity.union-output-aliases`,
+    `ir-identity.reference-queries`,
+    `query.public-container-copy`,
+    `query-identity.compiled-output`,
+    `query-identity.equality-partition`,
+    `derived-publication.membership-work`,
+    `derived-publication.membership-work-fixed`,
+    `query.distinct-collisions-ordered`,
+  ].map(
+    (property) =>
+      [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+  ),
+  ...ownerGroups
+    .filter(([, prefix]) => prefix === `pg-serializer`)
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
+  ...[
+    `electric.persisted-tag-history`,
+    `electric.bound-descriptor-history`,
+  ].map(
+    (property) =>
+      [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+  ),
   [
     `query-db.ownership.mutation-confirmation`,
     `query-db\\.ownership\\.mutation-confirmation.*random seed`,
@@ -1227,38 +1395,25 @@ const replayTestNames = new Map([
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
   [`oracle.declared-reach`, `reach ledgers refine the declared reach model`],
-  [
-    `includes-work.projection-payload`,
-    `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
-  ],
-  ...[
-    `reference`,
-    `neon-realtime`,
-    `trailbase`,
-    `rxdb`,
-    `powersync`,
-    `electric`,
-    `convex`,
-  ].map(
-    (driver) =>
-      [
-        `adapter-conformance.eager-live-source.${driver}`,
-        `conforms on a random campaign or a replayed seed`,
-      ] as const,
-  ),
+  ...ownerGroups
+    .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
   [
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,
   ],
-  [`react.window-render`, `window changes at React commit.*fresh`],
-  [`react.window-retry-ownership`, `retry ownership/.*fresh`],
-  [`react.client-window`, `client page identity.*fresh`],
-  [`svelte.client-window`, `Svelte client page identity.*fresh`],
-  [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
-  [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
+  [`svelte.client-window`, `svelte\\.client-window > random seed`],
   [
-    `live-query-observer.hydration-subset-handoff`,
-    `seeded ready-subset handoff \\(fresh\\)`,
+    `svelte.client-window-recovery`,
+    `svelte\\.client-window-recovery > random seed`,
   ],
   [
     `preact.window-render.eager-derived-offset`,
@@ -1321,19 +1476,20 @@ const replayTestNames = new Map([
     `ivm.topk-negative-window-orderBy`,
     `Absolute-rank negative window oracle:.*orderBy.*random`,
   ],
-  [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
+  [`ivm.distinct-collisions`, `ivm\\.distinct-collisions > random seed`],
   [
     `ivm.distinct-representatives`,
-    `conserves full representative contributions.*random`,
+    `ivm\\.distinct-representatives > random seed`,
   ],
   [
-    `includes.bucket-collisions`,
-    `preserves colliding active buckets.*(random|replay)`,
+    `ivm.distinct-collisions-tuple`,
+    `ivm\\.distinct-collisions-tuple > random seed`,
   ],
   [
-    `query.distinct-collisions`,
-    `preserves public distinct collision rows.*random`,
+    `ivm.distinct-representatives-unit-split`,
+    `ivm\\.distinct-representatives-unit-split > random seed`,
   ],
+  [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [
     `sqlite-resume.source-progress`,
     `preserves source progress evidence.*random or replayed`,
@@ -1357,10 +1513,6 @@ const replayTestNames = new Map([
   [
     `ssr.stream-record-lifetime`,
     `settles each record demand at its transport checkpoint.*random`,
-  ],
-  [
-    `live-query-observer.hydration-error-timing`,
-    `publishes errors at their ownership checkpoint.*random`,
   ],
   [
     `live-query-observer.retained-snapshot`,
@@ -1400,50 +1552,23 @@ const replayTestNames = new Map([
     `matches a live-query Collection's cleanup admission \\(random\\)`,
   ],
   [
-    `live-query-observer.partial-attach`,
-    `releases every acquired channel before retry.*random`,
-  ],
-  [
     `subscription-lifecycle.notification-error`,
     `acquires retained demand after replacement readiness.*random`,
   ],
-  [
-    `react.descriptor-error-surface`,
-    `error-surface after descriptor failure.*random`,
-  ],
-  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
-  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
-  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
-  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
-  [
-    `react.ssr-runtime-ordinary`,
-    `ordinary preserves runtime error hydration views.*random`,
-  ],
-  [
-    `react.ssr-runtime-infinite`,
-    `infinite preserves runtime error hydration views.*random`,
-  ],
-  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
-  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [`svelte.ssr-snapshot`, `svelte\\.ssr-snapshot > random seed`],
+  [`svelte.ssr-handoff`, `svelte\\.ssr-handoff > random seed`],
   [
     `svelte.ssr-receiving-reader`,
-    `preserves each receiving reader view.*random`,
+    `svelte\\.ssr-receiving-reader > random seed`,
   ],
-  [
-    `svelte.ssr-runtime-errors`,
-    `keeps runtime failures on their ordinary error surface.*random`,
-  ],
-  [
-    `live-query-observer.release-failure`,
-    `reattaches after reporting a release failure.*random`,
-  ],
+  [`svelte.ssr-runtime-errors`, `svelte\\.ssr-runtime-errors > random seed`],
   [
     `structural-identity.equal-representations`,
-    `agrees with D2 value identity for equal representations`,
+    `structural-identity\\.equal-representations > random seed`,
   ],
   [
     `structural-identity.independent-values`,
-    `agrees with D2 value identity for independent values`,
+    `structural-identity\\.independent-values > random seed`,
   ],
   [
     `index-update.reference-model`,
@@ -1461,12 +1586,19 @@ const replayTestNames = new Map([
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
   ],
+  [`ivm.hash-identity`, `ivm\\.hash-identity > random seed`],
+  [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
+  [`ivm.hash-value`, `ivm\\.hash-value > random seed`],
+  [`ivm.incrementalization-law`, `ivm\\.incrementalization-law > random seed`],
+  [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
+  [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
+  [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],
   [`group-result-key.groups`, `group-result-key\\.groups > random seed`],
 ])
 
 // Properties whose own seeded generator replaces fast-check, so they have no
 // shrink path.
-const reseededProperties = new Set([`evaluators.like`])
+const reseededProperties = new Set<string>()
 
 // Enumerated oracleProperty sources have no random campaign or shrink path.
 // Keep their literal registry names here; the owner groups still supply their
@@ -1503,16 +1635,87 @@ const enumeratedProperties = new Set([
   `query-db.ownership.refresh-overlap`,
   `query-db.ownership.handler-identity`,
   `query-db.ownership.work`,
+  `solid.row-materialization`,
+  `solid.native-parent-materialization`,
+  `solid.descriptor-visibility`,
+  `solid.live-getters`,
+  `solid.shared-graph-calibration`,
+  `solid.shared-graphs`,
+  `solid.callable-fields`,
+  `solid.reserved-fields`,
+  `solid.array-methods`,
+  `svelte.ssr-handoff.cases`,
+  `svelte.ssr-receiving-reader.cases`,
+  `svelte.ssr-snapshot.cases`,
+  `svelte.ssr-runtime-errors.cases`,
+  `svelte.cache-options`,
+  `svelte.descriptor-start-release`,
+  `query.ordered-mutation-outcome`,
   `reverse-index.large-reads`,
+  `react.suspense-local-options`,
+  `react.suspense-indexing-config`,
+  `react.cache-first-registration`,
+  `react.source-id-inline-options`,
+  `react.source-id-deferred-release`,
+  `react.ssr-effects-react18-disabled`,
+  `react.ssr-effects-current-disabled`,
+  `react.ssr-runtime-ordinary.cases`,
+  `react.ssr-runtime-infinite.cases`,
+  `react.descriptor-start-release.live`,
+  `react.descriptor-start-release.infinite`,
+  `react.descriptor-start-release.suspense`,
+  `react.bound-schema-options.live`,
+  `react.bound-schema-options.suspense`,
+  `react.cache-options.client-render`,
+  `react.cache-options.suspense-render`,
+  `react.cache-options.server-render`,
   `preact.bound-options`,
   `preact.bound-schema-options`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
 ])
 
+// These converted receivers register the framework's native campaign names.
+// Their old hand-written campaign titles no longer select the random replay.
+const nativeReactProperties = new Set([
+  `react.client-window`,
+  `react.window-render`,
+  `react.window-retry-ownership`,
+  `react.suspense-retry-history`,
+  `react.suspense-replacement-history`,
+  `react.suspense-preload-restart-history`,
+  `react.suspense-siblings`,
+  `react.descriptor-error-surface`,
+  `react.descriptor-ownership`,
+  `react.ssr-ordinary`,
+  `react.ssr-infinite`,
+  `react.ssr-stream-cut`,
+  `react.ssr-runtime-ordinary`,
+  `react.ssr-runtime-infinite`,
+])
+
 function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
     return `${property.replaceAll(`.`, `\\.`)}.*random seed`
+  // Includes registrations now use the framework's canonical campaign name.
+  if (
+    property.startsWith(`includes.matrix.`) ||
+    property.startsWith(`includes-collection.`) ||
+    property.startsWith(`includes-cross-formulation.`) ||
+    property.startsWith(`includes-optimistic.`) ||
+    property.startsWith(`includes-publication.`) ||
+    property.startsWith(`includes-query-shape.`) ||
+    property.startsWith(`includes-work.`) ||
+    [
+      `includes.alpha-renaming`,
+      `includes.scoped-alpha-renaming`,
+      `includes.incremental-history`,
+      `includes.nested-scalar-materialization`,
+      `includes.optimistic-convergence`,
+      `includes.bucket-collisions`,
+    ].includes(property)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
@@ -1561,12 +1764,11 @@ function directReplayTestName(property: string): string | undefined {
         return `immutable query key histories \\(fresh\\)`
     }
   }
-  if (property.startsWith(`react.ssr-effects-`)) {
-    const [runtime, ...path] = property
-      .slice(`react.ssr-effects-`.length)
-      .split(`-`)
-    return `${runtime} ${path.join(`-`)} renders without client layout diagnostics \\(random\\)`
-  }
+  if (
+    nativeReactProperties.has(property) ||
+    property.startsWith(`react.ssr-effects-`)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
   if (property === `replay.ordered-failed-replay`)
@@ -1582,7 +1784,7 @@ function directReplayTestName(property: string): string | undefined {
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
-    return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   return replayTestNames.get(property)
 }
 

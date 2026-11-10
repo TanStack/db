@@ -58,15 +58,34 @@ Implement `EagerLiveSourceDriver`:
 - **`txidEvidence`:** `change` when txids travel on each row message, so a batch with no change carries none; default `batch`.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
-Declare only the capabilities your adapter supports; the grammar generates
-only the steps they allow. New and converted receivers register through
-`oracleProperty`. The shared `tests/eager-live-source-oracle-suite.ts` registers
-the fixed and fresh campaigns, with randomized constructed histories for every
-required state. Each campaign requires at least five constructions per state
-and checks generated constructions separately. RxDB, PowerSync and TrailBase
-use this path; their conversion preserves the existing laws and budgets.
+Declare only the capabilities your adapter supports. All eager live-source
+receivers register their campaigns with `oracleProperty`. The shared
+`tests/eager-live-source-property-oracle.ts` registration retains the model and
+comparison for the upstream receivers. Each campaign keeps its original run budget and seed 2118 beside
+a random campaign. Five independently seeded constructed histories per recipe
+make every state in `reachStatesFor(driver)` required. The recipes vary rows,
+values, and generated suffixes inside the same capability-dependent grammar.
+The original arbitrary's random choices are unchanged.
+The shared comparison also checks every generated construction against its
+declared states; a missing entry fails even when the pinned framework loses
+the generated construction's association. The construction declares what is
+required, and the existing production path records what actually happened.
+
+Receivers using that registration encode Dates and `Float64Array` values as tagged data.
+`resolveEagerLiveSourceHistory` restores the native values before the provider,
+model, and comparison run, so the strict FID-1 judgments remain unchanged. The
+registration adapter records a `ConformanceViolation` under its original law
+and checkpoint; driver failures and secondary cleanup diagnostics retain their
+original error objects. Electric's default error-handler variant and Convex's
+React and wrapped-client variants have named fixed/fresh campaigns and direct
+replay routes. The vendored Neon receiver uses the same registration while its
+documented failure-channel baseline remains RED.
+RxDB and PowerSync retain the receiving constructions in
+`tests/eager-live-source-oracle-suite.ts`. TrailBase retains its shared Node and
+Chromium receiving suite. These registrations keep their existing laws, run
+budgets, and stronger generated-state comparisons. Both registration paths use
+the same independent model and checker.
 See the [conversion evidence](../../docs/contributing/oracle-reviews/2026-11-10-eager-source-primary-conversions.md).
-Remaining legacy receivers keep their listed compatibility path until conversion.
 
 ## Persisted startup conformance
 

@@ -1,18 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
-import {
-  oracleFixedSeed,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { parseFiniteNumber } from './pg-serializer-finite-decoder'
 import {
-  parseFiniteArray,
-  parseFiniteNumber,
-} from './pg-serializer-finite-decoder'
-import { serializerProp } from './pg-serializer-property-support'
+  expectFiniteArrayContents,
+  serializerProp,
+} from './pg-serializer-property-oracle'
 import type { FiniteArrayValue } from './pg-serializer-finite-decoder'
 
 // Replay one named law with TANSTACK_DB_ORACLE_SEED=<reported seed>,
@@ -57,13 +52,6 @@ const example = oracleReplayTest(it)
  * nonfinite numbers, unsupported objects, and provider casts are outside this
  * flat finite-value model. Malformed array text is a nearby rejected output.
  */
-
-function expectFiniteArrayContents(
-  input: ReadonlyArray<FiniteArrayValue | undefined>,
-  output: string,
-): void {
-  expect(parseFiniteArray(output)).toEqual(input.map((value) => value ?? null))
-}
 
 declareOracle({
   check: [expectFiniteArrayContents],
@@ -359,32 +347,6 @@ describe(`pg-serializer property-based tests`, () => {
       // The same observer judges production outputs above; these outputs come
       // from test-owned faults, not a mutation of the serializer or its inputs.
       expect(() => expectFiniteArrayContents(input, output)).toThrow()
-    })
-
-    example(`shrinks and exactly replays omitted nonempty arrays`, () => {
-      oracleRoute(`calibration`)
-      const property = fc.property(
-        fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
-        (input) => expectFiniteArrayContents(input, `{}`),
-      )
-      const failure = fc.check(
-        property,
-        oracleFixedSeed(90701, { numRuns: 25 }),
-      )
-      expect(failure.failed).toBe(true)
-      if (!failure.failed || failure.counterexamplePath === null) {
-        throw new Error(`omission fault did not produce a replayable failure`)
-      }
-      expect(failure.errorInstance).toMatchObject({ name: `AssertionError` })
-      expect(failure.counterexample[0]).toHaveLength(1)
-      const replay = fc.check(property, {
-        numRuns: oracleRuns(100),
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-      })
-      expect(replay.failed).toBe(true)
-      expect(replay.counterexample).toEqual(failure.counterexample)
-      expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
     })
 
     serializerProp(`pg-serializer.mixed-array-contents`, [

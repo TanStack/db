@@ -1218,9 +1218,9 @@ export function expectedReload(
 export function reloadViolations(
   history: ReloadHistory,
   observed: ReloadObservation,
+  expected = expectedReload(history, observed),
 ): Array<string> {
   const violations: Array<string> = []
-  const expected = expectedReload(history, observed)
   const { ids, storageIds, log, reloadLog } = observed
   const count = (
     entries: ReadonlyArray<Logged>,

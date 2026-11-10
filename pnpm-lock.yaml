@@ -61,11 +61,11 @@ importers:
         specifier: 0.3.4
         version: 0.3.4(@typescript-eslint/utils@8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@tanstack/eslint-plugin-oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e1fb504
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e1fb504(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@f4d5a0e
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@f4d5a0e(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@tanstack/oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504(fast-check@4.10.2)(vitest@5.1.0)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e(fast-check@4.10.2)(vitest@5.1.0)
       '@tanstack/typedoc-config':
         specifier: 0.3.5
         version: 0.3.5(typescript@5.9.3)
@@ -1313,8 +1313,8 @@ importers:
         specifier: ^0.22.2
         version: 0.22.2(@types/node@25.2.2)(@typescript-eslint/utils@8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@tanstack/oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504(fast-check@4.10.2)(vitest@5.1.0)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e(fast-check@4.10.2)(vitest@5.1.0)
       '@vitest/coverage-istanbul':
         specifier: ^5.1.0
         version: 5.1.0(vitest@5.1.0)
@@ -6323,8 +6323,8 @@ packages:
     peerDependencies:
       eslint: ^8.0.0 || ^9.0.0
 
-  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e1fb504':
-    resolution: {integrity: sha512-JW41txx/qjoZxr3qjUBh97XeD0q2gZvDL357phISCekuhdL3otEpEhqVtNcEutKhNSPI+mptOlyE5svLDpP6Og==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e1fb504}
+  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@f4d5a0e':
+    resolution: {integrity: sha512-cdWbTcTHuC4v2skB85CRpYYVMPHUBD7oBKV0cOcUZWDtgeg8pyGNnU7xKBhOPMw778vhiqzsuM10PmyoOwLHXA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@f4d5a0e}
     version: 0.0.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -6334,8 +6334,8 @@ packages:
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504':
-    resolution: {integrity: sha512-62FdmCZauJJsWonUvSJK0LxUJrY3aAIYYc+2bmkWK4/OWJCZfCArAMw2UE911kMgGgpvBb9DdCO33UVfpbTYVQ==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504}
+  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e':
+    resolution: {integrity: sha512-62FdmCZauJJsWonUvSJK0LxUJrY3aAIYYc+2bmkWK4/OWJCZfCArAMw2UE911kMgGgpvBb9DdCO33UVfpbTYVQ==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
@@ -18606,7 +18606,7 @@ snapshots:
       - supports-color
       - typescript
 
-  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e1fb504(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)':
+  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@f4d5a0e(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/parser': 8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       eslint: 9.39.5(jiti@2.7.0)
@@ -18616,7 +18616,7 @@ snapshots:
 
   '@tanstack/history@1.162.5': {}
 
-  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e1fb504(fast-check@4.10.2)(vitest@5.1.0)':
+  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f4d5a0e(fast-check@4.10.2)(vitest@5.1.0)':
     dependencies:
       fast-check: 4.10.2
       typescript: 5.9.3

@@ -29,17 +29,16 @@
  * and one open transaction. Optimistic settlement belongs to
  * `optimistic-history-oracle.ts`.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import {
-  oracleFixedSeed,
-  oracleRandomParameters,
+  oracleProperty,
   oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
+  pass,
+  violation,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
@@ -48,6 +47,7 @@ import {
   stageInsert,
 } from './collection-sync-reentrancy-support.js'
 import type { Row, SyncOps } from './collection-sync-reentrancy-support.js'
+import type { Observation, Verdict } from './oracle-config.js'
 
 type ListenerAction = `commit` | `abort`
 
@@ -97,7 +97,110 @@ const exhaustiveListenerScenarios: Array<ListenerScenario> = enumerateActions(
 
 let generatedHarnessId = 0
 
-async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
+type ListenerObservation = {
+  appliedKeys?: Array<number>
+  batches?: Array<Array<number>>
+  maxListenerDepth?: number
+  committedReceipts?: number
+  abortedReceipts?: Array<{ status: PromiseSettledResult<void>[`status`] }>
+  lastBatch?: Array<number>
+  pendingTransactions?: number
+}
+type ListenerModel = {
+  committedKeys: Array<number>
+  abortedCount: number
+  openKey?: number
+}
+
+// Input positions, rather than production's transaction queue, determine the
+// accepted keys. The optional open transaction reserves one key between groups.
+function modelListenerScenario(scenario: ListenerScenario): ListenerModel {
+  let nextKey = 2
+  const committedKeys: Array<number> = []
+  let abortedCount = 0
+  const actions = (group: ReadonlyArray<ListenerAction>) => {
+    for (const action of group) {
+      const key = nextKey++
+      if (action === `commit`) committedKeys.push(key)
+      else abortedCount++
+    }
+  }
+  actions(scenario.beforeOpen)
+  const openKey = scenario.leaveOpen ? nextKey++ : undefined
+  actions(scenario.afterOpen)
+  return { committedKeys, abortedCount, openKey }
+}
+
+// These are the original assertions at their original publication and receipt
+// cuts. The fixed enumeration and generated campaigns share this comparison.
+function expectListenerCut(
+  checkpoint: string,
+  actual: ListenerObservation,
+  expected: ListenerModel,
+): void {
+  const { committedKeys, abortedCount, openKey } = expected
+  if (checkpoint === `outer publication`) {
+    expect(actual.appliedKeys).toEqual([1, ...committedKeys])
+    expect(actual.batches).toEqual([
+      [1],
+      ...(committedKeys.length > 0 ? [committedKeys] : []),
+    ])
+    expect(actual.maxListenerDepth).toBe(1)
+  } else if (checkpoint === `receipt settlement`) {
+    expect(actual.committedReceipts).toBe(committedKeys.length)
+    expect(actual.abortedReceipts).toHaveLength(abortedCount)
+    expect(
+      actual.abortedReceipts!.every(({ status }) => status === `rejected`),
+    ).toBe(true)
+  } else if (checkpoint === `open publication`) {
+    expect(actual.appliedKeys).toEqual([1, ...committedKeys, openKey])
+    expect(actual.lastBatch).toEqual([openKey])
+  } else expect(actual.pendingTransactions).toBe(0)
+}
+
+function checkListenerScenario(
+  _scenario: ListenerScenario,
+  observations: ReadonlyArray<Observation>,
+  expected: ListenerModel,
+): Verdict {
+  for (const { checkpoint, value } of observations) {
+    try {
+      expectListenerCut(checkpoint, value as ListenerObservation, expected)
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== `AssertionError`)
+        throw error
+      return {
+        kind: `violation`,
+        checkpoint,
+        difference: error.message,
+        law: `reentrant drain`,
+        cause: error,
+      }
+    }
+  }
+  const checkpoints = [
+    `outer publication`,
+    `receipt settlement`,
+    ...(expected.openKey === undefined ? [] : [`open publication`]),
+    `drained queue`,
+  ]
+  return observations.length === checkpoints.length &&
+    observations.every((item, index) => item.checkpoint === checkpoints[index])
+    ? pass
+    : violation(
+        `complete history`,
+        `the listener history stopped before its final drain`,
+      )
+}
+
+async function runListenerScenario(
+  scenario: ListenerScenario,
+  record?: (checkpoint: string, value: ListenerObservation) => void,
+): Promise<void> {
+  const expected = record ? undefined : modelListenerScenario(scenario)
+  const observe =
+    record ??
+    ((checkpoint, value) => expectListenerCut(checkpoint, value, expected!))
   const harness = createSyncHarness(
     `generated-listener-sync-${generatedHarnessId++}`,
   )
@@ -113,7 +216,6 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     },
   )
   const batches: Array<Array<number>> = []
-  const committedKeys: Array<number> = []
   const committedReceipts: Array<Promise<void>> = []
   const abortedReceipts: Array<PromiseSettledResult<void>> = []
   let openKey: number | undefined
@@ -126,7 +228,6 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     const key = nextKey++
     stageInsert(harness.sync, { id: key, value: action })
     if (action === `commit`) {
-      committedKeys.push(key)
       const receipt = harness.sync.commit()
       if (receipt !== true) committedReceipts.push(receipt)
       return
@@ -168,30 +269,29 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     // The listener's committed work applies after the outer batch closes and
     // publishes as one batch; listener delivery never nests.
 
-    expect(appliedKeys).toEqual([1, ...committedKeys])
-    expect(batches).toEqual([
-      [1],
-      ...(committedKeys.length > 0 ? [committedKeys] : []),
-    ])
-    expect(maxListenerDepth).toBe(1)
+    observe(`outer publication`, {
+      appliedKeys: [...appliedKeys],
+      batches: batches.map((batch) => [...batch]),
+      maxListenerDepth,
+    })
     await Promise.all(committedReceipts)
     await flushPromises()
-    expect(committedReceipts).toHaveLength(committedKeys.length)
-    expect(abortedReceipts).toHaveLength(
-      scenario.beforeOpen.filter((action) => action === `abort`).length +
-        scenario.afterOpen.filter((action) => action === `abort`).length,
-    )
-    expect(abortedReceipts.every(({ status }) => status === `rejected`)).toBe(
-      true,
-    )
+    observe(`receipt settlement`, {
+      committedReceipts: committedReceipts.length,
+      abortedReceipts: abortedReceipts.map(({ status }) => ({ status })),
+    })
 
     if (openKey !== undefined) {
       harness.sync.commit()
-      expect(appliedKeys).toEqual([1, ...committedKeys, openKey])
-      expect(batches.at(-1)).toEqual([openKey])
+      observe(`open publication`, {
+        appliedKeys: [...appliedKeys],
+        lastBatch: batches.at(-1)?.slice(),
+      })
     }
 
-    expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+    observe(`drained queue`, {
+      pendingTransactions: collection._state.pendingSyncedTransactions.length,
+    })
   } finally {
     subscription.unsubscribe()
     await collection.cleanup()
@@ -205,9 +305,6 @@ declareOracle({
   check: [runListenerScenario],
   grammar: [listenerScenarioArbitrary, exhaustiveListenerScenarios],
 })
-
-const { multiplier, ...replay } = readOracleRunConfig()
-const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
   // A truncate marks the Collection ready before it publishes its batch, and a
@@ -476,27 +573,21 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  const listenerScenarioFixedSeed = oracleFixedSeed(1774, {
-    numRuns: generatedRuns,
+  oracleProperty({
+    id: `collection-sync.reentrant-drain`,
+    law: {
+      statement: `Listener commits apply after the current publication, aborted commits apply nothing, and an open transaction publishes only after committing.`,
+      authority: `Collection sync publication and aborted commit contracts stated above`,
+      limits: `Up to two listener commit or abort actions on either side of one optional open transaction; fixed layout, truncate, error and subset cases remain supplemental.`,
+      owner: `docs/contributing/oracle-coverage.md`,
+    },
+    histories: {
+      arbitrary: listenerScenarioArbitrary,
+      runs: 30,
+      fixedSeeds: [1774],
+    },
+    model: modelListenerScenario,
+    driver: (scenario, observe) => runListenerScenario(scenario, observe),
+    check: checkListenerScenario,
   })
-  fcTest.prop([listenerScenarioArbitrary], listenerScenarioFixedSeed)(
-    `matches the reentrant drain laws for a fixed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(listenerScenarioFixedSeed))
-      return runListenerScenario(...args)
-    },
-  )
-
-  const listenerScenarioCampaign = oracleRandomParameters(
-    generatedRuns,
-    replay,
-    `collection-sync.reentrant-drain`,
-  )
-  fcTest.prop([listenerScenarioArbitrary], listenerScenarioCampaign)(
-    `matches the reentrant drain laws for a random or replayed seed`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(listenerScenarioCampaign))
-      return runListenerScenario(...args)
-    },
-  )
 })

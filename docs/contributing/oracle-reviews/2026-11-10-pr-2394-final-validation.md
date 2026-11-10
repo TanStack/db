@@ -106,3 +106,28 @@ Local installation recovery remains uncommitted: query-core 5.107.1→5.106.0,
 fake-indexeddb 6.2.8→6.2.7 and tailwindcss/postcss 4.3.5→4.3.4. Workspace override
 and lockfile hashes remain `ef167cca76c028d75a96818c987373ef213c8fff152ae4ff5aa43da3adea79b5`
 and `597c414dc296075582b34c76d10e71caac19d57a33b81a97f74f79ec10b225e1`.
+
+
+## Integration with the later main migration
+
+Main `50e6015c8b954c872125d410dfaace43d80161db` landed after publication of
+`af50717a7` and the whitespace-only autofix `5bb88d40e`. The integration keeps
+main's shared eager-source grammar helpers, tagged-value registration and new
+framework dependency pin `f4d5a0e`. It retains this branch's PowerSync, RxDB and
+TrailBase receiving registrations, constructed histories, comparisons, run
+budgets and real-browser paths. Both paths share the same independent model
+and original comparison. No adapter production source changes in this merge.
+
+Central metadata preserves both sets of owner additions and legacy removals.
+The legacy list is 105 entries. An executed three-way comparison of 898 manifest
+entries found no missing or accidental change. The three intentionally retained
+branch selectors name PowerSync, RxDB and TrailBase random-seed registrations.
+The narrow TrailBase Chromium metadata check authenticates its full existing
+property ID, exact owner file and registration call. Four metadata checks and
+targeted lint pass with the exact new framework dependency.
+
+The shared conformance TypeScript check and the normal TrailBase eager suite
+pass (119 tests). The integrated RxDB eager/startup/lifecycle run passes 281
+tests across three files. PowerSync and pushed-head integration checks remain
+in progress at this record's checkpoint. Earlier finite coverage and the
+explicit mutation-decision limits above remain applicable.

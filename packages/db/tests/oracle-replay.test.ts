@@ -204,7 +204,7 @@ describe(`guarded oracle replay`, () => {
     [
       `query-identity.compiled-output`,
       `tests/query/identity-output-shape-oracle.test.ts`,
-      `varies safe aliases and payloads, seed=undefined`,
+      `query-identity\\.compiled-output > random seed`,
     ],
     [
       `load-subset.rejected-waiter`,
@@ -621,6 +621,45 @@ describe(`named oracle replay manifest`, () => {
           expect(source).toContain(
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
+      } else if (
+        entry.property ===
+        `adapter-conformance.eager-live-source.trailbase.chromium`
+      ) {
+        // This receiving owner declares its complete property ID and passes it
+        // to the shared registration, rather than deriving a variant suffix.
+        expect(entry.file).toBe(
+          `packages/browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
+        )
+        expect(source).toContain(`const property = \`${entry.property}\``)
+        expect(source).toMatch(/registerTrailBaseEager\(\s*\{\s*property,/u)
+      } else if (
+        entry.property.startsWith(`adapter-conformance.eager-live-source.`)
+      ) {
+        const prefix = `adapter-conformance.eager-live-source.`
+        const [driver, ...variant] = entry.property
+          .slice(prefix.length)
+          .split(`.`)
+        expect(source).toContain(`\`${prefix}${driver}\``)
+        if (variant[0] === `ablation`) {
+          expect(driver).toBe(`reference`)
+          expect(source).toContain('id: `${property}.ablation.${name}`')
+          const [name, state] = variant.slice(1)
+          expect(source).toContain(`\`${name}\``)
+          if (state !== undefined) {
+            expect(source).toContain(`\`${state}\``)
+            expect(source).toContain(
+              'registerAblation(`${kind}.${lost}`, lost,',
+            )
+          }
+        } else if (variant.length > 0) {
+          expect(variant).toHaveLength(1)
+          expect(
+            source.includes(`id: \`\${property}.${variant[0]}\``) ||
+              (driver === `convex` &&
+                source.includes('id: `${property}.${client}`') &&
+                source.includes(`\`${variant[0]}\``)),
+          ).toBe(true)
+        }
       } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
         const [, , tagged, consumer, emptySecond, delivery] =
           entry.property.split(`.`)
@@ -782,24 +821,25 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
-  it(`reseeds a property from its campaign seed alone`, () => {
-    // The LIKE oracle draws its cases from its own seeded generator, so the
-    // guarded runner, which witnesses a seed and a path, cannot witness it.
+  it(`gives LIKE a direct seed-and-path assertion replay`, () => {
     expect(
-      oracleReplayManifest
-        .filter(({ status }) => status === `reseeded-campaign`)
-        .map(({ property, command, environment }) => ({
-          property,
-          command,
-          environment,
-        })),
-    ).toEqual([
-      {
-        property: `evaluators.like`,
-        command: `pnpm exec vitest run tests/query/compiler/evaluators-oracle.test.ts`,
-        environment: [`TANSTACK_DB_ORACLE_SEED`],
-      },
-    ])
+      oracleReplayManifest.filter(
+        ({ status }) => status === `reseeded-campaign`,
+      ),
+    ).toEqual([])
+    expect(
+      oracleReplayManifest.find(
+        ({ property }) => property === `evaluators.like`,
+      ),
+    ).toMatchObject({
+      status: `assertion`,
+      testNamePattern: `evaluators\\.like > random seed`,
+      environment: [
+        `TANSTACK_DB_ORACLE_SEED`,
+        `TANSTACK_DB_ORACLE_PATH`,
+        `TANSTACK_DB_ORACLE_PROPERTY`,
+      ],
+    })
   })
 
   it(`gives every index and pagination matrix property a direct test selector`, () => {

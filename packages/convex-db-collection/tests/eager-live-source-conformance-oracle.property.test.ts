@@ -1,22 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { describe } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../../db-adapter-conformance/src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
 import { convexConformanceDriver } from './conformance-driver'
 
 /**
@@ -38,79 +32,46 @@ import { convexConformanceDriver } from './conformance-driver'
  * needs a receiving witness against it.
  */
 
-const property = `adapter-conformance.eager-live-source.convex`
-const driver = convexConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-const runs = 400
-const campaignTimeoutMs = 120_000
+describe(`eager live-source conformance: convex`, () => {
+  const property = `adapter-conformance.eager-live-source.convex`
+  const driver = convexConformanceDriver()
+  const historyArb = eagerLiveSourceHistoryArb(driver)
+  const runs = 400
+  const campaignTimeoutMs = 120_000
 
-async function campaign(
-  options: fc.Parameters<[unknown]>,
-  checked = driver,
-  name = property,
-) {
-  const reach = createOracleReach(name, reachStatesFor(checked), {
-    minimum: 5,
+  oracleProperty({
+    id: property,
+    ...eagerLiveSourceOracle(driver),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(driver),
+      runs,
+      fixedSeeds: [2118],
+    },
+    timeout: campaignTimeoutMs,
   })
-  oracleRoute(oracleRouteOf(options))
-  await fc.assert(eagerLiveSourceProperty(checked, reach), options)
-  return reach
-}
 
-describe(`eager live-source conformance: Convex`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
+  // The React client's watchQuery path and an app wrapper's onUpdate-only path
+  // receive the same histories and judgment as the JavaScript client.
+  for (const client of [`react`, `wrapped`] as const) {
+    const receiving = convexConformanceDriver({ client })
+    oracleProperty({
+      id: `${property}.${client}`,
+      ...eagerLiveSourceOracle(receiving),
+      check: checkEagerLiveSourceObservations,
+      histories: {
+        ...eagerLiveSourceHistories(receiving),
+        runs,
+        fixedSeeds: [2118],
+      },
+      timeout: campaignTimeoutMs,
+    })
+  }
 
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  // The React client reaches the adapter through `watchQuery`.
-  oracleReplayTest(it)(
-    `conforms over the React client on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-        convexConformanceDriver({ client: `react` }),
-        `${property}.react`,
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  // An app's wrapper that exposes only `onUpdate` hides the client's log
-  // accessor, so the adapter falls back to skipping one replayed error.
-  oracleReplayTest(it)(
-    `conforms over a wrapped JavaScript client on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-        convexConformanceDriver({ client: `wrapped` }),
-        `${property}.wrapped`,
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-})
-
-declareOracle({
-  owns: [`src/index.ts#convexCollectionOptions`],
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  declareOracle({
+    owns: [`src/index.ts#convexCollectionOptions`],
+    check: [checkEagerLiveSourceHistory],
+    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+    grammar: [historyArb],
+  })
 })
