@@ -2874,6 +2874,14 @@ export function queryCollectionOptions(
       }
     }
 
+    // The first eager result can arrive before persisted restore publishes.
+    // Its ownership baseline must include durable rows still absent in memory.
+    const needsPersistedBaseline = (queryHash: string) =>
+      retainedQueriesPendingRevalidation.has(queryHash) ||
+      (syncMode === `eager` &&
+        persistence !== null &&
+        !queryToRows.has(queryHash))
+
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -2888,10 +2896,18 @@ export function queryCollectionOptions(
       const validatedItems =
         selectedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
-      const persistedBaseline = await loadPersistedBaselineForQuery(
-        hashedQueryKey,
-        validatedItems.length === 0,
-      )
+      // Eager restore already owns the complete row read and its key evidence.
+      // Await that publication before diffing, rather than scanning it again.
+      const useHydratedBaseline =
+        syncMode === `eager` &&
+        !retainedQueriesPendingRevalidation.has(hashedQueryKey)
+      if (useHydratedBaseline) await persistence?.hydrateBaseline()
+      const persistedBaseline = useHydratedBaseline
+        ? undefined
+        : await loadPersistedBaselineForQuery(
+            hashedQueryKey,
+            validatedItems.length === 0,
+          )
       if (
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -3220,7 +3236,7 @@ export function queryCollectionOptions(
                     hashedQueryKey,
                     result,
                     (signal, token) =>
-                      retainedQueriesPendingRevalidation.has(hashedQueryKey)
+                      needsPersistedBaseline(hashedQueryKey)
                         ? reconcileSuccessfulResult(
                             queryKey,
                             result,
@@ -3286,23 +3302,26 @@ export function queryCollectionOptions(
               return
             }
             if (result.isFetching) return
-
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              reconcileSuccessfulResult(
-                queryKey,
-                result,
-                token,
-                signal,
-                undefined,
-                fetchStartGenerations.get(hashedQueryKey) ??
-                  directWriteGeneration,
-              ),
-            )
-          } else {
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              applySuccessfulResult(queryKey, result, token, undefined, signal),
-            )
           }
+          enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
+            needsPersistedBaseline(hashedQueryKey)
+              ? reconcileSuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  signal,
+                  undefined,
+                  fetchStartGenerations.get(hashedQueryKey) ??
+                    directWriteGeneration,
+                )
+              : applySuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  undefined,
+                  signal,
+                ),
+          )
         }
 
         if (

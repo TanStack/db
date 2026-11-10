@@ -1,4 +1,6 @@
+import { DatabaseSync } from 'node:sqlite'
 import { hashKey, isCancelledError } from '@tanstack/query-core'
+import fc from 'fast-check'
 import {
   DbClient,
   IR,
@@ -11,7 +13,14 @@ import {
 } from '@tanstack/db'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
@@ -29,7 +38,21 @@ import {
 
 import { InvalidQueryResultError } from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
-import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  createSQLiteCorePersistenceAdapter,
+  persistedCollectionOptions,
+} from '../../db-sqlite-persistence-core/src'
+import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
+import { BrowserWASQLiteDriver } from '../../browser-db-sqlite-persistence/src/wa-sqlite-driver'
+import { createAdapter } from './persisted-direct-write-support'
+import {
+  expectedStartupOwnership,
+  isStartupRowRead,
+  observeStartupOwnership,
+  startupOwnershipCutViolations,
+  startupOwnershipHistories,
+  startupOwnershipViolations,
+} from './persisted-startup-ownership-oracle'
 import {
   categorySubset,
   cleanups,
@@ -47,6 +70,8 @@ import {
   shared,
   storedItems,
 } from './ownership-lifecycle-support.js'
+import type { StartupOwnershipHistory } from './persisted-startup-ownership-oracle'
+import type { SQLInputValue } from 'node:sqlite'
 import type {
   MutationConfirmationObservation,
   MutationConfirmationRow,
@@ -5991,3 +6016,234 @@ describe(`query collection ownership lifecycle`, () => {
     expect(publications).not.toContainEqual([first.id])
   })
 })
+
+// Persisted restore and first Query response are independent participants. This
+// generated dimension of the ownership graph crosses their delivery order.
+const startupMembershipArb = fc.record({
+  previous: fc.integer({ min: 1, max: 7 }),
+  next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
+  peer: fc.boolean(),
+})
+const startupOwnershipHistoryArb: fc.Arbitrary<StartupOwnershipHistory> = fc
+  .oneof(
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        membership: startupMembershipArb,
+        origin: fc.constant(`fetch` as const),
+        response: fc.constantFrom(
+          `before-restore` as const,
+          `after-restore` as const,
+        ),
+      }),
+    },
+    {
+      weight: 4,
+      arbitrary: fc.record({
+        membership: startupMembershipArb,
+        origin: fc.constantFrom(
+          `initial-disabled` as const,
+          `initial-pending` as const,
+          `cached-disabled` as const,
+          `cached-pending` as const,
+        ),
+        response: fc.constant(`before-restore` as const),
+      }),
+    },
+  )
+  .map(({ membership, ...schedule }) => ({ ...membership, ...schedule }))
+
+declareOracle({
+  grammar: [startupOwnershipHistoryArb],
+  check: [startupOwnershipViolations],
+})
+
+// Calibration supplies a stale durable answer to the same cut comparison.
+// A later refetch cannot erase an already checked startup mismatch.
+oracleReplayTest(it)(`rejects stale durability before a later refetch`, () => {
+  const history = startupOwnershipHistories[0]!
+  const stale = expectedStartupOwnership({ ...history, next: history.previous })
+  expect(
+    startupOwnershipCutViolations(history, `startupDurable`, stale),
+  ).not.toEqual([])
+})
+
+for (const host of [`controlled`, `node-sqlite`] as const) {
+  describe(`persisted startup ownership through ${host}`, () => {
+    const reach = createOracleReach(`query.startup-ownership.${host}`, [
+      `response-before-restore`,
+      `restore-before-response`,
+      `empty-result`,
+      `peer-owner`,
+      `fetch`,
+      `initial-disabled`,
+      `initial-pending`,
+      `cached-disabled`,
+      `cached-pending`,
+    ])
+    afterAll(() => {
+      reach.assertReached()
+      console.info(
+        `query.startup-ownership.${host}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+    let sequence = 0
+    async function check(
+      history: StartupOwnershipHistory,
+      historyReach = reach,
+    ) {
+      historyReach.beginHistory()
+      const id = `startup-${host}-${sequence++}`
+      const database =
+        host === `node-sqlite` ? new DatabaseSync(`:memory:`) : undefined
+      let rowReads = 0
+      const adapter = createAdapter([])
+      const loadSnapshot = adapter.loadResumeSnapshot
+      adapter.loadResumeSnapshot = (...args) => {
+        if (args[1]?.includeRows !== false) rowReads++
+        return loadSnapshot(...args)
+      }
+      const scanRows = adapter.scanRows
+      adapter.scanRows = (...args) => {
+        rowReads++
+        return scanRows(...args)
+      }
+      const persistence = database
+        ? {
+            adapter: createSQLiteCorePersistenceAdapter({
+              driver: new BrowserWASQLiteDriver({
+                database: {
+                  execute: <T>(
+                    sql: string,
+                    params: ReadonlyArray<unknown> = [],
+                  ) => {
+                    if (isStartupRowRead(sql)) rowReads++
+                    if (
+                      !/^\s*(select|with|pragma)/i.test(sql) &&
+                      params.length === 0
+                    ) {
+                      database.exec(sql)
+                      return Promise.resolve([])
+                    }
+                    return Promise.resolve(
+                      database
+                        .prepare(sql)
+                        .all(
+                          ...(params.map((value) =>
+                            value === undefined
+                              ? null
+                              : typeof value === `boolean`
+                                ? Number(value)
+                                : value,
+                          ) as Array<SQLInputValue>),
+                        ) as Array<T>,
+                    )
+                  },
+                },
+              }),
+            }),
+          }
+        : { adapter }
+      const holdBaseline = database
+        ? inProcessSeams.holdFirstRowSnapshot
+        : () => {
+            const original = adapter.loadResumeSnapshot
+            let release!: () => void
+            const gate = new Promise<void>((resolve) => {
+              release = resolve
+            })
+            let held = false
+            let used = false
+            adapter.loadResumeSnapshot = async (...args) => {
+              if (!used && args[1]?.includeRows !== false) {
+                used = true
+                held = true
+                await gate
+                held = false
+              }
+              return original(...args)
+            }
+            return {
+              isHeld: () => held,
+              release,
+              uninstall: () => {
+                release()
+                adapter.loadResumeSnapshot = original
+              },
+            }
+          }
+      try {
+        const observation = await observeStartupOwnership(
+          persistence,
+          holdBaseline,
+          history,
+          id,
+          () => rowReads,
+          () => {
+            historyReach.reach(history.origin)
+            historyReach.reach(
+              history.response === `before-restore`
+                ? `response-before-restore`
+                : `restore-before-response`,
+            )
+            if (history.next === 0) historyReach.reach(`empty-result`)
+            if (history.peer) historyReach.reach(`peer-owner`)
+          },
+        )
+        expect(startupOwnershipViolations(history, observation)).toEqual([])
+      } finally {
+        database?.close()
+      }
+    }
+    oracleReplayTest(it).each(startupOwnershipHistories)(
+      `reconciles persisted owners: %j`,
+      async (history) => {
+        oracleRoute(`fixed history`)
+        await check(history)
+      },
+    )
+    for (const campaign of [`fixed`, `random`] as const) {
+      const register =
+        campaign === `fixed`
+          ? oracleReplayTest(it)
+          : oracleReplayTest(it, `query.startup-ownership`)
+      register(
+        `reconciles generated startup histories (${campaign})`,
+        async () => {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2367, { numRuns: oracleRuns(80) })
+              : oraclePropertyOptions(80, `query.startup-ownership`)
+          oracleRoute(oracleRouteOf(parameters))
+          const generatedReach = createOracleReach(
+            `query.startup-ownership.${host}.${campaign}`,
+            [
+              `response-before-restore`,
+              `restore-before-response`,
+              `empty-result`,
+              `peer-owner`,
+              `fetch`,
+              `initial-disabled`,
+              `initial-pending`,
+              `cached-disabled`,
+              `cached-pending`,
+            ],
+          )
+          await fc.assert(
+            fc.asyncProperty(startupOwnershipHistoryArb, (history) =>
+              check(history, generatedReach),
+            ),
+            parameters,
+          )
+          generatedReach.assertReached()
+          console.info(
+            `query.startup-ownership.${host}.${campaign}`,
+            Object.fromEntries(generatedReach.counts()),
+          )
+        },
+        60_000,
+      )
+    }
+  })
+}

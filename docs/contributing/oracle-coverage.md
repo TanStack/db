@@ -2377,6 +2377,35 @@ remaining design and coverage questions, including valid Temporal kinds without
 public order and mixed-kind query order. Earlier PR-branch counterexamples do
 not by themselves establish an `origin/main` failure.
 
+The Query DB ownership oracle's
+[persisted startup dimension](../../packages/query-db-collection/tests/persisted-startup-ownership-oracle.ts)
+crosses a complete eager Query response with a held persisted restore (#2367).
+Its independent set-replacement model removes only that Query's old ownership
+and preserves another persisted owner. The generated grammar crosses nonempty
+prior subsets of three keys, any next subset (weighted toward empty), changed
+values on overlapping keys, a peer owner, and response-before/after-restore.
+It also crosses complete initialData and cached responses with fetching disabled
+or pending. Controlled storage and real Node SQLite each run fixed and random
+80-history campaigns with separate declared reach for both schedules, empty
+results, peer owners, and all five response origins.
+The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/query-startup-ownership-oracle.opfs.spec.ts)
+runs eight histories through the shared driver and comparison: the reported
+race, an empty answer, shared ownership, a restore-first control, and each
+cached/initialData origin. The checkpoints compare public and durable rows and
+exact ownership after preload, before refetch can repair storage, then inside
+and after refetch fulfillment and after a local-only reopen. Startup also checks
+the reload oracle's existing one-full-row-read law. The repair awaits the
+wrapper's baseline publication instead of scanning the same rows again.
+Original omission behavior, a nonempty-only repair, and a redundant-scan repair
+fail these comparisons. Captured mismatches and primary runtime errors survive
+secondary cleanup errors. The neighboring persisted direct-write oracle records
+source commit order independently of Query cache availability and compares the
+matching nonpersisted schedule; Node SQLite receives all three held boundaries.
+Limits: eager startup, three string keys and numeric
+values, one persistence instance; no on-demand window, concurrent tab writer,
+arbitrary metadata namespace, or failed-I/O claim. Evidence is in the
+[issue evaluation](oracle-reviews/2026-11-09-issue-2367.md).
+
 The Query DB ownership oracle also owns the explicit mutation-handler refresh
 contract ([evidence](oracle-reviews/pr-2171-explicit-query-refresh.md)). Its 18-history table crosses insert, update, and delete with no
 confirmation, explicit refetch, and direct writes, with and without discarded
