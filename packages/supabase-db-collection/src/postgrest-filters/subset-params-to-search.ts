@@ -24,6 +24,7 @@ export function subsetParamsToSearch(
     parseOrderByExpression(orderBy).map((sort) => ({
       column: sort.field.join('.'),
       ascending: sort.direction === 'asc',
+      nulls: sort.nulls,
     })),
   )
   // `limit: 0` is a real, distinct subset (an empty window). Guard on

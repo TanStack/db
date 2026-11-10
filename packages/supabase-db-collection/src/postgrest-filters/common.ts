@@ -18,16 +18,23 @@ interface FilterOptions {
   stripAlias?: boolean
 }
 
-/** Set the comma-joined `order` param (independent of limit/offset). */
+/**
+ * Set the comma-joined `order` param (independent of limit/offset). Null
+ * placement is always explicit: Postgres puts nulls last for `asc`, while
+ * TanStack DB puts them first unless told otherwise.
+ */
 export function appendOrder(
   search: URLSearchParams,
-  sorts: Array<{ column: string; ascending: boolean }>,
+  sorts: Array<{ column: string; ascending: boolean; nulls: 'first' | 'last' }>,
 ): void {
   if (sorts.length === 0) return
   search.set(
     'order',
     sorts
-      .map((sort) => `${sort.column}.${sort.ascending ? 'asc' : 'desc'}`)
+      .map(
+        (sort) =>
+          `${sort.column}.${sort.ascending ? 'asc' : 'desc'}.nulls${sort.nulls}`,
+      )
       .join(','),
   )
 }

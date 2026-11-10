@@ -239,17 +239,17 @@ describe('subsetParamsToSearch', () => {
   test('appends a single order direction', () => {
     expect(
       subsetParamsToSearch({ orderBy: [sort(id, 'asc')] }).get('order'),
-    ).toBe('id.asc')
+    ).toBe('id.asc.nullslast')
     expect(
       subsetParamsToSearch({ orderBy: [sort(id, 'desc')] }).get('order'),
-    ).toBe('id.desc')
+    ).toBe('id.desc.nullslast')
   })
 
   test('merges multiple order columns into one comma-joined value', () => {
     const search = subsetParamsToSearch({
       orderBy: [sort(id, 'asc'), sort(name, 'desc')],
     })
-    expect(search.get('order')).toBe('id.asc,name.desc')
+    expect(search.get('order')).toBe('id.asc.nullslast,name.desc.nullslast')
     expect(search.getAll('order')).toHaveLength(1)
   })
 
@@ -297,7 +297,7 @@ describe('loadSubsetOptionsToSearch', () => {
       limit: 5,
     })
     expect(search.get('id')).toBe('eq.1')
-    expect(search.get('order')).toBe('id.asc')
+    expect(search.get('order')).toBe('id.asc.nullslast')
     expect(search.get('limit')).toBe('5')
   })
 
@@ -375,7 +375,7 @@ describe('cursorCurrentToSearch', () => {
       cursor: { whereFrom: gt(id, 40), whereCurrent: eq(id, 40) },
     })
     expect(search?.get('active')).toBe('eq.true')
-    expect(search?.get('order')).toBe('id.asc')
+    expect(search?.get('order')).toBe('id.asc.nullslast')
     expect(search?.get('id')).toBe('eq.40')
     expect(search?.has('limit')).toBe(false)
   })

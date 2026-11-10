@@ -367,7 +367,7 @@ describe('supabaseQueryFn: chunked fan-out for an oversized IN list', () => {
     // Multi-page chunks are read in key order after the query's own order.
     for (const search of pagedSearches) {
       expect(search).toContain(
-        'order=rank.asc,organization_identifier_column.asc,id.asc',
+        'order=rank.asc.nullslast,organization_identifier_column.asc,id.asc',
       )
     }
     for (const rawUrl of getRawUrls(mockFetch)) {
