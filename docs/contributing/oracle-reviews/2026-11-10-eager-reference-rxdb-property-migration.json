@@ -5600,7 +5600,8 @@
       "exitCode": 0,
       "log": "narrowed-conformance-types.log"
     },
-    "sourceHashesAfterCommit": "All13 source/support files match the completed validation hashes."
+    "sourceHashesAfterCommit": "All13 source/support files match the completed validation hashes.",
+    "scope": "Earlier narrowed source commit bb0fb2d8032555f00c2e21f1047778e116571959 only. Restored48-control harness added later; canonical final package validation belongs to pending CI."
   },
   "artifactSha256": {
     "rxdb-gap-before/results.json": "d7f01e8c32776b88fd45962129b2d35acb672018c80bc0f31446623735e6d663",
@@ -5647,364 +5648,1241 @@
     }
   },
   "referenceCalibrations": {
-    "before": [
-      [
-        "ready-before-delivery",
-        "READY-2 (status)"
-      ],
-      [
-        "wraps-loading-failure",
-        "READY-4 (health error cause)"
-      ],
-      [
-        "failure-clears-rows",
-        "HEALTH-1 (rows)"
-      ],
-      [
-        "transient-is-fatal",
-        "HEALTH-1 (health error)"
-      ],
-      [
-        "delivery-error-is-fatal",
-        "HEALTH-1 (health error)"
-      ],
-      [
-        "never-recovers",
-        "HEALTH-2 (health failureReason)"
-      ],
-      [
-        "transient-fails-loading",
-        "RETRY-1 (status)"
-      ],
-      [
-        "splits-batch",
-        "PUB-1 (publication)"
-      ],
-      [
-        "drops-deletes",
-        "PUB-3/FID-4 (rows)"
-      ],
-      [
-        "leaks-subscription",
-        "LIFE-2/LIFE-10 (releases per subscription)"
-      ],
-      [
-        "restart-replays-rows",
-        "LIFE-2/LIFE-5 (rows)"
-      ],
-      [
-        "swallows-prompt-failure",
-        "READY-4 (status)"
-      ],
-      [
-        "ready-at-restart",
-        "LIFE-2/LIFE-5 (status)"
-      ],
-      [
-        "keeps-failed-source",
-        "LIFE-10 (open provider subscriptions)"
-      ],
-      [
-        "double-release",
-        "LIFE-10 (releases per subscription)"
-      ],
-      [
-        "detached-rejection",
-        "HEALTH-5"
-      ],
-      [
-        "logs-failure",
-        "HEALTH-5"
-      ],
-      [
-        "retired-evidence-before-ready",
-        "EVID-2 (awaitTxId 0)"
-      ],
-      [
-        "disconnect-fails",
-        "RECON-1 (health error)"
-      ],
-      [
-        "renew-resubscribes",
-        "RENEW-1 (open provider subscriptions)"
-      ],
-      [
-        "drops-buffered",
-        "READY-10/PUB-9 (rows)"
-      ],
-      [
-        "replays-per-batch",
-        "PUB-5/PUB-9 (publication)"
-      ],
-      [
-        "ready-before-buffer",
-        "READY-10 (rows when ready)"
-      ],
-      [
-        "shows-buffered",
-        "READY-10/PUB-9 (rows)"
-      ],
-      [
-        "merges-updates",
-        "FID-1 (fields)"
-      ],
-      [
-        "dates-as-strings",
-        "FID-1 (values)"
-      ],
-      [
-        "bigints-as-numbers",
-        "FID-1 (values)"
-      ],
-      [
-        "drops-nulls",
-        "FID-1 (values)"
-      ],
-      [
-        "loses-negative-zero",
-        "FID-1 (values)"
-      ],
-      [
-        "typed-booleans-as-numbers",
-        "FID-1 (values)"
-      ],
-      [
-        "commits-malformed-prefix",
-        "PUB-4 (rows)"
-      ],
-      [
-        "ignores-malformed",
-        "PUB-4 (status)"
-      ],
-      [
-        "relabels-inserts",
-        "PUB-2 (change events)"
-      ],
-      [
-        "stale-outage-value",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "replaces-outage-value",
-        "RETRY-1 (health failureReason)"
-      ],
-      [
-        "reports-outage-early",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "outage-count-survives-delivery",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "empty-response-keeps-count",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "empty-response-recovers",
-        "RETRY-1 (health failureReason)"
-      ],
-      [
-        "rejected-delivery-fails",
-        "PUB-4 (health error)"
-      ],
-      [
-        "wraps-loading-failure",
-        "READY-4 (health error cause)"
-      ]
-    ],
-    "after": [
-      [
-        "ready-before-delivery",
-        "READY-2 (status)"
-      ],
-      [
-        "wraps-loading-failure",
-        "READY-4 (health error cause)"
-      ],
-      [
-        "failure-clears-rows",
-        "HEALTH-1 (rows)"
-      ],
-      [
-        "transient-is-fatal",
-        "HEALTH-1 (health error)"
-      ],
-      [
-        "delivery-error-is-fatal",
-        "HEALTH-1 (health error)"
-      ],
-      [
-        "never-recovers",
-        "HEALTH-2 (health failureReason)"
-      ],
-      [
-        "transient-fails-loading",
-        "RETRY-1 (status)"
-      ],
-      [
-        "splits-batch",
-        "PUB-1 (publication)"
-      ],
-      [
-        "drops-deletes",
-        "PUB-3/FID-4 (rows)"
-      ],
-      [
-        "snapshot-merges",
-        "PUB-7 (rows)"
-      ],
-      [
-        "leaks-subscription",
-        "LIFE-2/LIFE-10 (releases per subscription)"
-      ],
-      [
-        "restart-replays-rows",
-        "LIFE-2/LIFE-5 (rows)"
-      ],
-      [
-        "swallows-prompt-failure",
-        "READY-4 (status)"
-      ],
-      [
-        "ready-at-restart",
-        "LIFE-2/LIFE-5 (status)"
-      ],
-      [
-        "keeps-failed-source",
-        "LIFE-10 (open provider subscriptions)"
-      ],
-      [
-        "double-release",
-        "LIFE-10 (releases per subscription)"
-      ],
-      [
-        "detached-rejection",
-        "HEALTH-5"
-      ],
-      [
-        "logs-failure",
-        "HEALTH-5"
-      ],
-      [
-        "wait-off-by-one",
-        "EVID-1 (awaitTxId 0)"
-      ],
-      [
-        "retired-evidence-before-ready",
-        "EVID-2 (awaitTxId 0)"
-      ],
-      [
-        "forgets-retired-evidence",
-        "EVID-2 (awaitTxId 0)"
-      ],
-      [
-        "leaks-waits-after-fail",
-        "EVID-2 (awaitTxId 0)"
-      ],
-      [
-        "wait-ignores-timeout",
-        "EVID-3 (awaitTxId 0)"
-      ],
-      [
-        "disconnect-fails",
-        "RECON-1 (health error)"
-      ],
-      [
-        "renew-resubscribes",
-        "RENEW-1 (open provider subscriptions)"
-      ],
-      [
-        "drops-buffered",
-        "READY-10/PUB-9 (rows)"
-      ],
-      [
-        "buffer-before-rows",
-        "READY-10/PUB-9 (rows)"
-      ],
-      [
-        "replays-per-batch",
-        "PUB-5/PUB-9 (publication)"
-      ],
-      [
-        "ready-before-buffer",
-        "READY-10 (rows when ready)"
-      ],
-      [
-        "shows-buffered",
-        "READY-10/PUB-9 (rows)"
-      ],
-      [
-        "merges-updates",
-        "FID-1 (fields)"
-      ],
-      [
-        "dates-as-strings",
-        "FID-1 (values)"
-      ],
-      [
-        "bigints-as-numbers",
-        "FID-1 (values)"
-      ],
-      [
-        "drops-nulls",
-        "FID-1 (values)"
-      ],
-      [
-        "loses-negative-zero",
-        "FID-1 (values)"
-      ],
-      [
-        "typed-booleans-as-numbers",
-        "FID-1 (values)"
-      ],
-      [
-        "commits-malformed-prefix",
-        "PUB-4 (rows)"
-      ],
-      [
-        "ignores-malformed",
-        "PUB-4 (status)"
-      ],
-      [
-        "relabels-inserts",
-        "PUB-2 (change events)"
-      ],
-      [
-        "stale-outage-value",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "replaces-outage-value",
-        "RETRY-1 (health failureReason)"
-      ],
-      [
-        "reports-outage-early",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "outage-count-survives-delivery",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "empty-response-keeps-count",
-        "HEALTH-1 (health failureReason)"
-      ],
-      [
-        "empty-response-recovers",
-        "RETRY-1 (health failureReason)"
-      ],
-      [
-        "rejected-delivery-fails",
-        "PUB-4 (health error)"
-      ],
-      [
-        "wraps-loading-failure",
-        "READY-4 (health error cause)"
-      ]
-    ],
-    "preservedDistinctPairs": 40,
-    "afterDistinctPairs": 46
+    "supersededLossyEnumeration": {
+      "before": [
+        [
+          "ready-before-delivery",
+          "READY-2 (status)"
+        ],
+        [
+          "wraps-loading-failure",
+          "READY-4 (health error cause)"
+        ],
+        [
+          "failure-clears-rows",
+          "HEALTH-1 (rows)"
+        ],
+        [
+          "transient-is-fatal",
+          "HEALTH-1 (health error)"
+        ],
+        [
+          "delivery-error-is-fatal",
+          "HEALTH-1 (health error)"
+        ],
+        [
+          "never-recovers",
+          "HEALTH-2 (health failureReason)"
+        ],
+        [
+          "transient-fails-loading",
+          "RETRY-1 (status)"
+        ],
+        [
+          "splits-batch",
+          "PUB-1 (publication)"
+        ],
+        [
+          "drops-deletes",
+          "PUB-3/FID-4 (rows)"
+        ],
+        [
+          "leaks-subscription",
+          "LIFE-2/LIFE-10 (releases per subscription)"
+        ],
+        [
+          "restart-replays-rows",
+          "LIFE-2/LIFE-5 (rows)"
+        ],
+        [
+          "swallows-prompt-failure",
+          "READY-4 (status)"
+        ],
+        [
+          "ready-at-restart",
+          "LIFE-2/LIFE-5 (status)"
+        ],
+        [
+          "keeps-failed-source",
+          "LIFE-10 (open provider subscriptions)"
+        ],
+        [
+          "double-release",
+          "LIFE-10 (releases per subscription)"
+        ],
+        [
+          "detached-rejection",
+          "HEALTH-5"
+        ],
+        [
+          "logs-failure",
+          "HEALTH-5"
+        ],
+        [
+          "retired-evidence-before-ready",
+          "EVID-2 (awaitTxId 0)"
+        ],
+        [
+          "disconnect-fails",
+          "RECON-1 (health error)"
+        ],
+        [
+          "renew-resubscribes",
+          "RENEW-1 (open provider subscriptions)"
+        ],
+        [
+          "drops-buffered",
+          "READY-10/PUB-9 (rows)"
+        ],
+        [
+          "replays-per-batch",
+          "PUB-5/PUB-9 (publication)"
+        ],
+        [
+          "ready-before-buffer",
+          "READY-10 (rows when ready)"
+        ],
+        [
+          "shows-buffered",
+          "READY-10/PUB-9 (rows)"
+        ],
+        [
+          "merges-updates",
+          "FID-1 (fields)"
+        ],
+        [
+          "dates-as-strings",
+          "FID-1 (values)"
+        ],
+        [
+          "bigints-as-numbers",
+          "FID-1 (values)"
+        ],
+        [
+          "drops-nulls",
+          "FID-1 (values)"
+        ],
+        [
+          "loses-negative-zero",
+          "FID-1 (values)"
+        ],
+        [
+          "typed-booleans-as-numbers",
+          "FID-1 (values)"
+        ],
+        [
+          "commits-malformed-prefix",
+          "PUB-4 (rows)"
+        ],
+        [
+          "ignores-malformed",
+          "PUB-4 (status)"
+        ],
+        [
+          "relabels-inserts",
+          "PUB-2 (change events)"
+        ],
+        [
+          "stale-outage-value",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "replaces-outage-value",
+          "RETRY-1 (health failureReason)"
+        ],
+        [
+          "reports-outage-early",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "outage-count-survives-delivery",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "empty-response-keeps-count",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "empty-response-recovers",
+          "RETRY-1 (health failureReason)"
+        ],
+        [
+          "rejected-delivery-fails",
+          "PUB-4 (health error)"
+        ],
+        [
+          "wraps-loading-failure",
+          "READY-4 (health error cause)"
+        ]
+      ],
+      "after": [
+        [
+          "ready-before-delivery",
+          "READY-2 (status)"
+        ],
+        [
+          "wraps-loading-failure",
+          "READY-4 (health error cause)"
+        ],
+        [
+          "failure-clears-rows",
+          "HEALTH-1 (rows)"
+        ],
+        [
+          "transient-is-fatal",
+          "HEALTH-1 (health error)"
+        ],
+        [
+          "delivery-error-is-fatal",
+          "HEALTH-1 (health error)"
+        ],
+        [
+          "never-recovers",
+          "HEALTH-2 (health failureReason)"
+        ],
+        [
+          "transient-fails-loading",
+          "RETRY-1 (status)"
+        ],
+        [
+          "splits-batch",
+          "PUB-1 (publication)"
+        ],
+        [
+          "drops-deletes",
+          "PUB-3/FID-4 (rows)"
+        ],
+        [
+          "snapshot-merges",
+          "PUB-7 (rows)"
+        ],
+        [
+          "leaks-subscription",
+          "LIFE-2/LIFE-10 (releases per subscription)"
+        ],
+        [
+          "restart-replays-rows",
+          "LIFE-2/LIFE-5 (rows)"
+        ],
+        [
+          "swallows-prompt-failure",
+          "READY-4 (status)"
+        ],
+        [
+          "ready-at-restart",
+          "LIFE-2/LIFE-5 (status)"
+        ],
+        [
+          "keeps-failed-source",
+          "LIFE-10 (open provider subscriptions)"
+        ],
+        [
+          "double-release",
+          "LIFE-10 (releases per subscription)"
+        ],
+        [
+          "detached-rejection",
+          "HEALTH-5"
+        ],
+        [
+          "logs-failure",
+          "HEALTH-5"
+        ],
+        [
+          "wait-off-by-one",
+          "EVID-1 (awaitTxId 0)"
+        ],
+        [
+          "retired-evidence-before-ready",
+          "EVID-2 (awaitTxId 0)"
+        ],
+        [
+          "forgets-retired-evidence",
+          "EVID-2 (awaitTxId 0)"
+        ],
+        [
+          "leaks-waits-after-fail",
+          "EVID-2 (awaitTxId 0)"
+        ],
+        [
+          "wait-ignores-timeout",
+          "EVID-3 (awaitTxId 0)"
+        ],
+        [
+          "disconnect-fails",
+          "RECON-1 (health error)"
+        ],
+        [
+          "renew-resubscribes",
+          "RENEW-1 (open provider subscriptions)"
+        ],
+        [
+          "drops-buffered",
+          "READY-10/PUB-9 (rows)"
+        ],
+        [
+          "buffer-before-rows",
+          "READY-10/PUB-9 (rows)"
+        ],
+        [
+          "replays-per-batch",
+          "PUB-5/PUB-9 (publication)"
+        ],
+        [
+          "ready-before-buffer",
+          "READY-10 (rows when ready)"
+        ],
+        [
+          "shows-buffered",
+          "READY-10/PUB-9 (rows)"
+        ],
+        [
+          "merges-updates",
+          "FID-1 (fields)"
+        ],
+        [
+          "dates-as-strings",
+          "FID-1 (values)"
+        ],
+        [
+          "bigints-as-numbers",
+          "FID-1 (values)"
+        ],
+        [
+          "drops-nulls",
+          "FID-1 (values)"
+        ],
+        [
+          "loses-negative-zero",
+          "FID-1 (values)"
+        ],
+        [
+          "typed-booleans-as-numbers",
+          "FID-1 (values)"
+        ],
+        [
+          "commits-malformed-prefix",
+          "PUB-4 (rows)"
+        ],
+        [
+          "ignores-malformed",
+          "PUB-4 (status)"
+        ],
+        [
+          "relabels-inserts",
+          "PUB-2 (change events)"
+        ],
+        [
+          "stale-outage-value",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "replaces-outage-value",
+          "RETRY-1 (health failureReason)"
+        ],
+        [
+          "reports-outage-early",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "outage-count-survives-delivery",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "empty-response-keeps-count",
+          "HEALTH-1 (health failureReason)"
+        ],
+        [
+          "empty-response-recovers",
+          "RETRY-1 (health failureReason)"
+        ],
+        [
+          "rejected-delivery-fails",
+          "PUB-4 (health error)"
+        ],
+        [
+          "wraps-loading-failure",
+          "READY-4 (health error cause)"
+        ]
+      ],
+      "preservedDistinctPairs": 40,
+      "afterDistinctPairs": 46,
+      "status": "Superseded: string-only extraction omitted all six original RegExp predicates. The 40-to-46 distinct-pair increase was an extraction artifact, not added calibration coverage."
+    },
+    "originalComplete": {
+      "sourceBase": "9a5214f2801c2c7918f6fd21ac5add317559322a",
+      "mainCount": 39,
+      "outageCount": 8,
+      "controls": {
+        "mutants": [
+          {
+            "index": 0,
+            "mutant": "ready-before-delivery",
+            "law": {
+              "kind": "exact",
+              "value": "READY-2 (status)"
+            }
+          },
+          {
+            "index": 1,
+            "mutant": "wraps-loading-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (health error cause)"
+            }
+          },
+          {
+            "index": 2,
+            "mutant": "failure-clears-rows",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (rows)"
+            }
+          },
+          {
+            "index": 3,
+            "mutant": "transient-is-fatal",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health error)"
+            }
+          },
+          {
+            "index": 4,
+            "mutant": "delivery-error-is-fatal",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health error)"
+            }
+          },
+          {
+            "index": 5,
+            "mutant": "never-recovers",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-2 (health failureReason)"
+            }
+          },
+          {
+            "index": 6,
+            "mutant": "transient-fails-loading",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (status)"
+            }
+          },
+          {
+            "index": 7,
+            "mutant": "splits-batch",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-1 (publication)"
+            }
+          },
+          {
+            "index": 8,
+            "mutant": "drops-deletes",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-3/FID-4 (rows)"
+            }
+          },
+          {
+            "index": 9,
+            "mutant": "snapshot-merges",
+            "law": {
+              "kind": "pattern",
+              "literal": "/PUB-7 \\(rows\\)|PUB-4 \\(rows\\)/"
+            }
+          },
+          {
+            "index": 10,
+            "mutant": "leaks-subscription",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-10 (releases per subscription)"
+            }
+          },
+          {
+            "index": 11,
+            "mutant": "restart-replays-rows",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-5 (rows)"
+            }
+          },
+          {
+            "index": 12,
+            "mutant": "swallows-prompt-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (status)"
+            }
+          },
+          {
+            "index": 13,
+            "mutant": "ready-at-restart",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-5 (status)"
+            }
+          },
+          {
+            "index": 14,
+            "mutant": "keeps-failed-source",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-10 (open provider subscriptions)"
+            }
+          },
+          {
+            "index": 15,
+            "mutant": "double-release",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-10 (releases per subscription)"
+            }
+          },
+          {
+            "index": 16,
+            "mutant": "detached-rejection",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-5"
+            }
+          },
+          {
+            "index": 17,
+            "mutant": "logs-failure",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-5"
+            }
+          },
+          {
+            "index": 18,
+            "mutant": "wait-off-by-one",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-1 \\(awaitTxId \\d+\\)|EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 19,
+            "mutant": "retired-evidence-before-ready",
+            "law": {
+              "kind": "exact",
+              "value": "EVID-2 (awaitTxId 0)"
+            }
+          },
+          {
+            "index": 20,
+            "mutant": "forgets-retired-evidence",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 21,
+            "mutant": "leaks-waits-after-fail",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-2|EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 22,
+            "mutant": "wait-ignores-timeout",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-3 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 23,
+            "mutant": "disconnect-fails",
+            "law": {
+              "kind": "exact",
+              "value": "RECON-1 (health error)"
+            }
+          },
+          {
+            "index": 24,
+            "mutant": "renew-resubscribes",
+            "law": {
+              "kind": "exact",
+              "value": "RENEW-1 (open provider subscriptions)"
+            }
+          },
+          {
+            "index": 25,
+            "mutant": "drops-buffered",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10/PUB-9 (rows)"
+            }
+          },
+          {
+            "index": 26,
+            "mutant": "buffer-before-rows",
+            "law": {
+              "kind": "pattern",
+              "literal": "/READY-10\\/PUB-9 \\(rows\\)|PUB-4 \\(rows\\)/"
+            }
+          },
+          {
+            "index": 27,
+            "mutant": "replays-per-batch",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-5/PUB-9 (publication)"
+            }
+          },
+          {
+            "index": 28,
+            "mutant": "ready-before-buffer",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10 (rows when ready)"
+            }
+          },
+          {
+            "index": 29,
+            "mutant": "shows-buffered",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10/PUB-9 (rows)"
+            }
+          },
+          {
+            "index": 30,
+            "mutant": "merges-updates",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (fields)"
+            }
+          },
+          {
+            "index": 31,
+            "mutant": "dates-as-strings",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 32,
+            "mutant": "bigints-as-numbers",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 33,
+            "mutant": "drops-nulls",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 34,
+            "mutant": "loses-negative-zero",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 35,
+            "mutant": "typed-booleans-as-numbers",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 36,
+            "mutant": "commits-malformed-prefix",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (rows)"
+            }
+          },
+          {
+            "index": 37,
+            "mutant": "ignores-malformed",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (status)"
+            }
+          },
+          {
+            "index": 38,
+            "mutant": "relabels-inserts",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-2 (change events)"
+            }
+          }
+        ],
+        "outageMutants": [
+          {
+            "index": 0,
+            "mutant": "stale-outage-value",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 1,
+            "mutant": "replaces-outage-value",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 2,
+            "mutant": "reports-outage-early",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 3,
+            "mutant": "outage-count-survives-delivery",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 4,
+            "mutant": "empty-response-keeps-count",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 5,
+            "mutant": "empty-response-recovers",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 6,
+            "mutant": "rejected-delivery-fails",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (health error)"
+            }
+          },
+          {
+            "index": 7,
+            "mutant": "wraps-loading-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (health error cause)"
+            }
+          }
+        ]
+      },
+      "additionalSearch": {
+        "mutant": "reverses-batch",
+        "law": {
+          "kind": "exact",
+          "value": "PUB-1 (publication)"
+        },
+        "config": {
+          "perChange": true
+        },
+        "seed": 2118,
+        "runs": 600
+      },
+      "additionalFixed": {
+        "mutant": "ready-at-restart",
+        "law": "LIFE-5 (prompt restart)",
+        "history": [
+          {
+            "kind": "fail"
+          },
+          {
+            "kind": "restart",
+            "prompt": true
+          },
+          {
+            "kind": "snapshot",
+            "rows": []
+          }
+        ]
+      }
+    },
+    "restoredComplete": {
+      "sourceBase": "9a5214f2801c2c7918f6fd21ac5add317559322a",
+      "mainCount": 39,
+      "outageCount": 8,
+      "controls": {
+        "mutants": [
+          {
+            "index": 0,
+            "mutant": "ready-before-delivery",
+            "law": {
+              "kind": "exact",
+              "value": "READY-2 (status)"
+            }
+          },
+          {
+            "index": 1,
+            "mutant": "wraps-loading-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (health error cause)"
+            }
+          },
+          {
+            "index": 2,
+            "mutant": "failure-clears-rows",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (rows)"
+            }
+          },
+          {
+            "index": 3,
+            "mutant": "transient-is-fatal",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health error)"
+            }
+          },
+          {
+            "index": 4,
+            "mutant": "delivery-error-is-fatal",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health error)"
+            }
+          },
+          {
+            "index": 5,
+            "mutant": "never-recovers",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-2 (health failureReason)"
+            }
+          },
+          {
+            "index": 6,
+            "mutant": "transient-fails-loading",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (status)"
+            }
+          },
+          {
+            "index": 7,
+            "mutant": "splits-batch",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-1 (publication)"
+            }
+          },
+          {
+            "index": 8,
+            "mutant": "drops-deletes",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-3/FID-4 (rows)"
+            }
+          },
+          {
+            "index": 9,
+            "mutant": "snapshot-merges",
+            "law": {
+              "kind": "pattern",
+              "literal": "/PUB-7 \\(rows\\)|PUB-4 \\(rows\\)/"
+            }
+          },
+          {
+            "index": 10,
+            "mutant": "leaks-subscription",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-10 (releases per subscription)"
+            }
+          },
+          {
+            "index": 11,
+            "mutant": "restart-replays-rows",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-5 (rows)"
+            }
+          },
+          {
+            "index": 12,
+            "mutant": "swallows-prompt-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (status)"
+            }
+          },
+          {
+            "index": 13,
+            "mutant": "ready-at-restart",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-2/LIFE-5 (status)"
+            }
+          },
+          {
+            "index": 14,
+            "mutant": "keeps-failed-source",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-10 (open provider subscriptions)"
+            }
+          },
+          {
+            "index": 15,
+            "mutant": "double-release",
+            "law": {
+              "kind": "exact",
+              "value": "LIFE-10 (releases per subscription)"
+            }
+          },
+          {
+            "index": 16,
+            "mutant": "detached-rejection",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-5"
+            }
+          },
+          {
+            "index": 17,
+            "mutant": "logs-failure",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-5"
+            }
+          },
+          {
+            "index": 18,
+            "mutant": "wait-off-by-one",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-1 \\(awaitTxId \\d+\\)|EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 19,
+            "mutant": "retired-evidence-before-ready",
+            "law": {
+              "kind": "exact",
+              "value": "EVID-2 (awaitTxId 0)"
+            }
+          },
+          {
+            "index": 20,
+            "mutant": "forgets-retired-evidence",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 21,
+            "mutant": "leaks-waits-after-fail",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-2|EVID-2 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 22,
+            "mutant": "wait-ignores-timeout",
+            "law": {
+              "kind": "pattern",
+              "literal": "/EVID-3 \\(awaitTxId \\d+\\)/"
+            }
+          },
+          {
+            "index": 23,
+            "mutant": "disconnect-fails",
+            "law": {
+              "kind": "exact",
+              "value": "RECON-1 (health error)"
+            }
+          },
+          {
+            "index": 24,
+            "mutant": "renew-resubscribes",
+            "law": {
+              "kind": "exact",
+              "value": "RENEW-1 (open provider subscriptions)"
+            }
+          },
+          {
+            "index": 25,
+            "mutant": "drops-buffered",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10/PUB-9 (rows)"
+            }
+          },
+          {
+            "index": 26,
+            "mutant": "buffer-before-rows",
+            "law": {
+              "kind": "pattern",
+              "literal": "/READY-10\\/PUB-9 \\(rows\\)|PUB-4 \\(rows\\)/"
+            }
+          },
+          {
+            "index": 27,
+            "mutant": "replays-per-batch",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-5/PUB-9 (publication)"
+            }
+          },
+          {
+            "index": 28,
+            "mutant": "ready-before-buffer",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10 (rows when ready)"
+            }
+          },
+          {
+            "index": 29,
+            "mutant": "shows-buffered",
+            "law": {
+              "kind": "exact",
+              "value": "READY-10/PUB-9 (rows)"
+            }
+          },
+          {
+            "index": 30,
+            "mutant": "merges-updates",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (fields)"
+            }
+          },
+          {
+            "index": 31,
+            "mutant": "dates-as-strings",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 32,
+            "mutant": "bigints-as-numbers",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 33,
+            "mutant": "drops-nulls",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 34,
+            "mutant": "loses-negative-zero",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 35,
+            "mutant": "typed-booleans-as-numbers",
+            "law": {
+              "kind": "exact",
+              "value": "FID-1 (values)"
+            }
+          },
+          {
+            "index": 36,
+            "mutant": "commits-malformed-prefix",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (rows)"
+            }
+          },
+          {
+            "index": 37,
+            "mutant": "ignores-malformed",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (status)"
+            }
+          },
+          {
+            "index": 38,
+            "mutant": "relabels-inserts",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-2 (change events)"
+            }
+          }
+        ],
+        "outageMutants": [
+          {
+            "index": 0,
+            "mutant": "stale-outage-value",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 1,
+            "mutant": "replaces-outage-value",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 2,
+            "mutant": "reports-outage-early",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 3,
+            "mutant": "outage-count-survives-delivery",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 4,
+            "mutant": "empty-response-keeps-count",
+            "law": {
+              "kind": "exact",
+              "value": "HEALTH-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 5,
+            "mutant": "empty-response-recovers",
+            "law": {
+              "kind": "exact",
+              "value": "RETRY-1 (health failureReason)"
+            }
+          },
+          {
+            "index": 6,
+            "mutant": "rejected-delivery-fails",
+            "law": {
+              "kind": "exact",
+              "value": "PUB-4 (health error)"
+            }
+          },
+          {
+            "index": 7,
+            "mutant": "wraps-loading-failure",
+            "law": {
+              "kind": "exact",
+              "value": "READY-4 (health error cause)"
+            }
+          }
+        ]
+      },
+      "additionalSearch": {
+        "mutant": "reverses-batch",
+        "law": {
+          "kind": "exact",
+          "value": "PUB-1 (publication)"
+        },
+        "config": {
+          "perChange": true
+        },
+        "seed": 2118,
+        "runs": 600
+      },
+      "additionalFixed": {
+        "mutant": "ready-at-restart",
+        "law": "LIFE-5 (prompt restart)",
+        "history": [
+          {
+            "kind": "fail"
+          },
+          {
+            "kind": "restart",
+            "prompt": true
+          },
+          {
+            "kind": "snapshot",
+            "rows": []
+          }
+        ]
+      }
+    },
+    "originalTableAppearances": 47,
+    "originalDistinctTableMutantNames": 46,
+    "originalSearchesIncludingPerChange": 48,
+    "originalFixedPromptReplay": 1,
+    "searchSeed": 2118,
+    "searchCeilingPerControl": 600,
+    "candidateOrderingProof": {
+      "variants": [
+        {
+          "variant": "default",
+          "seed": 2118,
+          "runs": 600,
+          "originalCandidates": 600,
+          "sampledCandidates": 600,
+          "allCandidatesIdentical": true,
+          "originalArbitraryMatchesAll600": true,
+          "sequenceSha256": "61ee6fed63f50f20152fda5c32166ce673e7a44f4a596b238c3dbc7cb61b1381"
+        },
+        {
+          "variant": "per-change",
+          "seed": 2118,
+          "runs": 600,
+          "originalCandidates": 600,
+          "sampledCandidates": 600,
+          "allCandidatesIdentical": true,
+          "originalArbitraryMatchesAll600": true,
+          "sequenceSha256": "61ee6fed63f50f20152fda5c32166ce673e7a44f4a596b238c3dbc7cb61b1381"
+        },
+        {
+          "variant": "outage",
+          "seed": 2118,
+          "runs": 600,
+          "originalCandidates": 600,
+          "sampledCandidates": 600,
+          "allCandidatesIdentical": true,
+          "originalArbitraryMatchesAll600": true,
+          "sequenceSha256": "bf282678c8d4350d4d68f9e825737c90bf3b4657913fa0051fa8478bcde84861"
+        }
+      ],
+      "mechanism": "fc.sample and pre-shrink fc.check use identical toss order; all600 candidate hashes match for each actual driver configuration. No production execution or mutation job."
+    },
+    "executionStatus": "Pending canonical CI validation; no restored48-control runtime result is claimed."
   },
   "finalRxdbReach": [
     {
@@ -6069,5 +6947,73 @@
         "value:string:load": 105
       }
     }
-  ]
+  ],
+  "calibrationBudgetFollowup": {
+    "status": "CI validation pending. No local heavy run of the restored48 searches was started.",
+    "newOrdinaryHarness": "packages/db-adapter-conformance/tests/reference-adapter-calibration.test.ts",
+    "change": "Additive exact original hostile-search stream using native model/driver/check; retain supplemental native calibrations.",
+    "earlierPairApplicability": {
+      "unchangedClosureFiles": 168,
+      "unchangedExternalImports": 11,
+      "newFileOutsideClosure": "packages/db-adapter-conformance/tests/reference-adapter-calibration.test.ts",
+      "newFileImportsNoRxdb": true,
+      "original13SourceHashesStillIdentical": true,
+      "currentConfigHashes": {
+        "packages/rxdb-db-collection/vite.config.ts": "7cc1725655ab9f51e0e80c5b544edd372da792aaa35494dc869ebf58f5bedd8a",
+        "packages/rxdb-db-collection/vitest.config.ts": "9da26f3ca8909a05ad175dced44018fe445a10a805cf319d98a3c5a9bf179173",
+        "packages/rxdb-db-collection/tsconfig.json": "846524fe9918144841633ebc5c207580e5ab7135f97fe10f7f7f71ec6c00e1d7",
+        "packages/rxdb-db-collection/package.json": "fc3a0a068bcc6f54947ed0745445ed078d71dca6b7e2c776b49e172e7b9fe92c",
+        "scripts/oracle-lint-settings.mjs": "d503cfb71397f1595d5413fc82bef7dbc74a6b885fc122a3ca5c684d40d0faaa",
+        "packages/db/tests/oracle-config.ts": "423ab28447adb4be0e4d0592aced5c5d9d4f23b68732fc8145aabebf9d7c93ac"
+      },
+      "limits": "Requires independent verification of package-root owner/test discovery and installed runtime/framework bytes. Earlier pair remains evidence of its recorded source, not an unqualified final-tree pair.",
+      "runtimeFilesReverified": 4329,
+      "frameworkFilesReverified": 59,
+      "discoverySources": {
+        "oracle-gaps/check.mjs": "warmContext sets root:pkg at366-368;globSpecs enumerates that package;analyze receives only those test paths at939-944.",
+        "oracle-gaps/analysis.mjs": "analyze(ts,pkg,sources,testFiles) follows declarations from supplied test files at58-62.",
+        "rxdbViteConfig": "test.dir ./tests under unchanged RxDB package root; new conformance calibration file is a sibling package, not a candidate."
+      }
+    },
+    "earlierPairLimits": "Complete RxDB pair belongs to the earlier frozen source. New calibration file is outside its168-file closure. Independent audit of package discovery/runtime remains pending; no unqualified final-tree pair claim.",
+    "calibrationShrinking": "Sample loop preserves all generated candidates before first rejection. Unlike old fc.check controls it does not shrink; no shrunk counterexample is claimed. Product campaigns retain normal shrinking/replay.",
+    "unchangedNativeSemantics": {
+      "nativeSemanticFunctionsUnchanged": [
+        {
+          "name": "namesLaw",
+          "sha256": "6b5b87a7719e9e6a5677a1190277c2dec97d8e8faf1b86bba823ea44d9a62c59"
+        },
+        {
+          "name": "checkEagerLiveSourceHistory",
+          "sha256": "f11edccd6d2647645d948082a0f5a324eca87d4ab62ecbf286e89a2d3e8317dc"
+        },
+        {
+          "name": "stepModel",
+          "sha256": "5d969def7ae529e15a8e75e91683dbe338482d73bf5395fe123d11a1e0499e6f"
+        },
+        {
+          "name": "expectedObservation",
+          "sha256": "f2941163bdbca3b3a7c3bb408818470e4195cff1554aa1461dde91036e74fbe5"
+        }
+      ],
+      "fixture": {
+        "file": "packages/db-adapter-conformance/tests/reference-adapter.ts",
+        "unchanged": true,
+        "sha256": "87041dc118055b8b900c685626079c42cc4a7bc0cdb43aac6a6b921052d38a41"
+      },
+      "generation": "Native arbitrary gains unmappers only. All600 actual generated values match original source in each of3 configurations; see calibration-candidate-order.json."
+    },
+    "candidateIdentification": "The followup source commit containing this record; exact commit SHA is recorded in the external CI handoff.",
+    "sourceParent": "c7f0de31a671f8a6d63179e26f8c061892d79c4f",
+    "sourceSha256": {
+      "packages/db-adapter-conformance/tests/reference-adapter-calibration.test.ts": "605bd8c3c726119331e69087fe8283faf3c9a1067f6538c2286ab3ac994e9789",
+      "docs/contributing/oracle-coverage.md": "f586b5b7eb727404d171f9476c1c02bb7733c2e6483ae09c07d7eacebbbed7ca"
+    },
+    "requiredCIChecks": [
+      "Canonical reference116 suite plus new48 calibration searches",
+      "Canonical RxDB runtime/schema types24 tests",
+      "Conformance TypeScript check",
+      "Optional fresh remote full132 BEFORE/AFTER pair; evaluate exact stable-key semantic preservation separately"
+    ]
+  }
 }

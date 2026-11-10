@@ -1,11 +1,18 @@
 # Eager reference and RxDB property migration evidence
 
-Source commit: `bb0fb2d8032555f00c2e21f1047778e116571959`. Base: `9a5214f2801c2c7918f6fd21ac5add317559322a`.
+Earlier validated source commit: `bb0fb2d8032555f00c2e21f1047778e116571959`. Base: `9a5214f2801c2c7918f6fd21ac5add317559322a`.
 The companion [identity-level evidence](2026-11-10-eager-reference-rxdb-property-migration.json)
 records all 132 stable mutation keys, immutable source replacements, before/after
 outcomes and named verdicts, source hashes, declared-state counts, and log hashes.
 This record covers the shared eager-source machinery, reference receiver, and
 RxDB receiver. Other receiving adapters retain their legacy campaigns.
+
+The additive calibration-budget repair in the followup source commit is
+**pending canonical CI validation**. The earlier package results and complete
+mutation pair below apply to their recorded source. They do not establish that
+the newly restored 48 searches or final native package checks pass. Static
+checks establish the original predicates, budgets and ordered candidates; the
+CI handoff records the exact final candidate commit.
 
 ## Law, reach, and preservation
 
@@ -68,7 +75,7 @@ path `100:0:0:0:0`. Direct replay reproduces the same law and missing states.
 The temporary native edit was restored byte for byte. A permanent calibration
 removes the required production reach observations and uses the same check.
 
-Normal narrowed validation is GREEN:
+Earlier narrowed validation at `bb0fb2d803` was GREEN:
 
 | Check | Result |
 | --- | --- |
@@ -98,10 +105,32 @@ under constructed witnesses and stop-on-first-kill ordering; those changes are
 retained individually. Five runtime-only failures remain separate and are not
 credited as semantic kills. All other outcome identities are unchanged.
 
-Reference also retains every one of its 40 distinct earlier
-mutant/law calibration pairs; its converted suite has 46 such pairs.
-The source-based lists are preserved in JSON; this is calibration preservation,
-not a full reference-production mutation census.
+The earlier string-only calibration extraction omitted six RegExp predicates;
+its claimed increase from 40 to 46 distinct pairs was an extraction artifact.
+The lossless original tables contain 39 main entries (33 strings, six RegExps)
+and eight outage entries: 47 appearances, 46 distinct mutant names. The duplicate
+`wraps-loading-failure` is required in both driver configurations. The separate
+per-change `reverses-batch` control makes 48 generated searches, each with seed
+2118 and a ceiling of 600 histories. The fixed prompt-restart control is a 49th
+control. The companion JSON now preserves every exact original predicate and
+configuration, including whole-law RegExp matching.
+
+The additive ordinary `reference-adapter-calibration.test.ts` restores those 48
+original searches through the same native model, driver and comparison. Native
+property calibrations remain supplemental. Static AST equality preserves both
+original tables. For every candidate in all 600-history streams for default,
+per-change and outage configurations, diagnostics show the original native
+arbitrary equals the converted native arbitrary and `fc.sample` follows the
+same pre-shrink `fc.check` candidate order. The sample loop stops on the first
+accepted law and propagates failures outside the exact `ConformanceViolation`
+class. It does not shrink and claims no shrunk calibration counterexample;
+product campaigns keep their ordinary shrinking and replay. Runtime validation
+of the 48 searches is pending in canonical CI. No local heavy run was started.
+
+The original full RxDB pair remains earlier-source evidence. The additive
+ordinary file is outside all 168 RxDB closure files, which remain byte-identical
+to the narrowed tested slice. Independent package-discovery and runtime audit
+is pending; this is not a claim of a full gap pair on the entire final tree.
 
 ## Evidence provenance and narrowing
 

@@ -7837,9 +7837,12 @@ a step, not only the settled checkpoint. The reference push adapter
 (`tests/reference-adapter-oracle.property.test.ts`,
 `adapter-conformance.eager-live-source.reference`) runs fixed and random
 campaigns of 600 histories with declared reach, a per-change variant, an
-outage-threshold variant with client-created values, and 45 law-named
-hostile mutants, with ORC-004 reconstruction, exclusion, and
-ablation controls. These reference campaigns and the RxDB receiving campaign
+outage-threshold variant with client-created values, and ORC-004
+reconstruction, exclusion, and ablation controls. The ordinary
+`tests/reference-adapter-calibration.test.ts` retains all 48 original hostile
+searches: seed 2118, a ceiling of 600 histories each, exact whole-law string or
+RegExp predicates, and each original driver configuration. Native property
+calibrations are supplemental; the fixed prompt-restart comparison remains. These reference campaigns and the RxDB receiving campaign
 register through `oracleProperty`; other receiving drivers keep their legacy
 campaign registration.
 Each declared state has five constructed histories with generated rows and
