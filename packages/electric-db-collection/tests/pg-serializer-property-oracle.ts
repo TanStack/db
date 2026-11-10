@@ -52,6 +52,7 @@ export function expectFiniteArrayContents(
 declareOracle({ check: [expectFiniteArrayContents] })
 
 // Keep the moved calibration's original 25-candidate search visible to budget accounting.
-export const omissionCalibrationOptions = oracleFixedSeed(90701, {
-  numRuns: 25,
-})
+export const omissionCalibrationOptions: { numRuns: number; seed: number } =
+  oracleFixedSeed(90701, {
+    numRuns: 25,
+  })
