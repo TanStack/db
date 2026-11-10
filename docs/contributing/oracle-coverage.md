@@ -7806,6 +7806,20 @@ and PowerSync sources supply no remote-replication claim. See
 [all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md) and
 [network-first evidence](oracle-reviews/2026-11-10-network-first-startup.md).
 
+The [diff-focused gap CLI audit](oracle-reviews/2026-11-10-startup-gap-cli.md)
+records mutation evidence separately from startup conformance. Open receiving
+distinctions are unwrapped retained-row reload and empty-load mutation ordering
+for RxDB/PowerSync (`M9`/`M164`, core subscription-lifecycle owner with adapter
+receivers), cleanup during TrailBase's held persisted hydration (`M150`, its
+lifecycle owner plus this persistence composition), and Query's redundant
+hydration/ownership classification (`M1466`/`M1458`, ownership-lifecycle and
+reload-work owners), older fetch generations crossing newer direct writes
+(`M1778`/`M1779`, direct-write-window owner), and derived-select results without
+an inverse cache mapping (`M1733`, ownership-lifecycle/direct-write-window).
+The audit names each required history and observation. These survivors are
+unresolved sensitivity signals, not approved equivalences or known product
+counterexamples. They do not narrow the startup comparisons above.
+
 ## Adapter conformance: eager live sources (#2118)
 
 `packages/db-adapter-conformance/src/eager-live-source-oracle.ts` owns the
