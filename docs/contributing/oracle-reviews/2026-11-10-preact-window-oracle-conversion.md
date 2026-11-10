@@ -96,3 +96,31 @@ It establishes preservation of this mutation sample. It does not establish
 Suspense, concurrent scheduling, asynchronous provider settlement, or closure
 of the surviving, crashed, or unreached mutants. No semantic law, comparison,
 production path, or fixed regression was retired.
+
+
+## Literal registration follow-up
+
+Final reviewed code: `6e5dec8fc7e336d164ff76c89c7ddad7130be874`.
+The shared manifest's source-discovery test exposed a missed integration gate:
+computed IDs did not appear as literal property names in the receiving file.
+The focused test failed with the first missing Preact property. An explicit
+12-tuple registration table now supplies the same ID/source/key/move cells.
+No oracle law, grammar, model, production driver, comparison, or budget changed.
+A separate tuple comparison verified all 12 entries against the original
+Cartesian registration, including the association of each ID with its flags.
+
+The full named replay-manifest group passed 69 tests after the change; the
+Preact window suite passed all 56 tests with seven histories reaching each
+declared state per campaign and cell. The guarded on-demand/keyed/both
+seed-2291/path-0 replay again executed exactly one requested history. Normal
+ESLint, targeted oracle lint, and `git diff --check` passed. The mutation report
+comparison was run at `3b492829777c871d8769742ddfdce150df7a5b60`, before this
+registration-only change and the import-order correction. Its evidence is
+unchanged; no additional mutation run is claimed.
+
+```sh
+pnpm --filter @tanstack/db exec vitest run --maxWorkers=2 --coverage.enabled=false tests/oracle-replay.test.ts -t 'named oracle replay manifest'
+pnpm --filter @tanstack/preact-db exec vitest run --maxWorkers=2 --coverage.enabled=false tests/window-render-oracle.test.tsx
+pnpm exec eslint packages/preact-db/tests/window-render-oracle.test.tsx
+pnpm lint:changed packages/preact-db/tests/window-render-oracle.test.tsx
+```
