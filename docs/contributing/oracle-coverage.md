@@ -7842,9 +7842,12 @@ reconstruction, exclusion, and ablation controls. The ordinary
 `tests/reference-adapter-calibration.test.ts` retains all 48 original hostile
 searches: seed 2118, a ceiling of 600 histories each, exact whole-law string or
 RegExp predicates, and each original driver configuration. Native property
-calibrations are supplemental; the fixed prompt-restart comparison remains. These reference campaigns and the RxDB receiving campaign
-register through `oracleProperty`; other receiving drivers keep their legacy
-campaign registration.
+calibrations are supplemental; the fixed prompt-restart comparison remains.
+All eager live-source receivers register through `oracleProperty`: reference,
+RxDB, Electric, Convex, PowerSync, TrailBase, and the separately run Neon
+baseline. Their original fixed seed, run budgets, and shared comparisons stay.
+Electric's no-on-error path and Convex's React and wrapped-client paths also
+have named fixed/fresh campaigns and replay routes.
 Each declared state has five constructed histories with generated rows and
 suffixes inside the same capability-dependent language. The shared comparison
 checks every generated construction's declared states against independently

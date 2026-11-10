@@ -958,12 +958,12 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `electric`,
+    `electric electric.no-on-error`,
   ],
   [
     `convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `convex`,
+    `convex convex.react convex.wrapped`,
   ],
 ]
 
@@ -1072,19 +1072,8 @@ const replayTestNames = new Map([
     `includes-work.projection-payload`,
     `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
   ],
-  ...[`neon-realtime`, `trailbase`, `powersync`, `electric`, `convex`].map(
-    (driver) =>
-      [
-        `adapter-conformance.eager-live-source.${driver}`,
-        `conforms on a random campaign or a replayed seed`,
-      ] as const,
-  ),
   ...ownerGroups
-    .filter(
-      ([, prefix, suffixes]) =>
-        prefix === `adapter-conformance.eager-live-source` &&
-        (suffixes.startsWith(`reference`) || suffixes === `rxdb`),
-    )
+    .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
       suffixes.split(` `).map((suffix) => {
         const property = `${prefix}.${suffix}`

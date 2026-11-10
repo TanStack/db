@@ -76,10 +76,6 @@ export const oracleLintSettings = {
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/convex-db-collection/tests/lazy-paging-abort-replay-oracle.property.test.ts`,
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -138,10 +134,6 @@ export const oracleLintSettings = {
       {
         file: `packages/convex-db-collection/tests/values-oracle.property.test.ts`,
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
@@ -576,10 +568,6 @@ export const oracleLintSettings = {
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -618,10 +606,6 @@ export const oracleLintSettings = {
       {
         file: `packages/offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/query-db-collection/tests/cursor-pagination-oracle.integration.test.ts`,
@@ -718,10 +702,6 @@ export const oracleLintSettings = {
       {
         file: `packages/svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/trailbase-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,

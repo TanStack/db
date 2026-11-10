@@ -58,7 +58,7 @@ Implement `EagerLiveSourceDriver`:
 - **`txidEvidence`:** `change` when txids travel on each row message, so a batch with no change carries none; default `batch`.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
-Declare only the capabilities your adapter supports. The reference and RxDB
+Declare only the capabilities your adapter supports. All eager live-source
 receivers register their campaigns with `oracleProperty` and use
 `tests/eager-live-source-property-oracle.ts` to retain the shared model and
 comparison. Each campaign keeps its original run budget and seed 2118 beside
@@ -76,10 +76,10 @@ Campaign histories encode Dates and `Float64Array` values as tagged data.
 model, and comparison run, so the strict FID-1 judgments remain unchanged. The
 registration adapter records a `ConformanceViolation` under its original law
 and checkpoint; driver failures and secondary cleanup diagnostics retain their
-original error objects. Other receivers keep `eagerLiveSourceProperty` with
-their existing reach counters and replay routes. The vendored Neon receiver
-also remains on that legacy API while its documented failure-channel baseline
-is RED.
+original error objects. Electric's default error-handler variant and Convex's
+React and wrapped-client variants have named fixed/fresh campaigns and direct
+replay routes. The vendored Neon receiver uses the same registration while its
+documented failure-channel baseline remains RED.
 
 ## Drivers
 

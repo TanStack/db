@@ -622,9 +622,7 @@ describe(`named oracle replay manifest`, () => {
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
       } else if (
-        entry.property.startsWith(
-          `adapter-conformance.eager-live-source.reference`,
-        ) || entry.property === `adapter-conformance.eager-live-source.rxdb`
+        entry.property.startsWith(`adapter-conformance.eager-live-source.`)
       ) {
         const prefix = `adapter-conformance.eager-live-source.`
         const [driver, ...variant] = entry.property
@@ -644,7 +642,12 @@ describe(`named oracle replay manifest`, () => {
           }
         } else if (variant.length > 0) {
           expect(variant).toHaveLength(1)
-          expect(source).toContain(`id: \`\${property}.${variant[0]}\``)
+          expect(
+            source.includes(`id: \`\${property}.${variant[0]}\``) ||
+              (driver === `convex` &&
+                source.includes('id: `${property}.${client}`') &&
+                source.includes(`\`${variant[0]}\``)),
+          ).toBe(true)
         }
       } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
         const [, , tagged, consumer, emptySecond, delivery] =
