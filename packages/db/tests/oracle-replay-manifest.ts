@@ -70,6 +70,16 @@ const ownerGroups: ReadonlyArray<
     `reduce-fast-path`,
   ],
   [
+    `svelte-db/tests/cache-options-oracle.svelte.test.ts`,
+    `svelte`,
+    `cache-options`,
+  ],
+  [
+    `svelte-db/tests/descriptor-start-release-oracle.svelte.test.ts`,
+    `svelte`,
+    `descriptor-start-release`,
+  ],
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -268,17 +278,17 @@ const ownerGroups: ReadonlyArray<
   [
     `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-snapshot`,
+    `ssr-snapshot ssr-snapshot.cases`,
   ],
   [
     `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-handoff ssr-receiving-reader`,
+    `ssr-handoff ssr-handoff.cases ssr-receiving-reader ssr-receiving-reader.cases`,
   ],
   [
     `svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`,
     `svelte`,
-    `ssr-runtime-errors`,
+    `ssr-runtime-errors ssr-runtime-errors.cases`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
@@ -1180,8 +1190,11 @@ const replayTestNames = new Map([
   [`react.window-render`, `window changes at React commit.*fresh`],
   [`react.window-retry-ownership`, `retry ownership/.*fresh`],
   [`react.client-window`, `client page identity.*fresh`],
-  [`svelte.client-window`, `Svelte client page identity.*fresh`],
-  [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
+  [`svelte.client-window`, `svelte\\.client-window > random seed`],
+  [
+    `svelte.client-window-recovery`,
+    `svelte\\.client-window-recovery > random seed`,
+  ],
   [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
   [
     `preact.window-render.eager-derived-offset`,
@@ -1343,16 +1356,13 @@ const replayTestNames = new Map([
     `react.ssr-runtime-infinite`,
     `infinite preserves runtime error hydration views.*random`,
   ],
-  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
-  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [`svelte.ssr-snapshot`, `svelte\\.ssr-snapshot > random seed`],
+  [`svelte.ssr-handoff`, `svelte\\.ssr-handoff > random seed`],
   [
     `svelte.ssr-receiving-reader`,
-    `preserves each receiving reader view.*random`,
+    `svelte\\.ssr-receiving-reader > random seed`,
   ],
-  [
-    `svelte.ssr-runtime-errors`,
-    `keeps runtime failures on their ordinary error surface.*random`,
-  ],
+  [`svelte.ssr-runtime-errors`, `svelte\\.ssr-runtime-errors > random seed`],
   [
     `structural-identity.equal-representations`,
     `structural-identity\\.equal-representations > random seed`,
@@ -1393,6 +1403,12 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `svelte.ssr-handoff.cases`,
+  `svelte.ssr-receiving-reader.cases`,
+  `svelte.ssr-snapshot.cases`,
+  `svelte.ssr-runtime-errors.cases`,
+  `svelte.cache-options`,
+  `svelte.descriptor-start-release`,
   `reverse-index.large-reads`,
   `react.ssr-effects-react18-disabled`,
   `react.ssr-effects-current-disabled`,
