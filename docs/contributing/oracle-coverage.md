@@ -7803,7 +7803,8 @@ premise. TrailBase has no deployed-server or SDK-wire claim, and the local RxDB
 and PowerSync sources supply no remote-replication claim. See
 [migration status](../../packages/db-adapter-conformance/MIGRATION.md),
 [original evidence](oracle-reviews/2026-11-09-issue-2367.md) and the
-[all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md).
+[all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md) and
+[network-first evidence](oracle-reviews/2026-11-10-network-first-startup.md).
 
 ## Adapter conformance: eager live sources (#2118)
 
