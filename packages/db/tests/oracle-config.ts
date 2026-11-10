@@ -372,6 +372,8 @@ const staticOracleProperties = [
   `offline.serializer.mutation-wire`,
   `offline.serializer.date-marker`,
   `offline.serializer.version-two`,
+  `offline.serializer.malformed-object`,
+  `offline.serializer.mutation-codec`,
   `offline.settlement.transaction`,
   `offline.settlement.retry-record`,
   `offline.settlement.admission`,

@@ -1065,7 +1065,7 @@ const ownerGroups: ReadonlyArray<
   [
     `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
     `offline`,
-    `serializer.mutation-wire serializer.date-marker serializer.version-two`,
+    `serializer.mutation-wire serializer.date-marker serializer.version-two serializer.malformed-object serializer.mutation-codec`,
   ],
   [
     `offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
