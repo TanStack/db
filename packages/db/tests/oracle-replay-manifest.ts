@@ -363,6 +363,11 @@ const ownerGroups: ReadonlyArray<
     `optimistic-outcomes`,
   ],
   [
+    `db/tests/query/ir-stable-identity-oracle.test.ts`,
+    `ir-identity`,
+    `canonical-expressions reference-expressions membership-set lexical-aliases projected-results output-denotation union-output-aliases reference-queries`,
+  ],
+  [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
     `query-identity`,
     `compiled-output equality-partition`,
@@ -1140,6 +1145,14 @@ const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `ir-identity.canonical-expressions`,
+    `ir-identity.reference-expressions`,
+    `ir-identity.membership-set`,
+    `ir-identity.lexical-aliases`,
+    `ir-identity.projected-results`,
+    `ir-identity.output-denotation`,
+    `ir-identity.union-output-aliases`,
+    `ir-identity.reference-queries`,
     `query.public-container-copy`,
     `query-identity.compiled-output`,
     `query-identity.equality-partition`,
