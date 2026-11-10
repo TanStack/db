@@ -131,6 +131,11 @@ const ownerGroups: ReadonlyArray<
     `react.cache-options`,
     `client-render suspense-render server-render`,
   ],
+  [
+    `react-db/tests/descriptor-start-release-oracle.test.tsx`,
+    `react.descriptor-start-release`,
+    `live infinite suspense`,
+  ],
   [`preact-db/tests/bound-options-oracle.test.ts`, `preact`, `bound-options`],
   [
     `preact-db/tests/bound-schema-options-oracle.test.ts`,
@@ -202,7 +207,7 @@ const ownerGroups: ReadonlyArray<
   [
     `react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx`,
     `react`,
-    `ssr-runtime-ordinary ssr-runtime-infinite`,
+    `ssr-runtime-ordinary ssr-runtime-infinite ssr-runtime-ordinary.cases ssr-runtime-infinite.cases`,
   ],
   [
     `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
@@ -1301,6 +1306,11 @@ const reseededProperties = new Set<string>()
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
   `reverse-index.large-reads`,
+  `react.ssr-runtime-ordinary.cases`,
+  `react.ssr-runtime-infinite.cases`,
+  `react.descriptor-start-release.live`,
+  `react.descriptor-start-release.infinite`,
+  `react.descriptor-start-release.suspense`,
   `react.bound-schema-options.live`,
   `react.bound-schema-options.suspense`,
   `react.cache-options.client-render`,
