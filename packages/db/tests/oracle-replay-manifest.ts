@@ -1321,6 +1321,13 @@ const replayTestNames = new Map([
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `load-subset.exact-completion`,
+    `load-subset.exact-inflight`,
+    `load-subset.rejected-waiter`,
+    `bucket-facade.rollback-history`,
+    `where-predicate.publication`,
+    `cold-join.reconciliation`,
+    `cold-join.compound`,
     `ir-identity.canonical-expressions`,
     `ir-identity.reference-expressions`,
     `ir-identity.membership-set`,
@@ -1732,8 +1739,6 @@ function directReplayTestName(property: string): string | undefined {
     return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
   if (property === `replay.subscription-demand-origin`)
     return `distinguishes failed demand origins \\(replay campaign\\)`
-  if (property === `cold-join.compound`)
-    return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))

@@ -108,14 +108,6 @@ export const oracleLintSettings = {
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/query/cold-join-reconciliation-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/query/custom-index-order-selection-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -134,10 +126,6 @@ export const oracleLintSettings = {
       {
         file: `packages/db/tests/query/load-subset-joint-replay-oracle.property.test.ts`,
         reason: `campaign helper; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/query/load-subset-oracle.property.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
@@ -166,10 +154,6 @@ export const oracleLintSettings = {
       {
         file: `packages/db/tests/query/virtual-row-fields-types-oracle.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db/tests/query/where-predicate-publication-oracle.property.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/db/tests/SortedMap-oracle.test.ts`,

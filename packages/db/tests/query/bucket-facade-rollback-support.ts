@@ -5,6 +5,7 @@ import {
   resolvePublicValue,
 } from '../../src/query/live/bucket-facade-adapter.js'
 import { createTransaction } from '../../src/transactions.js'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import { stripVirtualProps } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../../src/types.js'
@@ -426,23 +427,29 @@ export class Driver {
 
   /** The adapter holds exactly the facades the model shows. */
   checkHeld(model: Model, label: string): void {
-    expect(
-      [...this.entries().keys()].sort(),
-      `${label}: facades held by the adapter`,
-    ).toEqual([...model.keys()].sort())
+    oracleAssertion(`${label}: facades held by the adapter`, () =>
+      expect(
+        [...this.entries().keys()].sort(),
+        `${label}: facades held by the adapter`,
+      ).toEqual([...model.keys()].sort()),
+    )
   }
 
   check(model: Model, label: string): void {
-    expect(
-      this.protocolViolations,
-      `${label}: change-message protocol`,
-    ).toEqual([])
+    oracleAssertion(`${label}: change-message protocol`, () =>
+      expect(
+        this.protocolViolations,
+        `${label}: change-message protocol`,
+      ).toEqual([]),
+    )
     // The adapter holds exactly the facades the model shows: a failed flush
     // removes the facades it created, and a retired bucket has no facade.
-    expect(
-      [...this.entries().keys()].sort(),
-      `${label}: facades held by the adapter`,
-    ).toEqual([...model.keys()].sort())
+    oracleAssertion(`${label}: facades held by the adapter`, () =>
+      expect(
+        [...this.entries().keys()].sort(),
+        `${label}: facades held by the adapter`,
+      ).toEqual([...model.keys()].sort()),
+    )
     // A retired or replaced facade shows only its visible optimistic rows,
     // including one retired while a hold spanned several flushes.
     const held = new Set([...this.entries().values()].map((e) => e.collection))
@@ -452,38 +459,54 @@ export class Driver {
       const visible = [...this.local(facade)]
         .filter(([, shown]) => shown)
         .map(([id]) => id)
-      expect(
-        [...facade.keys()].sort(),
-        `${label}: rows of a retired facade`,
-      ).toEqual(visible.sort())
+      oracleAssertion(`${label}: rows of a retired facade`, () =>
+        expect(
+          [...facade.keys()].sort(),
+          `${label}: rows of a retired facade`,
+        ).toEqual(visible.sort()),
+      )
     }
     for (const bucket of BUCKETS) {
       const rows = model.get(bucket)
       const facade = this.entry(bucket)?.collection
       if (!rows) continue
-      expect(facade, `${label}: facade ${bucket}`).toBeDefined()
+      oracleAssertion(`${label}: facade ${bucket}`, () =>
+        expect(facade, `${label}: facade ${bucket}`).toBeDefined(),
+      )
       // A facade the model shows has been made ready by the flush that
       // created it.
-      expect(facade!.status, `${label}: status of ${bucket}`).toBe(`ready`)
+      oracleAssertion(`${label}: status of ${bucket}`, () =>
+        expect(facade!.status, `${label}: status of ${bucket}`).toBe(`ready`),
+      )
       // An optimistic row overlays a graph row with the same id, so neither is
       // compared by value.
       const local = this.local(facade!)
-      expect(
-        facade!.toArray
-          .map(stripVirtualProps)
-          .filter((row) => !local.has(row.id)),
-        `${label}: rows of ${bucket}`,
-      ).toEqual(expectedRows(rows).filter((row) => !local.has(row.id)))
+      oracleAssertion(`${label}: rows of ${bucket}`, () =>
+        expect(
+          facade!.toArray
+            .map(stripVirtualProps)
+            .filter((row) => !local.has(row.id)),
+          `${label}: rows of ${bucket}`,
+        ).toEqual(expectedRows(rows).filter((row) => !local.has(row.id))),
+      )
       for (const [id, visible] of local) {
-        expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
-          visible,
+        oracleAssertion(`${label}: local row ${bucket}/${id}`, () =>
+          expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
+            visible,
+          ),
         )
       }
       for (const id of rows.keys()) {
         if (local.has(id)) continue
         const stored = facade!.get(id)
-        expect(stored, `${label}: row ${bucket}/${id}`).toBeDefined()
-        expect(facade!.getKeyFromItem(stored!), `${label}: key ${id}`).toBe(id)
+        oracleAssertion(`${label}: row ${bucket}/${id}`, () =>
+          expect(stored, `${label}: row ${bucket}/${id}`).toBeDefined(),
+        )
+        oracleAssertion(`${label}: key ${id}`, () =>
+          expect(facade!.getKeyFromItem(stored!), `${label}: key ${id}`).toBe(
+            id,
+          ),
+        )
       }
     }
   }
@@ -502,10 +525,15 @@ export class Driver {
   async attemptCleanup(bucket: BucketKey): Promise<void> {
     const facade = this.entry(bucket)?.collection
     if (!facade) return
-    await expect(facade.cleanup(), `holder cleanup`).rejects.toThrow(
-      /cannot be cleaned up directly/,
+    const cleanup = facade.cleanup()
+    await oracleAssertion(`holder cleanup`, () =>
+      expect(cleanup, `holder cleanup`).rejects.toThrow(
+        /cannot be cleaned up directly/,
+      ),
     )
-    expect(facade.status, `status after a refused cleanup`).toBe(`ready`)
+    oracleAssertion(`status after a refused cleanup`, () =>
+      expect(facade.status, `status after a refused cleanup`).toBe(`ready`),
+    )
   }
 
   /**

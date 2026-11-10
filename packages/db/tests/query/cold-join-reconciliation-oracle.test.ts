@@ -5,13 +5,12 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import { oracleProperty, oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { runTrace } from '../trace-runner.js'
 import {
@@ -188,8 +187,12 @@ async function runColdJoin(
     driver: {
       setup: () => undefined,
       start: async () => {
-        expect(children.size).toBe(0)
-        expect(calls).toEqual([])
+        oracleAssertion(`cold child source before acquisition`, () =>
+          expect(children.size).toBe(0),
+        )
+        oracleAssertion(`cold provider before preload`, () =>
+          expect(calls).toEqual([]),
+        )
         await parentSource.preload()
         // Never preload the child collection: the compiled join must acquire it.
         subscription = live.subscribeChanges(
@@ -260,13 +263,23 @@ async function runColdJoin(
       },
       recompute: () => expectedColdJoinRows(model),
       assertEqual: (actual, expected) => {
-        expect(
-          actual.calls.some((call) => call.rows.length > 0),
+        oracleAssertion(
           `a nonempty cold acquisition must reach the provider`,
-        ).toBe(true)
-        expect(actual.calls[0]?.rows).toEqual(initial)
-        expect(actual.rows).toEqual(ordered(expected))
-        expect(actual.replica).toEqual(ordered(expected))
+          () =>
+            expect(
+              actual.calls.some((call) => call.rows.length > 0),
+              `a nonempty cold acquisition must reach the provider`,
+            ).toBe(true),
+        )
+        oracleAssertion(`first cold acquisition rows`, () =>
+          expect(actual.calls[0]?.rows).toEqual(initial),
+        )
+        oracleAssertion(`cold public rows after applied step`, () =>
+          expect(actual.rows).toEqual(ordered(expected)),
+        )
+        oracleAssertion(`cold event replica after applied step`, () =>
+          expect(actual.replica).toEqual(ordered(expected)),
+        )
         return undefined
       },
     },
@@ -470,41 +483,42 @@ it(`reconciles cold join acquisition, deletion, restoration and route moves`, as
   ).toBeGreaterThanOrEqual(2)
 })
 const coldJoinProperty = `cold-join.reconciliation`
-const { replayPath, replayProperty } = readOracleRunConfig()
-const coldJoinSeeds =
-  replayPath !== undefined && replayProperty === coldJoinProperty
-    ? [undefined]
-    : [941207, undefined]
-
-// The fixed and random campaigns use one grammar and checker. A seed and
-// shrink path replay only the requested campaign through oraclePropertyOptions.
-it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
-  const step: fc.Arbitrary<Step> = fc.oneof(
-    fc
-      .constantFrom(10, 20, 30, 40)
-      .map((id) => ({ type: `delete` as const, id })),
-    fc
-      .record({
-        id: fc.constantFrom(10, 20, 30, 40),
-        parentId: fc.integer({ min: 1, max: 2 }),
-        amount: fc.integer({ min: -5, max: 5 }),
-      })
-      .map((row) => ({ type: `put` as const, row })),
-  )
-  const parameters =
-    seed === undefined
-      ? oraclePropertyOptions(50, coldJoinProperty)
-      : oracleFixedSeed(seed, { numRuns: oracleRuns(50) })
-  oracleRoute(oracleRouteOf(parameters))
-  await fc.assert(
-    fc.asyncProperty(
-      fc.array(step, { minLength: 0, maxLength: 15 }),
-      async (steps) => {
-        await runColdJoin([...history, ...steps])
-      },
-    ),
-    parameters,
-  )
+// The original random tail follows the same fixed route-move prefix. The
+// assertion adapter retains the complete recomputation and event-replica check.
+const coldStepArbitrary: fc.Arbitrary<Step> = fc.oneof(
+  fc
+    .constantFrom(10, 20, 30, 40)
+    .map((id) => ({ type: `delete` as const, id })),
+  fc
+    .record({
+      id: fc.constantFrom(10, 20, 30, 40),
+      parentId: fc.integer({ min: 1, max: 2 }),
+      amount: fc.integer({ min: -5, max: 5 }),
+    })
+    .map((row) => ({ type: `put` as const, row })),
+)
+oracleProperty({
+  id: coldJoinProperty,
+  law: {
+    statement: `Cold acquisition and every applied child change agree with independent relational recomputation and the event replica.`,
+    authority: `ARCHITECTURE.md Identity and Initial demand; the existing cold-join law above.`,
+    limits: `The unchanged fixed route-move prefix and zero-to-fifteen-step tail; controlled whole-source acquisition, without demand minimization or provider I/O claims.`,
+    owner: `Cold join reconciliation`,
+  },
+  histories: {
+    arbitrary: fc.array(coldStepArbitrary, { minLength: 0, maxLength: 15 }),
+    runs: 50,
+    fixedSeeds: [941207],
+    states: [],
+    constructed: [],
+  },
+  resolve: (steps) => ({ steps }),
+  model: recordedAssertionJudgment,
+  driver: (plan: { steps: Array<Step> }, observe) =>
+    recordAssertionJudgment(coldJoinProperty, plan, observe, async () => {
+      await runColdJoin([...history, ...plan.steps])
+    }),
+  check: forwardAssertionJudgment,
 })
 it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
   `rejects %s through the real cold join trace checker`,
@@ -783,15 +797,21 @@ async function runCompoundHistory(
           model.right.values(),
           atoms.map((atom) => atom.group),
         )
-        expect(
-          sortJoinPairs(live.toArray.map((row) => [row.leftId, row.rightId])),
-          `compound public pairs`,
-        ).toEqual(expected)
-        expect(
-          sortJoinPairs([...replica.values()]),
-          `compound event replica`,
-        ).toEqual(expected)
-        expect(live.size).toBe(expected.length)
+        oracleAssertion(`compound public pairs`, () =>
+          expect(
+            sortJoinPairs(live.toArray.map((row) => [row.leftId, row.rightId])),
+            `compound public pairs`,
+          ).toEqual(expected),
+        )
+        oracleAssertion(`compound event replica`, () =>
+          expect(
+            sortJoinPairs([...replica.values()]),
+            `compound event replica`,
+          ).toEqual(expected),
+        )
+        oracleAssertion(`compound public multiplicity`, () =>
+          expect(live.size).toBe(expected.length),
+        )
       }
       await live.preload()
       check()
@@ -801,10 +821,12 @@ async function runCompoundHistory(
           (row) => atoms[row.atom]!.group !== null && row.b !== null,
         )
       )
-        expect(
-          mutant === `hide-acquisition` ? 0 : acquisitions,
-          `cold source acquisition`,
-        ).toBeGreaterThan(0)
+        oracleAssertion(`cold source acquisition`, () =>
+          expect(
+            mutant === `hide-acquisition` ? 0 : acquisitions,
+            `cold source acquisition`,
+          ).toBeGreaterThan(0),
+        )
       for (const step of scenario.steps) {
         const { side, row, remove } = step
         const sync = actions[side]!
@@ -977,59 +999,57 @@ describe(`compound join relational oracle`, () => {
     },
   )
   const property = `cold-join.compound`
-  const config = readOracleRunConfig()
-  const seeds =
-    config.replayProperty === property ? [undefined] : [861593, undefined]
-  it.each(seeds)(
-    `recomputes generated compound histories, seed=%s`,
-    async (seed) => {
-      const rowArbitrary = fc.record({
-        id: fc.integer({ min: 0, max: 3 }),
-        atom: fc.integer({ min: 0, max: compoundBoundaryRows.length - 1 }),
-        b: fc.constantFrom<number | null>(0, 1, null),
-        c: fc.integer({ min: 0, max: 1 }),
-      })
-      const campaignParameters =
-        seed === undefined
-          ? oraclePropertyOptions(60, property)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            left: fc.uniqueArray(rowArbitrary, {
-              selector: (row) => row.id,
-              maxLength: 4,
-            }),
-            right: fc.uniqueArray(rowArbitrary, {
-              selector: (row) => row.id,
-              maxLength: 4,
-            }),
-            steps: fc.array(
-              fc.record({
-                side: fc.constantFrom<`left` | `right`>(`left`, `right`),
-                row: rowArbitrary,
-                remove: fc.boolean(),
-              }),
-              { maxLength: 8 },
-            ),
-            join: fc.constantFrom<CompoundJoin>(
-              `inner`,
-              `left`,
-              `right`,
-              `full`,
-            ),
-            width: fc.constantFrom<2 | 3>(2, 3),
-            atomFirst: fc.boolean(),
-            nested: fc.boolean(),
-            reversed: fc.boolean(),
-            autoIndex: fc.constantFrom<EqualityMode>(`off`, `eager`),
-            cold: fc.boolean(),
-          }),
-          (scenario) => runCompoundHistory(scenario),
-        ),
-        campaignParameters,
-      )
+  const rowArbitrary = fc.record({
+    id: fc.integer({ min: 0, max: 3 }),
+    atom: fc.integer({ min: 0, max: compoundBoundaryRows.length - 1 }),
+    b: fc.constantFrom<number | null>(0, 1, null),
+    c: fc.integer({ min: 0, max: 1 }),
+  })
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Every component equality is TRUE for a compound match, with exact unmatched rows and event multiplicity for the selected join.`,
+      authority: `ARCHITECTURE.md Identity and Initial demand; the compound relational law above.`,
+      limits: `The unchanged two-or-three-term grammar with bounded keyed histories, scan/index and eager/cold paths; no optimistic or replay claim.`,
+      owner: `Compound join reconciliation`,
     },
-  )
+    histories: {
+      arbitrary: fc.record({
+        left: fc.uniqueArray(rowArbitrary, {
+          selector: (row) => row.id,
+          maxLength: 4,
+        }),
+        right: fc.uniqueArray(rowArbitrary, {
+          selector: (row) => row.id,
+          maxLength: 4,
+        }),
+        steps: fc.array(
+          fc.record({
+            side: fc.constantFrom<`left` | `right`>(`left`, `right`),
+            row: rowArbitrary,
+            remove: fc.boolean(),
+          }),
+          { maxLength: 8 },
+        ),
+        join: fc.constantFrom<CompoundJoin>(`inner`, `left`, `right`, `full`),
+        width: fc.constantFrom<2 | 3>(2, 3),
+        atomFirst: fc.boolean(),
+        nested: fc.boolean(),
+        reversed: fc.boolean(),
+        autoIndex: fc.constantFrom<EqualityMode>(`off`, `eager`),
+        cold: fc.boolean(),
+      }),
+      runs: 60,
+      fixedSeeds: [861593],
+      states: [],
+      constructed: [],
+    },
+    resolve: (scenario) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { scenario: CompoundHistory }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runCompoundHistory(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
