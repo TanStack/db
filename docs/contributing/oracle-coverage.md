@@ -8031,7 +8031,11 @@ builder's declared states on every invocation. The shared check compares those
 declarations with actual state observations for seeded, generated, and shrunk
 constructed outputs; it does not depend on the pinned framework's seeded-only
 association. The checker rejects both an always-accept report and a trace that
-omits a required constructed state. Production mutants that always accept or allow a removed baseline
+omits a required constructed state at the virtual `constructed states`
+checkpoint. This checkpoint is unrecorded, so an incomplete driver trace keeps
+its actual driver failure primary rather than inventing an earlier state
+omission. Actual gate-report mismatches still use `completed`. Production
+mutants that always accept or allow a removed baseline
 to restart fail the named `only shrinks` law at `completed`, including direct
 seed/path replay.
 

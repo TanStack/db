@@ -365,3 +365,44 @@ In the clean fixed-seed/random campaigns, the eight state counts are:
 `strict global config without hooks` 5/7. These finite results establish the
 local check's sensitivity; they do not repair or certify upstream's general
 constructed-history association.
+
+
+## Failure-fidelity correction after `89da1607b`
+
+A constructed-state completeness verdict must not claim that an earlier
+recorded checkpoint already established a missing later observation. The
+pinned framework preserves a driver's error as primary unless the check
+reports a violation at a checkpoint already present in its partial trace.
+The first reach repair used the gate's recorded `completed` checkpoint,
+which could give the wrong priority when a driver failed before recording
+its required states.
+
+An executable native framework control reuses the actual gate property's
+history grammar, second constructed builder, independent model, and shared
+check. Only its driver is wrapped: the real Git/Node gate driver completes,
+its wrapper forwards the actual CLI report, suppresses reach observations,
+and then throws `Error: original gate driver crash`. Both controls record
+`{status: 1, added: ["packages/db/tests/a-oracle.test.ts"]}` from the actual CLI.
+On unchanged `89da1607b`, the named `constructed reach` violation at
+`completed` becomes primary, with the injected driver crash only as cause.
+
+The repair reports missing construction obligations at the virtual,
+unrecorded `constructed states` checkpoint. Repeating the same native control
+now preserves the original driver error as primary. Both injected-fault
+Vitest runs intentionally fail; the GREEN result is the explicit comparison
+that the real CLI completed and only the repaired run preserves the original
+error instead of an `OracleViolation`. This is failure-fidelity evidence,
+not a product-law mutant kill. The existing report comparison still runs
+first and reports actual report mismatches at `completed`.
+
+No history, campaign, property ID, run budget, production gate, or installed
+framework package changes. The earlier generated-only RED at `completed`
+is evidence for its recorded parent source; the current completeness check
+uses `constructed states`.
+
+After the checkpoint correction, all six gate tests pass with both original
+20-history campaigns. The guarded replay command above passes again and
+records exactly one execution at seed `20261110`, path `8:0:0:0:0:0`.
+The permanent omitted-state and always-accept-report calibrations both pass;
+the former now exercises the named violation at the virtual checkpoint, while
+the latter retains the semantic comparison's priority.

@@ -207,9 +207,11 @@ function checkReport(_history, trace, expected) {
       .map(({ value }) => value),
   )
   const missing = expected.requiredStates.filter((state) => !reached.has(state))
+  // Completeness is known only after the driver returns. An unrecorded
+  // checkpoint keeps a driver failure primary when it cuts this trace short.
   return missing.length > 0
     ? violation(
-        `completed`,
+        `constructed states`,
         `constructed history did not enter ${missing.join(`, `)}`,
         `constructed reach`,
       )
