@@ -1174,25 +1174,6 @@ const coverageLaw = {
   owner: `SQLite persistence`,
 }
 oracleProperty({
-  id: PROPERTY,
-  law: coverageLaw,
-  histories: {
-    arbitrary: historyArb,
-    runs: RUNS,
-    fixedSeeds: [2102],
-    measured: REACH_STATES,
-  },
-  resolve: (history) => ({ history }),
-  model: recordedAssertionJudgment,
-  driver: (plan, observe) =>
-    recordAssertionJudgment(`demand coverage`, plan, observe, () => {
-      quietConsole()
-      return checkHistory(plan.history, observe)
-    }),
-  check: forwardAssertionJudgment,
-  timeout: campaignTimeoutMs,
-})
-oracleProperty({
   id: REQUIRED_PROPERTY,
   law: coverageLaw,
   histories: {
@@ -1233,6 +1214,25 @@ oracleProperty({
   timeout: campaignTimeoutMs,
 })
 
+oracleProperty({
+  id: PROPERTY,
+  law: coverageLaw,
+  histories: {
+    arbitrary: historyArb,
+    runs: RUNS,
+    fixedSeeds: [2102],
+    measured: REACH_STATES,
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`demand coverage`, plan, observe, () => {
+      quietConsole()
+      return checkHistory(plan.history, observe)
+    }),
+  check: forwardAssertionJudgment,
+  timeout: campaignTimeoutMs,
+})
 // The release law: a released load owns no wait, so the source Collection is
 // not loading a subset after the release, nor after the wait would have
 // passed.
