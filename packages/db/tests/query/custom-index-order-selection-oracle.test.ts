@@ -55,6 +55,7 @@ import {
   expectedMaterializedIndexes,
   orderedReads,
 } from './custom-index-order-selection-model-oracle.js'
+import type { MaterializedRow } from './custom-index-order-selection-model-oracle.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 
@@ -428,7 +429,7 @@ async function runMaterializedIndexHistory(
     } else {
       await cached!.preload()
       oracleAssertion(`output indexing configuration`, () =>
-        expectIndexingConfiguration(cached, settings),
+        expectIndexingConfiguration(cached!, settings),
       )
       for (const updated of [false, true]) {
         if (updated) {

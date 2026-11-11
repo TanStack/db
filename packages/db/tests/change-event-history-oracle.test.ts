@@ -30,7 +30,12 @@ import {
   expectedRowsAfter,
   perKeyEventTrace,
 } from './change-event-history-model-oracle.js'
-import type { Key, Op, TestItem } from './change-event-history-fixture.js'
+import type {
+  Key,
+  Op,
+  OpKind,
+  TestItem,
+} from './change-event-history-fixture.js'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'

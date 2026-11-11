@@ -190,7 +190,12 @@ oracleProperty({
 // comparison as the generated campaign; no hand-authored expected answer.
 // The recipe grammar cannot take a resolved history back, so it is one
 // enumerated property.
-oracleProperty({
+// The shared check takes any plan, so the history type is given here rather
+// than inferred from it.
+oracleProperty<
+  { name: string; worlds: DistinctBucketHistory },
+  ReadonlyArray<string>
+>({
   id: `ivm.distinct-representatives-fixed`,
   law: cell0.law,
   owns: [`src/operators/distinct.ts#distinct`],

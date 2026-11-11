@@ -23,6 +23,8 @@ const config = defineConfig({
 
         `tests/collection-setup-reopen-oracle.test.ts`,
         `tests/persisted-demand-coverage-campaign-oracle.test.ts`,
+        `tests/sync-metadata-session-persisted-oracle.test.ts`,
+        `tests/sync-metadata-session-sqlite-oracle.test.ts`,
         `tests/shared-logical-scheduling-oracle.test.ts`,
         `tests/persisted-reload-replacement-oracle.test.ts`,
         `tests/persisted-readiness-oracle.test.ts`,

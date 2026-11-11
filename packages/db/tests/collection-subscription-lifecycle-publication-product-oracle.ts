@@ -7,7 +7,10 @@
  * These definitions moved here unchanged so that the ordinary test can check
  * the product's size without importing the oracle test file.
  */
-import type { LifecycleCommand } from './collection-subscription-lifecycle-grammar-oracle.js'
+import type {
+  DemandName,
+  LifecycleCommand,
+} from './collection-subscription-lifecycle-grammar-oracle.js'
 import type {
   PublicationPhase,
   Row,

@@ -19,6 +19,8 @@ export const properties: ReadonlyArray<string> = [
   `persisted-demand-coverage.next-page`,
   `persisted-demand-coverage.storage-fault-sweep`,
   `persisted-demand-coverage.release-sweep`,
+  `sync-metadata-session.persisted-fixed`,
+  `sync-metadata-session.sqlite-seed-reinsert-reload-replay`,
   `browser.shared-driver-fairness.neutral`,
   `browser.shared-driver-fairness.persist-storm`,
   `browser.shared-driver-fairness.persist-first`,
@@ -64,6 +66,16 @@ export const properties: ReadonlyArray<string> = [
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-persisted-oracle.test.ts`,
+    `sync-metadata-session`,
+    `persisted-fixed`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-oracle.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-seed-reinsert-reload-replay`,
+  ],
   [
     `browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts`,
     `opfs`,
