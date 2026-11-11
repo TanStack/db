@@ -268,5 +268,9 @@ oracleProperty({
       mirrorThroughReconnect(plan.mirror),
     ),
   check: forwardAssertionJudgment,
-  timeout: 45000,
+  // Each history's own test takes a few seconds. The framework's determinism
+  // test runs every history twice in one test, against a ledger that each
+  // run extends, so it needs the time of twelve histories over a growing
+  // ledger (45 s timed out in CI).
+  timeout: 180_000,
 })
