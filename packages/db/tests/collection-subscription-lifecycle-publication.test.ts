@@ -16,6 +16,14 @@ import {
   cloneRow,
   normalizePublicationOrder,
 } from './collection-subscription-lifecycle-publication-support'
+import { deferralCleanupHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
+import {
+  publicationControlCases,
+  publicationProductCases,
+  replacementOrderingCases,
+  replacementRetirementCases,
+  successfulReplacementCases,
+} from './collection-subscription-lifecycle-publication-product-oracle.js'
 import type {
   PublicationChange,
   Row,
@@ -865,4 +873,25 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       }
     },
   )
+})
+
+// Grammar-size checks of the histories that the row-publication oracle
+// replays. They test test code, so they live outside the oracle file.
+describe(`CollectionSubscription lifecycle publication grammar`, () => {
+  it(`reconstructs every bounded deferral cleanup history`, () => {
+    expect(deferralCleanupHistories).toHaveLength(32)
+    expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
+      32,
+    )
+  })
+  it(`defines all 288 unique row-publication lifecycle cells`, () => {
+    expect(publicationProductCases).toHaveLength(288)
+    expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
+      288,
+    )
+    expect(successfulReplacementCases).toHaveLength(32)
+    expect(replacementOrderingCases).toHaveLength(6)
+    expect(replacementRetirementCases).toHaveLength(46)
+    expect(publicationControlCases).toHaveLength(204)
+  })
 })

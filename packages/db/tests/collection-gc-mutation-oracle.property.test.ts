@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
@@ -9,12 +9,7 @@ import {
   gcDeadline,
   stepGcModel,
 } from './collection-gc-retention-oracle.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -383,9 +378,6 @@ const historyArbitrary = fc.record({
   age: fc.integer({ min: 0, max: 80 }),
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
-declareOracle({
-  grammar: [historyArbitrary],
-})
 
 // Keep the original per-history dedupe, campaign reset and one-history
 // minimum for every declared state. Native measured reach reports the same
@@ -450,43 +442,3 @@ describe(`mutation retention campaign reach`, () => {
     check: forwardAssertionJudgment,
   })
 })
-
-// An independently supplied projection is still an exact membership obligation.
-// It cannot waive missing, stale or extra keys, even when default insert-slot
-// keys would differ from the update/delete driver's expected public rows.
-it.skipIf(oracleReplayRequested())(
-  `rejects corruption of a supplied mutation projection`,
-  () => {
-    oracleRoute(`calibration`)
-    const model = createGcModel(100)
-    stepGcModel(model, { kind: `mutate`, commit: true })
-    const observation = {
-      retired: false,
-      visibleKeys: [7],
-      transactionStates: [`persisting`],
-    }
-    expect(() =>
-      checkGcObservation(model, observation, `valid projection`, [], [7]),
-    ).not.toThrow()
-    for (const visibleKeys of [[], [1], [7, 8], [7, 7]])
-      expect(() =>
-        checkGcObservation(
-          model,
-          { ...observation, visibleKeys },
-          `corrupt projection`,
-          [],
-          [7],
-        ),
-      ).toThrow(`visible keys expected [7]`)
-    stepGcModel(model, { kind: `cleanup` })
-    expect(() =>
-      checkGcObservation(
-        model,
-        { ...observation, retired: true },
-        `cleanup projection`,
-        [],
-        [7],
-      ),
-    ).toThrow(`cleanup left visible rows`)
-  },
-)

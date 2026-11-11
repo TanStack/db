@@ -1,14 +1,9 @@
 import fc from 'fast-check'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -888,10 +883,6 @@ const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
   { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
 
-declareOracle({
-  grammar: [boundaryHistoryArbitrary],
-})
-
 // Preserve the original campaign-local counts: one hit per history and
 // every one of the 33 existing states reached at least once per campaign.
 describe(`GC boundary campaign reach`, () => {
@@ -1078,10 +1069,25 @@ const boundaryExamples: Array<{ name: string; history: BoundaryHistory }> = [
     },
   },
 ]
-it.skipIf(oracleReplayRequested()).each(boundaryExamples)(
-  `reconstructs $name`,
-  async ({ history }) => {
-    oracleRoute(`fixed history`)
-    await runBoundaryHistory(history)
+// The generated grammar builds its histories with `.map`, so it cannot take
+// these traces back as fixed histories. They run as one enumerated property
+// through the same driver and comparison; it stands aside during a replay.
+const boundaryFixedPropertyName = `collection-lifecycle.gc-retention-boundaries-fixed`
+oracleProperty({
+  id: boundaryFixedPropertyName,
+  law: {
+    statement: `Collection retention follows independently modeled logical holds, release and handoff deadlines, and controlled host idle opportunities across transaction and cleanup phases.`,
+    authority: `BaseCollectionConfig.gcTime and the shared GC retention oracle's maintainer decisions`,
+    limits: `The named review traces that the generated grammar cannot take back; each is replayed through the same driver and comparison.`,
   },
-)
+  owns: [`src/collection/lifecycle.ts`],
+  histories: boundaryExamples,
+  label: ({ name }) => `reconstructs ${name}`,
+  resolve: (example) => ({ history: example.history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`Collection GC retention`, plan, observe, () =>
+      runBoundaryHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})

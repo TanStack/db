@@ -1,8 +1,7 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import { oracleProperty, oracleRoute, pass, violation } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
+import { oracleProperty, pass, violation } from './oracle-config'
 import { resetCleanupQueue } from './utils'
 import type { Observation, Verdict } from './oracle-config'
 
@@ -124,11 +123,6 @@ function expectQueueState(
       .sort(),
   ).toEqual([...model.errors].sort())
 }
-
-declareOracle({
-  check: [expectQueueState],
-  model: [stepModel],
-})
 
 type QueueObservation = {
   deliveries: Array<Delivery>
@@ -286,19 +280,6 @@ async function driveHistory(
   if (failed) throw primaryFailure
 }
 
-// Fixed wrong-driver controls retain their original assertion boundary.
-async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
-  const expected = modelHistory(actions)
-  let cut = 0
-  await driveHistory(
-    actions,
-    (_checkpoint, actual) => {
-      expectCut(actual, expected[cut++]!)
-    },
-    fault,
-  )
-}
-
 const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   fc.record({
     kind: fc.constant(`schedule` as const),
@@ -335,6 +316,16 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 // clock. The fixed seed and seedless campaigns use the same property and run
 // budget. The shared oracle config
 // accepts a seed and shrink path for direct replay of the seedless grammar.
+// The faulty-queue controls below run this history: a replacement, a
+// cancellation, and one advance past both deadlines.
+const faultControlHistory: Array<Action> = [
+  { kind: `schedule`, key: 0, delay: 1, throws: false },
+  { kind: `schedule`, key: 0, delay: 3, throws: false },
+  { kind: `schedule`, key: 1, delay: 2, throws: false },
+  { kind: `cancel`, key: 1 },
+  { kind: `advance`, elapsed: 3 },
+]
+
 const fixedHistories: Array<[Array<Action>]> = [
   [
     [
@@ -396,32 +387,30 @@ oracleProperty({
     arbitrary: fc.array(actionArbitrary, { maxLength: 50 }),
     runs: 100,
     fixedSeeds: [20260913],
-    fixed: fixedHistories.map(([history], index) => ({
-      name: `appointment regression ${index + 1}`,
-      history,
-    })),
+    // The control history comes first, so each faulty-queue calibration
+    // tries it before any other candidate.
+    fixed: [
+      { name: `faulty queue control`, history: faultControlHistory },
+      ...fixedHistories.map(([history], index) => ({
+        name: `appointment regression ${index + 1}`,
+        history,
+      })),
+    ],
   },
   model: modelHistory,
   driver: (actions, observe) => driveHistory(actions, observe),
   check: checkHistory,
+  // These controls prove that the oracle rejects four plausible wrong queues.
+  // The check reports law `appointment histories` only for an AssertionError
+  // at a recorded cut, the rejection that each original control required.
+  calibrations: (
+    [`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const
+  ).map((fault) => ({
+    name: `rejects the ${fault} faulty queue`,
+    law: `appointment histories`,
+    driver: (
+      actions: Array<Action>,
+      observe: (checkpoint: string, value: unknown) => void,
+    ) => driveHistory(actions, observe, fault),
+  })),
 })
-
-// These controls prove that the oracle rejects four plausible wrong queues.
-it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(
-  `rejects the %s faulty queue`,
-  async (fault) => {
-    oracleRoute(`calibration`)
-    await expect(
-      runHistory(
-        [
-          { kind: `schedule`, key: 0, delay: 1, throws: false },
-          { kind: `schedule`, key: 0, delay: 3, throws: false },
-          { kind: `schedule`, key: 1, delay: 2, throws: false },
-          { kind: `cancel`, key: 1 },
-          { kind: `advance`, elapsed: 3 },
-        ],
-        fault,
-      ),
-    ).rejects.toMatchObject({ name: `AssertionError` })
-  },
-)

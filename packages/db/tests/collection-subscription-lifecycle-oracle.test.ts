@@ -1,5 +1,5 @@
 import { fc } from '@fast-check/vitest'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -12,9 +12,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
-  oracleRoute,
 } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
@@ -28,26 +26,6 @@ import {
   subscriberResumeRetirementHistories,
   subscriberStartCleanupHistories,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import {
-  acquisitionCellDefinitions,
-  acquisitionEntries,
-  acquisitionInteractionCauses,
-  acquisitionInteractionCellDefinitions,
-  acquisitionLifecycleStates,
-  acquisitionPhases,
-  excludedAcquisitionCells,
-  failureScenarios,
-  legalAcquisitionCells,
-  releaseScenarios,
-  restartScenarios,
-  startOutcomes,
-  startReentries,
-  startScenarios,
-} from './collection-subscription-lifecycle-cell-support.js'
-import type {
-  AcquisitionCell,
-  AcquisitionInteractionCell,
-} from './collection-subscription-lifecycle-cell-support.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 /**
@@ -61,9 +39,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
  *
  * The cell witnesses live in collection-subscription-lifecycle-cells.test.ts.
  * Each case there declares the cells it may reach, and the coverage audit in
- * that file fails if a legal cell was never observed. This file keeps the
- * grammar calibrations, the model checks, and the generated properties that
- * run the scenario drivers. Counts, signals, errors, readiness, owners, and
+ * that file fails if a legal cell was never observed, and that file also
+ * checks the size of the cell table and scenario grammar. This file keeps the
+ * model checks and the properties that run the scenario drivers. Counts, signals, errors, readiness, owners, and
  * rows are checked separately.
  *
  * Release law: an `unloadSubset` that throws is an adapter bug. The
@@ -812,37 +790,13 @@ function expectedThreeGenerationSettlement(
   }
 }
 
-declareOracle({
-  check: [runAsyncRestartScenario],
-  model: [
-    modelSubscriberResumeRetirement,
-    startupRetirementModel,
-    expectedUnloadsAfterUnavailableWait,
-    expectedLoadsAfterCleanupEndsWait,
-    expectedStatusAfterQueuedCancel,
-    expectedUncaughtReleaseErrors,
-    expectedSubscriberCountAfterRelease,
-    expectedThreeGenerationSettlement,
-  ],
-  grammar: [
-    acquisitionCellDefinitions,
-    acquisitionInteractionCellDefinitions,
-    startScenarios,
-    failureScenarios,
-    releaseScenarios,
-    restartScenarios,
-    asyncRestartScenarioArbitrary,
-  ],
-})
-
 /**
  * Exhaust the synchronous adapter-start boundary before adding more runtime
  * special cases. Logical demand is visible during this callback, but a
  * physical acquisition and its lease exist only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
-  it(`executes every required async restart regime`, async () => {
-    oracleRoute(`case`)
+  const runRequiredAsyncRestartRegimes = async () => {
     const reach = new Set<string>()
     for (const scenario of asyncRestartCoverageScenarios) {
       for (const label of await runAsyncRestartScenario(scenario)) {
@@ -867,212 +821,185 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     oracleAssertion('existing comparison at 818', () =>
       expect(required.filter((label) => !reach.has(label))).toEqual([]),
     )
-  })
-
-  it(`covers every finite start, failure-delivery, and release cell`, () => {
-    oracleRoute(`case`)
-    oracleAssertion('existing comparison at 823', () =>
-      expect(
-        new Set(
-          startScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
-        ),
-      ).toHaveLength(startOutcomes.length * startReentries.length),
-    )
-    oracleAssertion('existing comparison at 828', () =>
-      expect(
-        new Set(
-          failureScenarios.map(
-            ({ outcome, reentry }) => `${outcome}:${reentry}`,
-          ),
-        ),
-      ).toHaveLength(2 * startReentries.length),
-    )
-    oracleAssertion('existing comparison at 833', () =>
-      expect(
-        new Set(
-          releaseScenarios.map(
-            ({ outcome, reentry }) => `${outcome}:${reentry}`,
-          ),
-        ),
-      ).toHaveLength(2 * 4),
-    )
-    oracleAssertion('existing comparison at 838', () =>
-      expect(
-        new Set(
-          restartScenarios.map(
-            ({ outcome, reentry }) => `${outcome}:${reentry}`,
-          ),
-        ),
-      ).toHaveLength(4 * 5),
-    )
-  })
-
-  it(`accounts for every acquisition phase and entry pair`, () => {
-    oracleRoute(`case`)
-    const allCells = new Set<AcquisitionCell>(
-      acquisitionPhases.flatMap((phase) =>
-        acquisitionEntries.map((entry) => `${phase}:${entry}` as const),
-      ),
-    )
-    oracleAssertion('existing comparison at 852', () =>
-      expect(
-        new Set([...legalAcquisitionCells, ...excludedAcquisitionCells.keys()]),
-      ).toEqual(allCells),
-    )
-  })
-
-  it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
-    oracleRoute(`case`)
-    const allCells = new Set<AcquisitionInteractionCell>(
-      acquisitionLifecycleStates.flatMap((state) =>
-        acquisitionInteractionCauses.map(
-          (cause) => `${state}:${cause}` as const,
-        ),
-      ),
-    )
-    oracleAssertion('existing comparison at 866', () =>
-      expect(
-        new Set(Object.keys(acquisitionInteractionCellDefinitions)),
-      ).toEqual(allCells),
-    )
-  })
-
-  it.each(
-    ([false, true] as const).flatMap((restart) =>
-      (
-        [`loading`, `ready`, `adapter-throw`, `ready-effect-throw`] as const
-      ).map((entry) => ({ restart, entry })),
-    ),
-  )(
-    `retires startup at $entry with nested restart=$restart`,
-    async ({ entry, restart }) => {
-      oracleRoute(`case`)
-      const failure = new Error(`obsolete startup failed`)
-      const cleanups: Array<number> = []
-      const loads: Array<number> = []
-      const unloads: Array<number> = []
-      let syncRunGeneration = -1
-      let retire = false
-      let nestedRestartError: unknown
-      const collection = createOnDemandCollection<{ id: string }>({
-        sync: {
-          sync: ({ markReady }) => {
-            const ownSyncRunGeneration = ++syncRunGeneration
-            markReady()
-            if (ownSyncRunGeneration === 1 && entry === `adapter-throw`) {
-              throw failure
-            }
-            return {
-              loadSubset: () => {
-                loads.push(ownSyncRunGeneration)
-                return true
-              },
-              unloadSubset: () => unloads.push(ownSyncRunGeneration),
-              cleanup: () => {
-                cleanups.push(ownSyncRunGeneration)
-              },
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      let removeListener = () => {}
-      try {
-        await collection.cleanup()
-        const retireSyncRun = () => {
-          if (!retire) return
-          retire = false
-          void collection.cleanup()
-          if (restart) {
-            try {
-              collection.startSyncImmediate()
-            } catch (error) {
-              nestedRestartError = error
-            }
-          }
-          if (entry === `ready-effect-throw`) throw failure
-        }
-        removeListener =
-          entry === `ready-effect-throw`
-            ? collection.onFirstReady(retireSyncRun)
-            : collection.on(
-                entry === `loading` ? `status:loading` : `status:ready`,
-                retireSyncRun,
-              )
-        retire = true
-        if (entry === `adapter-throw` || entry === `ready-effect-throw`) {
-          oracleAssertion('existing comparison at 937', () =>
-            expect(() => collection.startSyncImmediate()).toThrow(failure),
-          )
-        } else {
-          collection.startSyncImmediate()
-        }
-        await flushPromises()
-
-        const {
-          cleanupStartedDuringSyncEntry,
-          restartSucceeded,
-          returnsObsoleteCleanup,
-        } = startupRetirementModel(entry, restart)
-        if (restart && cleanupStartedDuringSyncEntry) {
-          oracleAssertion('existing comparison at 949', () =>
-            expect(nestedRestartError).toMatchObject({
-              name: `CollectionStateError`,
-              message: expect.stringContaining(`after cleanup() completes`),
-            }),
-          )
-        } else {
-          oracleAssertion('existing comparison at 954', () =>
-            expect(nestedRestartError).toBeUndefined(),
-          )
-        }
-        oracleAssertion('existing comparison at 956', () =>
-          expect(collection.status).toBe(
-            restartSucceeded ? `ready` : `cleaned-up`,
-          ),
-        )
-        oracleAssertion('existing comparison at 959', () =>
-          expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0]),
-        )
-        oracleAssertion('existing comparison at 960', () =>
-          expect(syncRunGeneration).toBe(
-            entry === `loading` ? (restart ? 1 : 0) : 1,
-          ),
-        )
-
-        if (restartSucceeded) {
-          subscription.requestSnapshot({
-            where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
-          })
-          oracleAssertion('existing comparison at 968', () =>
-            expect(loads).toEqual([syncRunGeneration]),
-          )
-          subscription.unsubscribe()
-          oracleAssertion('existing comparison at 970', () =>
-            expect(unloads).toEqual([syncRunGeneration]),
-          )
-        } else {
-          oracleAssertion('existing comparison at 972', () =>
-            expect(loads).toEqual([]),
-          )
-          oracleAssertion('existing comparison at 973', () =>
-            expect(unloads).toEqual([]),
-          )
-        }
-      } finally {
-        removeListener()
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.async-restart-regimes`,
+    law: {
+      statement: `Demand settlements are fenced by the sync run that owns their physical acquisition, and the async restart coverage scenarios together execute every required regime.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the lifecycle grammar's existing model`,
+      limits: `The four async restart coverage scenarios, replayed in order through the shared driver.`,
     },
+    owns: [`src/collection/subscription.ts`],
+    histories: [`executes every required async restart regime`] as const,
+    label: (name) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.async-restart-regimes`,
+        plan,
+        observe,
+        runRequiredAsyncRestartRegimes,
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  const startupRetirementCases = ([false, true] as const).flatMap((restart) =>
+    ([`loading`, `ready`, `adapter-throw`, `ready-effect-throw`] as const).map(
+      (entry) => ({ restart, entry }),
+    ),
   )
+  const runStartupRetirementCase = async ({
+    entry,
+    restart,
+  }: (typeof startupRetirementCases)[number]) => {
+    const failure = new Error(`obsolete startup failed`)
+    const cleanups: Array<number> = []
+    const loads: Array<number> = []
+    const unloads: Array<number> = []
+    let syncRunGeneration = -1
+    let retire = false
+    let nestedRestartError: unknown
+    const collection = createOnDemandCollection<{ id: string }>({
+      sync: {
+        sync: ({ markReady }) => {
+          const ownSyncRunGeneration = ++syncRunGeneration
+          markReady()
+          if (ownSyncRunGeneration === 1 && entry === `adapter-throw`) {
+            throw failure
+          }
+          return {
+            loadSubset: () => {
+              loads.push(ownSyncRunGeneration)
+              return true
+            },
+            unloadSubset: () => unloads.push(ownSyncRunGeneration),
+            cleanup: () => {
+              cleanups.push(ownSyncRunGeneration)
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let removeListener = () => {}
+    try {
+      await collection.cleanup()
+      const retireSyncRun = () => {
+        if (!retire) return
+        retire = false
+        void collection.cleanup()
+        if (restart) {
+          try {
+            collection.startSyncImmediate()
+          } catch (error) {
+            nestedRestartError = error
+          }
+        }
+        if (entry === `ready-effect-throw`) throw failure
+      }
+      removeListener =
+        entry === `ready-effect-throw`
+          ? collection.onFirstReady(retireSyncRun)
+          : collection.on(
+              entry === `loading` ? `status:loading` : `status:ready`,
+              retireSyncRun,
+            )
+      retire = true
+      if (entry === `adapter-throw` || entry === `ready-effect-throw`) {
+        oracleAssertion('existing comparison at 937', () =>
+          expect(() => collection.startSyncImmediate()).toThrow(failure),
+        )
+      } else {
+        collection.startSyncImmediate()
+      }
+      await flushPromises()
+
+      const {
+        cleanupStartedDuringSyncEntry,
+        restartSucceeded,
+        returnsObsoleteCleanup,
+      } = startupRetirementModel(entry, restart)
+      if (restart && cleanupStartedDuringSyncEntry) {
+        oracleAssertion('existing comparison at 949', () =>
+          expect(nestedRestartError).toMatchObject({
+            name: `CollectionStateError`,
+            message: expect.stringContaining(`after cleanup() completes`),
+          }),
+        )
+      } else {
+        oracleAssertion('existing comparison at 954', () =>
+          expect(nestedRestartError).toBeUndefined(),
+        )
+      }
+      oracleAssertion('existing comparison at 956', () =>
+        expect(collection.status).toBe(
+          restartSucceeded ? `ready` : `cleaned-up`,
+        ),
+      )
+      oracleAssertion('existing comparison at 959', () =>
+        expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0]),
+      )
+      oracleAssertion('existing comparison at 960', () =>
+        expect(syncRunGeneration).toBe(
+          entry === `loading` ? (restart ? 1 : 0) : 1,
+        ),
+      )
+
+      if (restartSucceeded) {
+        subscription.requestSnapshot({
+          where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
+        })
+        oracleAssertion('existing comparison at 968', () =>
+          expect(loads).toEqual([syncRunGeneration]),
+        )
+        subscription.unsubscribe()
+        oracleAssertion('existing comparison at 970', () =>
+          expect(unloads).toEqual([syncRunGeneration]),
+        )
+      } else {
+        oracleAssertion('existing comparison at 972', () =>
+          expect(loads).toEqual([]),
+        )
+        oracleAssertion('existing comparison at 973', () =>
+          expect(unloads).toEqual([]),
+        )
+      }
+    } finally {
+      removeListener()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.startup-retirement`,
+    law: {
+      statement: `Startup retirement follows the independent startup model: a nested restart succeeds only when no cleanup started during the sync entry, and a ready entry returns the obsolete sync run's cleanup resource.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and startupRetirementModel.`,
+      limits: `The four sync entry points, with and without a nested restart.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: startupRetirementCases,
+    label: (row) =>
+      `retires startup at ${row.entry} with nested restart=${row.restart}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.startup-retirement`,
+        plan,
+        observe,
+        () => runStartupRetirementCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // A cleaned-up attempt recovers with a restart. An errored attempt cannot
   // recover in place; the test above owns its demand.
-  it.each(
-    ([`cleaned-up`] as const).flatMap((unavailable) =>
+  const unavailableDemandCases = ([`cleaned-up`] as const).flatMap(
+    (unavailable) =>
       (
         [
           `return`,
@@ -1099,640 +1026,743 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           ).map((entry) => ({ unavailable, outcome, phase, entry })),
         ),
       ),
-    ),
-  )(
-    `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
-    async ({ outcome, phase, entry }) => {
-      oracleRoute(`case`)
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const transport = createDeferred<void>()
-      const failure = new Error(`recovery acquisition failed`)
-      const signal = new AbortController()
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const rows = new Map<string | number, { id: string }>()
-      let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-      const collection = createOnDemandCollection<{ id: string }>({
-        sync: {
-          sync: (next) => {
-            operations = next
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                if (outcome === `throw`) throw failure
-                operations.begin()
-                operations.write({ type: `insert`, value: { id: `row` } })
-                operations.commit()
-                return outcome === `return` ? true : transport.promise
-              },
-              unloadSubset: (options) => unloads.push(options),
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) rows.delete(change.key)
-            else rows.set(change.key, change.value)
+  )
+  const runUnavailableDemandCase = async ({
+    outcome,
+    phase,
+    entry,
+  }: (typeof unavailableDemandCases)[number]) => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const transport = createDeferred<void>()
+    const failure = new Error(`recovery acquisition failed`)
+    const signal = new AbortController()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const rows = new Map<string | number, { id: string }>()
+    let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
+    const collection = createOnDemandCollection<{ id: string }>({
+      sync: {
+        sync: (next) => {
+          operations = next
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (outcome === `throw`) throw failure
+              operations.begin()
+              operations.write({ type: `insert`, value: { id: `row` } })
+              operations.commit()
+              return outcome === `return` ? true : transport.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
           }
         },
-        { includeInitialState: false },
+      },
+    })
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) rows.delete(change.key)
+          else rows.set(change.key, change.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    let result: true | Promise<void> | undefined
+    let release: (() => void) | undefined
+    const settlements: Array<unknown> = []
+    const visibleOnSuccess: Array<Array<string>> = []
+    let callbacks = 0
+    try {
+      if (entry === `limited`) {
+        subscription.setOrderByIndex(
+          collection.createIndex((row) => row.id, { indexType: BTreeIndex }),
+        )
+      }
+      await collection.cleanup()
+      const onLoadSubsetResult = (
+        value: true | Promise<void>,
+        _options: LoadSubsetOptions,
+        releaseDemand?: () => void,
+      ) => {
+        callbacks++
+        result = value
+        release = releaseDemand
+        if (value instanceof Promise)
+          void value.then(
+            () => {
+              visibleOnSuccess.push([...rows.values()].map(({ id }) => id))
+              settlements.push(`success`)
+            },
+            (error: unknown) => settlements.push(error),
+          )
+      }
+      if (entry === `snapshot`) {
+        subscription.requestSnapshot({
+          where,
+          signal: signal.signal,
+          onLoadSubsetResult,
+        })
+      } else {
+        subscription.requestLimitedSnapshot({
+          orderBy: [
+            {
+              expression: new PropRef([`id`]),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ],
+          limit: 1,
+          onLoadSubsetResult,
+        })
+      }
+      // Production callers copy the result as soon as requestSnapshot returns.
+      oracleAssertion('existing comparison at 1101', () =>
+        expect(callbacks).toBe(1),
       )
-      let result: true | Promise<void> | undefined
-      let release: (() => void) | undefined
-      const settlements: Array<unknown> = []
-      const visibleOnSuccess: Array<Array<string>> = []
-      let callbacks = 0
-      try {
-        if (entry === `limited`) {
-          subscription.setOrderByIndex(
-            collection.createIndex((row) => row.id, { indexType: BTreeIndex }),
-          )
-        }
-        await collection.cleanup()
-        const onLoadSubsetResult = (
-          value: true | Promise<void>,
-          _options: LoadSubsetOptions,
-          releaseDemand?: () => void,
-        ) => {
-          callbacks++
-          result = value
-          release = releaseDemand
-          if (value instanceof Promise)
-            void value.then(
-              () => {
-                visibleOnSuccess.push([...rows.values()].map(({ id }) => id))
-                settlements.push(`success`)
-              },
-              (error: unknown) => settlements.push(error),
-            )
-        }
-        if (entry === `snapshot`) {
-          subscription.requestSnapshot({
-            where,
-            signal: signal.signal,
-            onLoadSubsetResult,
-          })
-        } else {
-          subscription.requestLimitedSnapshot({
-            orderBy: [
-              {
-                expression: new PropRef([`id`]),
-                compareOptions: { direction: `asc`, nulls: `first` },
-              },
-            ],
-            limit: 1,
-            onLoadSubsetResult,
-          })
-        }
-        // Production callers copy the result as soon as requestSnapshot returns.
-        oracleAssertion('existing comparison at 1101', () =>
-          expect(callbacks).toBe(1),
-        )
-        oracleAssertion('existing comparison at 1102', () =>
-          expect(result).toBeInstanceOf(Promise),
-        )
+      oracleAssertion('existing comparison at 1102', () =>
+        expect(result).toBeInstanceOf(Promise),
+      )
+      await flushPromises()
+      oracleAssertion('existing comparison at 1104', () =>
+        expect(settlements).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1105', () =>
+        expect(loads).toEqual([]),
+      )
+      const recover = () => {
+        collection.startSyncImmediate()
+        operations.markReady()
+      }
+      if (phase === `during`) {
+        recover()
         await flushPromises()
-        oracleAssertion('existing comparison at 1104', () =>
-          expect(settlements).toEqual([]),
+        oracleAssertion('existing comparison at 1113', () =>
+          expect(loads).toHaveLength(1),
         )
-        oracleAssertion('existing comparison at 1105', () =>
-          expect(loads).toEqual([]),
-        )
-        const recover = () => {
-          collection.startSyncImmediate()
-          operations.markReady()
-        }
-        if (phase === `during`) {
-          recover()
-          await flushPromises()
-          oracleAssertion('existing comparison at 1113', () =>
-            expect(loads).toHaveLength(1),
+        if (outcome !== `return` && outcome !== `throw`) {
+          oracleAssertion('existing comparison at 1115', () =>
+            expect(settlements).toEqual([]),
           )
-          if (outcome !== `return` && outcome !== `throw`) {
-            oracleAssertion('existing comparison at 1115', () =>
-              expect(settlements).toEqual([]),
-            )
-            oracleAssertion('existing comparison at 1116', () =>
-              expect([...rows.values()]).toEqual([]),
-            )
-          }
-        }
-        if (outcome === `release`) release!()
-        else if (outcome === `unsubscribe`) subscription.unsubscribe()
-        else if (outcome === `cleanup`) await collection.cleanup()
-        else if (outcome === `abort`) signal.abort()
-        else if (outcome === `reject`) transport.reject(failure)
-        else if (outcome === `resolve`) transport.resolve()
-        await flushPromises()
-        if (outcome === `return` || outcome === `resolve`) {
-          oracleAssertion('existing comparison at 1127', () =>
-            expect(settlements).toEqual([`success`]),
-          )
-          oracleAssertion('existing comparison at 1128', () =>
-            expect(visibleOnSuccess).toEqual([[`row`]]),
-          )
-          oracleAssertion('existing comparison at 1129', () =>
-            expect([...rows.values()].map(({ id }) => id)).toEqual([`row`]),
-          )
-        } else if (outcome === `throw` || outcome === `reject`) {
-          oracleAssertion('existing comparison at 1131', () =>
-            expect(settlements).toHaveLength(1),
-          )
-          oracleAssertion('existing comparison at 1132', () =>
-            expect(settlements[0]).toBe(failure),
-          )
-          oracleAssertion('existing comparison at 1133', () =>
+          oracleAssertion('existing comparison at 1116', () =>
             expect([...rows.values()]).toEqual([]),
           )
-        } else {
-          oracleAssertion('existing comparison at 1135', () =>
-            expect(settlements).toEqual([
-              expect.objectContaining({ name: `AbortError` }),
-            ]),
+        }
+      }
+      if (outcome === `release`) release!()
+      else if (outcome === `unsubscribe`) subscription.unsubscribe()
+      else if (outcome === `cleanup`) await collection.cleanup()
+      else if (outcome === `abort`) signal.abort()
+      else if (outcome === `reject`) transport.reject(failure)
+      else if (outcome === `resolve`) transport.resolve()
+      await flushPromises()
+      if (outcome === `return` || outcome === `resolve`) {
+        oracleAssertion('existing comparison at 1127', () =>
+          expect(settlements).toEqual([`success`]),
+        )
+        oracleAssertion('existing comparison at 1128', () =>
+          expect(visibleOnSuccess).toEqual([[`row`]]),
+        )
+        oracleAssertion('existing comparison at 1129', () =>
+          expect([...rows.values()].map(({ id }) => id)).toEqual([`row`]),
+        )
+      } else if (outcome === `throw` || outcome === `reject`) {
+        oracleAssertion('existing comparison at 1131', () =>
+          expect(settlements).toHaveLength(1),
+        )
+        oracleAssertion('existing comparison at 1132', () =>
+          expect(settlements[0]).toBe(failure),
+        )
+        oracleAssertion('existing comparison at 1133', () =>
+          expect([...rows.values()]).toEqual([]),
+        )
+      } else {
+        oracleAssertion('existing comparison at 1135', () =>
+          expect(settlements).toEqual([
+            expect.objectContaining({ name: `AbortError` }),
+          ]),
+        )
+        oracleAssertion('existing comparison at 1138', () =>
+          expect(unloads).toEqual(
+            expectedUnloadsAfterUnavailableWait(phase, outcome, loads),
+          ),
+        )
+        if (phase === `before` && outcome !== `cleanup`) {
+          recover()
+          await flushPromises()
+          oracleAssertion('existing comparison at 1144', () =>
+            expect(loads).toEqual([]),
           )
-          oracleAssertion('existing comparison at 1138', () =>
-            expect(unloads).toEqual(
-              expectedUnloadsAfterUnavailableWait(phase, outcome, loads),
+        }
+        if (outcome === `cleanup`) {
+          // Cleanup ends this wait, not the surviving subscription's demand.
+          collection.startSyncImmediate()
+          operations.markReady()
+          await flushPromises()
+          oracleAssertion('existing comparison at 1151', () =>
+            expect(loads).toHaveLength(
+              expectedLoadsAfterCleanupEndsWait(phase),
             ),
           )
-          if (phase === `before` && outcome !== `cleanup`) {
-            recover()
-            await flushPromises()
-            oracleAssertion('existing comparison at 1144', () =>
-              expect(loads).toEqual([]),
-            )
-          }
-          if (outcome === `cleanup`) {
-            // Cleanup ends this wait, not the surviving subscription's demand.
-            collection.startSyncImmediate()
-            operations.markReady()
-            await flushPromises()
-            oracleAssertion('existing comparison at 1151', () =>
-              expect(loads).toHaveLength(
-                expectedLoadsAfterCleanupEndsWait(phase),
-              ),
-            )
-          }
-          // Non-cooperative late settlement cannot rewrite the observed outcome.
-          transport.resolve()
-          await flushPromises()
-          oracleAssertion('existing comparison at 1156', () =>
-            expect(settlements).toEqual([
-              expect.objectContaining({ name: `AbortError` }),
-            ]),
-          )
         }
-        oracleAssertion('existing comparison at 1160', () =>
-          expect(callbacks).toBe(1),
-        )
-      } finally {
+        // Non-cooperative late settlement cannot rewrite the observed outcome.
         transport.resolve()
-        subscription.unsubscribe()
-        await collection.cleanup()
+        await flushPromises()
+        oracleAssertion('existing comparison at 1156', () =>
+          expect(settlements).toEqual([
+            expect.objectContaining({ name: `AbortError` }),
+          ]),
+        )
       }
-    },
-  )
-
-  it.each(
-    ([`loading`, `ready`] as const).flatMap((phase) =>
-      ([`cleanup`, `release`, `unsubscribe`] as const).map((action) => ({
-        phase,
-        action,
-      })),
-    ),
-  )(
-    `cancels queued acquisition during $phase via $action`,
-    async ({ phase, action }) => {
-      oracleRoute(`case`)
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      let cancelOnEntry = false
-      const observed: Array<true | Promise<void>> = []
-      const collection = createOnDemandCollection<{ id: string }>({
-        id: `deferred-resume-cleanup`,
-        startSync: false,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: (options) => unloads.push(options),
-            }
-          },
-        },
-      })
-      oracleAssertion('existing comparison at 1201', () =>
-        expect(collection._deferSyncStart()).toBe(true),
+      oracleAssertion('existing comparison at 1160', () =>
+        expect(callbacks).toBe(1),
       )
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-        deferAcquisition: true,
-      })
-      const removeReadyListener = collection.on(`status:${phase}`, () => {
-        if (!cancelOnEntry) return
-        cancelOnEntry = false
-        if (action === `cleanup`) void collection.cleanup()
-        else if (action === `release`) subscription.releaseSnapshot(where)
-        else subscription.unsubscribe()
-      })
-      subscription.requestSnapshot({
-        where,
-        onLoadSubsetResult: (result) => observed.push(result),
-      })
-
-      try {
-        cancelOnEntry = true
-        subscription.resumeDeferredAcquisition()
-        await flushPromises()
-
-        oracleAssertion('existing comparison at 1223', () =>
-          expect(collection.status).toBe(
-            expectedStatusAfterQueuedCancel(action),
-          ),
-        )
-        oracleAssertion('existing comparison at 1224', () =>
-          expect(loads).toHaveLength(0),
-        )
-        oracleAssertion('existing comparison at 1225', () =>
-          expect(unloads).toHaveLength(0),
-        )
-        oracleAssertion('existing comparison at 1226', () =>
-          expect(observed).toHaveLength(1),
-        )
-        await oracleAssertion('existing comparison at 1227', () =>
-          expect(observed[0]).rejects.toMatchObject({ name: `AbortError` }),
-        )
-      } finally {
-        removeReadyListener()
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
+    } finally {
+      transport.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.unavailable-demand`,
+    law: {
+      statement: `Demand that waits on an unavailable sync run is observed synchronously, and only a release or unsubscribe during recovery retires the physical acquisition that recovery started.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and the unavailable-wait model.`,
+      limits: `A cleaned-up sync run, the bounded recovery outcomes and phases, and the snapshot and limited entries.`,
     },
+    owns: [`src/collection/subscription.ts`],
+    histories: unavailableDemandCases,
+    label: (row) =>
+      `observes unavailable demand synchronously: ${row.entry} / ${row.unavailable} / ${row.outcome} / ${row.phase}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.unavailable-demand`,
+        plan,
+        observe,
+        () => runUnavailableDemandCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  const queuedCancelCases = ([`loading`, `ready`] as const).flatMap((phase) =>
+    ([`cleanup`, `release`, `unsubscribe`] as const).map((action) => ({
+      phase,
+      action,
+    })),
   )
-
-  it.each(
-    ([`return`, `throw`] as const).flatMap((outcome) =>
-      [false, true].map((releaseSelf) => ({ outcome, releaseSelf })),
-    ),
-  )(
-    `retires only the acquired lease for aborted replay with unload=$outcome, releaseSelf=$releaseSelf`,
-    async ({ outcome, releaseSelf }) => {
-      oracleRoute(`case`)
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const controller = new AbortController()
-      const failure = new Error(`release failed`)
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const errors: Array<unknown> = []
-      const uncaught = captureMicrotaskErrors()
-      let releaseOwner = () => {}
-      let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
-      const collection = createCollection<{ id: string }, string>({
-        id: `aborted-replay-release`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (nextOperations) => {
-            operations = nextOperations
-            operations.markReady()
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: (options) => {
-                unloads.push(options)
-                if (unloads.length === 1) {
-                  if (releaseSelf) releaseOwner()
-                  if (outcome === `throw`) throw failure
-                }
-              },
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      releaseOwner = () => subscription.releaseSnapshot(where)
-      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
-      try {
-        subscription.requestSnapshot({ where, signal: controller.signal })
-        controller.abort()
-        operations.begin()
-        operations.truncate()
-        const receipt = operations.commit()
-        if (receipt !== true) await receipt
-        await flushPromises()
-
-        oracleAssertion('existing comparison at 1291', () =>
-          expect(loads).toHaveLength(1),
-        )
-        oracleAssertion('existing comparison at 1292', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        oracleAssertion('existing comparison at 1293', () =>
-          expect(unloads[0]).toBe(loads[0]),
-        )
-        oracleAssertion('existing comparison at 1294', () =>
-          expect(loads[0]!.signal!.aborted).toBe(true),
-        )
-        oracleAssertion('existing comparison at 1295', () =>
-          expect(subscription.status).toBe(`ready`),
-        )
-        // The release error is reported uncaught, not as a load error.
-        oracleAssertion('existing comparison at 1297', () =>
-          expect(errors).toEqual([]),
-        )
-        oracleAssertion('existing comparison at 1298', () =>
-          expect(uncaught.errors).toEqual(
-            expectedUncaughtReleaseErrors(outcome, failure),
-          ),
-        )
-
-        releaseOwner()
-        oracleAssertion('existing comparison at 1303', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        subscription.unsubscribe()
-        oracleAssertion('existing comparison at 1305', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        for (const options of unloads)
-          oracleAssertion('existing comparison at 1306', () =>
-            expect(options).toBe(loads[0]),
-          )
-        oracleAssertion('existing comparison at 1307', () =>
-          expect(loads).toHaveLength(1),
-        )
-        await Promise.resolve()
-        oracleAssertion('existing comparison at 1309', () =>
-          expect(uncaught.errors).toEqual(
-            expectedUncaughtReleaseErrors(outcome, failure),
-          ),
-        )
-      } finally {
-        uncaught.restore()
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
-  it.each(
-    ([`adapter`, `error-listener`] as const).flatMap((reentry) =>
-      [1, 2].map((failures) => ({ reentry, failures })),
-    ),
-  )(
-    `attempts release once across $reentry reentry with $failures configured failures`,
-    async ({ reentry, failures }) => {
-      oracleRoute(`case`)
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const failure = new Error(`physical release failed`)
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const errors: Array<unknown> = []
-      const nestedFailures: Array<unknown> = []
-      const uncaught = captureMicrotaskErrors()
-      let releaseOwner = () => {}
-      const collection = createOnDemandCollection<{ id: string }>({
-        id: `release-reentry-${reentry}-${failures}`,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: (options) => {
-                unloads.push(options)
-                if (unloads.length === 1 && reentry === `adapter`) {
-                  releaseOwner()
-                }
-                if (unloads.length <= failures) throw failure
-              },
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      releaseOwner = () => {
-        try {
-          subscription.unsubscribe()
-        } catch (error) {
-          nestedFailures.push(error)
-        }
-      }
-      subscription.on(`loadSubset:error`, ({ error }) => {
-        errors.push(error)
-        if (errors.length === 1 && reentry === `error-listener`) releaseOwner()
-      })
-      try {
-        subscription.requestSnapshot({ where })
-        let releaseError: unknown
-        try {
-          subscription.releaseSnapshot(where)
-        } catch (error) {
-          releaseError = error
-        }
-        oracleAssertion('existing comparison at 1379', () =>
-          expect(releaseError).toBe(undefined),
-        )
-        // Adapter reentry sees a retired acquisition, including after throw.
-        // A release error reaches no error listener, so that listener cannot
-        // reenter teardown.
-        oracleAssertion('existing comparison at 1383', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        // Only the adapter path reentered and unsubscribed.
-        oracleAssertion('existing comparison at 1385', () =>
-          expect(collection.subscriberCount).toBe(
-            expectedSubscriberCountAfterRelease(reentry),
-          ),
-        )
-        oracleAssertion('existing comparison at 1388', () =>
-          expect(errors).toEqual([]),
-        )
-        oracleAssertion('existing comparison at 1389', () =>
-          expect(nestedFailures).toEqual([]),
-        )
-        oracleAssertion('existing comparison at 1390', () =>
-          expect(() => subscription.unsubscribe()).not.toThrow(),
-        )
-        oracleAssertion('existing comparison at 1391', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        subscription.unsubscribe()
-        oracleAssertion('existing comparison at 1393', () =>
-          expect(unloads).toHaveLength(1),
-        )
-        oracleAssertion('existing comparison at 1394', () =>
-          expect(loads).toHaveLength(1),
-        )
-        for (const options of unloads)
-          oracleAssertion('existing comparison at 1395', () =>
-            expect(options).toBe(loads[0]),
-          )
-        await Promise.resolve()
-        // One attempt, one report, whatever the adapter would throw later.
-        oracleAssertion('existing comparison at 1398', () =>
-          expect(uncaught.errors).toEqual([failure]),
-        )
-      } finally {
-        uncaught.restore()
-        await collection.cleanup()
-        subscription.unsubscribe()
-      }
-    },
-  )
-
-  it.each(threeGenerationScenarios)(
-    `fences three sync-run generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
-    async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {
-      oracleRoute(`case`)
-      type Row = { id: string; version: number }
-      const obsolete = createDeferred<void>()
-      const current = createDeferred<void>()
-      void obsolete.promise.catch(() => {})
-      void current.promise.catch(() => {})
-      const obsoleteFailure = new Error(`obsolete sync run failed`)
-      const currentFailure = new Error(`current sync run failed`)
-      const visible = new Map<string | number, Row>()
-      const errors: Array<unknown> = []
-      const unloadSyncRunGenerations: Array<number> = []
-      let syncRunGeneration = -1
-
-      const collection = createOnDemandCollection<Row>({
-        id: `three-sync-run-generations-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
-        sync: {
-          sync: (operations) => {
-            syncRunGeneration++
-            const ownSyncRunGeneration = syncRunGeneration
-            operations.markReady()
-            return {
-              loadSubset: (options) => {
-                if (ownSyncRunGeneration === 0) {
-                  operations.begin()
-                  operations.write({
-                    type: `insert`,
-                    value: { id: `row`, version: 1 },
-                  })
-                  operations.commit(options.signal)
-                  return true
-                }
-                const gate = ownSyncRunGeneration === 1 ? obsolete : current
-                const outcome =
-                  ownSyncRunGeneration === 1 ? obsoleteOutcome : currentOutcome
-                const failure =
-                  ownSyncRunGeneration === 1 ? obsoleteFailure : currentFailure
-                return gate.promise.then(() => {
-                  if (outcome === `reject`) throw failure
-                  operations.begin()
-                  operations.write({
-                    type: `insert`,
-                    value: {
-                      id: `row`,
-                      version: ownSyncRunGeneration + 1,
-                    },
-                  })
-                  const receipt = operations.commit(options.signal)
-                  if (receipt !== true) return receipt
-                  return undefined
-                })
-              },
-              unloadSubset: () =>
-                unloadSyncRunGenerations.push(ownSyncRunGeneration),
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) visible.delete(change.key)
-            else {
-              visible.set(change.key, {
-                id: change.value.id,
-                version: change.value.version,
-              })
-            }
+  const runQueuedCancelCase = async ({
+    phase,
+    action,
+  }: (typeof queuedCancelCases)[number]) => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    let cancelOnEntry = false
+    const observed: Array<true | Promise<void>> = []
+    const collection = createOnDemandCollection<{ id: string }>({
+      id: `deferred-resume-cleanup`,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
           }
         },
-        { includeInitialState: false },
-      )
-      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
-      subscription.requestSnapshot()
-      oracleAssertion('existing comparison at 1483', () =>
-        expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }]),
-      )
+      },
+    })
+    oracleAssertion('existing comparison at 1201', () =>
+      expect(collection._deferSyncStart()).toBe(true),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      deferAcquisition: true,
+    })
+    const removeReadyListener = collection.on(`status:${phase}`, () => {
+      if (!cancelOnEntry) return
+      cancelOnEntry = false
+      if (action === `cleanup`) void collection.cleanup()
+      else if (action === `release`) subscription.releaseSnapshot(where)
+      else subscription.unsubscribe()
+    })
+    subscription.requestSnapshot({
+      where,
+      onLoadSubsetResult: (result) => observed.push(result),
+    })
 
+    try {
+      cancelOnEntry = true
+      subscription.resumeDeferredAcquisition()
+      await flushPromises()
+
+      oracleAssertion('existing comparison at 1223', () =>
+        expect(collection.status).toBe(expectedStatusAfterQueuedCancel(action)),
+      )
+      oracleAssertion('existing comparison at 1224', () =>
+        expect(loads).toHaveLength(0),
+      )
+      oracleAssertion('existing comparison at 1225', () =>
+        expect(unloads).toHaveLength(0),
+      )
+      oracleAssertion('existing comparison at 1226', () =>
+        expect(observed).toHaveLength(1),
+      )
+      await oracleAssertion('existing comparison at 1227', () =>
+        expect(observed[0]).rejects.toMatchObject({ name: `AbortError` }),
+      )
+    } finally {
+      removeReadyListener()
+      subscription.unsubscribe()
       await collection.cleanup()
-      collection.startSyncImmediate()
-      await flushPromises()
-      await collection.cleanup()
-      collection.startSyncImmediate()
-      await flushPromises()
-      oracleAssertion('existing comparison at 1491', () =>
-        expect(subscription.status).toBe(`loadingSubset`),
-      )
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.queued-cancel`,
+    law: {
+      statement: `Cancelling a queued acquisition starts no physical acquisition; cleanup leaves the Collection cleaned up, and release or unsubscribe leaves it ready.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and the queued-cancel model.`,
+      limits: `Loading and ready phases crossed with cleanup, release, and unsubscribe.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: queuedCancelCases,
+    label: (row) =>
+      `cancels queued acquisition during ${row.phase} via ${row.action}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.queued-cancel`,
+        plan,
+        observe,
+        () => runQueuedCancelCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-      const settleObsolete = () =>
-        obsoleteOutcome === `resolve`
-          ? obsolete.resolve()
-          : obsolete.reject(obsoleteFailure)
-      const settleCurrent = () =>
-        currentOutcome === `resolve`
-          ? current.resolve()
-          : current.reject(currentFailure)
-      if (settlementOrder === `obsolete-first`) {
-        settleObsolete()
-        await flushPromises()
-        oracleAssertion('existing comparison at 1504', () =>
-          expect(subscription.status).toBe(`loadingSubset`),
-        )
-        settleCurrent()
-      } else {
-        settleCurrent()
-        await flushPromises()
-        settleObsolete()
-      }
+  const abortedReplayReleaseCases = ([`return`, `throw`] as const).flatMap(
+    (outcome) => [false, true].map((releaseSelf) => ({ outcome, releaseSelf })),
+  )
+  const runAbortedReplayReleaseCase = async ({
+    outcome,
+    releaseSelf,
+  }: (typeof abortedReplayReleaseCases)[number]) => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const controller = new AbortController()
+    const failure = new Error(`release failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const errors: Array<unknown> = []
+    const uncaught = captureMicrotaskErrors()
+    let releaseOwner = () => {}
+    let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
+    const collection = createCollection<{ id: string }, string>({
+      id: `aborted-replay-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (nextOperations) => {
+          operations = nextOperations
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1) {
+                if (releaseSelf) releaseOwner()
+                if (outcome === `throw`) throw failure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    releaseOwner = () => subscription.releaseSnapshot(where)
+    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+    try {
+      subscription.requestSnapshot({ where, signal: controller.signal })
+      controller.abort()
+      operations.begin()
+      operations.truncate()
+      const receipt = operations.commit()
+      if (receipt !== true) await receipt
       await flushPromises()
 
-      const settled = expectedThreeGenerationSettlement(
-        currentOutcome,
-        currentFailure,
+      oracleAssertion('existing comparison at 1291', () =>
+        expect(loads).toHaveLength(1),
       )
-      oracleAssertion('existing comparison at 1517', () =>
-        expect([...visible.values()]).toEqual([
-          { id: `row`, version: settled.version },
-        ]),
+      oracleAssertion('existing comparison at 1292', () =>
+        expect(unloads).toHaveLength(1),
       )
-      oracleAssertion('existing comparison at 1520', () =>
-        expect(errors).toEqual(settled.errors),
+      oracleAssertion('existing comparison at 1293', () =>
+        expect(unloads[0]).toBe(loads[0]),
       )
-      oracleAssertion('existing comparison at 1521', () =>
-        expect(subscription.lastError).toBe(settled.lastError),
+      oracleAssertion('existing comparison at 1294', () =>
+        expect(loads[0]!.signal!.aborted).toBe(true),
       )
-      oracleAssertion('existing comparison at 1522', () =>
+      oracleAssertion('existing comparison at 1295', () =>
         expect(subscription.status).toBe(`ready`),
       )
-
-      subscription.unsubscribe()
-      oracleAssertion('existing comparison at 1525', () =>
-        expect(unloadSyncRunGenerations).toEqual([2]),
+      // The release error is reported uncaught, not as a load error.
+      oracleAssertion('existing comparison at 1297', () =>
+        expect(errors).toEqual([]),
       )
+      oracleAssertion('existing comparison at 1298', () =>
+        expect(uncaught.errors).toEqual(
+          expectedUncaughtReleaseErrors(outcome, failure),
+        ),
+      )
+
+      releaseOwner()
+      oracleAssertion('existing comparison at 1303', () =>
+        expect(unloads).toHaveLength(1),
+      )
+      subscription.unsubscribe()
+      oracleAssertion('existing comparison at 1305', () =>
+        expect(unloads).toHaveLength(1),
+      )
+      for (const options of unloads)
+        oracleAssertion('existing comparison at 1306', () =>
+          expect(options).toBe(loads[0]),
+        )
+      oracleAssertion('existing comparison at 1307', () =>
+        expect(loads).toHaveLength(1),
+      )
+      await Promise.resolve()
+      oracleAssertion('existing comparison at 1309', () =>
+        expect(uncaught.errors).toEqual(
+          expectedUncaughtReleaseErrors(outcome, failure),
+        ),
+      )
+    } finally {
+      uncaught.restore()
+      subscription.unsubscribe()
       await collection.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.aborted-replay-release`,
+    law: {
+      statement: `An aborted replay retires only the acquisition lease it acquired, and a throwing physical release is reported once, uncaught.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and the release-error model.`,
+      limits: `Returning and throwing releases, with and without a self release.`,
     },
+    owns: [`src/collection/subscription.ts`],
+    histories: abortedReplayReleaseCases,
+    label: (row) =>
+      `retires only the acquired lease for aborted replay with unload=${row.outcome}, releaseSelf=${row.releaseSelf}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.aborted-replay-release`,
+        plan,
+        observe,
+        () => runAbortedReplayReleaseCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  const releaseReentryCases = ([`adapter`, `error-listener`] as const).flatMap(
+    (reentry) => [1, 2].map((failures) => ({ reentry, failures })),
   )
+  const runReleaseReentryCase = async ({
+    reentry,
+    failures,
+  }: (typeof releaseReentryCases)[number]) => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const failure = new Error(`physical release failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const errors: Array<unknown> = []
+    const nestedFailures: Array<unknown> = []
+    const uncaught = captureMicrotaskErrors()
+    let releaseOwner = () => {}
+    const collection = createOnDemandCollection<{ id: string }>({
+      id: `release-reentry-${reentry}-${failures}`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1 && reentry === `adapter`) {
+                releaseOwner()
+              }
+              if (unloads.length <= failures) throw failure
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    releaseOwner = () => {
+      try {
+        subscription.unsubscribe()
+      } catch (error) {
+        nestedFailures.push(error)
+      }
+    }
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      errors.push(error)
+      if (errors.length === 1 && reentry === `error-listener`) releaseOwner()
+    })
+    try {
+      subscription.requestSnapshot({ where })
+      let releaseError: unknown
+      try {
+        subscription.releaseSnapshot(where)
+      } catch (error) {
+        releaseError = error
+      }
+      oracleAssertion('existing comparison at 1379', () =>
+        expect(releaseError).toBe(undefined),
+      )
+      // Adapter reentry sees a retired acquisition, including after throw.
+      // A release error reaches no error listener, so that listener cannot
+      // reenter teardown.
+      oracleAssertion('existing comparison at 1383', () =>
+        expect(unloads).toHaveLength(1),
+      )
+      // Only the adapter path reentered and unsubscribed.
+      oracleAssertion('existing comparison at 1385', () =>
+        expect(collection.subscriberCount).toBe(
+          expectedSubscriberCountAfterRelease(reentry),
+        ),
+      )
+      oracleAssertion('existing comparison at 1388', () =>
+        expect(errors).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1389', () =>
+        expect(nestedFailures).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1390', () =>
+        expect(() => subscription.unsubscribe()).not.toThrow(),
+      )
+      oracleAssertion('existing comparison at 1391', () =>
+        expect(unloads).toHaveLength(1),
+      )
+      subscription.unsubscribe()
+      oracleAssertion('existing comparison at 1393', () =>
+        expect(unloads).toHaveLength(1),
+      )
+      oracleAssertion('existing comparison at 1394', () =>
+        expect(loads).toHaveLength(1),
+      )
+      for (const options of unloads)
+        oracleAssertion('existing comparison at 1395', () =>
+          expect(options).toBe(loads[0]),
+        )
+      await Promise.resolve()
+      // One attempt, one report, whatever the adapter would throw later.
+      oracleAssertion('existing comparison at 1398', () =>
+        expect(uncaught.errors).toEqual([failure]),
+      )
+    } finally {
+      uncaught.restore()
+      await collection.cleanup()
+      subscription.unsubscribe()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.release-reentry`,
+    law: {
+      statement: `A physical release is attempted once across reentry, and its error reaches no error listener.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and the reentry model.`,
+      limits: `Adapter and error-listener reentry with one or two configured failures.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: releaseReentryCases,
+    label: (row) =>
+      `attempts release once across ${row.reentry} reentry with ${row.failures} configured failures`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.release-reentry`,
+        plan,
+        observe,
+        () => runReleaseReentryCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  const threeGenerationCases = threeGenerationScenarios
+  const runThreeGenerationCase = async ({
+    obsoleteOutcome,
+    currentOutcome,
+    settlementOrder,
+  }: (typeof threeGenerationCases)[number]) => {
+    type Row = { id: string; version: number }
+    const obsolete = createDeferred<void>()
+    const current = createDeferred<void>()
+    void obsolete.promise.catch(() => {})
+    void current.promise.catch(() => {})
+    const obsoleteFailure = new Error(`obsolete sync run failed`)
+    const currentFailure = new Error(`current sync run failed`)
+    const visible = new Map<string | number, Row>()
+    const errors: Array<unknown> = []
+    const unloadSyncRunGenerations: Array<number> = []
+    let syncRunGeneration = -1
+
+    const collection = createOnDemandCollection<Row>({
+      id: `three-sync-run-generations-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
+      sync: {
+        sync: (operations) => {
+          syncRunGeneration++
+          const ownSyncRunGeneration = syncRunGeneration
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              if (ownSyncRunGeneration === 0) {
+                operations.begin()
+                operations.write({
+                  type: `insert`,
+                  value: { id: `row`, version: 1 },
+                })
+                operations.commit(options.signal)
+                return true
+              }
+              const gate = ownSyncRunGeneration === 1 ? obsolete : current
+              const outcome =
+                ownSyncRunGeneration === 1 ? obsoleteOutcome : currentOutcome
+              const failure =
+                ownSyncRunGeneration === 1 ? obsoleteFailure : currentFailure
+              return gate.promise.then(() => {
+                if (outcome === `reject`) throw failure
+                operations.begin()
+                operations.write({
+                  type: `insert`,
+                  value: {
+                    id: `row`,
+                    version: ownSyncRunGeneration + 1,
+                  },
+                })
+                const receipt = operations.commit(options.signal)
+                if (receipt !== true) return receipt
+                return undefined
+              })
+            },
+            unloadSubset: () =>
+              unloadSyncRunGenerations.push(ownSyncRunGeneration),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else {
+            visible.set(change.key, {
+              id: change.value.id,
+              version: change.value.version,
+            })
+          }
+        }
+      },
+      { includeInitialState: false },
+    )
+    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+    subscription.requestSnapshot()
+    oracleAssertion('existing comparison at 1483', () =>
+      expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }]),
+    )
+
+    await collection.cleanup()
+    collection.startSyncImmediate()
+    await flushPromises()
+    await collection.cleanup()
+    collection.startSyncImmediate()
+    await flushPromises()
+    oracleAssertion('existing comparison at 1491', () =>
+      expect(subscription.status).toBe(`loadingSubset`),
+    )
+
+    const settleObsolete = () =>
+      obsoleteOutcome === `resolve`
+        ? obsolete.resolve()
+        : obsolete.reject(obsoleteFailure)
+    const settleCurrent = () =>
+      currentOutcome === `resolve`
+        ? current.resolve()
+        : current.reject(currentFailure)
+    if (settlementOrder === `obsolete-first`) {
+      settleObsolete()
+      await flushPromises()
+      oracleAssertion('existing comparison at 1504', () =>
+        expect(subscription.status).toBe(`loadingSubset`),
+      )
+      settleCurrent()
+    } else {
+      settleCurrent()
+      await flushPromises()
+      settleObsolete()
+    }
+    await flushPromises()
+
+    const settled = expectedThreeGenerationSettlement(
+      currentOutcome,
+      currentFailure,
+    )
+    oracleAssertion('existing comparison at 1517', () =>
+      expect([...visible.values()]).toEqual([
+        { id: `row`, version: settled.version },
+      ]),
+    )
+    oracleAssertion('existing comparison at 1520', () =>
+      expect(errors).toEqual(settled.errors),
+    )
+    oracleAssertion('existing comparison at 1521', () =>
+      expect(subscription.lastError).toBe(settled.lastError),
+    )
+    oracleAssertion('existing comparison at 1522', () =>
+      expect(subscription.status).toBe(`ready`),
+    )
+
+    subscription.unsubscribe()
+    oracleAssertion('existing comparison at 1525', () =>
+      expect(unloadSyncRunGenerations).toEqual([2]),
+    )
+    await collection.cleanup()
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.three-generations`,
+    law: {
+      statement: `The current sync run decides the published row and the delivered error; the obsolete sync run's settlement never publishes.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the release law and boundary matrix stated at the top of this file, and the three-generation model.`,
+      limits: `Every obsolete and current outcome in both settlement orders.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: threeGenerationCases,
+    label: (row) =>
+      `fences three sync-run generations for ${row.obsoleteOutcome}/${row.currentOutcome} settled ${row.settlementOrder}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.three-generations`,
+        plan,
+        observe,
+        () => runThreeGenerationCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   oracleProperty({
     id: `subscription-lifecycle.async-restart`,
@@ -1956,128 +1986,144 @@ describe(`resumption notification error and surviving demand`, () => {
   // gate with no request, and a held requested start with both source modes.
   // It records the complete public status trace at subscribeChanges return
   // and cleanup settlement. A later ordinary reader is fresh restart demand.
-  it.each(
-    subscriberStartCleanupHistories.flatMap((history) =>
-      ([`none`, `unrequested`, `requested`] as const).flatMap((gate) =>
-        ([`eager`, `on-demand`] as const).map((syncMode) => ({
-          ...history,
-          gate,
-          syncMode,
-        })),
-      ),
+  const startCleanupCases = subscriberStartCleanupHistories.flatMap((history) =>
+    ([`none`, `unrequested`, `requested`] as const).flatMap((gate) =>
+      ([`eager`, `on-demand`] as const).map((syncMode) => ({
+        ...history,
+        gate,
+        syncMode,
+      })),
     ),
-  )(
-    `ordinary admission preserves $cleanupAt cleanup (pending=$cleanupPending, $gate start, $syncMode)`,
-    async (history) => {
-      oracleRoute(`case`)
-      const expected = modelSubscriberStartCleanup(history)
-      const pendingCleanup = createDeferred<void>()
-      let starts = 0
-      let cleanups = 0
-      let cleanupRequested = false
-      let cleanup: Promise<void> | undefined
-      const statuses: Array<string> = []
-      const collection = createCollection({
-        id: `ordinary-admission-cleanup`,
-        startSync: false,
-        syncMode: history.syncMode,
-        getKey: (row: { id: string }) => row.id,
-        sync: {
-          sync: ({ markReady }) => {
-            starts++
-            markReady()
-            return {
-              loadSubset: () => true,
-              cleanup: () => {
-                cleanups++
-                return history.cleanupPending
-                  ? pendingCleanup.promise
-                  : undefined
-              },
-            }
-          },
-        },
-      })
-      if (history.gate !== `none`) {
-        oracleAssertion('existing comparison at 1727', () =>
-          expect(collection._deferSyncStart()).toBe(true),
-        )
-        if (history.gate === `requested`) collection.startSyncImmediate()
-      }
-      const removeStatusListener = collection.on(
-        `status:change`,
-        ({ status }) => {
-          statuses.push(status)
-          if (!cleanupRequested && status === history.cleanupAt) {
-            cleanupRequested = true
-            cleanup = collection.cleanup()
+  )
+  const runStartCleanupCase = async (
+    history: (typeof startCleanupCases)[number],
+  ) => {
+    const expected = modelSubscriberStartCleanup(history)
+    const pendingCleanup = createDeferred<void>()
+    let starts = 0
+    let cleanups = 0
+    let cleanupRequested = false
+    let cleanup: Promise<void> | undefined
+    const statuses: Array<string> = []
+    const collection = createCollection({
+      id: `ordinary-admission-cleanup`,
+      startSync: false,
+      syncMode: history.syncMode,
+      getKey: (row: { id: string }) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            loadSubset: () => true,
+            cleanup: () => {
+              cleanups++
+              return history.cleanupPending ? pendingCleanup.promise : undefined
+            },
           }
         },
+      },
+    })
+    if (history.gate !== `none`) {
+      oracleAssertion('existing comparison at 1727', () =>
+        expect(collection._deferSyncStart()).toBe(true),
       )
-      let subscription:
-        ReturnType<typeof collection.subscribeChanges> | undefined
-      let peer: ReturnType<typeof collection.subscribeChanges> | undefined
-      try {
-        subscription = collection.subscribeChanges(() => {}, {
-          includeInitialState: false,
-        })
-        oracleAssertion('existing comparison at 1747', () =>
-          expect(starts, `adapter entries at admission return`).toBe(
-            expected.starts,
-          ),
-        )
-        oracleAssertion('existing comparison at 1750', () =>
-          expect(cleanups).toBe(expected.cleanups),
-        )
-        oracleAssertion('existing comparison at 1751', () =>
-          expect(collection.status).toBe(expected.statusOnReturn),
-        )
-        oracleAssertion('existing comparison at 1752', () =>
-          expect(statuses).toEqual(expected.statusesOnReturn),
-        )
+      if (history.gate === `requested`) collection.startSyncImmediate()
+    }
+    const removeStatusListener = collection.on(
+      `status:change`,
+      ({ status }) => {
+        statuses.push(status)
+        if (!cleanupRequested && status === history.cleanupAt) {
+          cleanupRequested = true
+          cleanup = collection.cleanup()
+        }
+      },
+    )
+    let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+    let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+    try {
+      subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      oracleAssertion('existing comparison at 1747', () =>
+        expect(starts, `adapter entries at admission return`).toBe(
+          expected.starts,
+        ),
+      )
+      oracleAssertion('existing comparison at 1750', () =>
+        expect(cleanups).toBe(expected.cleanups),
+      )
+      oracleAssertion('existing comparison at 1751', () =>
+        expect(collection.status).toBe(expected.statusOnReturn),
+      )
+      oracleAssertion('existing comparison at 1752', () =>
+        expect(statuses).toEqual(expected.statusesOnReturn),
+      )
 
-        pendingCleanup.resolve()
-        await cleanup
-        oracleAssertion('existing comparison at 1756', () =>
-          expect(starts, `cleanup settlement must not restart`).toBe(
-            expected.starts,
-          ),
-        )
-        oracleAssertion('existing comparison at 1759', () =>
-          expect(collection.status).toBe(expected.statusAfterCleanup),
-        )
-        oracleAssertion('existing comparison at 1760', () =>
-          expect(statuses).toEqual(expected.statusesAfterCleanup),
-        )
+      pendingCleanup.resolve()
+      await cleanup
+      oracleAssertion('existing comparison at 1756', () =>
+        expect(starts, `cleanup settlement must not restart`).toBe(
+          expected.starts,
+        ),
+      )
+      oracleAssertion('existing comparison at 1759', () =>
+        expect(collection.status).toBe(expected.statusAfterCleanup),
+      )
+      oracleAssertion('existing comparison at 1760', () =>
+        expect(statuses).toEqual(expected.statusesAfterCleanup),
+      )
 
-        removeStatusListener()
-        peer = collection.subscribeChanges(() => {}, {
-          includeInitialState: false,
-        })
-        oracleAssertion('existing comparison at 1766', () =>
-          expect(starts, `later demand may restart a retired run`).toBe(
-            expected.starts + (history.cleanupAt === `none` ? 0 : 1),
-          ),
-        )
-        oracleAssertion('existing comparison at 1769', () =>
-          expect(collection.status).toBe(`ready`),
-        )
-      } finally {
-        removeStatusListener()
-        pendingCleanup.resolve()
-        await cleanup
-        peer?.unsubscribe()
-        subscription?.unsubscribe()
-        await collection.cleanup()
-      }
+      removeStatusListener()
+      peer = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      oracleAssertion('existing comparison at 1766', () =>
+        expect(starts, `later demand may restart a retired run`).toBe(
+          expected.starts + (history.cleanupAt === `none` ? 0 : 1),
+        ),
+      )
+      oracleAssertion('existing comparison at 1769', () =>
+        expect(collection.status).toBe(`ready`),
+      )
+    } finally {
+      removeStatusListener()
+      pendingCleanup.resolve()
+      await cleanup
+      peer?.unsubscribe()
+      subscription?.unsubscribe()
+      await collection.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.start-cleanup`,
+    law: {
+      statement: `Ordinary subscriber admission treats a cleanup as retiring this start, not as permission to retry it, as the grammar's independent start-cleanup judgment predicts.`,
+      authority: `Collection cleanup/restart in the glossary and the lifecycle grammar's modelSubscriberStartCleanup.`,
+      limits: `The grammar's start-cleanup histories crossed with three render gates and both source modes.`,
     },
-  )
+    owns: [`src/collection/subscription.ts`],
+    histories: startCleanupCases,
+    label: (history) =>
+      `ordinary admission preserves ${history.cleanupAt} cleanup (pending=${history.cleanupPending}, ${history.gate} start, ${history.syncMode})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.start-cleanup`,
+        plan,
+        observe,
+        () => runStartCleanupCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // The callback can release this owner before resumption commits, or from
   // its acquiring notification. Both cuts must leave balanced public counts
   // and no later acquisition. The no-retirement neighbor must acquire normally.
-  it.each(
-    subscriberResumeRetirementHistories.flatMap((history) =>
+  const resumeRetirementCases = subscriberResumeRetirementHistories.flatMap(
+    (history) =>
       ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
         [false, true].map((renderGate) => ({
           ...history,
@@ -2085,96 +2131,116 @@ describe(`resumption notification error and surviving demand`, () => {
           renderGate,
         })),
       ),
-    ),
-  )(
-    `balances resume at $retireAt (cleanup=$cleanup, $syncMode, gate=$renderGate)`,
-    async (history) => {
-      oracleRoute(`case`)
-      const expected = modelSubscriberResumeRetirement(history)
-      let starts = 0
-      let loads = 0
-      const counts: Array<number> = []
-      const collection = createCollection<{ id: string }>({
-        getKey: (row) => row.id,
-        gcTime: 0,
-        syncMode: history.syncMode,
-        sync: {
-          sync: ({ markReady }) => {
-            starts++
-            markReady()
-            return {
-              loadSubset: () => {
-                loads++
-                return true
-              },
-            }
-          },
-        },
-      })
-      if (history.renderGate) collection._deferSyncStart()
-      const subscription = collection.subscribeChanges(() => {}, {
-        deferAcquisition: true,
-        includeInitialState: true,
-      })
-      let cleanup: Promise<void> | undefined
-      let retired = false
-      const retire = () => {
-        if (retired) return
-        retired = true
-        subscription.unsubscribe()
-        if (history.cleanup) cleanup = collection.cleanup()
-      }
-      const offStatus = collection.on(`status:change`, ({ status }) => {
-        if (status === history.retireAt) retire()
-      })
-      const offCounts = collection.on(
-        `subscribers:change`,
-        ({ subscriberCount }) => {
-          counts.push(subscriberCount)
-          if (history.retireAt === `subscribers` && subscriberCount === 1)
-            retire()
-        },
-      )
-      try {
-        subscription.resumeDeferredAcquisition()
-        oracleAssertion('existing comparison at 1845', () =>
-          expect(starts).toBe(expected.starts),
-        )
-        oracleAssertion('existing comparison at 1846', () =>
-          expect(collection.subscriberCount).toBe(expected.acquiring),
-        )
-        oracleAssertion('existing comparison at 1847', () =>
-          expect(counts).toEqual(expected.counts),
-        )
-        oracleAssertion('existing comparison at 1848', () =>
-          expect(collection._hasSubscriberOrPreload()).toBe(
-            expected.subscriberOrPreload,
-          ),
-        )
-        await cleanup
-        await flushPromises()
-        oracleAssertion('existing comparison at 1853', () =>
-          expect(collection.subscriberCount).toBe(expected.acquiring),
-        )
-        oracleAssertion('existing comparison at 1854', () =>
-          expect(loads).toBe(
-            history.syncMode === `on-demand` && history.retireAt === `none`
-              ? 1
-              : 0,
-          ),
-        )
-        offStatus()
-        offCounts()
-        subscription.unsubscribe()
-        oracleAssertion('existing comparison at 1862', () =>
-          expect(collection.subscriberCount).toBe(0),
-        )
-      } finally {
-        offStatus()
-        offCounts()
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
   )
+  const runResumeRetirementCase = async (
+    history: (typeof resumeRetirementCases)[number],
+  ) => {
+    const expected = modelSubscriberResumeRetirement(history)
+    let starts = 0
+    let loads = 0
+    const counts: Array<number> = []
+    const collection = createCollection<{ id: string }>({
+      getKey: (row) => row.id,
+      gcTime: 0,
+      syncMode: history.syncMode,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              return true
+            },
+          }
+        },
+      },
+    })
+    if (history.renderGate) collection._deferSyncStart()
+    const subscription = collection.subscribeChanges(() => {}, {
+      deferAcquisition: true,
+      includeInitialState: true,
+    })
+    let cleanup: Promise<void> | undefined
+    let retired = false
+    const retire = () => {
+      if (retired) return
+      retired = true
+      subscription.unsubscribe()
+      if (history.cleanup) cleanup = collection.cleanup()
+    }
+    const offStatus = collection.on(`status:change`, ({ status }) => {
+      if (status === history.retireAt) retire()
+    })
+    const offCounts = collection.on(
+      `subscribers:change`,
+      ({ subscriberCount }) => {
+        counts.push(subscriberCount)
+        if (history.retireAt === `subscribers` && subscriberCount === 1)
+          retire()
+      },
+    )
+    try {
+      subscription.resumeDeferredAcquisition()
+      oracleAssertion('existing comparison at 1845', () =>
+        expect(starts).toBe(expected.starts),
+      )
+      oracleAssertion('existing comparison at 1846', () =>
+        expect(collection.subscriberCount).toBe(expected.acquiring),
+      )
+      oracleAssertion('existing comparison at 1847', () =>
+        expect(counts).toEqual(expected.counts),
+      )
+      oracleAssertion('existing comparison at 1848', () =>
+        expect(collection._hasSubscriberOrPreload()).toBe(
+          expected.subscriberOrPreload,
+        ),
+      )
+      await cleanup
+      await flushPromises()
+      oracleAssertion('existing comparison at 1853', () =>
+        expect(collection.subscriberCount).toBe(expected.acquiring),
+      )
+      oracleAssertion('existing comparison at 1854', () =>
+        expect(loads).toBe(
+          history.syncMode === `on-demand` && history.retireAt === `none`
+            ? 1
+            : 0,
+        ),
+      )
+      offStatus()
+      offCounts()
+      subscription.unsubscribe()
+      oracleAssertion('existing comparison at 1862', () =>
+        expect(collection.subscriberCount).toBe(0),
+      )
+    } finally {
+      offStatus()
+      offCounts()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.resume-retirement`,
+    law: {
+      statement: `A resumption whose owner retires before it commits, or from its acquiring notification, leaves balanced public counts and no later acquisition; the no-retirement neighbor acquires normally.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary, and the lifecycle grammar's modelSubscriberResumeRetirement.`,
+      limits: `The grammar's resume-retirement histories crossed with both source modes and the render gate.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: resumeRetirementCases,
+    label: (history) =>
+      `balances resume at ${history.retireAt} (cleanup=${history.cleanup}, ${history.syncMode}, gate=${history.renderGate})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.resume-retirement`,
+        plan,
+        observe,
+        () => runResumeRetirementCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

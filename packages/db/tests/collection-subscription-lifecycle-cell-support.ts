@@ -1,5 +1,3 @@
-import { declareOracle } from './oracle-declaration.js'
-
 /**
  * Acquisition-boundary cells and scenario grammar for the demand lifecycle
  * oracle. The explicit cell table names every legal phase/entry pair and gives
@@ -136,8 +134,6 @@ export const acquisitionCellDefinitions = {
  * The cell table is the grammar of acquisition coverage. Its calibration test
  * in the oracle file reaches it through the cell sets derived below.
  */
-declareOracle({ grammar: [acquisitionCellDefinitions] })
-
 export const legalAcquisitionCells = new Set<AcquisitionCell>(
   Object.entries(acquisitionCellDefinitions)
     .filter(([, definition]) => definition.kind === `covered`)

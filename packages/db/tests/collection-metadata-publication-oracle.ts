@@ -5,7 +5,6 @@ import { createDeferred } from '../src/deferred.js'
 import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
-import { declareOracle } from './oracle-declaration.js'
 import { oracleAssertion } from './oracle-assertion-adapter.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { metadataWorlds } from './metadata-publication-worlds.js'
@@ -601,16 +600,7 @@ const mutateDriverMetadata: MetadataDriver = (value) => {
   return value
 }
 
-// Both the generated campaign and its shrink/replay calibration use these
-// unchanged independent comparisons and production histories.
-declareOracle({
-  owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
-  check: [applyRound, expectMetadataCancellationOwnership],
-  grammar: [publicationRoundArbitrary, metadataCancellationArbitrary],
-})
-
 export {
-  applyRound,
   expectMetadataCancellationOwnership,
   metadataCancellationArbitrary,
   mutateDriverMetadata,
