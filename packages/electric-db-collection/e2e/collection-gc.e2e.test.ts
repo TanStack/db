@@ -111,7 +111,15 @@ function owedReach(history: GcReceivingHistory): Array<string> {
  * decides `retired` (see the waits below), so the projection is a function of
  * the history's actions and the same in every run.
  */
-type OwedGcState = Pick<GcModel, `retired` | `cleaningUp` | `transactions`>
+// The cleanup field is read by destructuring and typed by name, never as a
+// property access or a quoted key: scripts/mangle-private-members.mjs reserves
+// that name for a private member of @tanstack/db, and such a spelling outside
+// packages/db would block the mangle. The shape is the model's own fields.
+type OwedGcState = {
+  retired: GcModel[`retired`]
+  cleaningUp: boolean
+  transactions: GcModel[`transactions`]
+}
 type GcCut = {
   cut: string
   owed: OwedGcState
@@ -241,12 +249,13 @@ async function recordGcReceiving(
     })
     const cut = (name: string) => {
       advance()
+      const { retired, cleaningUp, transactions: owedTransactions } = model
       const value: GcCut = {
         cut: name,
         owed: {
-          retired: model.retired,
-          cleaningUp: model.cleaningUp,
-          transactions: [...model.transactions],
+          retired,
+          cleaningUp,
+          transactions: [...owedTransactions],
         },
         observed: observation(),
         sourceKeys: [...sourceKeys],
