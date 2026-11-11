@@ -11,8 +11,7 @@ import * as sqlite from './sqlite.js'
 
 /** [owner file, prefix, suffixes] or, with the module that names them, a fourth entry. */
 export type ConvertedOwnerGroup =
-  | readonly [string, string, string]
-  | readonly [string, string, string, string]
+  readonly [string, string, string] | readonly [string, string, string, string]
 
 const groups = [
   adapters,
