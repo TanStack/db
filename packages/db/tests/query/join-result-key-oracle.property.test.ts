@@ -42,7 +42,7 @@
  * compiler's keying of the rows it supplies, not any real adapter's behavior.
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
   Query,
   createLiveQueryCollection,
@@ -52,18 +52,13 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import type { QueryBuilder } from '../../src/query/builder/index.js'
@@ -279,28 +274,16 @@ async function runHistory(history: History): Promise<void> {
   ])
 }
 
-declareOracle({
-  check: [runHistory],
-  model: [expectedPairs],
-})
+// A fixed history's name lists its left keys, so each regression keeps the
+// name of the test it replaced.
+const fixedHistoryName = (history: History) =>
+  `keeps every ${history.join} join pair for ${history.left
+    .map((row) =>
+      typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),
+    )
+    .join(` `)}`
 
 describe(`joined result key oracle`, () => {
-  // The fixed histories and the fixed-seed campaign stand aside during any path
-  // replay. The random campaign below is the one that a replay of this
-  // property selects.
-  if (!oracleReplayRequested()) {
-    for (const history of fixedHistories) {
-      it(`keeps every ${history.join} join pair for ${history.left
-        .map((row) =>
-          typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),
-        )
-        .join(` `)}`, () => {
-        oracleRoute(`case`)
-        return runHistory(history)
-      })
-    }
-  }
-
   oracleProperty({
     id: property,
     law: {
@@ -318,6 +301,10 @@ describe(`joined result key oracle`, () => {
       fixedSeeds: [44501962],
       states: [],
       constructed: [],
+      fixed: fixedHistories.map((history) => ({
+        name: fixedHistoryName(history),
+        history,
+      })),
     },
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
@@ -804,11 +791,6 @@ async function runSelectionHistory(
   ])
 }
 
-declareOracle({
-  model: [expectedSelections],
-  check: [checkSelections, runSelectionHistory],
-  grammar: [selectionForms, selectionHistoryArbitrary],
-})
 // The old aggregate ledger counted each form/receiver/cut reached by the finite
 // matrix. The native finite property preserves every form. Each history checks
 // its own receiver/cut product at the same production boundaries, so all 4,608

@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 
 /**
  * # When can an abort cancel a load?
@@ -60,159 +64,174 @@ function expectedOutcome(
   }
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/transactions.ts#createTransaction',
-  ],
-  model: [expectedOutcome],
-})
+// The production driver: it creates one abort phase in production and
+// compares the load, change event, and collection snapshot with
+// `expectedOutcome`.
+async function runAbortPhase(abortPhase: AbortPhase): Promise<void> {
+  const sourceId = `transaction-refinement-${abortPhase}`
+  const remoteRow: Row = { id: `remote`, group: `requested` }
+  const expected = expectedOutcome(abortPhase, remoteRow.id)
+  const controller = new AbortController()
+  const persistence = createDeferred<void>()
+  const publishedBatches: Array<Array<string>> = []
+  const callbackReads: Array<Array<string>> = []
+  let loadSubsetCalls = 0
+  let abortObservedAtCommit = false
+  let receiptWasDeferred = false
+  let abortRaisedByPublication = false
+
+  // Keep the local mutation unresolved. This delays publication of the
+  // remote row and creates the second abort phase.
+  const source = createCollection<Row>({
+    id: sourceId,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: ({ signal }) => {
+            loadSubsetCalls++
+            begin()
+            write({ type: `insert`, value: remoteRow })
+            if (abortPhase === `at-commit`) controller.abort()
+            abortObservedAtCommit = signal?.aborted ?? false
+            const receipt = commit(signal)
+            receiptWasDeferred = receipt instanceof Promise
+            // Source contract: a caller that aborted sees `AbortError`,
+            // even though its accepted rows apply.
+            return Promise.resolve(receipt).then(() => {
+              if (signal?.aborted) throw new LoadSubsetOperationAbortedError()
+            })
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+  const blocker = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  blocker.mutate(() => source.insert({ id: `local`, group: `outside-request` }))
+
+  // Record the change and the collection snapshot at the same publication.
+  const subscription = source.subscribeChanges(
+    (changes) => {
+      const remoteKeys = changes
+        .filter((change) => change.key === remoteRow.id)
+        .map((change) => String(change.key))
+      if (remoteKeys.length === 0) return
+      publishedBatches.push(remoteKeys)
+      callbackReads.push(source.has(remoteRow.id) ? [remoteRow.id] : [])
+      if (abortPhase === `after-publication-starts`) {
+        controller.abort()
+        abortRaisedByPublication = controller.signal.aborted
+      }
+    },
+    { includeInitialState: false },
+  )
+  let primaryFailure: unknown
+  let failed = false
+  const cleanupFailures: Array<unknown> = []
+  try {
+    const load = source._sync.loadSubset({ signal: controller.signal })
+    // Keep a rejection observed if an earlier reach assertion fails.
+    if (load instanceof Promise) void load.catch(() => undefined)
+    expect(load).toBeInstanceOf(Promise)
+
+    // The adapter and applied-receipt boundary must be reached in every
+    // phase. The held mutation keeps the remote sync transaction parked.
+    expect(loadSubsetCalls).toBe(1)
+    expect(receiptWasDeferred).toBe(true)
+    expect(abortObservedAtCommit).toBe(abortPhase === `at-commit`)
+    expect(source.has(remoteRow.id)).toBe(false)
+
+    if (abortPhase === `while-parked`) {
+      controller.abort()
+    }
+
+    persistence.resolve()
+    await blocker.when(`settled`)
+
+    if (expected.load === `rejects`) {
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
+    } else {
+      await expect(load).resolves.toBeUndefined()
+    }
+
+    // The load promise, change event, and collection snapshot must agree.
+    // A mismatch would expose a partial publication to callers.
+    expect(source.has(remoteRow.id)).toBe(expected.rowIsVisible)
+    expect(publishedBatches).toEqual(expected.publishedBatches)
+    expect(callbackReads).toEqual(expected.callbackReads)
+    expect(abortRaisedByPublication).toBe(
+      abortPhase === `after-publication-starts`,
+    )
+  } catch (error) {
+    primaryFailure = error
+    failed = true
+  } finally {
+    persistence.resolve()
+    try {
+      await blocker.when(`settled`)
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      `loadSubset transaction refinement cleanup failed`,
+      { cause: failed ? primaryFailure : cleanupFailures[0] },
+    )
+  }
+  if (failed) throw primaryFailure
+}
+
+// These three phases cover the contract:
+// - The caller aborts during commit.
+// - The caller aborts after commit while publication waits.
+// - The caller aborts when the first listener runs.
+// This oracle does not vary the schedule within each phase.
+const abortPhases: Array<AbortPhase> = [
+  `at-commit`,
+  `while-parked`,
+  `after-publication-starts`,
+]
+
+const transactionRefinementLaw = `loadSubset transaction refinement`
 
 describe(`loadSubset transaction refinement`, () => {
-  // These three phases cover the contract:
-  // - The caller aborts during commit.
-  // - The caller aborts after commit while publication waits.
-  // - The caller aborts when the first listener runs.
-  // This oracle does not vary the schedule within each phase.
-  it.each<AbortPhase>([
-    `at-commit`,
-    `while-parked`,
-    `after-publication-starts`,
-  ])(
-    `matches the independent receipt and publication model when aborting %s`,
-    async (abortPhase) => {
-      oracleRoute(`case`)
-      const sourceId = `transaction-refinement-${abortPhase}`
-      const remoteRow: Row = { id: `remote`, group: `requested` }
-      const expected = expectedOutcome(abortPhase, remoteRow.id)
-      const controller = new AbortController()
-      const persistence = createDeferred<void>()
-      const publishedBatches: Array<Array<string>> = []
-      const callbackReads: Array<Array<string>> = []
-      let loadSubsetCalls = 0
-      let abortObservedAtCommit = false
-      let receiptWasDeferred = false
-      let abortRaisedByPublication = false
-
-      // Keep the local mutation unresolved. This delays publication of the
-      // remote row and creates the second abort phase.
-      const source = createCollection<Row>({
-        id: sourceId,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: ({ signal }) => {
-                loadSubsetCalls++
-                begin()
-                write({ type: `insert`, value: remoteRow })
-                if (abortPhase === `at-commit`) controller.abort()
-                abortObservedAtCommit = signal?.aborted ?? false
-                const receipt = commit(signal)
-                receiptWasDeferred = receipt instanceof Promise
-                // Source contract: a caller that aborted sees `AbortError`,
-                // even though its accepted rows apply.
-                return Promise.resolve(receipt).then(() => {
-                  if (signal?.aborted)
-                    throw new LoadSubsetOperationAbortedError()
-                })
-              },
-            }
-          },
-        },
-      })
-      source.startSyncImmediate()
-      const blocker = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-      blocker.mutate(() =>
-        source.insert({ id: `local`, group: `outside-request` }),
-      )
-
-      // Record the change and the collection snapshot at the same publication.
-      const subscription = source.subscribeChanges(
-        (changes) => {
-          const remoteKeys = changes
-            .filter((change) => change.key === remoteRow.id)
-            .map((change) => String(change.key))
-          if (remoteKeys.length === 0) return
-          publishedBatches.push(remoteKeys)
-          callbackReads.push(source.has(remoteRow.id) ? [remoteRow.id] : [])
-          if (abortPhase === `after-publication-starts`) {
-            controller.abort()
-            abortRaisedByPublication = controller.signal.aborted
-          }
-        },
-        { includeInitialState: false },
-      )
-      let primaryFailure: unknown
-      let failed = false
-      const cleanupFailures: Array<unknown> = []
-      try {
-        const load = source._sync.loadSubset({ signal: controller.signal })
-        // Keep a rejection observed if an earlier reach assertion fails.
-        if (load instanceof Promise) void load.catch(() => undefined)
-        expect(load).toBeInstanceOf(Promise)
-
-        // The adapter and applied-receipt boundary must be reached in every
-        // phase. The held mutation keeps the remote sync transaction parked.
-        expect(loadSubsetCalls).toBe(1)
-        expect(receiptWasDeferred).toBe(true)
-        expect(abortObservedAtCommit).toBe(abortPhase === `at-commit`)
-        expect(source.has(remoteRow.id)).toBe(false)
-
-        if (abortPhase === `while-parked`) {
-          controller.abort()
-        }
-
-        persistence.resolve()
-        await blocker.when(`settled`)
-
-        if (expected.load === `rejects`) {
-          await expect(load).rejects.toMatchObject({ name: `AbortError` })
-        } else {
-          await expect(load).resolves.toBeUndefined()
-        }
-
-        // The load promise, change event, and collection snapshot must agree.
-        // A mismatch would expose a partial publication to callers.
-        expect(source.has(remoteRow.id)).toBe(expected.rowIsVisible)
-        expect(publishedBatches).toEqual(expected.publishedBatches)
-        expect(callbackReads).toEqual(expected.callbackReads)
-        expect(abortRaisedByPublication).toBe(
-          abortPhase === `after-publication-starts`,
-        )
-      } catch (error) {
-        primaryFailure = error
-        failed = true
-      } finally {
-        persistence.resolve()
-        try {
-          await blocker.when(`settled`)
-        } catch (error) {
-          cleanupFailures.push(error)
-        }
-        try {
-          subscription.unsubscribe()
-        } catch (error) {
-          cleanupFailures.push(error)
-        }
-        try {
-          await source.cleanup()
-        } catch (error) {
-          cleanupFailures.push(error)
-        }
-      }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(
-          cleanupFailures,
-          `loadSubset transaction refinement cleanup failed`,
-          { cause: failed ? primaryFailure : cleanupFailures[0] },
-        )
-      }
-      if (failed) throw primaryFailure
+  oracleProperty({
+    id: `load-subset.transaction-refinement`,
+    law: {
+      statement: `Commit accepts an on-demand batch and an accepted batch always applies: an abort before acceptance discards the row, a later abort keeps it, and every aborted load rejects with AbortError.`,
+      authority: `The applied-receipt contract in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `One row, one parked optimistic transaction, and three abort phases at the direct source Collection boundary; no live-query graph and no other schedules.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: abortPhases,
+    label: (abortPhase) =>
+      `matches the independent receipt and publication model when aborting ${abortPhase}`,
+    resolve: (abortPhase) => ({ abortPhase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(transactionRefinementLaw, plan, observe, () =>
+        runAbortPhase(plan.abortPhase),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
