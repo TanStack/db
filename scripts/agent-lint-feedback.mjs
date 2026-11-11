@@ -44,8 +44,8 @@
  * walking up to an outer checkout's, so the outer checkout's plugin lints it.
  * The maintainer accepted that on 2026-11-11, so every form says so: one line
  * names the plugin's package directory and the checkout that it is outside.
- * The line alone fails no command-line run, and a hook hands it to the agent
- * with its report, or alone.
+ * The line alone fails no command-line run and blocks no stop. A hook hands
+ * it to the agent with its report, or alone after an edit.
  *
  * The lint needs the checkout's installed dependencies, which a fresh worktree
  * does not have. This script loads them with dynamic imports and catches a
@@ -443,8 +443,9 @@ function reportText(results) {
  * when there is a report. A hook hands them to the agent: a post-edit report
  * reaches the model beside the tool result, and a stop report makes the agent
  * take another turn. A run that could not lint (`scope` is `unavailable`)
- * reports its one line the same way, and so does a run whose only line names
- * the plugin, except that every hook exits 0.
+ * reports its one line the same way, and so does an edit whose only line
+ * names the plugin, except that every hook exits 0. A stop whose only line
+ * names the plugin does not block: the lint ran.
  */
 function respond(report, input, scope, notice) {
   const withNotice = (text) => [notice, text].filter(Boolean).join(`\n`)
@@ -452,6 +453,10 @@ function respond(report, input, scope, notice) {
     if (withNotice(report) !== ``)
       process.stderr.write(`${withNotice(report)}\n`)
     if (report !== ``) process.exitCode = 1
+    return
+  }
+  if (report === `` && options.event === `stop`) {
+    showUser(notice)
     return
   }
   if (scope === `unavailable` || report === ``) {
@@ -469,6 +474,19 @@ function respond(report, input, scope, notice) {
     input,
     true,
   )
+}
+
+/**
+ * Shows a stop hook's informational line, if any, without blocking the stop.
+ * Only a report, or a line that says the lint did not run, may block one: a
+ * blocked stop costs the agent a turn. Claude Code, Codex, and Gemini CLI
+ * show `systemMessage` to the user. Copilot's stop hook has no such field, so
+ * it shows nothing. Codex requires JSON on stdout when a stop hook exits 0.
+ */
+function showUser(message) {
+  if (message !== `` && options.format !== `copilot`)
+    process.stdout.write(`${JSON.stringify({ systemMessage: message })}\n`)
+  else if (options.format === `codex`) process.stdout.write(`{}\n`)
 }
 
 /**

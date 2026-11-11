@@ -32,8 +32,12 @@
  * outside <checkout>`, names the plugin's package directory and the session
  * checkout. A command-line run writes the line to stderr and keeps its exit
  * status, so the line alone does not fail it. A hook adds the line to its
- * report, or, with no report, hands it to the agent and exits 0, as a skip
- * does. A checkout whose own plugin loads prints no such line.
+ * report. With no report, an edit hook hands it to the agent and exits 0, as
+ * a skip does. The line is informational, because the lint ran, so it never
+ * blocks a stop: only lint reports and a line that says the lint did not run
+ * may block one. With no report, a stop hook shows the line to the user
+ * without blocking where its harness has a field for that, and is silent
+ * otherwise. A checkout whose own plugin loads prints no such line.
  *
  * The lint needs the checkout's installed dependencies: ESLint, its TypeScript
  * parser, and the plugin. When the session checkout cannot resolve them, as in
@@ -83,7 +87,9 @@
  * review of that change asked that a hook's line reach the agent, and that a
  * partial install skip as a missing one does. The outer-plugin rule is the
  * maintainer's decision of 2026-11-11 ("using outer checkout's plugin seems
- * fine"): lint with the launch checkout's rule and say so. The failure rule for
+ * fine"): lint with the launch checkout's rule and say so. The coordinator's
+ * decision of 2026-11-11 added that the line must not block a stop. The
+ * failure rule for
  * arguments, hook input, the merge-base, and lint errors is the same 2026-11-10
  * decision, which review finding F26 applied to the paths that still
  * crashed. The harnesses' hook
@@ -462,6 +468,28 @@ const constructions = [
     worktreeInstall: `own`,
     fault,
   })),
+  // A worktree with no install whose branch changes nothing that an oracle
+  // file reaches, so its stop has no report and only the line.
+  (skeleton) => ({
+    ...skeleton,
+    shape: `free`,
+    oracles: skeleton.oracles.map((oracle) => ({
+      ...oracle,
+      edited: false,
+      untracked: false,
+    })),
+    supports: skeleton.supports.map((support) => ({
+      ...support,
+      edited: false,
+    })),
+    driver: { ...skeleton.driver, edited: false },
+    ruleEdited: false,
+    lockfile: { ...skeleton.lockfile, base: `present` },
+    session: `worktree`,
+    dependencies: `installed`,
+    worktreeInstall: `none`,
+    fault: `none`,
+  }),
 ]
 
 const shapes = {
@@ -755,6 +783,13 @@ function predictSelected(program, edited) {
 // lints it (maintainer decision, 2026-11-11). Every form then names where
 // that plugin is: the launch checkout's `node_modules`, outside the session
 // checkout. No other history names a location.
+//
+// The line never blocks a stop (decision of 2026-11-11): the lint ran, and a
+// blocked stop costs the agent a turn. A stop blocks exactly when it has lint
+// reports. With no report, the stop shows the line as `systemMessage`, which
+// Claude Code, Codex, and Gemini CLI document as a message to the user that
+// does not block. Copilot's `agentStop` documents only `decision` and
+// `reason`, so its stop is silent.
 
 /** Whether the session checkout's reports carry the edited rule's mark. */
 function predictRuleMarked(program) {
@@ -767,6 +802,24 @@ const NOTICE_LINE = `${NOTICE_PREFIX}<launch>/${PLUGIN}, outside <checkout>`
 /** The lines that name an outer plugin's location, in each form's response. */
 function predictNotices(program) {
   return program.outerInstall ? [NOTICE_LINE] : []
+}
+
+/**
+ * Each harness's stop for an outer plugin: whether it blocks, and the line
+ * that it shows without blocking, if any.
+ */
+function predictOuterStops(program) {
+  const blocks =
+    predictSelected(program, editedByScope(program).stop).length > 0
+  return Object.fromEntries(
+    HOOK_FORMATS.map((format) => [
+      format,
+      {
+        blocks,
+        shown: blocks || format === `copilot` ? null : NOTICE_LINE,
+      },
+    ]),
+  )
 }
 
 // Without a full install, no form lints, and none crashes. A missing or
@@ -1309,11 +1362,15 @@ function runCli(cwd, script, args, input, { launch, checkout }) {
     // A hook that has only a notice hands it to the agent on its channel.
     const event = args.includes(`--event=stop`) ? `stop` : `edit`
     const value = stdoutValue(stdout)
-    const text = value?.reason ?? value?.hookSpecificOutput?.additionalContext
+    // The stop's blocking is judged by `observedStops`.
+    const text =
+      value?.systemMessage ??
+      value?.reason ??
+      value?.hookSpecificOutput?.additionalContext
+    const forms = [agentChannel(`claude`, event, text), { systemMessage: text }]
     if (
       typeof text === `string` &&
-      JSON.stringify(value) ===
-        JSON.stringify(agentChannel(`claude`, event, text)) &&
+      forms.some((form) => JSON.stringify(value) === JSON.stringify(form)) &&
       text.split(`\n`).every(isNotice)
     ) {
       notices.push(...text.split(`\n`))
@@ -1498,6 +1555,29 @@ function observedFaults(program, repository) {
   return runs
 }
 
+/**
+ * Each harness's stop hook, run from the launch checkout: whether it blocks
+ * the stop, by exit 2 or a blocking `decision`, and the line that its
+ * `systemMessage` shows, with the checkouts' paths written as in `runRaw`.
+ */
+function observedStops(launch, launchScript, repository) {
+  return Object.fromEntries(
+    HOOK_FORMATS.map((format) => {
+      const run = runRaw(
+        launch,
+        launchScript,
+        [`--format=${format}`, `--event=stop`],
+        JSON.stringify({ cwd: repository.checkout }),
+        repository,
+      )
+      const blocks =
+        (run.exit === `nonzero` && run.stderr.length > 0) ||
+        [`block`, `deny`].includes(run.stdout?.decision)
+      return [format, { blocks, shown: run.stdout?.systemMessage ?? null }]
+    }),
+  )
+}
+
 /** What each scope reports, from one repository. */
 function observedSelections(program) {
   const repository = repositoryOf(program)
@@ -1540,7 +1620,15 @@ function observedSelections(program) {
       JSON.stringify({ cwd: checkout }),
       repository,
     )
-    return { changed, named, hook, stop }
+    return {
+      changed,
+      named,
+      hook,
+      stop,
+      stops: program.outerInstall
+        ? observedStops(launch, launchScript, repository)
+        : undefined,
+    }
   } finally {
     rmSync(launch, { recursive: true, force: true })
   }
@@ -1620,6 +1708,8 @@ function comparePluginLocation(notices, expected) {
 //   worktree-outer-plugin: the worktree has no install of its own under an
 //     installed launch checkout, so it lints with the launch checkout's plugin
 //     and names its location.
+//   outer-plugin-quiet-stop: such a worktree's stop has no report, so the
+//     line alone must not block it.
 //   scratch-directory: a launch session's checkout holds a scratch directory
 //     under `.worktrees/`.
 //   missing-dependencies-launch, missing-dependencies-worktree: the checkouts
@@ -1662,6 +1752,7 @@ const STATES = [
   `worktree-session`,
   `worktree-own-rule`,
   `worktree-outer-plugin`,
+  `outer-plugin-quiet-stop`,
   `scratch-directory`,
   `missing-dependencies-launch`,
   `missing-dependencies-worktree`,
@@ -1795,8 +1886,11 @@ function recordStates(program, observe) {
     states.add(`hook-production-boundary`)
   if (program.session === `worktree`) {
     states.add(`worktree-session`)
-    if (program.outerInstall) states.add(`worktree-outer-plugin`)
-    else if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)
+    if (program.outerInstall) {
+      states.add(`worktree-outer-plugin`)
+      if (predictSelected(program, editedByScope(program).stop).length === 0)
+        states.add(`outer-plugin-quiet-stop`)
+    } else if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }
@@ -1857,6 +1951,7 @@ const constructedStates = [
   ...BROKEN_INSTALLS.map((kind) => `${kind}-install`),
   `worktree-outer-plugin`,
   ...FAULTS.map((fault) => `${fault}-fault`),
+  `outer-plugin-quiet-stop`,
 ]
 
 oracleProperty({
@@ -1887,6 +1982,7 @@ oracleProperty({
     return {
       marked: predictRuleMarked(program),
       notices: predictNotices(program),
+      stops: program.outerInstall ? predictOuterStops(program) : undefined,
       selections: Object.fromEntries(
         [`changed`, `named`, `hook`, `stop`].map((scope) => [
           scope,
@@ -1906,7 +2002,7 @@ oracleProperty({
           scope,
           // A skip or failure record is plain data; a selection's marks are
           // a set.
-          value === undefined || scope === `skips` || scope === `faults`
+          value === undefined || [`skips`, `faults`, `stops`].includes(scope)
             ? value
             : { ...value, marks: [...value.marks] },
         ]),
@@ -1957,6 +2053,15 @@ oracleProperty({
       )
       if (location.kind !== `pass`) return location
     }
+    if (expected.stops !== undefined)
+      return (
+        differs(
+          `outer plugin stop`,
+          `informational line`,
+          observed.stops,
+          expected.stops,
+        ) ?? pass
+      )
     return pass
   },
   timeout: 1_200_000,

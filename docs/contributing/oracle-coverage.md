@@ -4405,15 +4405,23 @@ walking up to the launch checkout's `node_modules`. It lints with the launch
 checkout's plugin, not the one its own lockfile pins, and every form says so
 in one line: `oracle lint used the plugin installed at <location>, outside
 <checkout>`. A command-line run writes the line to stderr and keeps its exit
-status. A hook puts the line before its report, or, with no report, hands it
-to the agent and exits 0, as a skip does; at a stop, that asks for one more
-turn. A worktree-install dimension (own or none) draws this state under an
-installed launch checkout, and a construction in each campaign enters it
-(`worktree-outer-plugin`). The model predicts the launch checkout's unmarked
-rule for such a worktree, even when its branch changed the plugin, and the
-line in every form. A checkout whose own plugin loads must print no such
-line. It does not draw a launch checkout whose plugin is linked from outside
-every checkout.
+status. A hook puts the line before its report. With no report, an edit hook
+hands it to the agent and exits 0, as a skip does. The line never blocks a
+stop (coordinator decision, 2026-11-11): the lint ran, so only lint reports
+and a line that says the lint did not run may block one. With no report, the
+Claude Code, Codex, and Gemini CLI stop hooks show the line as
+`systemMessage`, which their hook documentation describes as a message to
+the user that does not block. Copilot's `agentStop` documents only
+`decision` and `reason`, so its stop is silent. A worktree-install dimension
+(own or none) draws this state under an installed launch checkout, and a
+construction in each campaign enters it (`worktree-outer-plugin`). Another
+construction gives such a worktree a stop with no report
+(`outer-plugin-quiet-stop`). The model predicts the launch checkout's
+unmarked rule for such a worktree, even when its branch changed the plugin,
+the line in every form, and, in each harness, whether the stop blocks and
+what it shows. A checkout whose own plugin loads must print no such line. It
+does not draw a launch checkout whose plugin is linked from outside every
+checkout.
 
 It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
