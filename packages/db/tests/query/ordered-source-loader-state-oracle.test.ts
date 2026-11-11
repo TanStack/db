@@ -1268,9 +1268,7 @@ async function checkAuthorityCase(
       // rank is finite: a head insert or an unexpressible boundary sends a
       // genuine replacement start's settlement to a full-source read too.
       ((fullSource &&
-        snapshot().every(({ value }) =>
-          Number.isFinite(value.rank as number),
-        )) ||
+        snapshot().every(({ value }) => Number.isFinite(value.rank))) ||
         (options.orderBy !== undefined &&
           options.where === undefined &&
           options.minValues === undefined))
