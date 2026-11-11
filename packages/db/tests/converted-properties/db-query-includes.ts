@@ -5,6 +5,26 @@
 // files and deletes this directory.
 import type { ConvertedOwnerGroup } from './index.js'
 
-export const properties: ReadonlyArray<string> = []
+export const properties: ReadonlyArray<string> = [
+  `includes-space.reachable-facades`,
+  `includes-outer-join-route-work.main-correlation`,
+  `evaluators.in-original-calibration`,
+]
 
-export const owners: ReadonlyArray<ConvertedOwnerGroup> = []
+export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db/tests/query/includes-space-oracle.test.ts`,
+    `includes-space`,
+    `reachable-facades`,
+  ],
+  [
+    `db/tests/query/includes-outer-join-route-work-oracle.test.ts`,
+    `includes-outer-join-route-work`,
+    `main-correlation`,
+  ],
+  [
+    `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
+    `evaluators`,
+    `in-original-calibration`,
+  ],
+]
