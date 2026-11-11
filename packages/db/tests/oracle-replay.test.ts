@@ -721,7 +721,11 @@ describe(`named oracle replay manifest`, () => {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)
         expect(source).toContain(`\`${family}.\${id}\``)
-      } else if (entry.property.startsWith(`pagination.limit-admission-`)) {
+      } else if (
+        entry.property.startsWith(`pagination.limit-admission-`) &&
+        // The fixed admission histories name their property literally.
+        entry.property !== `pagination.limit-admission-fixed`
+      ) {
         const suffix = entry.property.slice(
           `pagination.limit-admission-`.length,
         )
@@ -846,9 +850,16 @@ describe(`named oracle replay manifest`, () => {
     const direct = oracleReplayManifest.filter(({ property }) =>
       /^(index-update|pagination\.matrix)\./.test(property),
     )
-    expect(direct).toHaveLength(20)
+    // The 20 generated matrix properties replay a seed and path; the fixed
+    // index-update histories are enumerated sources that replay their cases.
+    expect(direct.filter(({ status }) => status === `assertion`)).toHaveLength(
+      20,
+    )
     for (const entry of direct) {
-      expect(entry.status).toBe(`assertion`)
+      if (entry.status !== `assertion`) {
+        expect(entry.property).toMatch(/^index-update\./)
+        expect(entry.status).toBe(`enumerated-campaign`)
+      }
       expect(entry.testNamePattern).toBeDefined()
     }
   })

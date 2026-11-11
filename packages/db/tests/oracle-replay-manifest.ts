@@ -1,5 +1,8 @@
 import { registeredOracleProperties } from './oracle-config.js'
-import { convertedOwners } from './converted-properties/index.js'
+import {
+  convertedOwners,
+  convertedProperties,
+} from './converted-properties/index.js'
 
 /**
  * This manifest maps a replay name to the source file that can prove it ran.
@@ -1886,6 +1889,9 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  // Every property that the declareOracle removal added is an enumerated
+  // source: one test per history, and no random campaign.
+  ...convertedProperties,
   ...[`rxdb`, `powersync`].flatMap((adapter) =>
     [`controlled`, `node-sqlite`].map(
       (host) => `adapter.${adapter}.capability.${host}`,
@@ -2141,6 +2147,14 @@ const outsideReplayConfigs = new Map([
  * runs only under its own config.
  */
 const ownerReplayConfigs = new Map([
+  [
+    `packages/electric-db-collection/e2e/electric.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/electron-db-sqlite-persistence/tests/reload-class-oracle.electron.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
   [
     `packages/browser-db-sqlite-persistence/e2e/query-scope-omission-oracle.browser.test.ts`,
     `vitest.adapter-oracles.config.ts`,
