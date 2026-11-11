@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createCollection } from '@tanstack/db'
-import { afterAll, expect, inject, it, vi } from 'vitest'
+import { afterAll, inject, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred'
 import {
   checkGcObservation,
@@ -8,10 +8,15 @@ import {
   gcDeadline,
   stepGcModel,
 } from '../../db/tests/collection-gc-retention-oracle'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { electricCollectionOptions } from '../src/electric'
-import type { GcAction } from '../../db/tests/collection-gc-retention-oracle'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
+import type {
+  GcAction,
+  GcModel,
+  GcObservation,
+} from '../../db/tests/collection-gc-retention-oracle'
 
 /**
  * The shared GC model owns retention and retirement. This receiving driver
@@ -48,306 +53,572 @@ const idleHost = vi.hoisted(() => {
 })
 afterAll(() => vi.unstubAllGlobals())
 
-for (const gcTime of [10, 100]) {
-  for (const lastUnsubscribe of [false, true]) {
-    for (const settlementOrder of [[0], [0, 1], [1, 0]]) {
-      const order =
-        settlementOrder.length === 1
-          ? `single`
-          : settlementOrder[0] === 0
-            ? `oldest-first`
-            : `newest-first`
-      it(`retains real Electric confirmations across GC with gcTime ${gcTime}, last unsubscribe ${lastUnsubscribe}, and ${order} settlement`, async () => {
-        const table = `gc_confirmation_${crypto.randomUUID().replaceAll('-', '')}`
-        const schema = inject(`testSchema`)
-        const admin = makePgClient()
-        const writers = settlementOrder.map(() => makePgClient())
-        const assignedTxids = writers.map(() => createDeferred<number>())
-        const sqlOpen = writers.map(() => false)
-        const acknowledged = writers.map(() => false)
-        const callerOutcomes = writers.map(() => `pending`)
-        const sourceKeys = new Set<number>()
-        const reach = createOracleReach(
-          `collection-lifecycle.gc-retention-boundaries`,
-          [
-            `provider-confirmations-held`,
-            ...(writers.length === 2
-              ? [
-                  `provider-${order}`,
-                  `surviving-provider-hold-crosses-deadline`,
-                ]
-              : []),
-            `all-provider-writes-confirmed`,
-            `renewed-zero-budget`,
-            `renewed-usable-idle`,
-          ],
-        )
-        reach.beginHistory()
-        let tableCreated = false
-        const collection = createCollection(
-          electricCollectionOptions<{ id: number; value: string }>({
-            id: table,
-            getKey: (row) => row.id,
-            startSync: false,
-            gcTime,
-            shapeOptions: {
-              url: `${inject(`baseUrl`)}/v1/shape`,
-              params: { table: `"${schema}"."${table}"` },
-              onError: (error) => {
-                throw error
-              },
-            },
-            onInsert: async ({ collection: owner, transaction }) => {
-              const id = transaction.mutations[0].modified.id
-              const slot = id - 1
-              const writer = writers[slot]!
-              try {
-                await writer.query(`BEGIN`)
-                sqlOpen[slot] = true
-                const result = await writer.query<{ txid: string }>(
-                  `INSERT INTO "${schema}"."${table}" (id, value) VALUES ($1, 'confirmed') RETURNING pg_current_xact_id()::text AS txid`,
-                  [id],
-                )
-                const txid = Number(result.rows[0]!.txid)
-                assignedTxids[slot]!.resolve(txid)
-                await owner.utils.awaitTxId(txid, 15_000)
-                acknowledged[slot] = true
-              } catch (error) {
-                assignedTxids[slot]!.reject(error)
-                throw error
-              }
-            },
-          }),
-        )
-        let primaryFailure: unknown
-        let checkFailed = false
-        const observeCallers: Array<Promise<void>> = []
+/**
+ * The histories: every gcTime, subscriber and settlement-order combination,
+ * enumerated, so each runs in every campaign.
+ */
+type GcReceivingHistory = {
+  gcTime: 10 | 100
+  lastUnsubscribe: boolean
+  settlementOrder: Array<0 | 1>
+}
+const histories: Array<GcReceivingHistory> = ([10, 100] as const).flatMap(
+  (gcTime) =>
+    [false, true].flatMap((lastUnsubscribe) =>
+      ([[0], [0, 1], [1, 0]] as Array<Array<0 | 1>>).map((settlementOrder) => ({
+        gcTime,
+        lastUnsubscribe,
+        settlementOrder,
+      })),
+    ),
+)
+const orderName = ({ settlementOrder }: GcReceivingHistory) =>
+  settlementOrder.length === 1
+    ? `single`
+    : settlementOrder[0] === 0
+      ? `oldest-first`
+      : `newest-first`
+
+/**
+ * Declared reach, per history: the states its own receiving path must enter.
+ * An enumerated source runs every history, so the check requires each
+ * history's states (law `declared reach`), as the earlier per-test reach
+ * ledger did. Two writers add the sibling hold across the first release.
+ */
+function owedReach(history: GcReceivingHistory): Array<string> {
+  return [
+    `provider-confirmations-held`,
+    ...(history.settlementOrder.length === 2
+      ? [
+          `provider-${orderName(history)}`,
+          `surviving-provider-hold-crosses-deadline`,
+        ]
+      : []),
+    `all-provider-writes-confirmed`,
+    `renewed-zero-budget`,
+    `renewed-usable-idle`,
+  ]
+}
+
+/**
+ * The GC model's owed state at one cut, without its clock fields. The shared
+ * model reads elapsed wall-clock time, which only the driver can measure; a
+ * trace that held clock readings would differ between two runs and fail the
+ * determinism test. So the driver steps the shared model, from the history's
+ * actions and the measured elapsed time alone, never from a production
+ * observation, and records this projection beside the observation. Every
+ * wait in this grammar ends comfortably before or after the deadline that
+ * decides `retired` (see the waits below), so the projection is a function of
+ * the history's actions and the same in every run.
+ */
+type OwedGcState = Pick<GcModel, `retired` | `cleaningUp` | `transactions`>
+type GcCut = {
+  cut: string
+  owed: OwedGcState
+  observed: GcObservation
+  sourceKeys: Array<number>
+}
+
+// A margin past the model's deadline, so timer rounding (a Node timer can
+// fire about a millisecond early) cannot leave the model before it.
+const deadlineMarginMs = 20
+
+async function recordGcReceiving(
+  history: GcReceivingHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const { gcTime, lastUnsubscribe, settlementOrder } = history
+  const table = `gc_confirmation_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = inject(`testSchema`)
+  const admin = makePgClient()
+  const writers = settlementOrder.map(() => makePgClient())
+  const assignedTxids = writers.map(() => createDeferred<number>())
+  const sqlOpen = writers.map(() => false)
+  const acknowledged = writers.map(() => false)
+  const callerOutcomes = writers.map(() => `pending`)
+  const sourceKeys = new Set<number>()
+  let tableCreated = false
+  const collection = createCollection(
+    electricCollectionOptions<{ id: number; value: string }>({
+      id: table,
+      getKey: (row) => row.id,
+      startSync: false,
+      gcTime,
+      shapeOptions: {
+        url: `${inject(`baseUrl`)}/v1/shape`,
+        params: { table: `"${schema}"."${table}"` },
+        onError: (error) => {
+          throw error
+        },
+      },
+      onInsert: async ({ collection: owner, transaction }) => {
+        const id = transaction.mutations[0].modified.id
+        const slot = id - 1
+        const writer = writers[slot]!
         try {
-          await admin.connect()
-          await Promise.all(writers.map((writer) => writer.connect()))
-          await admin.query(
-            `CREATE TABLE "${schema}"."${table}" (id INTEGER PRIMARY KEY, value TEXT NOT NULL)`,
+          await writer.query(`BEGIN`)
+          sqlOpen[slot] = true
+          const result = await writer.query<{ txid: string }>(
+            `INSERT INTO "${schema}"."${table}" (id, value) VALUES ($1, 'confirmed') RETURNING pg_current_xact_id()::text AS txid`,
+            [id],
           )
-          tableCreated = true
-          await collection.preload()
-          const startedAt = performance.now()
-          const model = createGcModel(gcTime)
-          const advance = () =>
-            stepGcModel(model, {
-              kind: `advance`,
-              elapsedMs: performance.now() - startedAt - model.now,
-            })
-          const apply = (action: GcAction) => {
-            advance()
-            stepGcModel(model, action)
-          }
-          const subscription = lastUnsubscribe
-            ? collection.subscribeChanges(() => {})
-            : undefined
-          if (subscription) apply({ kind: `subscribe` })
-          const transactions = writers.map((_, slot) => {
-            const transaction = collection.insert({
-              id: slot + 1,
-              value: `confirmed`,
-            })
-            apply({ kind: `insert`, commit: true })
-            observeCallers.push(
-              transaction.when(`settled`).then(
-                () => {
-                  callerOutcomes[slot] = `fulfilled`
-                },
-                () => {
-                  callerOutcomes[slot] = `rejected`
-                },
-              ),
-            )
-            return transaction
-          })
-          if (subscription) {
-            subscription.unsubscribe()
-            apply({ kind: `unsubscribe` })
-          }
-          const observation = () => ({
-            retired: collection.status === `cleaned-up`,
-            visibleKeys: [...collection.keys()].map((key) => {
-              if (typeof key !== `number`)
-                throw new Error(
-                  `Expected integer PostgreSQL key, received ${key}`,
-                )
-              return key
-            }),
-            transactionStates: transactions.map(
-              (transaction) => transaction.state,
-            ),
-          })
-          const check = (checkpoint: string) => {
-            advance()
-            checkGcObservation(model, observation(), checkpoint, [
-              ...sourceKeys,
-            ])
-          }
-          const idle = (hasTime: boolean) => {
-            for (const [id, callback] of [...idleHost.callbacks]) {
-              idleHost.callbacks.delete(id)
-              callback({
-                didTimeout: false,
-                timeRemaining: () => (hasTime ? 50 : 0),
-              })
-            }
-            apply({ kind: `idle`, hasTime, didTimeout: false })
-          }
-
-          const txids = await Promise.all(
-            assignedTxids.map((assigned) => assigned.promise),
-          )
-          expect(txids.every(Number.isSafeInteger)).toBe(true)
-          expect(new Set(txids).size).toBe(writers.length)
-          expect(sqlOpen).toEqual(writers.map(() => true))
-          // The separate connection cannot see either uncommitted source row.
-          // This proves genuine provider work, not merely a held utility Promise.
-          expect(
-            (
-              await admin.query(
-                `SELECT id FROM "${schema}"."${table}" ORDER BY id`,
-              )
-            ).rows,
-          ).toEqual([])
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.max(gcTime, 50) + 20),
-          )
-          idle(true)
-          check(`real Electric confirmations held across unheld GC deadline`)
-          expect(model.now).toBeGreaterThanOrEqual(Math.max(gcTime, 50))
-          expect(transactions.map((transaction) => transaction.state)).toEqual(
-            writers.map(() => `persisting`),
-          )
-          expect(callerOutcomes).toEqual(writers.map(() => `pending`))
-          expect(acknowledged).toEqual(writers.map(() => false))
-          reach.reach(`provider-confirmations-held`)
-          // A plausible wrong public result must be rejected at this same cut.
-          expect(() =>
-            checkGcObservation(
-              model,
-              { ...observation(), retired: true },
-              `hostile early retirement`,
-            ),
-          ).toThrow(/retired expected false, got true/)
-
-          for (const [index, slot] of settlementOrder.entries()) {
-            await writers[slot]!.query(`COMMIT`)
-            sqlOpen[slot] = false
-            sourceKeys.add(slot + 1)
-            await observeCallers[slot]
-            expect(callerOutcomes[slot]).toBe(`fulfilled`)
-            expect(acknowledged[slot]).toBe(true)
-            apply({ kind: `settle`, slot, outcome: `complete` })
-            check(`real Electric caller settlement ${index}`)
-            if (index + 1 < settlementOrder.length) {
-              const survivor = settlementOrder[index + 1]!
-              expect(sqlOpen[survivor]).toBe(true)
-              expect(acknowledged[survivor]).toBe(false)
-              expect(callerOutcomes[survivor]).toBe(`pending`)
-              expect(transactions[survivor]!.state).toBe(`persisting`)
-              expect(
-                (
-                  await admin.query(
-                    `SELECT id FROM "${schema}"."${table}" ORDER BY id`,
-                  )
-                ).rows,
-              ).toEqual([{ id: slot + 1 }])
-              reach.reach(`provider-${order}`)
-              // A fresh delay after the first confirmation is insufficient: the
-              // remaining handler still owns the Collection past that deadline.
-              await new Promise((resolve) =>
-                setTimeout(resolve, Math.max(gcTime, 50) + 20),
-              )
-              idle(true)
-              check(
-                `surviving real Electric confirmation holds after first release deadline`,
-              )
-              expect(transactions[survivor]!.state).toBe(`persisting`)
-              expect(callerOutcomes[survivor]).toBe(`pending`)
-              expect(acknowledged[survivor]).toBe(false)
-              reach.reach(`surviving-provider-hold-crosses-deadline`)
-            }
-          }
-          reach.reach(`all-provider-writes-confirmed`)
-          for (const id of sourceKeys)
-            expect(collection.get(id)).toMatchObject({
-              id,
-              value: `confirmed`,
-
-              $hasPendingWrites: false,
-            })
-          expect(idleHost.callbacks.size).toBe(0)
-
-          // Timer delivery proves core reached renewed eligibility. A zero-budget
-          // host opportunity must preserve rows; a usable one then retires them.
-          await vi.waitFor(() =>
-            expect(idleHost.callbacks.size).toBeGreaterThan(0),
-          )
-          advance()
-          // Real timers may round a sub-millisecond deadline. Wait for the
-          // independent model's deadline before delivering the idle opportunity.
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.max(0, gcDeadline(model) - model.now) + 1),
-          )
-          idle(false)
-          check(`real Electric renewed deadline without idle budget`)
-          expect(idleHost.callbacks.size).toBeGreaterThan(0)
-          reach.reach(`renewed-zero-budget`)
-          idle(true)
-          await Promise.resolve()
-          check(`real Electric renewed deadline with idle budget`)
-          expect(model.retired).toBe(true)
-          reach.reach(`renewed-usable-idle`)
-          reach.assertReached()
-          console.info(
-            JSON.stringify({
-              witness: `electric.gc-provider-confirmation`,
-              gcTime,
-              lastUnsubscribe,
-              txids,
-              order,
-              reach: Object.fromEntries(reach.counts()),
-              heldAcrossDeadline: true,
-              acknowledged,
-              callerOutcomes,
-              retired: model.retired,
-            }),
-          )
+          const txid = Number(result.rows[0]!.txid)
+          assignedTxids[slot]!.resolve(txid)
+          await owner.utils.awaitTxId(txid, 15_000)
+          acknowledged[slot] = true
         } catch (error) {
-          checkFailed = true
-          primaryFailure = error
+          assignedTxids[slot]!.reject(error)
+          throw error
         }
-        const cleanupFailures: Array<unknown> = []
-        for (const cleanup of [
-          ...writers.map((writer, slot) => async () => {
-            if (sqlOpen[slot]) await writer.query(`ROLLBACK`)
-          }),
-          () => collection.cleanup(),
-          () => Promise.all(observeCallers),
-          ...writers.map((writer) => () => writer.end()),
-          async () => {
-            if (tableCreated)
-              await admin.query(`DROP TABLE IF EXISTS "${schema}"."${table}"`)
-          },
-          () => admin.end(),
-        ]) {
-          try {
-            await cleanup()
-          } catch (error) {
-            cleanupFailures.push(error)
-          }
-        }
-        idleHost.callbacks.clear()
-        if (checkFailed || cleanupFailures.length)
-          throw new AggregateError(
-            [...(checkFailed ? [primaryFailure] : []), ...cleanupFailures],
-            `Electric GC receiving check or cleanup failed`,
-            { cause: primaryFailure },
-          )
+      },
+    }),
+  )
+  let primaryFailure: unknown
+  let checkFailed = false
+  const observeCallers: Array<Promise<void>> = []
+  const sourceRows = async () =>
+    (
+      await admin.query<{ id: number }>(
+        `SELECT id FROM "${schema}"."${table}" ORDER BY id`,
+      )
+    ).rows.map((row) => row.id)
+  try {
+    await admin.connect()
+    await Promise.all(writers.map((writer) => writer.connect()))
+    await admin.query(
+      `CREATE TABLE "${schema}"."${table}" (id INTEGER PRIMARY KEY, value TEXT NOT NULL)`,
+    )
+    tableCreated = true
+    await collection.preload()
+    const startedAt = performance.now()
+    // The shared model, stepped from environment inputs only: the history's
+    // actions and the elapsed time this driver measures. No production
+    // observation reaches it.
+    const model = createGcModel(gcTime)
+    const advance = () =>
+      stepGcModel(model, {
+        kind: `advance`,
+        elapsedMs: performance.now() - startedAt - model.now,
       })
+    const apply = (action: GcAction) => {
+      advance()
+      stepGcModel(model, action)
+    }
+    const subscription = lastUnsubscribe
+      ? collection.subscribeChanges(() => {})
+      : undefined
+    if (subscription) apply({ kind: `subscribe` })
+    const transactions = writers.map((_, slot) => {
+      const transaction = collection.insert({
+        id: slot + 1,
+        value: `confirmed`,
+      })
+      apply({ kind: `insert`, commit: true })
+      observeCallers.push(
+        transaction.when(`settled`).then(
+          () => {
+            callerOutcomes[slot] = `fulfilled`
+          },
+          () => {
+            callerOutcomes[slot] = `rejected`
+          },
+        ),
+      )
+      return transaction
+    })
+    if (subscription) {
+      subscription.unsubscribe()
+      apply({ kind: `unsubscribe` })
+    }
+    const observation = (): GcObservation => ({
+      retired: collection.status === `cleaned-up`,
+      visibleKeys: [...collection.keys()].map((key) => {
+        if (typeof key !== `number`)
+          throw new Error(`Expected integer PostgreSQL key, received ${key}`)
+        return key
+      }),
+      transactionStates: transactions.map((transaction) => transaction.state),
+    })
+    const cut = (name: string) => {
+      advance()
+      const value: GcCut = {
+        cut: name,
+        owed: {
+          retired: model.retired,
+          cleaningUp: model.cleaningUp,
+          transactions: [...model.transactions],
+        },
+        observed: observation(),
+        sourceKeys: [...sourceKeys],
+      }
+      observe(`gc`, value)
+    }
+    const idle = (hasTime: boolean) => {
+      for (const [id, callback] of [...idleHost.callbacks]) {
+        idleHost.callbacks.delete(id)
+        callback({
+          didTimeout: false,
+          timeRemaining: () => (hasTime ? 50 : 0),
+        })
+      }
+      apply({ kind: `idle`, hasTime, didTimeout: false })
+    }
+    const provider = (slot: number) => ({
+      sqlOpen: sqlOpen[slot],
+      acknowledged: acknowledged[slot],
+      caller: callerOutcomes[slot],
+      phase: transactions[slot]!.state,
+    })
+
+    const txids = await Promise.all(
+      assignedTxids.map((assigned) => assigned.promise),
+    )
+    // The separate connection cannot see either uncommitted source row. This
+    // proves genuine provider work, not merely a held utility Promise.
+    observe(`provider work`, {
+      txidsSafe: txids.every(Number.isSafeInteger),
+      distinctTxids: new Set(txids).size,
+      sqlOpen: [...sqlOpen],
+      visibleSourceRows: await sourceRows(),
+    })
+    // Every writer holds the Collection, so the model's deadline is
+    // unbounded here: this wait only has to cross the unheld deadline.
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(gcTime, 50) + deadlineMarginMs),
+    )
+    idle(true)
+    cut(`real Electric confirmations held across unheld GC deadline`)
+    observe(`held across deadline`, {
+      crossedUnheldDeadline: model.now >= Math.max(gcTime, 50),
+      providers: writers.map((_, slot) => provider(slot)),
+    })
+    observe(`reach`, `provider-confirmations-held`)
+
+    for (const [index, slot] of settlementOrder.entries()) {
+      await writers[slot]!.query(`COMMIT`)
+      sqlOpen[slot] = false
+      sourceKeys.add(slot + 1)
+      await observeCallers[slot]
+      observe(`settled provider`, { slot, ...provider(slot) })
+      apply({ kind: `settle`, slot, outcome: `complete` })
+      cut(`real Electric caller settlement ${index}`)
+      if (index + 1 < settlementOrder.length) {
+        const survivor = settlementOrder[index + 1]!
+        observe(`surviving provider`, {
+          slot: survivor,
+          ...provider(survivor),
+          visibleSourceRows: await sourceRows(),
+        })
+        observe(`reach`, `provider-${orderName(history)}`)
+        // A fresh delay after the first confirmation is insufficient: the
+        // remaining handler still owns the Collection past that deadline. The
+        // survivor holds the Collection, so the model's deadline is unbounded.
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(gcTime, 50) + deadlineMarginMs),
+        )
+        idle(true)
+        cut(
+          `surviving real Electric confirmation holds after first release deadline`,
+        )
+        observe(`surviving provider after deadline`, {
+          slot: survivor,
+          ...provider(survivor),
+        })
+        observe(`reach`, `surviving-provider-hold-crosses-deadline`)
+      }
+    }
+    observe(`reach`, `all-provider-writes-confirmed`)
+    observe(`confirmed rows`, {
+      rows: [...sourceKeys].map((id) => {
+        const row = collection.get(id)
+        return row === undefined
+          ? null
+          : {
+              key: id,
+              id: row.id,
+              value: row.value,
+              hasPendingWrites: row.$hasPendingWrites,
+            }
+      }),
+      idleRequests: idleHost.callbacks.size,
+    })
+
+    // Timer delivery proves core reached renewed eligibility. A zero-budget
+    // host opportunity must preserve rows; a usable one then retires them.
+    await vi.waitFor(() => {
+      if (idleHost.callbacks.size === 0)
+        throw new Error(`core has not requested renewed idle work`)
+    })
+    advance()
+    // Real timers may round a sub-millisecond deadline. Wait past the
+    // independent model's deadline, by the margin, before delivering the idle
+    // opportunity, so the model is past it in every run.
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.max(0, gcDeadline(model) - model.now) + deadlineMarginMs,
+      ),
+    )
+    idle(false)
+    cut(`real Electric renewed deadline without idle budget`)
+    observe(`zero-budget idle`, { idleRequests: idleHost.callbacks.size })
+    observe(`reach`, `renewed-zero-budget`)
+    idle(true)
+    await Promise.resolve()
+    cut(`real Electric renewed deadline with idle budget`)
+    observe(`reach`, `renewed-usable-idle`)
+  } catch (error) {
+    checkFailed = true
+    primaryFailure = error
+  }
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of [
+    ...writers.map((writer, slot) => async () => {
+      if (sqlOpen[slot]) await writer.query(`ROLLBACK`)
+    }),
+    () => collection.cleanup(),
+    () => Promise.all(observeCallers),
+    ...writers.map((writer) => () => writer.end()),
+    async () => {
+      if (tableCreated)
+        await admin.query(`DROP TABLE IF EXISTS "${schema}"."${table}"`)
+    },
+    () => admin.end(),
+  ]) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
     }
   }
+  idleHost.callbacks.clear()
+  if (checkFailed || cleanupFailures.length)
+    throw new AggregateError(
+      [...(checkFailed ? [primaryFailure] : []), ...cleanupFailures],
+      `Electric GC receiving driver or cleanup failed`,
+      { cause: primaryFailure },
+    )
 }
+
+const valuesAt = <T>(trace: ReadonlyArray<Observation>, checkpoint: string) =>
+  trace
+    .filter((entry) => entry.checkpoint === checkpoint)
+    .map((entry) => entry.value as T)
+
+type ProviderObservation = {
+  slot?: number
+  sqlOpen: boolean
+  acknowledged: boolean
+  caller: string
+  phase: string
+  visibleSourceRows?: Array<number>
+}
+
+/**
+ * The check. Each `gc` cut runs the shared, unchanged checkGcObservation on
+ * the model's owed state and the public observation (law `gc retention`).
+ * The provider cuts check what the earlier driver asserted inline: genuine
+ * held provider work across the unheld deadline, a caller that settles only
+ * with its acknowledgement, a sibling whose SQL transaction and hold survive
+ * the first release, the confirmed rows, and the renewed idle requests.
+ * Reach is checked last, so a wrong observation is reported as itself.
+ */
+function checkGcReceiving(
+  history: GcReceivingHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: { reach: Array<string> },
+): Verdict {
+  const writers = history.settlementOrder.length
+  for (const value of valuesAt<GcCut>(trace, `gc`)) {
+    try {
+      checkGcObservation(
+        // The owed state, with the clock field the trace leaves out; the
+        // checker reads `now` only for its message.
+        { ...createGcModel(history.gcTime), ...value.owed, now: Number.NaN },
+        value.observed,
+        value.cut,
+        value.sourceKeys,
+      )
+    } catch (error) {
+      return violation(
+        `gc`,
+        error instanceof Error ? error.message : String(error),
+        `gc retention`,
+        { actual: value.observed, expected: value.owed },
+      )
+    }
+  }
+  for (const work of valuesAt<{
+    txidsSafe: boolean
+    distinctTxids: number
+    sqlOpen: Array<boolean>
+    visibleSourceRows: Array<number>
+  }>(trace, `provider work`)) {
+    if (
+      !work.txidsSafe ||
+      work.distinctTxids !== writers ||
+      work.sqlOpen.some((open) => !open) ||
+      work.visibleSourceRows.length > 0
+    )
+      return violation(
+        `provider work`,
+        `the provider did not hold ${writers} distinct, open, uncommitted SQL transactions`,
+        `genuine provider work`,
+        {
+          actual: work,
+          expected: {
+            txidsSafe: true,
+            distinctTxids: writers,
+            sqlOpen: Array.from({ length: writers }, () => true),
+            visibleSourceRows: [],
+          },
+        },
+      )
+  }
+  const held = (provider: ProviderObservation) =>
+    provider.sqlOpen &&
+    !provider.acknowledged &&
+    provider.caller === `pending` &&
+    provider.phase === `persisting`
+  for (const value of valuesAt<{
+    crossedUnheldDeadline: boolean
+    providers: Array<ProviderObservation>
+  }>(trace, `held across deadline`)) {
+    if (!value.crossedUnheldDeadline || !value.providers.every(held))
+      return violation(
+        `held across deadline`,
+        `a provider confirmation did not stay held, pending and persisting across the unheld GC deadline`,
+        `held provider confirmation`,
+      )
+  }
+  for (const value of valuesAt<ProviderObservation>(
+    trace,
+    `settled provider`,
+  )) {
+    if (value.caller !== `fulfilled` || !value.acknowledged)
+      return violation(
+        `settled provider`,
+        `writer ${value.slot} settled without its genuine acknowledgement`,
+        `provider confirmation settles the caller`,
+      )
+  }
+  for (const value of valuesAt<ProviderObservation>(
+    trace,
+    `surviving provider`,
+  )) {
+    const committed = history.settlementOrder[0]! + 1
+    if (
+      !held(value) ||
+      JSON.stringify(value.visibleSourceRows) !== JSON.stringify([committed])
+    )
+      return violation(
+        `surviving provider`,
+        `the sibling's hold or SQL transaction did not survive the first release`,
+        `a completed writer keeps its sibling's hold`,
+      )
+  }
+  for (const value of valuesAt<ProviderObservation>(
+    trace,
+    `surviving provider after deadline`,
+  )) {
+    if (value.phase !== `persisting` || value.caller !== `pending`)
+      return violation(
+        `surviving provider after deadline`,
+        `the sibling's hold ended at the first release deadline`,
+        `a completed writer keeps its sibling's hold`,
+      )
+    if (value.acknowledged)
+      return violation(
+        `surviving provider after deadline`,
+        `the sibling was acknowledged before its SQL transaction committed`,
+        `a completed writer keeps its sibling's hold`,
+      )
+  }
+  for (const value of valuesAt<{
+    rows: Array<{
+      key: number
+      id: number
+      value: string
+      hasPendingWrites: boolean
+    } | null>
+    idleRequests: number
+  }>(trace, `confirmed rows`)) {
+    if (
+      value.rows.some(
+        (row) =>
+          row === null ||
+          row.id !== row.key ||
+          row.value !== `confirmed` ||
+          row.hasPendingWrites,
+      ) ||
+      value.idleRequests !== 0
+    )
+      return violation(
+        `confirmed rows`,
+        `a confirmed row is missing, differs or still has pending writes, or idle work was requested early`,
+        `confirmed rows`,
+      )
+  }
+  for (const value of valuesAt<{ idleRequests: number }>(
+    trace,
+    `zero-budget idle`,
+  )) {
+    if (value.idleRequests === 0)
+      return violation(
+        `zero-budget idle`,
+        `a zero-budget idle opportunity consumed the renewed idle request`,
+        `zero-budget idle keeps the request`,
+      )
+  }
+  const reached = valuesAt<string>(trace, `reach`)
+  const missing = expected.reach.filter((state) => !reached.includes(state))
+  if (missing.length > 0)
+    return violation(
+      `reach`,
+      `the history did not enter ${missing.join(`, `)}`,
+      `declared reach`,
+    )
+  // The usable idle cut must retire the Collection: the shared model owes it,
+  // and the last gc cut above compared it.
+  return pass
+}
+
+oracleProperty({
+  id: `collection-lifecycle.gc-retention-boundaries.electric-postgres`,
+  law: {
+    statement: `A held real Electric confirmation keeps a Collection past its unheld GC deadline; caller settlement follows genuine acknowledgement, a completed writer leaves its sibling's hold in place, and GC renews only after the last confirmation, retiring on the first usable idle opportunity.`,
+    authority: `The shared GC retention model and checker (packages/db/tests/collection-gc-retention-oracle.ts) and its coverage-map entry; the maintainer's first-usable-idle retirement decision.`,
+    limits: `Twelve histories: gcTime 10/100ms, absent or last-unsubscribed owner, one writer or two in both settlement orders. Real PostgreSQL and Electric, controlled host idle delivery, real elapsed timers. Provider failure and recovery, three or more writers, browser/provider composition and persistence wrappers are outside this path. The shared model is stepped in the driver from actions and measured elapsed time, never from production observations, so traces stay free of clock readings.`,
+  },
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories,
+  label: (history) =>
+    `retains real Electric confirmations across GC with gcTime ${history.gcTime}, last unsubscribe ${history.lastUnsubscribe}, and ${orderName(history)} settlement`,
+  model: (history) => ({ reach: owedReach(history) }),
+  driver: recordGcReceiving,
+  check: checkGcReceiving,
+  calibrations: [
+    {
+      // A plausible wrong public result at the held cut: an early retirement.
+      name: `hostile early retirement`,
+      law: `gc retention`,
+      corrupt: (trace) => {
+        const at = trace.findIndex((entry) => entry.checkpoint === `gc`)
+        if (at < 0) return undefined
+        const value = trace[at]!.value as GcCut
+        return trace.map((entry, index) =>
+          index === at
+            ? {
+                checkpoint: `gc`,
+                value: {
+                  ...value,
+                  observed: { ...value.observed, retired: true },
+                },
+              }
+            : entry,
+        )
+      },
+    },
+  ],
+  timeout: 120_000,
+})

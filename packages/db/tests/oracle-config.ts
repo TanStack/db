@@ -589,6 +589,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-lifecycle.gc-persisting-transaction`,
   `collection-lifecycle.gc-retention-boundaries`,
+  `collection-lifecycle.gc-retention-boundaries.electric-postgres`,
   `collection-lifecycle.gc-mutation-shapes`,
   `collection-state.retention`,
   `collection-state.accepted-snapshot.before-delete`,

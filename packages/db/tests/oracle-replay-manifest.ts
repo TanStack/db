@@ -37,6 +37,11 @@ const ownerGroups: ReadonlyArray<
     `failing-queries`,
   ],
   [
+    `electric-db-collection/e2e/collection-gc.e2e.test.ts`,
+    `collection-lifecycle.gc-retention-boundaries`,
+    `electric-postgres`,
+  ],
+  [
     `query-db-collection/tests/scope-omission-reacquisition-oracle.test.ts`,
     `query`,
     `scope-omission-reacquisition`,
@@ -1906,6 +1911,7 @@ const enumeratedProperties = new Set([
   `documented-mutations.electric`,
   `query-db.reload-housekeeping`,
   `query-db.failing-queries`,
+  `collection-lifecycle.gc-retention-boundaries.electric-postgres`,
   `query-db.ownership.reacquisition`,
   `query-db.ownership.published-owners`,
   `query-db.ownership.direct-lifetime`,
@@ -2167,6 +2173,10 @@ const ownerReplayConfigs = new Map([
   ],
   [
     `packages/electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/electric-db-collection/e2e/collection-gc.e2e.test.ts`,
     `vitest.e2e.config.ts`,
   ],
   [
