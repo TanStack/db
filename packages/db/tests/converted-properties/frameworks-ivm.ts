@@ -29,6 +29,7 @@ export const properties: ReadonlyArray<string> = [
   `react.source-id-reuse-fixed`,
   `react.source-id-reuse-infinite-fixed`,
   // vue-db and scripts
+  `scripts.release-comments`,
   `vue.use-live-query-publication`,
 ]
 
@@ -126,6 +127,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `source-id-reuse-infinite-fixed`,
   ],
   // vue-db and scripts
+  [
+    `../scripts/release-comments-oracle.property.test.js`,
+    `scripts`,
+    `release-comments`,
+  ],
   [
     `vue-db/tests/useLiveQuery-publication-oracle.test.ts`,
     `vue`,
