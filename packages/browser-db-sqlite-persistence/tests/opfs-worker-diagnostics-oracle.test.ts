@@ -1,11 +1,6 @@
 import { fc } from '@fast-check/vitest'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  oracleReplayRequested,
-  oracleRoute,
-} from '../../db/tests/oracle-config'
+import { afterEach, vi } from 'vitest'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type {
   BrowserOPFSWorkerRequest,
@@ -321,27 +316,6 @@ TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
-declareOracle({
-  check: [checkNative],
-  model: [referenceMessage, referenceResponse],
-})
-
-describe(`OPFS worker diagnostics oracle`, () => {
-  it.skipIf(oracleReplayRequested())(
-    `rejects a diagnostic that drops an exposed VFS cause`,
-    async () => {
-      oracleRoute(`calibration`)
-      const input = diagnosticExamples[6]![0] as OpenFailure
-      const { response, opens } = await initialize(input)
-      const expected = referenceResponse(input).response
-
-      expect(response).toEqual(expected)
-      expect(opens).toBe(1)
-      expect({ ...response, error: input.primaryMessage }).not.toEqual(expected)
-    },
-  )
-})
-
 // The formatter and admission relation keep the same independent judgment;
 // native registration supplies fixed/random scheduling and direct replay.
 function checkNative(
@@ -398,5 +372,34 @@ oracleProperty({
     observe(`worker init response`, await initialize(input))
   },
   check: checkNative,
+  // A present-cause example rejects a response that drops the cause: the
+  // check must reject the retained example's real response with its error
+  // replaced by the primary message alone. The framework runs it only where
+  // the clean response and open reach match the model.
+  calibrations: [
+    {
+      name: `rejects a diagnostic that drops an exposed VFS cause`,
+      law: `diagnostic response and open reach`,
+      corrupt: (trace, input) => {
+        if (input !== diagnosticExamples[6]![0]) return undefined
+        return trace.map((entry) => {
+          if (entry.checkpoint !== `worker init response`) return entry
+          const { response, opens } = entry.value as Awaited<
+            ReturnType<typeof initialize>
+          >
+          return {
+            ...entry,
+            value: {
+              response: {
+                ...response,
+                error: (input as OpenFailure).primaryMessage,
+              },
+              opens,
+            },
+          }
+        })
+      },
+    },
+  ],
   timeout: 15_000,
 })
