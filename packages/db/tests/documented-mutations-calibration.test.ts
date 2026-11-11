@@ -3,10 +3,10 @@
  * API rejection. Every control uses the documentation grammar, existing shared
  * outcome model and shared comparison; it supplies no separate expected answer.
  * These controls establish judgment sensitivity, not execution of an adapter.
+ * They run no production, so they are ordinary tests beside the shared
+ * documented-mutation judgment in documented-mutations-oracle.ts.
  */
 import { expect, test } from 'vitest'
-import { oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import {
   checkDocumentedMutation,
   documentedMutationHistories,
@@ -70,7 +70,6 @@ const completeRowControls: Array<{
 test.each(completeRowControls)(
   `rejects incomplete ordinary rows: $name`,
   ({ shape, corrupt }) => {
-    oracleRoute(`calibration`)
     const failure = new Error(`API failure`)
     const selected = histories.filter(
       (h) =>
@@ -110,7 +109,6 @@ test.each(completeRowControls)(
 )
 
 test(`rejects acknowledgement attributed to an API that rejected before returning`, () => {
-  oracleRoute(`calibration`)
   const failure = new Error(`API committed then rejected`)
   const selected = histories.filter(
     (h) => h.apiOutcome === `reject-after-write`,
@@ -152,7 +150,6 @@ test(`rejects acknowledgement attributed to an API that rejected before returnin
 test.each([`fulfilled`, `rejected`] as const)(
   `rejects an extracted handler that is %s while its source remains held`,
   (outcome) => {
-    oracleRoute(`calibration`)
     const failure = new Error(`API failure`)
     const selected = histories.filter(
       (h) =>
@@ -201,7 +198,6 @@ test.each([
   `wrong error message`,
   `replaced transaction error`,
 ])(`rejects an incorrect HTTP-status outcome: %s`, (fault) => {
-  oracleRoute(`calibration`)
   const transportFailure = new Error(`transport failed`)
   const selected = histories.filter((h) => h.failureResponse === `http-status`)
   expect(selected.length).toBeGreaterThan(0)
@@ -243,12 +239,4 @@ test.each([
       ),
     ).toThrow()
   }
-})
-
-// What this oracle owns: no production function. These controls calibrate the
-// documented-mutation judgment against planted faults, so the file declares no owns.
-declareOracle({
-  check: [checkMutationConfirmation, checkDocumentedMutation],
-  model: [expectedMutationConfirmation],
-  grammar: [documentedMutationHistories],
 })

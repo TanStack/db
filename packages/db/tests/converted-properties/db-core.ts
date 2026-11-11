@@ -54,6 +54,20 @@ export const properties: ReadonlyArray<string> = [
   `index-update.binary-ownership`,
   `index-update.month-day-equality`,
   // transactions and mutations
+  `collection-state.optimistic-composition`,
+  `paced-mutations.timeline`,
+  `paced-mutations.held-pacing`,
+  `paced-mutations.settlement`,
+  `collection-state.optimistic-outcome-cells`,
+  `collection-state.pending-peer-settlement`,
+  `collection-state.external-completion`,
+  `collection-state.same-key-cases`,
+  `collection-state.delete-insert`,
+  `collection-state.typed-keys`,
+  `optimistic-history.publication-cases`,
+  `production-errors.classes`,
+  `production-errors.sites`,
+  `production-errors.generated-docs`,
   // IndexedDB and live-query observers
   // proxies and conformance
   `proxy.own-property-histories`,
@@ -112,6 +126,36 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `reference-model-fixed nullish-fixed nullish-string-owners invalid-comparator rejected-comparator-writes collection-boundary comparator-equal-update mixed-key-deletion mixed-key-history temporal-key-owners mixed-public-snapshot binary-ownership month-day-equality`,
   ],
   // transactions and mutations
+  [
+    `db/tests/optimistic-composition-oracle.test.ts`,
+    `collection-state`,
+    `optimistic-composition`,
+  ],
+  [
+    `db/tests/paced-mutations-oracle.test.ts`,
+    `paced-mutations`,
+    `timeline held-pacing settlement`,
+  ],
+  [
+    `db/tests/optimistic-history-outcomes-oracle.test.ts`,
+    `collection-state`,
+    `optimistic-outcome-cells pending-peer-settlement external-completion`,
+  ],
+  [
+    `db/tests/optimistic-transaction-oracle.property.test.ts`,
+    `collection-state`,
+    `same-key-cases delete-insert typed-keys`,
+  ],
+  [
+    `db/tests/optimistic-history-publication-oracle.test.ts`,
+    `optimistic-history`,
+    `publication-cases`,
+  ],
+  [
+    `db/tests/production-error-messages-oracle.test.ts`,
+    `production-errors`,
+    `classes sites generated-docs`,
+  ],
   // IndexedDB and live-query observers
   // proxies and conformance
   [
