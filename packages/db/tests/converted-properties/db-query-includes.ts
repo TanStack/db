@@ -26,6 +26,10 @@ export const properties: ReadonlyArray<string> = [
   `includes-publication.confirmation-sides`,
   `includes-publication.missing-callbacks`,
   `includes-publication.held-repair`,
+  `includes-temporal.readiness-fixed`,
+  `includes-temporal.demand-scheduling-orders`,
+  `includes-temporal.release-reentry-fixed`,
+  `includes-temporal.lagging-source`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -63,5 +67,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-publication-oracle.test.ts`,
     `includes-publication`,
     `plain-write-checkpoints transient-tear callback-only-tear confirmation-sides missing-callbacks held-repair`,
+  ],
+  [
+    `db/tests/query/includes-temporal-oracle.test.ts`,
+    `includes-temporal`,
+    `readiness-fixed demand-scheduling-orders release-reentry-fixed lagging-source`,
   ],
 ]
