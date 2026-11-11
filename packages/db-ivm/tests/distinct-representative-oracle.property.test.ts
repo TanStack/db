@@ -9,11 +9,9 @@
  * Limits: immutable fixture selections, four colliding members plus an anchor,
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
-import { expect, it } from 'vitest'
 import { D2 } from '../src/d2.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
-import { oracleReplayTest } from '../../db/tests/oracle-config.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
 import {
   DISTINCT_BUCKET_REACH_STATES,
@@ -190,11 +188,16 @@ oracleProperty({
 
 // Small replay of differing unselected fields through the same driver and
 // comparison as the generated campaign; no hand-authored expected answer.
-oracleReplayTest(it)(
-  `retracts the contribution it emitted for an equal selection`,
-  () => {
-    drive(
-      [
+// The recipe grammar cannot take a resolved history back, so it is one
+// enumerated property.
+oracleProperty({
+  id: `ivm.distinct-representatives-fixed`,
+  law: cell0.law,
+  owns: [`src/operators/distinct.ts#distinct`],
+  histories: [
+    {
+      name: `retracts the contribution it emitted for an equal selection`,
+      worlds: [
         [],
         [
           { member: 0, variant: 0 },
@@ -202,25 +205,13 @@ oracleReplayTest(it)(
         ],
         [{ member: 0, variant: 1 }],
         [],
-      ],
-      false,
-    )
+      ] satisfies DistinctBucketHistory,
+    },
+  ],
+  label: ({ name }) => name,
+  model: (): ReadonlyArray<string> => [],
+  driver: ({ worlds }, observe) => {
+    driveDistinctChecked(() => drive(worlds, false), observe)
   },
-)
-
-// Checker calibration supplies a wrong observation to the same refinement
-// check. Correct selected membership alone cannot authorize invented payloads.
-oracleReplayTest(it)(
-  `rejects a representative absent from source inputs`,
-  () => {
-    const source = [{ member: 0, variant: 0 }]
-    expect(() =>
-      checkDistinctRepresentatives(
-        [[[0, { member: 0, variant: 999 }], 1]],
-        source,
-        source,
-        `fabricated representative`,
-      ),
-    ).toThrow(/distinct representative contribution diverged/)
-  },
-)
+  check: checkDistinctCampaign,
+})
