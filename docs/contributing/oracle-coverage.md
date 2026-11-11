@@ -4509,8 +4509,10 @@ a mutant wrong-answer control, and an explicit statement of remaining limits.
       LEFT-joined filter: the ordered loader repeats a continuation `offset`
       capped at the window's `offset + limit` (`countAcquiredRows()`), so the
       provider serves the same page again. Witness: ranks 2, 1, 0 with only rank
-      0 marked and limit 1 leaves the window empty (an `it.fails` case in the
-      Query DB ordered refetch oracle). Owner: the ordered-work oracle
+      0 marked and limit 1 leaves the window empty (an `it.fails` case in
+      `packages/query-db-collection/tests/refetch-ordered-prefix-known-defects.test.ts`,
+      through the Query DB ordered refetch oracle's driver and check in
+      `refetch-ordered-prefix-driver-oracle.ts`). Owner: the ordered-work oracle
       (`packages/db/tests/query/ordered-work-oracle.property.test.ts`) needs an
       offset-honoring provider; the Query DB ordered refetch owner then adds the
       offset encoding to its generated campaigns.
@@ -4528,8 +4530,9 @@ a mutant wrong-answer control, and an explicit statement of remaining limits.
       return fewer rows than a request's `limit`. Under a joined, offset
       window, a row whose order changes can then drop out of the window after
       a refetch, through the loader's own repair; it reproduces on main.
-      Witness: the capped-provider `it.fails` case in the Query DB ordered
-      refetch oracle. Owner: the ordered-work oracle needs a page-capping
+      Witness: the capped-provider `it.fails` case in
+      `packages/query-db-collection/tests/refetch-ordered-prefix-known-defects.test.ts`,
+      through the Query DB ordered refetch oracle's driver and check. Owner: the ordered-work oracle needs a page-capping
       provider; the Query DB ordered refetch owner then adds page caps to its
       generated campaigns.
 - [ ] **Refill after a joined-side removal when a continuation adds no rows.**

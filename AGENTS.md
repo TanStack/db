@@ -779,6 +779,15 @@ production with a hand-written value and a test that steps only the model.
 The `oracle/no-unit-test` lint rule reports every other registration in a file
 whose name contains `oracle` (maintainer decision, 2026-11-11).
 
+Two kinds of test files support an oracle without being oracle files. An
+`it.fails` witness of a known defect goes in an ordinary
+`<subject>-known-defects.test.ts` that reuses the oracle's driver and check;
+the coverage map records the defect as open and names the file. A spec for a
+runtime where `oracleProperty` cannot load, such as a Playwright spec or a
+suite that a WebView app bundles, is a receiving witness named `*-witness.*`:
+it compares production with its oracle owner's shared check, and every oracle
+lint rule except `oracle/no-unit-test` applies to it.
+
 Name the production code that an oracle file judges in the `owns` list of each
 `oracleProperty` call, written inline as a literal array. A file that registers
 through a wrapper passes the list in the wrapper call's options literal, and

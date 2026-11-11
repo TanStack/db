@@ -54,15 +54,28 @@ Follow the subsystem reading requirements in AGENTS.md.
 
 Name the production code that the oracle judges in `owns` on each
 `oracleProperty` call, as an inline literal array; the law has no owner field.
+A file that registers through a wrapper passes the list in the wrapper call's
+options literal, and the wrapper forwards it to `oracleProperty`.
 The [oracle guide](../../../docs/contributing/oracle-rubric.md#name-oracle-files-consistently)
 states the form that the gap report reads.
 
-Keep unit tests and standalone concrete type assertions out of oracle files
-(ORC-016). Fixed regressions are inputs to the same model, production driver,
-and comparison as the broader campaign, without their own expected answers.
-Compile-time oracles generate legal TypeScript inputs and compare public types
-with a reusable independent law; a matrix of fixed assertions does not satisfy
-this requirement. Supplemental examples belong in ordinary test files.
+An oracle file registers its tests only through `oracleProperty`; the
+`oracle/no-unit-test` rule reports any other registration. Keep unit tests and
+standalone concrete type assertions out of oracle files (ORC-016). A fixed
+regression is a `histories.fixed` entry, or a history of an enumerated
+property with the same driver, model, and check, without its own expected
+answer. A finite table of cases is an enumerated source; a check that rejects a
+wrong answer is a `calibrations` entry; a reach check over fixed scenarios is
+an enumerated source with declared `states`. Never register a list of closures
+under one property. Compile-time oracles generate legal TypeScript inputs and
+compare public types with a reusable independent law; a matrix of fixed
+assertions does not satisfy this requirement. Supplemental examples, model-rule
+expectations, and grammar-size checks belong in ordinary test files. An
+`it.fails` witness of a known defect goes in an ordinary
+`<subject>-known-defects.test.ts` that reuses the oracle's driver and check,
+with the defect open in the coverage map. A spec for a runtime where
+`oracleProperty` cannot load, such as Playwright or a bundled WebView suite, is
+a receiving witness named `*-witness.*`.
 
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
 when there is a material uncertainty. Select cards within the authorized task;
