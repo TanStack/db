@@ -30,6 +30,9 @@ export const properties: ReadonlyArray<string> = [
   `includes-temporal.demand-scheduling-orders`,
   `includes-temporal.release-reentry-fixed`,
   `includes-temporal.lagging-source`,
+  `includes-query-shape.multiplicity-fixed`,
+  `includes-query-shape.correlation-fixed`,
+  `includes-query-shape.nullable-fixed`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -72,5 +75,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-temporal-oracle.test.ts`,
     `includes-temporal`,
     `readiness-fixed demand-scheduling-orders release-reentry-fixed lagging-source`,
+  ],
+  [
+    `db/tests/query/includes-query-shape-oracle.test.ts`,
+    `includes-query-shape`,
+    `multiplicity-fixed correlation-fixed nullable-fixed`,
   ],
 ]

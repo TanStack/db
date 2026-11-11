@@ -1,6 +1,12 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -8,8 +14,7 @@ import {
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import { cleanupQuery } from './includes-query-shape-support.js'
@@ -450,30 +455,118 @@ const nullableProjection: TraceProjection<
  * the first divergent checkpoint. The models are the three recomputations above,
  * each computed from the driver's own Maps.
  */
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  model: [
-    expectedMultiplicityRows,
-    expectedCorrelationRows,
-    expectedNullableRows,
-  ],
-})
-
 function campaigns(fixedSeed: number, property: string) {
   return [
     { name: `fixed and random`, options: { runs: 12, property, fixedSeed } },
   ]
 }
 
+const multiplicityLaw = `Deleting one joined contributor preserves the remaining multiplicity, and deleting the final one removes the parent's child.`
+const correlationLaw = `Materialization follows its correlation alias, whether the source or the joined alias, and stays distinct from join identity through route moves.`
+const nullableLaw = `A null or unmatched correlation key materializes an undefined singleton, and a key that returns from null starts a fresh route.`
+
+// Fixed histories of the three query-shape families, replayed through each
+// family's shared driver and recomputation. The first history of each list is
+// the clean replay of that family's calibration, which the calibration
+// corrupts; the framework tries candidates in this order.
+const multiplicityFixedHistories = [
+  {
+    name: `matches recomputation after one of two joined contributors leaves`,
+    childCount: 2,
+  },
+  {
+    name: `matches recomputation when the final joined contributor is deleted`,
+    childCount: 1,
+  },
+]
+
+const correlationFixedHistories: Array<{
+  name: string
+  target: CorrelationTarget
+  correlationId: number
+  productionId: number
+  orderId: number
+  steps: Array<OrderRow>
+}> = [
+  {
+    name: `matches recomputation for a source correlation beside a distinct order part`,
+    target: `source`,
+    correlationId: 1,
+    productionId: 101,
+    orderId: 7,
+    steps: [],
+  },
+  {
+    name: `matches recomputation when materialization correlates through its source alias`,
+    target: `source`,
+    correlationId: 1,
+    productionId: 101,
+    orderId: 1,
+    steps: [],
+  },
+  // Part 1 is the joined correlation. Part 7 is the source correlation.
+  // Moving order.partId changes only the joined query, then restores it.
+  ...([`source`, `joined`] as const).map((target) => ({
+    name: `keeps ${target} correlation distinct from join identity through route moves`,
+    target,
+    correlationId: 1,
+    productionId: 101,
+    orderId: 7,
+    steps: [
+      { id: 7, partId: 7 },
+      { id: 7, partId: 1 },
+    ],
+  })),
+]
+
+const nullableFixedHistories: Array<{
+  name: string
+  authors: Array<AuthorRow>
+  posts: Array<PostRow>
+  steps: Array<PostRow>
+}> = [
+  {
+    name: `matches recomputation when a null correlation key becomes non-null`,
+    authors: [{ id: 1, name: `Ada` }],
+    posts: [{ id: 1, authorId: null }],
+    steps: [{ id: 1, authorId: 1 }],
+  },
+  {
+    name: `matches recomputation for an unmatched non-null correlation key`,
+    authors: [],
+    posts: [{ id: 1, authorId: 999 }],
+    steps: [],
+  },
+  {
+    name: `matches recomputation when an existing correlation key becomes null`,
+    authors: [{ id: 1, name: `Ada` }],
+    posts: [{ id: 1, authorId: 1 }],
+    steps: [{ id: 1, authorId: null }],
+  },
+  {
+    name: `reactivates a singleton after null and repeated route retirement`,
+    authors: [{ id: 1, name: `Ada` }],
+    posts: [{ id: 1, authorId: null }],
+    steps: [
+      { id: 1, authorId: 1 },
+      { id: 1, authorId: null },
+      { id: 1, authorId: 1 },
+    ],
+  },
+]
+
 describe(`includes query-shape recompute oracle`, () => {
   for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
     registerIncludesProperty(
       [fc.integer({ min: 2, max: 5 })],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
       async (childCount) => {
         await runTrace({
@@ -485,38 +578,6 @@ describe(`includes query-shape recompute oracle`, () => {
     )
   }
 
-  fcTest(
-    `matches recomputation when the final joined contributor is deleted`,
-    () => {
-      oracleRoute(`fixed history`)
-      return runTrace({
-        steps: [1],
-        driver: createMultiplicityDriver(1),
-        projection: multiplicityProjection,
-      })
-    },
-  )
-
-  fcTest(
-    `rejects a premature parent removal after one contributor leaves`,
-    async () => {
-      oracleRoute(`calibration`)
-      await expect(
-        runTrace({
-          steps: [1],
-          driver: createMultiplicityDriver(2),
-          projection: {
-            ...multiplicityProjection,
-            observe: (context) =>
-              context.children.size === 1
-                ? []
-                : multiplicityProjection.observe(context),
-          },
-        }),
-      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
-    },
-  )
-
   for (const campaign of campaigns(1704, `includes-query-shape.correlation`)) {
     registerIncludesProperty(
       [
@@ -525,7 +586,14 @@ describe(`includes query-shape recompute oracle`, () => {
           productionId: fc.integer({ min: 101, max: 200 }),
         }),
       ],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `materialization follows correlation through a joined alias (${campaign.name})`,
       async ({ correlationId, productionId }) => {
         await runTrace({
@@ -542,57 +610,17 @@ describe(`includes query-shape recompute oracle`, () => {
     )
   }
 
-  fcTest(
-    `matches recomputation when materialization correlates through its source alias`,
-    () => {
-      oracleRoute(`fixed history`)
-      return runTrace({
-        steps: [],
-        driver: createCorrelationDriver(`source`, 1, 101),
-        projection: correlationProjection,
-      })
-    },
-  )
-
-  fcTest.each([`source`, `joined`] as const)(
-    `keeps %s correlation distinct from join identity through route moves`,
-    (target) => {
-      oracleRoute(`case`)
-      return runTrace({
-        // Part 1 is the joined correlation. Part 7 is the source correlation.
-        // Moving order.partId changes only the joined query, then restores it.
-        steps: [
-          { id: 7, partId: 7 },
-          { id: 7, partId: 1 },
-        ],
-        driver: createCorrelationDriver(target, 1, 101, 7),
-        projection: correlationProjection,
-      })
-    },
-  )
-
-  fcTest(
-    `rejects the wrong correlation alias at the initial checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      await expect(
-        runTrace({
-          steps: [],
-          driver: createCorrelationDriver(`source`, 1, 101, 7),
-          projection: {
-            ...correlationProjection,
-            recompute: (context) =>
-              correlationProjection.recompute({ ...context, target: `joined` }),
-          },
-        }),
-      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 0 })
-    },
-  )
-
   for (const campaign of campaigns(1706, `includes-query-shape.nullable`)) {
     registerIncludesProperty(
       [fc.integer({ min: 1, max: 100 })],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `findOne maps a null correlation key to undefined (${campaign.name})`,
       async (postId) => {
         await runTrace({
@@ -604,70 +632,222 @@ describe(`includes query-shape recompute oracle`, () => {
     )
   }
 
-  fcTest(
-    `matches recomputation for an unmatched non-null correlation key`,
-    () => {
-      oracleRoute(`fixed history`)
-      return runTrace({
-        steps: [],
-        driver: createNullableDriver([], [{ id: 1, authorId: 999 }]),
-        projection: nullableProjection,
-      })
+  oracleProperty({
+    id: `includes-query-shape.multiplicity-fixed`,
+    law: {
+      statement: multiplicityLaw,
+      authority: `The joined multiplicity, alias identity, and null-key normalization contracts in packages/db/src/query/live/ARCHITECTURE.md (contribution conservation and total materialization), stated at the start of this owner.`,
+      limits: `Two fixed contributor counts, replayed through the multiplicity driver and recomputation, and the premature-removal calibration.`,
     },
-  )
-
-  fcTest(
-    `matches recomputation when an existing correlation key becomes null`,
-    () => {
-      oracleRoute(`fixed history`)
-      return runTrace({
-        steps: [{ id: 1, authorId: null }],
-        driver: createNullableDriver(
-          [{ id: 1, name: `Ada` }],
-          [{ id: 1, authorId: 1 }],
-        ),
-        projection: nullableProjection,
-      })
-    },
-  )
-
-  fcTest(
-    `reactivates a singleton after null and repeated route retirement`,
-    () => {
-      oracleRoute(`fixed history`)
-      return runTrace({
-        steps: [
-          { id: 1, authorId: 1 },
-          { id: 1, authorId: null },
-          { id: 1, authorId: 1 },
-        ],
-        driver: createNullableDriver(
-          [{ id: 1, name: `Ada` }],
-          [{ id: 1, authorId: null }],
-        ),
-        projection: nullableProjection,
-      })
-    },
-  )
-
-  fcTest(
-    `rejects a stale empty singleton at its reactivation checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      await expect(
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: multiplicityFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(multiplicityLaw, plan, observe, () =>
         runTrace({
-          steps: [{ id: 1, authorId: 1 }],
-          driver: createNullableDriver(
-            [{ id: 1, name: `Ada` }],
-            [{ id: 1, authorId: null }],
-          ),
-          projection: {
-            ...nullableProjection,
-            observe: ({ live }) =>
-              live.toArray.map((row) => ({ id: row.id, author: undefined })),
-          },
+          steps: [1],
+          driver: createMultiplicityDriver(plan.history.childCount),
+          projection: multiplicityProjection,
         }),
-      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects a premature parent removal after one contributor leaves`,
+        law: multiplicityLaw,
+        // The former calibration body. Exactly the old matcher: only a
+        // TraceAssertionError at checkpoint 1 counts as the check
+        // rejecting a premature parent removal. The shared trace check marks its own comparison
+        // failures, so any other failure is rethrown without that marking and
+        // fails this calibration, as it failed the old test.
+        driver: (plan, observe) =>
+          recordAssertionJudgment(multiplicityLaw, plan, observe, async () => {
+            try {
+              await runTrace({
+                steps: [1],
+                driver: createMultiplicityDriver(plan.history.childCount),
+                projection: {
+                  ...multiplicityProjection,
+                  observe: (context) =>
+                    context.children.size === 1
+                      ? []
+                      : multiplicityProjection.observe(context),
+                },
+              })
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.name === `TraceAssertionError` &&
+                (error as Error & { checkpoint?: unknown }).checkpoint === 1
+              )
+                rejectAt(
+                  `rejects a premature parent removal after one contributor leaves`,
+                  error,
+                )
+              throw new Error(
+                `the corrupted projection failed outside the expected rejection: ${String(error)}`,
+              )
+            }
+          }),
+      },
+    ],
+  })
+
+  oracleProperty({
+    id: `includes-query-shape.correlation-fixed`,
+    law: {
+      statement: correlationLaw,
+      authority: `The joined multiplicity, alias identity, and null-key normalization contracts in packages/db/src/query/live/ARCHITECTURE.md (contribution conservation and total materialization), stated at the start of this owner.`,
+      limits: `Four fixed source and joined correlation histories, replayed through the correlation driver and recomputation, and the wrong-alias calibration.`,
     },
-  )
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: correlationFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(correlationLaw, plan, observe, () =>
+        runTrace({
+          steps: plan.history.steps,
+          driver: createCorrelationDriver(
+            plan.history.target,
+            plan.history.correlationId,
+            plan.history.productionId,
+            plan.history.orderId,
+          ),
+          projection: correlationProjection,
+        }),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects the wrong correlation alias at the initial checkpoint`,
+        law: correlationLaw,
+        // The former calibration body. Exactly the old matcher: only a
+        // TraceAssertionError at checkpoint 0 counts as the check
+        // rejecting the wrong correlation alias. The shared trace check marks its own comparison
+        // failures, so any other failure is rethrown without that marking and
+        // fails this calibration, as it failed the old test.
+        driver: (plan, observe) =>
+          recordAssertionJudgment(correlationLaw, plan, observe, async () => {
+            try {
+              await runTrace({
+                steps: plan.history.steps,
+                driver: createCorrelationDriver(
+                  plan.history.target,
+                  plan.history.correlationId,
+                  plan.history.productionId,
+                  plan.history.orderId,
+                ),
+                projection: {
+                  ...correlationProjection,
+                  recompute: (context) =>
+                    correlationProjection.recompute({
+                      ...context,
+                      target: `joined`,
+                    }),
+                },
+              })
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.name === `TraceAssertionError` &&
+                (error as Error & { checkpoint?: unknown }).checkpoint === 0
+              )
+                rejectAt(
+                  `rejects the wrong correlation alias at the initial checkpoint`,
+                  error,
+                )
+              throw new Error(
+                `the corrupted projection failed outside the expected rejection: ${String(error)}`,
+              )
+            }
+          }),
+      },
+    ],
+  })
+
+  oracleProperty({
+    id: `includes-query-shape.nullable-fixed`,
+    law: {
+      statement: nullableLaw,
+      authority: `The joined multiplicity, alias identity, and null-key normalization contracts in packages/db/src/query/live/ARCHITECTURE.md (contribution conservation and total materialization), stated at the start of this owner.`,
+      limits: `Four fixed null and unmatched correlation-key histories, replayed through the nullable driver and recomputation, and the stale-singleton calibration.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: nullableFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(nullableLaw, plan, observe, () =>
+        runTrace({
+          steps: plan.history.steps,
+          driver: createNullableDriver(
+            plan.history.authors,
+            plan.history.posts,
+          ),
+          projection: nullableProjection,
+        }),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects a stale empty singleton at its reactivation checkpoint`,
+        law: nullableLaw,
+        // The former calibration body. Exactly the old matcher: only a
+        // TraceAssertionError at checkpoint 1 counts as the check
+        // rejecting a stale empty singleton. The shared trace check marks its own comparison
+        // failures, so any other failure is rethrown without that marking and
+        // fails this calibration, as it failed the old test.
+        driver: (plan, observe) =>
+          recordAssertionJudgment(nullableLaw, plan, observe, async () => {
+            try {
+              await runTrace({
+                steps: plan.history.steps,
+                driver: createNullableDriver(
+                  plan.history.authors,
+                  plan.history.posts,
+                ),
+                projection: {
+                  ...nullableProjection,
+                  observe: ({ live }) =>
+                    live.toArray.map((row) => ({
+                      id: row.id,
+                      author: undefined,
+                    })),
+                },
+              })
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.name === `TraceAssertionError` &&
+                (error as Error & { checkpoint?: unknown }).checkpoint === 1
+              )
+                rejectAt(
+                  `rejects a stale empty singleton at its reactivation checkpoint`,
+                  error,
+                )
+              throw new Error(
+                `the corrupted projection failed outside the expected rejection: ${String(error)}`,
+              )
+            }
+          }),
+      },
+    ],
+  })
 })
