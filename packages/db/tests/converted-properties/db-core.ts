@@ -31,6 +31,8 @@ export const properties: ReadonlyArray<string> = [
   `duration-query-equality.direct-lookup`,
   `duration-query-equality.public-eq`,
   `duration-query-equality.calendar-indexing`,
+  `index-suggestion.collection-size`,
+  `index-suggestion.ordered-diagnostic`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -68,6 +70,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/duration-query-equality-oracle.test.ts`,
     `duration-query-equality`,
     `direct-lookup public-eq calendar-indexing`,
+  ],
+  [
+    `db/tests/index-suggestion-oracle.test.ts`,
+    `index-suggestion`,
+    `collection-size ordered-diagnostic`,
   ],
   // transactions and mutations
   // IndexedDB and live-query observers
