@@ -4336,8 +4336,10 @@ and the Claude edit and stop hooks. A generated construction in each campaign fi
 a free-shaped program with a production hook target, an edited production file,
 and an oracle import of that production file. The declared
 `hook-production-boundary` intersection measures the full premise, so the
-production-boundary selection law cannot lose its required reach to random sampling. This preserves
-the 24-history random run budget and reach minimum of two. Its model is a fixed-point closure over the
+production-boundary selection law cannot lose its required reach to random sampling. Another fixes
+a re-export chain with no configuration edit, so `re-export-dependent` is required, not only measured.
+The random run budget rose from 24 to 28 histories, because the install histories below lint nothing;
+the reach minimum of two is unchanged. Its model is a fixed-point closure over the
 drawn import graph, independent of the script's forward search. It covers
 oracle-to-oracle imports, untracked oracle files, and `.js` oracle files. It
 also covers the checkout rule from #2280. A session works in the launch
@@ -4352,7 +4354,44 @@ is drawn as a lockfile edit together with a changed installed copy in the
 session checkout's `node_modules`, as an install leaves them; a settings edit is
 drawn as a change that alters no report. A plain scratch directory under
 `.worktrees/` must produce no report. The repository's `.gitignore` is part of
-the tested configuration. It does not draw `.js` support modules or drivers,
+the tested configuration. It also owns the missing-install rule (maintainer
+decision, 2026-11-10: the hook never crashes). The script loads its lint
+modules with dynamic imports. When the session checkout's ESLint, parser, or
+plugin cannot load because a module is missing, every form produces one line
+that names the checkout and says to run `pnpm install`. Any other load error
+produces `oracle lint failed: <message>`. The command-line forms (the changed
+scope, the named scope, and `--all`) write the line to stderr and exit nonzero.
+The edit and stop hooks of all four harness formats exit 0 and hand the line
+to the agent as JSON on stdout: `additionalContext` after an edit, and a
+blocking `decision` with a `reason` at a stop, per each harness's hook output
+documentation. Constructions in each campaign draw a missing install (no
+`node_modules`) in a launch session and in a worktree session, whose hooks
+delegate through the launch checkout's script. They also draw a session
+checkout whose installed plugin lacks its entry file, lacks its subpath rule
+module, imports a package that is not installed, or has a cut-off entry file.
+It does not draw a broken ESLint or parser, a missing dependency deeper in the
+tree, or a stop hook input with `stop_hook_active`.
+
+Open limit of `scripts.lint-scope` (reachable, older than the missing-install
+rule; owner: `scripts/lint-scope-oracle.property.test.js`; needs a maintainer
+decision). A worktree under `.worktrees/` with no `node_modules` of its own,
+inside an installed launch checkout, resolves ESLint, the parser, and the
+plugin by walking up to the launch checkout's `node_modules`. So it lints with
+the launch checkout's plugin, not the one its own lockfile pins, which breaks
+this oracle's law that each report uses the session checkout's installed rule.
+Trace (reproduced 2026-11-11): commit a launch checkout with the script and an
+undeclared oracle file, install it with a plugin whose `no-unit-test` message
+carries a mark, add `.worktrees/wt` with `git worktree add` and no install, edit
+the oracle file there, and run `node scripts/agent-lint-feedback.mjs` in the
+worktree. It exits 1 with a report that carries the launch checkout's mark. The
+grammar does not draw this state: every installed worktree history copies the
+plugin into the worktree, and the missing-install histories leave the launch
+checkout uninstalled too. Needed witness: a worktree-install dimension (own or
+none) under an installed launch checkout, with the decided law. The two
+candidate laws are to skip as not installed, or to lint with the launch
+checkout's rule and say so.
+
+It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
 exists for it (the plugin's part-reach oracle, in TanStack/oracles, owns that
 resolution). It does not draw an edit to `package.json` without a lockfile
