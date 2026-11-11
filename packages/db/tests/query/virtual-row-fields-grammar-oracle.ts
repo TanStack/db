@@ -4,7 +4,6 @@
  * Composition changes where that same syntax is consumed. Each receiver owns
  * its model and legal boundary-specific extensions.
  */
-import { declareOracle } from '../oracle-declaration.js'
 
 export const metadataProjectionShapes = [
   `structured-projection`,
@@ -39,11 +38,3 @@ export const metadataCollisionCases = [
     : [false]
   ).map((authoredPending) => ({ collision, authoredPending })),
 )
-
-declareOracle({
-  grammar: [
-    metadataProjectionShapes,
-    metadataCompositions,
-    metadataCollisionCases,
-  ],
-})

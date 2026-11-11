@@ -12,7 +12,6 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-collection-support.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver } from '../trace-runner.js'
@@ -219,11 +218,6 @@ export function checkFacadeIntervals<TGroup>(
       expect(facade.toArray, `retired facade remains empty`).toEqual([])
     }
 }
-declareOracle({
-  model: [recompute, advanceFacadeIntervals],
-  check: [checkFacadeIntervals],
-})
-
 export function createCollectionDriver(
   initialParents: ReadonlyArray<ParentRow>,
   initialChildren: ReadonlyArray<ChildRow>,
