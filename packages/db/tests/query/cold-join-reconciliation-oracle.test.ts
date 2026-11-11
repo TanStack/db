@@ -1,6 +1,7 @@
+import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
@@ -9,9 +10,9 @@ import {
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from '../oracle-assertion-adapter.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import {
   checkWithCleanup,
@@ -384,80 +385,108 @@ function expectEqualityJoinMatchesPredicate(
   )
 }
 
-describe.each([`off`, `eager`] as const)(
-  `join equality oracle with auto-index %s`,
-  (autoIndex) => {
-    it.each(equalityJoinCases)(
-      `$label joins agree with equality predicates`,
-      async ({ label, createValues }) => {
-        oracleRoute(`case`)
-        const { left: leftValue, right: rightValue, other } = createValues()
-        const left = createEqualitySource<EqualityRow>(
-          `equality-left-${label}`,
-          [{ id: 1, value: leftValue }],
-          autoIndex,
-        )
-        const rightRows = [
-          { id: 10, value: rightValue },
-          { id: 20, value: other },
-        ]
-        const right = createEqualitySource<EqualityRow>(
-          `equality-right-${label}`,
-          rightRows,
-          autoIndex,
-        )
-        const predicateRight = createEqualitySource<EqualityRow>(
-          `equality-predicate-${label}`,
-          rightRows,
-          autoIndex,
-        )
-        const joined = createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q
-              .from({ left })
-              .innerJoin({ right }, ({ left: l, right: r }) =>
-                eq(l.value, r.value),
-              )
-              .select(({ right: row }) => ({ id: row.id })),
-        })
-        const filtered = createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q
-              .from({ right: predicateRight })
-              .where(({ right: row }) => eq(row.value, leftValue))
-              .select(({ right: row }) => ({ id: row.id })),
-        })
+// The production driver of one equality-join case: an equality join and an
+// equality predicate over the same values, compared by
+// `expectEqualityJoinMatchesPredicate`.
+async function runEqualityJoinCase(
+  autoIndex: EqualityMode,
+  { label, createValues }: (typeof equalityJoinCases)[number],
+): Promise<void> {
+  const { left: leftValue, right: rightValue, other } = createValues()
+  const left = createEqualitySource<EqualityRow>(
+    `equality-left-${label}`,
+    [{ id: 1, value: leftValue }],
+    autoIndex,
+  )
+  const rightRows = [
+    { id: 10, value: rightValue },
+    { id: 20, value: other },
+  ]
+  const right = createEqualitySource<EqualityRow>(
+    `equality-right-${label}`,
+    rightRows,
+    autoIndex,
+  )
+  const predicateRight = createEqualitySource<EqualityRow>(
+    `equality-predicate-${label}`,
+    rightRows,
+    autoIndex,
+  )
+  const joined = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ left })
+        .innerJoin({ right }, ({ left: l, right: r }) => eq(l.value, r.value))
+        .select(({ right: row }) => ({ id: row.id })),
+  })
+  const filtered = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ right: predicateRight })
+        .where(({ right: row }) => eq(row.value, leftValue))
+        .select(({ right: row }) => ({ id: row.id })),
+  })
 
-        await checkWithCleanup(
-          async () => {
-            await Promise.all([joined.preload(), filtered.preload()])
-            const expected = [{ id: 10 }]
-            expect(joined.toArray, `${label} join result`).toMatchObject(
-              expected,
-            )
-            expect(filtered.toArray, `${label} predicate result`).toMatchObject(
-              expected,
-            )
-            expectEqualityJoinMatchesPredicate(joined, filtered)
-            if (autoIndex === `eager`)
-              expect(
-                right.indexes.size,
-                `${label} join auto-index reach`,
-              ).toBeGreaterThan(0)
-            else expect(right.indexes.size, `${label} join scan path`).toBe(0)
-          },
-          joined,
-          filtered,
-          predicateRight,
-          right,
-          left,
-        )
-      },
-    )
+  await checkWithCleanup(
+    async () => {
+      await Promise.all([joined.preload(), filtered.preload()])
+      const expected = [{ id: 10 }]
+      expect(joined.toArray, `${label} join result`).toMatchObject(expected)
+      expect(filtered.toArray, `${label} predicate result`).toMatchObject(
+        expected,
+      )
+      expectEqualityJoinMatchesPredicate(joined, filtered)
+      if (autoIndex === `eager`)
+        expect(
+          right.indexes.size,
+          `${label} join auto-index reach`,
+        ).toBeGreaterThan(0)
+      else expect(right.indexes.size, `${label} join scan path`).toBe(0)
+    },
+    joined,
+    filtered,
+    predicateRight,
+    right,
+    left,
+  )
+}
+
+// The rows of `equalityJoinCases` create their values, so a history names its
+// case by label.
+const equalityJoinCasesByLabel = new Map<
+  string,
+  (typeof equalityJoinCases)[number]
+>(equalityJoinCases.map((row) => [row.label, row]))
+oracleProperty({
+  id: `cold-join.equality-predicate`,
+  law: {
+    statement: `A compiled equality join publishes the same rows as an equality predicate over the same value, on the scan and auto-index paths.`,
+    authority: `ARCHITECTURE.md Identity; the established predicate equality classes stated above.`,
+    limits: `The finite equality-class cases above, each with auto-indexing off and eager, at preload.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: ([`off`, `eager`] as const).flatMap((autoIndex) =>
+    equalityJoinCases.map(({ label }) => ({ autoIndex, label })),
+  ),
+  label: ({ autoIndex, label }) =>
+    `join equality oracle with auto-index ${autoIndex}: ${label} joins agree with equality predicates`,
+  resolve: ({ autoIndex, label }) => ({
+    autoIndex,
+    row: equalityJoinCasesByLabel.get(label)!,
+  }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`cold-join.equality-predicate`, plan, observe, () =>
+      runEqualityJoinCase(plan.autoIndex, plan.row),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 const history: ReadonlyArray<Step> = [
   { type: `delete`, id: 10 },
@@ -475,13 +504,6 @@ const history: ReadonlyArray<Step> = [
 // fresh insertion. The bounded tail uses keys 10/20/30/40, parent IDs 1/2,
 // amounts -5..5, and lengths 0..15. It excludes simultaneous duplicate child
 // keys, which a keyed Collection cannot represent, and unmatched parent IDs.
-it(`reconciles cold join acquisition, deletion, restoration and route moves`, async () => {
-  oracleRoute(`fixed history`)
-  const batches = await runColdJoin(history)
-  expect(
-    batches.flat().filter((change) => change.type === `delete`).length,
-  ).toBeGreaterThanOrEqual(2)
-})
 const coldJoinProperty = `cold-join.reconciliation`
 // The original random tail follows the same fixed route-move prefix. The
 // assertion adapter retains the complete recomputation and event-replica check.
@@ -524,17 +546,61 @@ oracleProperty({
     }),
   check: forwardAssertionJudgment,
 })
-it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
-  `rejects %s through the real cold join trace checker`,
-  async (mutant) => {
-    oracleRoute(`calibration`)
-    await runColdJoin(history)
-    await expect(runColdJoin(history, mutant)).rejects.toMatchObject({
-      name: `TraceAssertionError`,
-      cause: { name: `AssertionError` },
-    })
+// The fixed route-move prefix alone: it must delete at least twice, and an
+// observation mutant of the real trace checker must fail it.
+async function runColdJoinPrefix(): Promise<void> {
+  const batches = await runColdJoin(history)
+  expect(
+    batches.flat().filter((change) => change.type === `delete`).length,
+  ).toBeGreaterThanOrEqual(2)
+}
+oracleProperty({
+  id: `cold-join.reconciliation-fixed`,
+  law: {
+    statement: `Cold acquisition and every applied child change agree with independent relational recomputation and the event replica.`,
+    authority: `ARCHITECTURE.md Identity and Initial demand; the existing cold-join law above.`,
+    limits: `The fixed route-move prefix with no tail, which must reach deletion twice.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [
+    `reconciles cold join acquisition, deletion, restoration and route moves`,
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(coldJoinProperty, plan, observe, () =>
+      runColdJoinPrefix(),
+    ),
+  check: forwardAssertionJudgment,
+  // Each mutant must fail the real trace checker with a trace assertion
+  // whose cause is an assertion failure, exactly as its old witness required.
+  calibrations: (
+    [`hide-acquisition`, `drop-delete`, `wrong-result`] as const
+  ).map((mutant) => ({
+    name: `rejects ${mutant} through the real cold join trace checker`,
+    law: coldJoinProperty,
+    driver: (plan: { name: string }, observe) =>
+      recordAssertionJudgment(coldJoinProperty, plan, observe, async () => {
+        try {
+          await runColdJoin(history, mutant)
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.name === `TraceAssertionError` &&
+            error.cause instanceof Error &&
+            error.cause.name === `AssertionError`
+          )
+            rejectAt(`calibration ${mutant}`, error)
+          throw error
+        }
+      }),
+  })),
+})
 
 /**
  * Compound joins extend the same equality law to a nonempty conjunction. Every
@@ -868,10 +934,6 @@ async function runCompoundHistory(
  * the compound nested-loop model. Each driver builds its own expectation from
  * the scenario it runs, so the caller supplies inputs, not expected rows.
  */
-declareOracle({
-  check: [runColdJoin, runCompoundHistory, expectEqualityJoinMatchesPredicate],
-  model: [expectedColdJoinRows, compoundPairs],
-})
 
 // All atom classes occur in the initial matrix. Partial matches differ only
 // in the last term; nulls occur in both tuple positions. The fixed scenario
@@ -906,97 +968,146 @@ const compoundWitness: CompoundHistory = {
   cold: false,
 }
 
-describe(`compound join relational oracle`, () => {
-  for (const autoIndex of [`off`, `eager`] as const) {
-    for (const atomFirst of [false, true]) {
-      it(`loads the matching compound tuple: index=${autoIndex}, atomFirst=${atomFirst}`, async () => {
-        oracleRoute(`case`)
-        await runCompoundHistory({
-          ...compoundWitness,
-          left: [{ id: 1, atom: 10, b: 7, c: 9 }],
-          right: [{ id: 2, atom: 10, b: 7, c: 9 }],
-          steps: [],
-          join: `left`,
-          autoIndex,
-          atomFirst,
-          cold: true,
-        })
-      })
-    }
-  }
-
+// Named compound histories, which the generated grammar cannot take back: its
+// rows hold only ids 0 to 3, and the witness holds ids up to 31. Each replays
+// through `runCompoundHistory` under its old test name.
+const compoundFixedHistories: Array<{
+  name: string
+  scenario: CompoundHistory
+}> = [
+  ...([`off`, `eager`] as const).flatMap((autoIndex) =>
+    [false, true].map((atomFirst) => ({
+      name: `loads the matching compound tuple: index=${autoIndex}, atomFirst=${atomFirst}`,
+      scenario: {
+        ...compoundWitness,
+        left: [{ id: 1, atom: 10, b: 7, c: 9 }],
+        right: [{ id: 2, atom: 10, b: 7, c: 9 }],
+        steps: [],
+        join: `left` as const,
+        autoIndex,
+        atomFirst,
+        cold: true,
+      },
+    })),
+  ),
   // A nullish component makes the whole tuple unsatisfiable, regardless of
   // term order. Such a row may need no acquisition. The nonnull neighbor must
   // acquire even when the empty right source gives the same unmatched output.
-  describe(`compound demand premise`, () => {
-    for (const autoIndex of [`off`, `eager`] as const) {
-      for (const atomFirst of [false, true]) {
-        for (const atom of [0, 21]) {
-          for (const b of [null, 0]) {
-            it(`checks nullish and satisfiable tuples: index=${autoIndex}, atomFirst=${atomFirst}, atom=${atom}, b=${b}`, async () => {
-              oracleRoute(`case`)
-              await runCompoundHistory({
-                ...compoundWitness,
-                left: [{ id: 0, atom, b, c: 0 }],
-                right: [],
-                steps: [],
-                join: `left`,
-                width: 2,
-                atomFirst,
-                autoIndex,
-                cold: true,
-              })
-            })
-          }
-        }
-      }
-    }
-  })
-  it.each([
+  ...([`off`, `eager`] as const).flatMap((autoIndex) =>
+    [false, true].flatMap((atomFirst) =>
+      [0, 21].flatMap((atom) =>
+        [null, 0].map((b) => ({
+          name: `compound demand premise: checks nullish and satisfiable tuples: index=${autoIndex}, atomFirst=${atomFirst}, atom=${atom}, b=${b}`,
+          scenario: {
+            ...compoundWitness,
+            left: [{ id: 0, atom, b, c: 0 }],
+            right: [],
+            steps: [],
+            join: `left` as const,
+            width: 2 as const,
+            atomFirst,
+            autoIndex,
+            cold: true,
+          },
+        })),
+      ),
+    ),
+  ),
+  ...[
     { name: `distinct objects`, leftAtom: 11, rightAtom: 13 },
     { name: `opposite infinities`, leftAtom: 6, rightAtom: 7 },
     { name: `Date and ISO string`, leftAtom: 2, rightAtom: 3 },
     { name: `bigint`, leftAtom: 8, rightAtom: 8 },
-  ])(`preserves compound $name equality`, async ({ leftAtom, rightAtom }) => {
-    oracleRoute(`case`)
-    await runCompoundHistory({
+  ].map(({ name, leftAtom, rightAtom }) => ({
+    name: `preserves compound ${name} equality`,
+    scenario: {
       ...compoundWitness,
       atomFirst: false,
       left: [{ id: 1, atom: leftAtom, b: 1, c: 1 }],
       right: [{ id: 2, atom: rightAtom, b: 1, c: 1 }],
       steps: [],
-    })
-  })
-  for (const join of [`inner`, `left`, `right`, `full`] as const) {
-    for (const cold of [false, true]) {
-      it(`preserves all equality classes through ${join} histories, cold=${cold}`, async () => {
-        oracleRoute(`case`)
-        await runCompoundHistory({ ...compoundWitness, join, cold })
-      })
-    }
-  }
-  it.each([`off`, `eager`] as const)(
-    `rejects a hidden acquisition for a satisfiable tuple, index=%s`,
-    async (autoIndex) => {
-      oracleRoute(`calibration`)
-      await expect(
-        runCompoundHistory(
-          {
-            ...compoundWitness,
-            left: [{ id: 0, atom: 0, b: 0, c: 0 }],
-            right: [],
-            steps: [],
-            join: `left`,
-            width: 2,
-            atomFirst: false,
-            autoIndex,
-            cold: true,
-          },
-          `hide-acquisition`,
-        ),
-      ).rejects.toThrow(`cold source acquisition`)
     },
-  )
+  })),
+  ...([`inner`, `left`, `right`, `full`] as const).flatMap((join) =>
+    [false, true].map((cold) => ({
+      name: `preserves all equality classes through ${join} histories, cold=${cold}`,
+      scenario: { ...compoundWitness, join, cold },
+    })),
+  ),
+]
+
+// The satisfiable tuple that a hidden acquisition must not pass, as its old
+// witness built it.
+const hiddenAcquisitionWitness = (
+  autoIndex: EqualityMode,
+): CompoundHistory => ({
+  ...compoundWitness,
+  left: [{ id: 0, atom: 0, b: 0, c: 0 }],
+  right: [],
+  steps: [],
+  join: `left`,
+  width: 2,
+  atomFirst: false,
+  autoIndex,
+  cold: true,
+})
+
+describe(`compound join relational oracle`, () => {
+  oracleProperty({
+    id: `cold-join.compound-fixed`,
+    law: {
+      statement: `Every component equality is TRUE for a compound match, with exact unmatched rows and event multiplicity for the selected join.`,
+      authority: `ARCHITECTURE.md Identity and Initial demand; the compound relational law above.`,
+      limits: `Named histories that the generated grammar cannot take back: the matching, nullish, equality-class, and all-class witnesses above.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: compoundFixedHistories,
+    label: ({ name }) => name,
+    resolve: ({ scenario }) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`cold-join.compound`, plan, observe, () =>
+        runCompoundHistory(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
+    // A hidden acquisition must fail the acquisition comparison on the
+    // satisfiable tuple its old witness used, with the old message.
+    calibrations: ([`off`, `eager`] as const).map((autoIndex) => ({
+      name: `rejects a hidden acquisition for a satisfiable tuple, index=${autoIndex}`,
+      law: `cold-join.compound`,
+      driver: (plan: { scenario: CompoundHistory }, observe) =>
+        recordAssertionJudgment(
+          `cold-join.compound`,
+          plan,
+          observe,
+          async () => {
+            const witness = isDeepStrictEqual(
+              plan.scenario,
+              hiddenAcquisitionWitness(autoIndex),
+            )
+            try {
+              await runCompoundHistory(
+                plan.scenario,
+                witness ? `hide-acquisition` : undefined,
+              )
+            } catch (error) {
+              if (
+                witness &&
+                error instanceof Error &&
+                error.message.includes(`cold source acquisition`)
+              )
+                rejectAt(`calibration hide-acquisition ${autoIndex}`, error)
+              throw error
+            }
+          },
+        ),
+    })),
+  })
+
   const property = `cold-join.compound`
   const rowArbitrary = fc.record({
     id: fc.integer({ min: 0, max: 3 }),

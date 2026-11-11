@@ -87,8 +87,23 @@ const lifecycleProperties: ReadonlyArray<string> = [
   `cold-join.equality-predicate`,
   `cold-join.reconciliation-fixed`,
   `cold-join.compound-fixed`,
+  `ordered-work.lifecycle-initial-settlement`,
+  `ordered-work.lifecycle-product`,
+  `ordered-work.lifecycle-initial-fallback`,
+  `ordered-work.lifecycle-initial-fallback-publication`,
+  `ordered-work.lifecycle-later-fallback`,
+  `ordered-work.lifecycle-later-fallback-cleanup`,
+  `ordered-work.lifecycle-nullable-cells`,
+  `ordered-work.lifecycle-nullable-directions`,
+  `ordered-work.lifecycle-full-source`,
+  `ordered-work.lifecycle-eager-full-source`,
 ]
 const lifecycleOwners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db/tests/query/ordered-lifecycle-oracle.property.test.ts`,
+    `ordered-work`,
+    `lifecycle-initial-settlement lifecycle-product lifecycle-initial-fallback lifecycle-initial-fallback-publication lifecycle-later-fallback lifecycle-later-fallback-cleanup lifecycle-nullable-cells lifecycle-nullable-directions lifecycle-full-source lifecycle-eager-full-source`,
+  ],
   [
     `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
     `bucket-facade`,
