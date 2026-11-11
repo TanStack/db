@@ -1,17 +1,9 @@
-import { describe, expect, test } from 'vitest'
-import { declareOracle } from '../oracle-declaration.js'
+import { describe, expect } from 'vitest'
 import { expectRowSnapshot } from '../conformance/row-snapshot-oracle.js'
 import {
   expectedPublicField,
-  expectedPublicFieldOverlapSource,
   expectedSelectedPublicField,
-  expectedSelectedPublicFieldOverlap,
   fieldStages,
-  overlapStages,
-  publicFieldCells,
-  publicFieldGrammar,
-  publicFieldOverlapCells,
-  publicFieldOverlapFunctionalCells,
   publicFieldSymbol,
   runPublicFieldOverlapCell,
 } from '../conformance/public-field-oracle.js'
@@ -33,8 +25,23 @@ import {
   sum,
   toArray,
 } from '../../src/query/index.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { requiredIncludesObservations } from './includes-state-observations.js'
+import {
+  checkMaterializedInputRows,
+  checkOuterJoinKeyRows,
+  expectedMaterializedInputRows,
+  expectedOuterJoinKeyRows,
+  grammarCellName,
+  grammarCells,
+  materializedInputCells,
+  materializedInputGrammar,
+} from './includes-context-transport-model-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   createGrammarCollection,
@@ -46,6 +53,25 @@ import {
   readEveryForm,
   runWithCleanup,
 } from './includes-context-transport-helpers.js'
+import type {
+  AggregationCell,
+  CorrelationDomainCell,
+  DerivedResultCell,
+  GrammarCell,
+  JoinCell,
+  LexicalScopeCell,
+  MaterializedInputCell,
+  MaterializedInputChild,
+  MaterializedInputGrandchild,
+  MaterializedInputRow,
+  NamespaceCollisionCell,
+  OuterKeyRow,
+  ParentProjectionCell,
+  PublicSurfaceCell,
+  RecursiveSourceCell,
+  UnionIdentityCell,
+  routeContextGrammar,
+} from './includes-context-transport-model-oracle.js'
 import type {
   PublicFieldCell,
   PublicFieldOverlapCell,
@@ -106,269 +132,8 @@ import type {
  * materialization forms beyond the displayed `toArray` queries.
  */
 
-const checkpoints = [`initial`, `parent-update`, `child-update`] as const
-
-// These axes name semantic boundaries, not implementation functions. Adding a
-// compiler feature means adding its boundary here or stating why it cannot
-// carry correlated context. Each declared tuple gets one named test below;
-// the path-specific witnesses in `includes-context-transport.test.ts`
-// reconstruct the separate dotted-path cases.
-//
-// Removing a family loses a distinct question: field versus whole-parent
-// projection; unmatched versus null correlation; immediate versus ancestor
-// scope; grouping versus aggregate placement; recursive boundary versus
-// evaluation phase; join-key side versus correlation attachment; union form;
-// derived-result boundary versus selection and nullability; user-name location
-// versus boundary and spelling; or public-surface shape. Within a family, the
-// asserted parent and child changes distinguish route reuse from recomputation.
-// The fixtures bound the range to small finite source Collections, three public
-// forms, and the listed updates. New numeric values with the same relations
-// change parameters, while arbitrary path segments or deeper recursive shapes
-// require new grammar rules. Ancestor alias shadowing and compiled
-// Collection-valued functional inputs are invalid query forms and excluded.
-const routeContextGrammar = {
-  parentProjection: {
-    shapes: [`field`, `whole-row`] as const,
-  },
-  correlationDomain: {
-    states: [`unmatched`, `null`] as const,
-  },
-  lexicalScope: {
-    scopes: [`immediate-parent`, `lexical-ancestor`] as const,
-  },
-  aggregation: {
-    groupings: [`implicit`, `explicit`] as const,
-    placements: [`inside-aggregate`, `wrapped-aggregate`] as const,
-  },
-  recursiveSource: {
-    boundaries: [`from-query-ref`, `joined-query-ref`, `union-branch`] as const,
-    phases: [
-      `filter`,
-      `projection`,
-      `aggregate`,
-      `having`,
-      `order-window`,
-    ] as const,
-  },
-  join: {
-    keySides: [`main`, `joined`] as const,
-    correlationAttachments: [`main`, `joined`] as const,
-  },
-  unionIdentity: {
-    forms: [`union-from`, `union-all`] as const,
-  },
-  derivedResult: {
-    boundaries: [`from-query-ref`, `joined-query-ref`, `union-all`] as const,
-    selections: [`expression`, `functional`] as const,
-    domains: [`non-null`, `nullable`] as const,
-  },
-  namespaceCollision: {
-    locations: [`parent-alias`, `selected-field`] as const,
-    boundaries: [`direct`, `query-ref`, `join`, `group`] as const,
-    names: [
-      `__parentContextIdentity`,
-      `__parentContext`,
-      `__correlationKey`,
-      `value`,
-      `identity`,
-    ] as const,
-  },
-  publicField: publicFieldGrammar,
-  publicSurface: {
-    shapes: [
-      `object-query-ref-scalar`,
-      `nested-functional-spread`,
-      `opaque-wrapper`,
-      `functional-having-input`,
-      `nested-reference`,
-      `adversarial-key`,
-      `user-symbol`,
-      `implicit-join`,
-    ] as const,
-  },
-} as const
-
-type ParentProjectionCell = {
-  family: `parent-projection`
-  shape: (typeof routeContextGrammar.parentProjection.shapes)[number]
-}
-
-type CorrelationDomainCell = {
-  family: `correlation-domain`
-  state: (typeof routeContextGrammar.correlationDomain.states)[number]
-}
-
-type LexicalScopeCell = {
-  family: `lexical-scope`
-  scope: (typeof routeContextGrammar.lexicalScope.scopes)[number]
-}
-
-type AggregationCell = {
-  family: `aggregation`
-  grouping: (typeof routeContextGrammar.aggregation.groupings)[number]
-  placement: (typeof routeContextGrammar.aggregation.placements)[number]
-}
-
-type RecursiveSourceCell = {
-  family: `recursive-source`
-  boundary: (typeof routeContextGrammar.recursiveSource.boundaries)[number]
-  phase: (typeof routeContextGrammar.recursiveSource.phases)[number]
-}
-
-type JoinCell = {
-  family: `join`
-  keySide: (typeof routeContextGrammar.join.keySides)[number]
-  correlationAttachment: (typeof routeContextGrammar.join.correlationAttachments)[number]
-}
-
-type UnionIdentityCell = {
-  family: `union-identity`
-  form: (typeof routeContextGrammar.unionIdentity.forms)[number]
-}
-
-type DerivedResultCell = {
-  family: `derived-result`
-  boundary: (typeof routeContextGrammar.derivedResult.boundaries)[number]
-  selection: (typeof routeContextGrammar.derivedResult.selections)[number]
-  domain: (typeof routeContextGrammar.derivedResult.domains)[number]
-}
-
-type NamespaceCollisionCell = {
-  family: `namespace-collision`
-  location: (typeof routeContextGrammar.namespaceCollision.locations)[number]
-  boundary: (typeof routeContextGrammar.namespaceCollision.boundaries)[number]
-  name: (typeof routeContextGrammar.namespaceCollision.names)[number]
-}
-
-type PublicSurfaceCell = {
-  family: `public-surface`
-  shape: (typeof routeContextGrammar.publicSurface.shapes)[number]
-}
-
-type GrammarCell =
-  | ParentProjectionCell
-  | CorrelationDomainCell
-  | LexicalScopeCell
-  | AggregationCell
-  | RecursiveSourceCell
-  | JoinCell
-  | UnionIdentityCell
-  | DerivedResultCell
-  | NamespaceCollisionCell
-  | PublicSurfaceCell
-  | PublicFieldCell
-  | PublicFieldOverlapCell
-
-// Expand every declared product once. The calibration test below rejects both
-// missing cells and duplicate cells.
-const grammarCells: Array<GrammarCell> = [
-  ...routeContextGrammar.parentProjection.shapes.map(
-    (shape): ParentProjectionCell => ({
-      family: `parent-projection`,
-      shape,
-    }),
-  ),
-  ...routeContextGrammar.correlationDomain.states.map(
-    (state): CorrelationDomainCell => ({
-      family: `correlation-domain`,
-      state,
-    }),
-  ),
-  ...routeContextGrammar.lexicalScope.scopes.map((scope): LexicalScopeCell => ({
-    family: `lexical-scope`,
-    scope,
-  })),
-  ...routeContextGrammar.aggregation.groupings.flatMap((grouping) =>
-    routeContextGrammar.aggregation.placements.map(
-      (placement): AggregationCell => ({
-        family: `aggregation`,
-        grouping,
-        placement,
-      }),
-    ),
-  ),
-  ...routeContextGrammar.recursiveSource.boundaries.flatMap((boundary) =>
-    routeContextGrammar.recursiveSource.phases.map(
-      (phase): RecursiveSourceCell => ({
-        family: `recursive-source`,
-        boundary,
-        phase,
-      }),
-    ),
-  ),
-  ...routeContextGrammar.join.keySides.flatMap((keySide) =>
-    routeContextGrammar.join.correlationAttachments.map(
-      (correlationAttachment): JoinCell => ({
-        family: `join`,
-        keySide,
-        correlationAttachment,
-      }),
-    ),
-  ),
-  ...routeContextGrammar.unionIdentity.forms.map((form): UnionIdentityCell => ({
-    family: `union-identity`,
-    form,
-  })),
-  ...routeContextGrammar.derivedResult.boundaries.flatMap((boundary) =>
-    routeContextGrammar.derivedResult.selections.flatMap((selection) =>
-      routeContextGrammar.derivedResult.domains.map(
-        (domain): DerivedResultCell => ({
-          family: `derived-result`,
-          boundary,
-          selection,
-          domain,
-        }),
-      ),
-    ),
-  ),
-  ...routeContextGrammar.namespaceCollision.locations.flatMap((location) =>
-    routeContextGrammar.namespaceCollision.boundaries.flatMap((boundary) =>
-      routeContextGrammar.namespaceCollision.names.map(
-        (name): NamespaceCollisionCell => ({
-          family: `namespace-collision`,
-          location,
-          boundary,
-          name,
-        }),
-      ),
-    ),
-  ),
-  ...publicFieldCells,
-  ...publicFieldOverlapCells,
-  ...publicFieldOverlapFunctionalCells,
-  ...routeContextGrammar.publicSurface.shapes.map(
-    (shape): PublicSurfaceCell => ({ family: `public-surface`, shape }),
-  ),
-]
-
-function grammarCellName(cell: GrammarCell): string {
-  switch (cell.family) {
-    case `parent-projection`:
-      return `${cell.family} / ${cell.shape}`
-    case `correlation-domain`:
-      return `${cell.family} / ${cell.state}`
-    case `lexical-scope`:
-      return `${cell.family} / ${cell.scope}`
-    case `aggregation`:
-      return `${cell.family} / ${cell.grouping} / ${cell.placement}`
-    case `recursive-source`:
-      return `${cell.family} / ${cell.boundary} / ${cell.phase}`
-    case `join`:
-      return `${cell.family} / ${cell.keySide}-side key / ${cell.correlationAttachment}-side correlation`
-    case `union-identity`:
-      return `${cell.family} / ${cell.form}`
-    case `derived-result`:
-      return `${cell.family} / ${cell.boundary} / ${cell.selection} / ${cell.domain}`
-    case `namespace-collision`:
-      return `${cell.family} / ${cell.location} / ${cell.boundary} / ${cell.name}`
-    case `public-field`:
-      return `${cell.family} / ${String(cell.key)} / ${cell.location} / ${cell.selection} / ${cell.destination}`
-    case `public-field-overlap`:
-      return `${cell.family} / ${cell.destination} / ${cell.operation} / ${cell.descriptor}`
-    case `public-surface`:
-      return `${cell.family} / ${cell.shape}`
-  }
-}
+// The route-context grammar (checkpoints, routeContextGrammar, grammarCells,
+// and grammarCellName) lives in includes-context-transport-model-oracle.ts.
 
 // Law: a child row carries each parent snapshot in the form its projection
 // selected, read from the current parent row, so a parent update changes every
@@ -2457,92 +2222,42 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
 
 // Each grammar cell is checked against the models below. Each expectation is
 // computed from the source Collections, not written as a value.
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  check: [runGrammarCell],
-  model: [
-    expectedParentSnapshots,
-    expectedCorrelatedIds,
-    expectedThresholdChildIds,
-    expectedGrandchildIds,
-    expectedNestedRows,
-    expectedAggregateScores,
-    expectedCandidateRows,
-    expectedUnionRows,
-    expectedDerivedRows,
-    expectedJoinRows,
-    expectedCollisionRows,
-    expectedPublicField,
-    expectedSelectedPublicField,
-    expectedPublicFieldOverlapSource,
-    expectedSelectedPublicFieldOverlap,
-  ],
-  grammar: [grammarCells],
-})
+const routeContextLaw = `Each parent reference is discovered across nested includes, QueryRef sources, union branches, and joined sources, enters route identity, is attached before the first operator that evaluates it, and is preserved through later boundaries.`
+const materializedInputLaw = `An inherited inline input keeps each parent's route: a child's membership depends only on its parent's group, and its nested array holds exactly the grandchildren naming it.`
+
+// Grammar cells are enumerated by name, because a public-field cell can hold a
+// symbol key, which is not history data. Resolution finds the cell again.
+const grammarCellsByName = new Map(
+  grammarCells.map((cell) => [grammarCellName(cell), cell]),
+)
+const observationsOf = (cell: GrammarCell) =>
+  cell.family === `public-field` || cell.family === `public-field-overlap`
+    ? `root and correlated forms × field admission stages`
+    : `every materialization form × parent/child updates`
 
 describe(`correlated include route-context transport grammar`, () => {
-  test(`expands every declared product without duplicate cells`, () => {
-    oracleRoute(`case`)
-    const expectedCellCount =
-      routeContextGrammar.parentProjection.shapes.length +
-      routeContextGrammar.correlationDomain.states.length +
-      routeContextGrammar.lexicalScope.scopes.length +
-      routeContextGrammar.aggregation.groupings.length *
-        routeContextGrammar.aggregation.placements.length +
-      routeContextGrammar.recursiveSource.boundaries.length *
-        routeContextGrammar.recursiveSource.phases.length +
-      routeContextGrammar.join.keySides.length *
-        routeContextGrammar.join.correlationAttachments.length +
-      routeContextGrammar.unionIdentity.forms.length +
-      routeContextGrammar.derivedResult.boundaries.length *
-        routeContextGrammar.derivedResult.selections.length *
-        routeContextGrammar.derivedResult.domains.length +
-      routeContextGrammar.namespaceCollision.locations.length *
-        routeContextGrammar.namespaceCollision.boundaries.length *
-        routeContextGrammar.namespaceCollision.names.length +
-      routeContextGrammar.publicSurface.shapes.length +
-      publicFieldCells.length +
-      publicFieldOverlapCells.length +
-      publicFieldOverlapFunctionalCells.length
-    const names = grammarCells.map(grammarCellName)
-
-    expect(grammarCells).toHaveLength(expectedCellCount)
-    expect(new Set(names)).toHaveLength(expectedCellCount)
-    expect(
-      grammarCells.filter(
-        (cell) =>
-          cell.family !== `public-field` &&
-          cell.family !== `public-field-overlap`,
-      ).length *
-        materializationForms.length *
-        checkpoints.length,
-    ).toBe(819)
-    expect(
-      grammarCells.filter((cell) => cell.family === `public-field`).length *
-        fieldStages.length *
-        4,
-    ).toBe(1200)
-    expect(
-      (publicFieldOverlapCells.length +
-        publicFieldOverlapFunctionalCells.length) *
-        overlapStages.length *
-        4,
-    ).toBe(432)
+  oracleProperty({
+    id: `includes-context-transport.grammar`,
+    law: {
+      statement: routeContextLaw,
+      authority: `Route-context transport in packages/db/src/query/live/ARCHITECTURE.md (discovery, route identity, attachment before evaluation, and preservation across recursive and join boundaries), stated at the start of this owner.`,
+      limits: `Every declared route-context grammar cell, enumerated by name, over small finite source Collections, three public forms, and the listed updates.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: grammarCells.map(grammarCellName),
+    label: (name) =>
+      `${name} × ${observationsOf(grammarCellsByName.get(name)!)}`,
+    resolve: (name) => ({ cell: grammarCellsByName.get(name)! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(routeContextLaw, plan, observe, () =>
+        runGrammarCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
   })
-
-  for (const cell of grammarCells) {
-    const observations =
-      cell.family === `public-field` || cell.family === `public-field-overlap`
-        ? `root and correlated forms × field admission stages`
-        : `every materialization form × parent/child updates`
-    test(`${grammarCellName(cell)} × ${observations}`, () => {
-      oracleRoute(`case`)
-      return runGrammarCell(cell)
-    })
-  }
 })
 
 // Law: a compound join pairs a child with a peer when the first equality holds
@@ -2572,7 +2287,103 @@ function expectedCompoundRows(
   )
 }
 
-declareOracle({ model: [expectedCompoundRows] })
+const compoundJoinLaw = `A parent value used only in the second join equality is still route context, so each parent pairs children with peers by its own parameter.`
+
+// The former case body, unchanged, for one boundary and parent side.
+async function judgeCompoundParentContext(
+  boundary: `direct` | `queryRef`,
+  parentSide: `main` | `joined`,
+): Promise<void> {
+  const parents = createGrammarCollection(`compound-parents`, [
+    { id: 1, group: 1, parameter: 1 },
+    { id: 2, group: 1, parameter: 2 },
+  ])
+  const children = createGrammarCollection(`compound-children`, [
+    { id: 10, group: 1, a: 1, b: 1 },
+    { id: 11, group: 1, a: 1, b: 2 },
+  ])
+  const peers = createGrammarCollection(`compound-peers`, [
+    { id: 20, a: 1, b: 2 },
+    { id: 21, a: 1, b: 3 },
+  ])
+  let cleanupLive: () => Promise<void> = async () => {}
+  await runWithCleanup(
+    { cleanup: () => cleanupLive() },
+    [parents, children, peers],
+    async () => {
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => {
+          const base = q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.group, parent.group))
+          const joinCondition = ({
+            child,
+            peer,
+          }: {
+            child: {
+              a: RefLeaf<number>
+              b: RefLeaf<number>
+            }
+            peer: {
+              a: RefLeaf<number>
+              b: RefLeaf<number>
+            }
+          }) =>
+            and(
+              eq(child.a, peer.a),
+              parentSide === `main`
+                ? eq(add(child.b, parent.parameter), peer.b)
+                : eq(child.b, add(peer.b, parent.parameter)),
+            )
+          const joined =
+            boundary === `direct`
+              ? base.innerJoin({ peer: peers.collection }, joinCondition)
+              : base.innerJoin(
+                  {
+                    peer: q
+                      .from({ peer: peers.collection })
+                      .select(({ peer }) => ({
+                        id: peer.id,
+                        a: peer.a,
+                        b: peer.b,
+                      })),
+                  },
+                  joinCondition,
+                )
+          const rows = joined.select(({ child, peer }) => ({
+            id: child.id,
+            peerId: peer.id,
+          }))
+          return { id: parent.id, ...includeInEveryForm(rows) }
+        }),
+      )
+      cleanupLive = () => live.cleanup()
+      const project = (rows: Iterable<{ id: number; peerId: number }>) =>
+        [...rows]
+          .map(({ id, peerId }) => [id, peerId])
+          .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!)
+      const check = () => {
+        for (const parent of parents.collection.toArray) {
+          const expected = expectedCompoundRows(
+            children,
+            peers,
+            parentSide,
+            parent,
+          )
+          expectEveryForm(live.get(parent.id)!, project, project(expected))
+        }
+      }
+      await live.preload()
+      check()
+      parents.write(`update`, { id: 1, group: 1, parameter: -1 })
+      check()
+      peers.write(`update`, { id: 20, a: 1, b: 1 })
+      check()
+      children.write(`update`, { id: 10, group: 1, a: 1, b: 3 })
+      check()
+    },
+  )
+}
 
 /**
  * A parent value used only in the second join equality is still route context.
@@ -2584,106 +2395,33 @@ declareOracle({ model: [expectedCompoundRows] })
  * updates. This bounded matrix makes no asynchronous publication claim.
  */
 describe(`compound join parent context`, () => {
-  for (const boundary of [`direct`, `queryRef`] as const) {
-    for (const parentSide of [`main`, `joined`] as const) {
-      test(`preserves the later parent operand through ${boundary}, ${parentSide}`, async () => {
-        oracleRoute(`case`)
-        const parents = createGrammarCollection(`compound-parents`, [
-          { id: 1, group: 1, parameter: 1 },
-          { id: 2, group: 1, parameter: 2 },
-        ])
-        const children = createGrammarCollection(`compound-children`, [
-          { id: 10, group: 1, a: 1, b: 1 },
-          { id: 11, group: 1, a: 1, b: 2 },
-        ])
-        const peers = createGrammarCollection(`compound-peers`, [
-          { id: 20, a: 1, b: 2 },
-          { id: 21, a: 1, b: 3 },
-        ])
-        let cleanupLive: () => Promise<void> = async () => {}
-        await runWithCleanup(
-          { cleanup: () => cleanupLive() },
-          [parents, children, peers],
-          async () => {
-            const live = createLiveQueryCollection((q) =>
-              q.from({ parent: parents.collection }).select(({ parent }) => {
-                const base = q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.group, parent.group))
-                const joinCondition = ({
-                  child,
-                  peer,
-                }: {
-                  child: {
-                    a: RefLeaf<number>
-                    b: RefLeaf<number>
-                  }
-                  peer: {
-                    a: RefLeaf<number>
-                    b: RefLeaf<number>
-                  }
-                }) =>
-                  and(
-                    eq(child.a, peer.a),
-                    parentSide === `main`
-                      ? eq(add(child.b, parent.parameter), peer.b)
-                      : eq(child.b, add(peer.b, parent.parameter)),
-                  )
-                const joined =
-                  boundary === `direct`
-                    ? base.innerJoin({ peer: peers.collection }, joinCondition)
-                    : base.innerJoin(
-                        {
-                          peer: q
-                            .from({ peer: peers.collection })
-                            .select(({ peer }) => ({
-                              id: peer.id,
-                              a: peer.a,
-                              b: peer.b,
-                            })),
-                        },
-                        joinCondition,
-                      )
-                const rows = joined.select(({ child, peer }) => ({
-                  id: child.id,
-                  peerId: peer.id,
-                }))
-                return { id: parent.id, ...includeInEveryForm(rows) }
-              }),
-            )
-            cleanupLive = () => live.cleanup()
-            const project = (rows: Iterable<{ id: number; peerId: number }>) =>
-              [...rows]
-                .map(({ id, peerId }) => [id, peerId])
-                .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!)
-            const check = () => {
-              for (const parent of parents.collection.toArray) {
-                const expected = expectedCompoundRows(
-                  children,
-                  peers,
-                  parentSide,
-                  parent,
-                )
-                expectEveryForm(
-                  live.get(parent.id)!,
-                  project,
-                  project(expected),
-                )
-              }
-            }
-            await live.preload()
-            check()
-            parents.write(`update`, { id: 1, group: 1, parameter: -1 })
-            check()
-            peers.write(`update`, { id: 20, a: 1, b: 1 })
-            check()
-            children.write(`update`, { id: 10, group: 1, a: 1, b: 3 })
-            check()
-          },
-        )
-      })
-    }
-  }
+  oracleProperty({
+    id: `includes-context-transport.compound-join`,
+    law: {
+      statement: compoundJoinLaw,
+      authority: `Route-context transport in packages/db/src/query/live/ARCHITECTURE.md (discovery, route identity, attachment before evaluation, and preservation across recursive and join boundaries), stated at the start of this owner.`,
+      limits: `The four enumerated direct/QueryRef by main/joined parent-side cells; no asynchronous publication claim.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: ([`direct`, `queryRef`] as const).flatMap((boundary) =>
+      ([`main`, `joined`] as const).map((parentSide) => ({
+        boundary,
+        parentSide,
+      })),
+    ),
+    label: ({ boundary, parentSide }) =>
+      `preserves the later parent operand through ${boundary}, ${parentSide}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(compoundJoinLaw, plan, observe, () =>
+        judgeCompoundParentContext(plan.boundary, plan.parentSide),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -2702,74 +2440,8 @@ describe(`compound join parent context`, () => {
  * grammar. The checks cover synchronous eager-source writes, not async demand,
  * callback publication counts, ordering guarantees or metadata attribution.
  */
-const materializedInputGrammar = {
-  boundaries: [`from-query-ref`, `joined-query-ref`] as const,
-  selections: [`expression`, `functional`] as const,
-  inputs: [`array`, `materialized`] as const,
-  checkpoints: [
-    `initial`,
-    `parent-move`,
-    `child-move`,
-    `grandchild-update`,
-    `grandchild-empty`,
-    `grandchild-reactivation`,
-  ] as const,
-}
-
-type MaterializedInputCell = {
-  boundary: (typeof materializedInputGrammar.boundaries)[number]
-  selection: (typeof materializedInputGrammar.selections)[number]
-  input: (typeof materializedInputGrammar.inputs)[number]
-}
-type MaterializedInputChild = { id: number; parentGroup: number }
-type MaterializedInputGrandchild = {
-  id: number
-  childId: number
-  label: string
-}
-type MaterializedInputRow = MaterializedInputChild & {
-  grandchildren: Array<{ id: number; label: string }>
-}
-
-const materializedInputCells = materializedInputGrammar.boundaries.flatMap(
-  (boundary) =>
-    materializedInputGrammar.selections.flatMap((selection) =>
-      materializedInputGrammar.inputs.map((input) => ({
-        boundary,
-        selection,
-        input,
-      })),
-    ),
-)
-
-// The model enumerates the current source rows from independently retained
-// facts. A child's membership depends only on its parent's group. Its nested
-// array contains exactly the grandchildren naming that child, even when empty.
-function expectedMaterializedInputRows(
-  parent: { group: number },
-  children: ReadonlyArray<MaterializedInputChild>,
-  grandchildren: ReadonlyArray<MaterializedInputGrandchild>,
-): Array<MaterializedInputRow> {
-  return children
-    .filter((child) => child.parentGroup === parent.group)
-    .map((child) => ({
-      ...child,
-      grandchildren: grandchildren
-        .filter((grandchild) => grandchild.childId === child.id)
-        .map(({ id, label }) => ({ id, label }))
-        .sort((left, right) => left.id - right.id),
-    }))
-    .sort((left, right) => left.id - right.id)
-}
-
-function checkMaterializedInputRows(
-  actual: unknown,
-  expected: ReadonlyArray<MaterializedInputRow>,
-  checkpoint: string,
-): void {
-  expect(actual, checkpoint).toEqual(expected)
-}
-
+// materializedInputGrammar, its cells, model, and check live in
+// includes-context-transport-model-oracle.ts.
 async function runMaterializedInputCell({
   boundary,
   selection,
@@ -2938,61 +2610,29 @@ async function runMaterializedInputCell({
   })
 }
 
-declareOracle({
-  check: [runMaterializedInputCell, checkMaterializedInputRows],
-  model: [expectedMaterializedInputRows],
-  grammar: [materializedInputCells],
-})
-
 describe(`parent route after inherited inline input materialization`, () => {
-  test(`expands every declared input boundary without duplicates`, () => {
-    oracleRoute(`case`)
-    const expected =
-      materializedInputGrammar.boundaries.length *
-      materializedInputGrammar.selections.length *
-      materializedInputGrammar.inputs.length
-    expect(materializedInputCells).toHaveLength(expected)
-    expect(
-      new Set(
-        materializedInputCells.map(
-          ({ boundary, selection, input }) =>
-            `${boundary}/${selection}/${input}`,
-        ),
+  oracleProperty({
+    id: `includes-context-transport.materialized-input`,
+    law: {
+      statement: materializedInputLaw,
+      authority: `Route-context transport in packages/db/src/query/live/ARCHITECTURE.md (discovery, route identity, attachment before evaluation, and preservation across recursive and join boundaries), stated at the start of this owner.`,
+      limits: `The enumerated boundary, selection, and input cells over synchronous eager-source writes; no async demand, callback publication count, ordering, or metadata attribution claim.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: materializedInputCells,
+    label: ({ boundary, selection, input }) =>
+      `${boundary} / ${selection} / ${input}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(materializedInputLaw, plan, observe, () =>
+        runMaterializedInputCell(plan.cell),
       ),
-    ).toHaveLength(expected)
+    check: forwardAssertionJudgment,
   })
-
-  test(`rejects lost children and cross-parent reuse at the public checkpoint`, () => {
-    oracleRoute(`calibration`)
-    const children = [
-      { id: 10, parentGroup: 1 },
-      { id: 20, parentGroup: 2 },
-    ]
-    const grandchildren = [{ id: 100, childId: 10, label: `ten` }]
-    const expected = expectedMaterializedInputRows(
-      { group: 1 },
-      children,
-      grandchildren,
-    )
-    const wrongRoute = expectedMaterializedInputRows(
-      { group: 2 },
-      children,
-      grandchildren,
-    )
-    checkMaterializedInputRows(expected, expected, `allowed`)
-    for (const wrong of [[], wrongRoute]) {
-      expect(() =>
-        checkMaterializedInputRows(wrong, expected, `calibration`),
-      ).toThrow()
-    }
-  })
-
-  for (const cell of materializedInputCells) {
-    test(`${cell.boundary} / ${cell.selection} / ${cell.input}`, () => {
-      oracleRoute(`case`)
-      return runMaterializedInputCell(cell)
-    })
-  }
 })
 
 /**
@@ -3021,188 +2661,159 @@ const outerJoinKeyGrammar = (
     ),
   ),
 )
-type OuterKeyRow = { id: number; link: number; parentGroup: number }
-function expectedOuterJoinKeyRows(
-  mains: ReadonlyArray<OuterKeyRow>,
-  children: ReadonlyArray<OuterKeyRow>,
-  group: number,
-  join: (typeof outerJoinKeyGrammar)[number][`join`],
-) {
-  return children
-    .filter((child) => child.parentGroup === group)
-    .flatMap((child) => {
-      const matched = mains.filter((main) => main.link === child.link)
-      return (
-        matched.length
-          ? matched
-          : join === `right` || join === `full`
-            ? [undefined]
-            : []
-      ).map((main) => ({
-        id: child.id,
-        mainId: main?.id,
-      }))
-    })
-    .sort((a, b) => a.id - b.id)
-}
-function checkOuterJoinKeyRows(
-  observed: Iterable<{ id: unknown; mainId: unknown }>,
-  expected: ReturnType<typeof expectedOuterJoinKeyRows>,
-) {
-  expect(
-    [...observed]
-      .map(({ id, mainId }) => ({ id, mainId }))
-      .sort((a, b) => Number(a.id) - Number(b.id)),
-  ).toEqual(expected)
-}
-declareOracle({
-  grammar: [outerJoinKeyGrammar],
-  model: [expectedOuterJoinKeyRows],
-  check: [checkOuterJoinKeyRows],
-})
-test(`rejects missing and duplicated joined contributions`, () => {
-  oracleRoute(`calibration`)
-  const mains = [{ id: 10, link: 10, parentGroup: 1 }]
-  const children = [
+// The former case body, unchanged, for one join, reference, and key cell.
+async function judgeOuterJoinKeyCell({
+  join,
+  mainRef,
+  joinedRef,
+  keys,
+}: (typeof outerJoinKeyGrammar)[number]): Promise<void> {
+  const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
+  const reach = requiredIncludesObservations(
+    `outer join independent source keys`,
+    cuts.flatMap((cut) => materializationForms.map((form) => `${cut}/${form}`)),
+  )
+  reach.beginHistory()
+  const parents = createGrammarCollection(`outer-key-parents`, [
+    { id: 1, group: 1 },
+    { id: 2, group: 2 },
+    { id: 3, group: 1 },
+  ])
+  let modelMains: Array<OuterKeyRow> = [{ id: 10, link: 10, parentGroup: 1 }]
+  let modelChildren: Array<OuterKeyRow> = [
     { id: 20, link: 10, parentGroup: 1 },
     { id: 21, link: 10, parentGroup: 1 },
     { id: 10, link: 30, parentGroup: 1 },
+    { id: 30, link: 50, parentGroup: 2 },
   ]
-  for (const join of [`inner`, `left`, `right`, `full`] as const) {
-    const expected = expectedOuterJoinKeyRows(mains, children, 1, join)
-    checkOuterJoinKeyRows(expected, expected)
-    for (const wrong of [expected.slice(1), [...expected, expected[0]!]])
-      expect(() => checkOuterJoinKeyRows(wrong, expected)).toThrow()
-  }
-})
-test.each(outerJoinKeyGrammar)(
-  `preserves outer-join child identities across independent source keys: %j`,
-  async ({ join, mainRef, joinedRef, keys }) => {
-    oracleRoute(`case`)
-    const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
-    const reach = requiredIncludesObservations(
-      `outer join independent source keys`,
-      cuts.flatMap((cut) =>
-        materializationForms.map((form) => `${cut}/${form}`),
-      ),
-    )
-    reach.beginHistory()
-    const parents = createGrammarCollection(`outer-key-parents`, [
-      { id: 1, group: 1 },
-      { id: 2, group: 2 },
-      { id: 3, group: 1 },
-    ])
-    let modelMains: Array<OuterKeyRow> = [{ id: 10, link: 10, parentGroup: 1 }]
-    let modelChildren: Array<OuterKeyRow> = [
-      { id: 20, link: 10, parentGroup: 1 },
-      { id: 21, link: 10, parentGroup: 1 },
-      { id: 10, link: 30, parentGroup: 1 },
-      { id: 30, link: 50, parentGroup: 2 },
-    ]
-    const mains = createControlledCollection(`outer-key-mains`, modelMains, {
+  const mains = createControlledCollection(`outer-key-mains`, modelMains, {
+    autoIndex: `eager`,
+    getKey: (row) => (keys === `strings` ? String(row.id) : row.id),
+  })
+  const children = createControlledCollection(
+    `outer-key-children`,
+    modelChildren,
+    {
       autoIndex: `eager`,
-      getKey: (row) => (keys === `strings` ? String(row.id) : row.id),
-    })
-    const children = createControlledCollection(
-      `outer-key-children`,
-      modelChildren,
-      {
-        autoIndex: `eager`,
-        getKey: (row) => (keys === `numbers` ? row.id : String(row.id)),
-      },
-    )
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q.from({ parent: parents.collection }).select(({ parent }) => {
-          const mainQuery = q
-            .from({ main: mains.collection })
-            .select(({ main }) => ({
-              id: main.id,
-              link: main.link,
-              parentGroup: main.parentGroup,
-            }))
-          const joinedQuery = q
-            .from({ child: children.collection })
-            .select(({ child }) => ({
-              id: child.id,
-              link: child.link,
-              parentGroup: child.parentGroup,
-            }))
-          // Runtime source kinds vary independently. This driver uses only their
-          // shared ordinary fields; the native type owner checks inference.
-          const base = q.from({
-            main: (mainRef
-              ? mainQuery
-              : mains.collection) as unknown as typeof mains.collection,
-          })
-          const source = {
-            child: (joinedRef
-              ? joinedQuery
-              : children.collection) as unknown as typeof children.collection,
-          }
-          const joined =
-            join === `inner`
-              ? base.innerJoin(source, ({ main, child }) =>
+      getKey: (row) => (keys === `numbers` ? row.id : String(row.id)),
+    },
+  )
+  const live = createLiveQueryCollection({
+    query: (q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => {
+        const mainQuery = q
+          .from({ main: mains.collection })
+          .select(({ main }) => ({
+            id: main.id,
+            link: main.link,
+            parentGroup: main.parentGroup,
+          }))
+        const joinedQuery = q
+          .from({ child: children.collection })
+          .select(({ child }) => ({
+            id: child.id,
+            link: child.link,
+            parentGroup: child.parentGroup,
+          }))
+        // Runtime source kinds vary independently. This driver uses only their
+        // shared ordinary fields; the native type owner checks inference.
+        const base = q.from({
+          main: (mainRef
+            ? mainQuery
+            : mains.collection) as unknown as typeof mains.collection,
+        })
+        const source = {
+          child: (joinedRef
+            ? joinedQuery
+            : children.collection) as unknown as typeof children.collection,
+        }
+        const joined =
+          join === `inner`
+            ? base.innerJoin(source, ({ main, child }) =>
+                eq(main.link, child.link),
+              )
+            : join === `left`
+              ? base.leftJoin(source, ({ main, child }) =>
                   eq(main.link, child.link),
                 )
-              : join === `left`
-                ? base.leftJoin(source, ({ main, child }) =>
+              : join === `right`
+                ? base.rightJoin(source, ({ main, child }) =>
                     eq(main.link, child.link),
                   )
-                : join === `right`
-                  ? base.rightJoin(source, ({ main, child }) =>
-                      eq(main.link, child.link),
-                    )
-                  : base.fullJoin(source, ({ main, child }) =>
-                      eq(main.link, child.link),
-                    )
-          // Full-join optionality is a conservative shared carrier for the
-          // runtime grammar; the model still checks actual absence and values.
-          const typedJoin = joined as ReturnType<
-            typeof base.fullJoin<typeof source>
-          >
-          const selected = typedJoin
-            .where(({ child }) => eq(child.parentGroup, parent.group))
-            .select(({ main, child }) => ({ id: child.id, mainId: main.id }))
-          return { id: parent.id, ...includeInEveryForm(selected) }
-        }),
-    })
-    const compare = (cut: string) => {
-      for (const parent of parents.collection.toArray) {
-        const expected = expectedOuterJoinKeyRows(
-          modelMains,
-          modelChildren,
-          parent.group,
-          join,
-        )
-        const forms = live.get(parent.id)!
-        const values = readEveryForm(forms, (rows) => [...rows])
-        for (const form of materializationForms) {
-          checkOuterJoinKeyRows(values[form], expected)
-          reach.reach(`${cut}/${form}`)
-        }
+                : base.fullJoin(source, ({ main, child }) =>
+                    eq(main.link, child.link),
+                  )
+        // Full-join optionality is a conservative shared carrier for the
+        // runtime grammar; the model still checks actual absence and values.
+        const typedJoin = joined as ReturnType<
+          typeof base.fullJoin<typeof source>
+        >
+        const selected = typedJoin
+          .where(({ child }) => eq(child.parentGroup, parent.group))
+          .select(({ main, child }) => ({ id: child.id, mainId: main.id }))
+        return { id: parent.id, ...includeInEveryForm(selected) }
+      }),
+  })
+  const compare = (cut: string) => {
+    for (const parent of parents.collection.toArray) {
+      const expected = expectedOuterJoinKeyRows(
+        modelMains,
+        modelChildren,
+        parent.group,
+        join,
+      )
+      const forms = live.get(parent.id)!
+      const values = readEveryForm(forms, (rows) => [...rows])
+      for (const form of materializationForms) {
+        checkOuterJoinKeyRows(values[form], expected)
+        reach.reach(`${cut}/${form}`)
       }
     }
-    await runWithCleanup(live, [parents, mains, children], async () => {
-      await live.preload()
-      compare(`initial`)
-      const original = modelMains[0]!
-      modelMains = []
-      mains.write(`delete`, original)
-      compare(`main-departed`)
-      modelMains = [original]
-      mains.write(`insert`, original)
-      compare(`main-returned`)
-      const removed = modelChildren.find(({ id }) => id === 10)!
-      modelChildren = modelChildren.filter(({ id }) => id !== 10)
-      children.write(`delete`, removed)
-      compare(`child-departed`)
-      reach.assertReached()
-      if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
-        console.log(
-          `outer-key reach ${JSON.stringify({ join, mainRef, joinedRef, keys })}`,
-          Object.fromEntries(reach.counts()),
-        )
-    })
+  }
+  await runWithCleanup(live, [parents, mains, children], async () => {
+    await live.preload()
+    compare(`initial`)
+    const original = modelMains[0]!
+    modelMains = []
+    mains.write(`delete`, original)
+    compare(`main-departed`)
+    modelMains = [original]
+    mains.write(`insert`, original)
+    compare(`main-returned`)
+    const removed = modelChildren.find(({ id }) => id === 10)!
+    modelChildren = modelChildren.filter(({ id }) => id !== 10)
+    children.write(`delete`, removed)
+    compare(`child-departed`)
+    reach.assertReached()
+    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+      console.log(
+        `outer-key reach ${JSON.stringify({ join, mainRef, joinedRef, keys })}`,
+        Object.fromEntries(reach.counts()),
+      )
+  })
+}
+
+const outerJoinKeyLaw = `An unmatched RIGHT or FULL joined QueryRef does not donate its source key to the joined result: each distinct projected contribution keeps one public child across independent source keys.`
+
+oracleProperty({
+  id: `includes-context-transport.outer-join-keys`,
+  law: {
+    statement: outerJoinKeyLaw,
+    authority: `Route-context transport in packages/db/src/query/live/ARCHITECTURE.md (discovery, route identity, attachment before evaluation, and preservation across recursive and join boundaries), stated at the start of this owner.`,
+    limits: `The enumerated join, main/joined reference, and key-domain cells; rows and stable distinct membership only, without key serialization or callback timing.`,
   },
-)
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+  ],
+  histories: outerJoinKeyGrammar,
+  label: (cell) =>
+    `preserves outer-join child identities across independent source keys: ${JSON.stringify(cell)}`,
+  resolve: (cell) => ({ ...cell }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(outerJoinKeyLaw, plan, observe, () =>
+      judgeOuterJoinKeyCell(plan),
+    ),
+  check: forwardAssertionJudgment,
+})

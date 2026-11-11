@@ -33,6 +33,10 @@ export const properties: ReadonlyArray<string> = [
   `includes-query-shape.multiplicity-fixed`,
   `includes-query-shape.correlation-fixed`,
   `includes-query-shape.nullable-fixed`,
+  `includes-context-transport.grammar`,
+  `includes-context-transport.compound-join`,
+  `includes-context-transport.materialized-input`,
+  `includes-context-transport.outer-join-keys`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -80,5 +84,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-query-shape-oracle.test.ts`,
     `includes-query-shape`,
     `multiplicity-fixed correlation-fixed nullable-fixed`,
+  ],
+  [
+    `db/tests/query/includes-context-transport-oracle.test.ts`,
+    `includes-context-transport`,
+    `grammar compound-join materialized-input outer-join-keys`,
   ],
 ]
