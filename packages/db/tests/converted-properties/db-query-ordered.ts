@@ -114,6 +114,12 @@ const otherProperties: ReadonlyArray<string> = [
   `optimizer-semantics.residual-pushdown`,
   `optimizer-semantics.preserved-join`,
   `optimizer-semantics.two-active-chain`,
+  `subquery-user-value.distinct-outer-where`,
+  `subquery-user-value.joined-distinct-writes`,
+  `subquery-user-value.joined-aggregate-writes`,
+  `subquery-user-value.flat-aggregate-join`,
+  `subquery-user-value.ordered-find-one`,
+  `subquery-user-value.materialized-find-one`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -240,6 +246,36 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/optimizer-semantics-oracle.test.ts`,
     `optimizer-semantics`,
     `two-active-chain`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `distinct-outer-where`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `joined-distinct-writes`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `joined-aggregate-writes`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `flat-aggregate-join`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `ordered-find-one`,
+  ],
+  [
+    `db/tests/query/subquery-user-value-oracle.test.ts`,
+    `subquery-user-value`,
+    `materialized-find-one`,
   ],
 ]
 
