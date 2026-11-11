@@ -12,8 +12,6 @@ export const properties: ReadonlyArray<string> = [
   `sqlite-reload.class.electron-app`,
   `sqlite-persistence.typed-value-reopen`,
   `sqlite-persistence.native-temporal-query`,
-  `persisted-demand-coverage.storage-fault`,
-  `persisted-demand-coverage.release`,
   `persisted-demand-coverage.cell`,
   `persisted-demand-coverage.lifecycle`,
   `persisted-demand-coverage.joined`,
@@ -24,6 +22,8 @@ export const properties: ReadonlyArray<string> = [
   `browser.shared-driver-fairness.fixed`,
   `browser.shared-driver-fairness.persist-first`,
   `browser.shared-driver-fairness.barrier`,
+  `browser.multi-tab-refetch-storm`,
+  `browser.multi-tab-reserved-history-fixed`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -48,11 +48,6 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `typed-value-reopen native-temporal-query`,
   ],
   [
-    `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
-    `persisted-demand-coverage`,
-    `storage-fault release`,
-  ],
-  [
     `db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`,
     `persisted-demand-coverage`,
     `cell lifecycle joined session-reset bookkeeping window next-page`,
@@ -61,5 +56,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
     `browser.shared-driver-fairness`,
     `fixed persist-first barrier`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
+    `browser`,
+    `multi-tab-refetch-storm multi-tab-reserved-history-fixed`,
   ],
 ]

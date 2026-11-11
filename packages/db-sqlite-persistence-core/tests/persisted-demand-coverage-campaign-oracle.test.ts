@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
-import { describe, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -1238,100 +1238,65 @@ function checkRelease(
   })
 }
 
-// Part 2's sweep: every call that the history makes without a failure fails
-// once, before and after its effect, and every fault reach is entered.
-async function runStorageFaultSweep(): Promise<void> {
-  quietConsole()
-  const baseline = await runWithFault(undefined)
-  // Positive witness: without a failure, session 2 settles D offline.
-  expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
-  const reached = new Set<FaultReach>()
-  const expectedReach: Array<FaultReach> = [
-    `coverage read failed`,
-    `row write failed`,
-    `coverage check failed`,
-    `coverage write failed`,
-  ]
-  for (const session of [1, 2] as const) {
-    const count = baseline.calls.filter((c) => c.session === session).length
-    for (let index = 0; index < count; index++) {
-      for (const timing of [`before effect`, `after effect`] as const) {
-        const run = await runWithFault({ session, index, timing })
-        const failed = run.calls.filter((c) => c.session === session)[index]
-        if (!failed) continue
-        try {
-          checkFault(failed, timing, run, (state) => reached.add(state))
-        } catch (error) {
-          throw new Error(
-            `failure at session ${session} call ${index} ` +
-              `(${failed.method}, ${timing}, late: ${failed.late})`,
-            { cause: error },
-          )
+describe(`persisted demand coverage over generated histories`, () => {
+  it.skipIf(oracleReplayRequested())(
+    `keeps the law when any one storage call fails`,
+    async () => {
+      quietConsole()
+      const baseline = await runWithFault(undefined)
+      // Positive witness: without a failure, session 2 settles D offline.
+      expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
+      const reached = new Set<FaultReach>()
+      const expectedReach: Array<FaultReach> = [
+        `coverage read failed`,
+        `row write failed`,
+        `coverage check failed`,
+        `coverage write failed`,
+      ]
+      for (const session of [1, 2] as const) {
+        const count = baseline.calls.filter((c) => c.session === session).length
+        for (let index = 0; index < count; index++) {
+          for (const timing of [`before effect`, `after effect`] as const) {
+            const run = await runWithFault({ session, index, timing })
+            const failed = run.calls.filter((c) => c.session === session)[index]
+            if (!failed) continue
+            try {
+              checkFault(failed, timing, run, (state) => reached.add(state))
+            } catch (error) {
+              throw new Error(
+                `failure at session ${session} call ${index} ` +
+                  `(${failed.method}, ${timing}, late: ${failed.late})`,
+                { cause: error },
+              )
+            }
+          }
         }
       }
-    }
-  }
-  expect(reached).toEqual(new Set(expectedReach))
-}
-
-// Part 3's sweep: one covered driver, released after every step up to the
-// step at which the load would have settled, and every release reach is
-// entered.
-async function runReleaseSweep(): Promise<void> {
-  quietConsole()
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverGroupA(driver)
-  const reached = new Set<ReleaseReach>()
-  const expectedReach: Array<ReleaseReach> = [
-    `released before the source load`,
-    `released while the source load waited`,
-    `released during a coverage read`,
-  ]
-  for (let steps = 0; steps <= 24; steps++) {
-    checkRelease(
-      steps,
-      await runReleaseAt(driver, steps, (state) => reached.add(state)),
-    )
-  }
-  expect(reached).toEqual(new Set(expectedReach))
-}
-
-describe(`persisted demand coverage over generated histories`, () => {
-  oracleProperty({
-    id: `persisted-demand-coverage.storage-fault`,
-    law: {
-      statement: `With one storage call failed before or after its effect, for every call of the history, session 2 settles D from SQLite only with exactly r1 and r2; a failed coverage read, row write, or coverage check leaves session 2 waiting, and a failed coverage write crashes the Collection.`,
-      authority: `The persisted demand coverage contract stated above, and the glossary's "crash" for a terminal local persistence failure.`,
-      limits: `One history, with the failure swept over every call that it makes without a failure; node:sqlite and the default coordinator only.`,
+      expect(reached).toEqual(new Set(expectedReach))
     },
-    owns: [`src/persisted.ts`],
-    histories: [{ name: `keeps the law when any one storage call fails` }],
-    label: ({ name }) => name,
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`storage fault`, plan, observe, () =>
-        runStorageFaultSweep(),
-      ),
-    check: forwardAssertionJudgment,
-    timeout: 600_000,
-  })
+    600_000,
+  )
 
-  oracleProperty({
-    id: `persisted-demand-coverage.release`,
-    law: {
-      statement: `A released load owns no wait: after the release, at every step of a load, the source Collection is not loading a subset, and it stays so when the clock passes the wait.`,
-      authority: `ARCHITECTURE.md law 6, as Part 3 above states it.`,
-      limits: `One covered driver, released after each of steps 0 to 24 under a fake clock; node:sqlite and the default coordinator only.`,
+  it.skipIf(oracleReplayRequested())(
+    `owns no wait after a release at any step of a load`,
+    async () => {
+      quietConsole()
+      const driver = createDriver(new DatabaseSync(`:memory:`))
+      await coverGroupA(driver)
+      const reached = new Set<ReleaseReach>()
+      const expectedReach: Array<ReleaseReach> = [
+        `released before the source load`,
+        `released while the source load waited`,
+        `released during a coverage read`,
+      ]
+      for (let steps = 0; steps <= 24; steps++) {
+        checkRelease(
+          steps,
+          await runReleaseAt(driver, steps, (state) => reached.add(state)),
+        )
+      }
+      expect(reached).toEqual(new Set(expectedReach))
     },
-    owns: [`src/persisted.ts`],
-    histories: [{ name: `owns no wait after a release at any step of a load` }],
-    label: ({ name }) => name,
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`release`, plan, observe, () =>
-        runReleaseSweep(),
-      ),
-    check: forwardAssertionJudgment,
-    timeout: 300_000,
-  })
+    300_000,
+  )
 })
