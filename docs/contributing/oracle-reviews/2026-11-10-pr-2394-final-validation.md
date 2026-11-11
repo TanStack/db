@@ -157,3 +157,41 @@ required `health` object. Its isolated local run reproduced the exact
 the fixture's existing first-load state without changing its assertions or
 production behavior. The full `tests/rxdb.test.ts` file then passed all nineteen
 tests. Final pushed-head CI remains pending at this checkpoint.
+
+## Browser cleanup and PowerSync fixture corrections
+
+CI on `735dc8a1962fa00df22e9c66cea01a658650a16a` exposed two further test
+fixture defects. The ordinary PowerSync on-demand fixture also omitted
+`collection.health`. Its isolated unchanged run failed with the same
+`health.reloading` TypeError as CI. Supplying `health: { reloading: false }`
+states its existing first-load condition. It changes no production behavior,
+model, history, comparison or budget.
+The isolated rerun passed its selected test with no type errors.
+
+The OPFS startup receiver attempted file removal immediately after awaited
+worker close. Chromium can release the native handle in a later task. Both
+startup cleanup sites and the eager-gap cleanup site now use the existing
+bounded `removeClosedArtifacts` helper. Only `NoModificationAllowedError`
+retries; other errors and permanent busy handles still fail. Primary comparison
+failures remain visible when cleanup also fails.
+
+The actual Chromium receiver now injects one busy-file rejection after the
+first database closes, on each of two runs using the same browser profile.
+With the original cleanup restored, that history failed with
+`NoModificationAllowedError: fixture handle release pending`. With the retry
+restored, both OPFS receiver specs passed in 3.9 minutes. Each profile run
+recorded the injected rejection and one retry, then completed the unchanged
+shared row, ownership, durability and artifact comparisons. The existing
+cleanup calibration also passed all three selected checks: transient busy
+success, permanent busy failure and preservation of a primary mismatch.
+
+Commands from the repository root:
+
+```sh
+pnpm --config.verifyDepsBeforeRun=false --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts persisted-startup-conformance-oracle.opfs.spec.ts eager-gap-conformance-oracle.opfs.spec.ts
+pnpm --config.verifyDepsBeforeRun=false --filter @tanstack/powersync-db-collection exec vitest run tests/on-demand-sync.test.ts --maxWorkers=1 --coverage.enabled=false -t 'does not publish a provisional or rejected subset'
+```
+
+The full PowerSync package run remains in progress. Its earlier CI timeouts
+are not treated as collateral failures without a passing rerun. Final-head CI
+and integration with later main remain separate gates.

@@ -41,11 +41,34 @@ test(`complete source results replace persisted rows across OPFS startup`, async
   page,
 }) => {
   test.setTimeout(600_000)
-  page.on(`console`, (message) =>
-    console.info(`browser ${message.type()}: ${message.text()}`),
-  )
+  let busyResponses = 0
+  page.on(`console`, (message) => {
+    console.info(`browser ${message.type()}: ${message.text()}`)
+    if (message.text() === `startup fixture busy response injected`)
+      busyResponses++
+  })
   const errors: Array<string> = []
   page.on(`pageerror`, (error) => errors.push(error.message))
+  // Native worker termination can release an OPFS handle after close returns.
+  // Inject that exact cleanup condition once, after the first database closes.
+  // Both profile runs must still complete the same shared row/durability checks.
+  await page.addInitScript(() => {
+    const removeEntry = FileSystemDirectoryHandle.prototype.removeEntry
+    let firstFileRemovals = 0
+    FileSystemDirectoryHandle.prototype.removeEntry = function (name, options) {
+      if (name === `ps-0.sqlite` && ++firstFileRemovals === 2) {
+        FileSystemDirectoryHandle.prototype.removeEntry = removeEntry
+        console.info(`startup fixture busy response injected`)
+        return Promise.reject(
+          new DOMException(
+            `fixture handle release pending`,
+            `NoModificationAllowedError`,
+          ),
+        )
+      }
+      return removeEntry.call(this, name, options)
+    }
+  })
   await page.goto(`/e2e/persisted-startup-conformance.opfs.html`)
   await page.waitForFunction(
     () => window.__persistedStartupConformance !== undefined,
@@ -53,6 +76,7 @@ test(`complete source results replace persisted rows across OPFS startup`, async
   const result = await page.evaluate(
     () => window.__persistedStartupConformance!,
   )
+  expect(busyResponses).toBe(1)
   expect(errors).toEqual([])
   checkStartupConformance(result)
   // Reuse the same origin and file names. Successful cleanup must keep the
@@ -64,4 +88,5 @@ test(`complete source results replace persisted rows across OPFS startup`, async
   checkStartupConformance(
     await page.evaluate(() => window.__persistedStartupConformance!),
   )
+  expect(busyResponses).toBe(2)
 })

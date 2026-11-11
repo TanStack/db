@@ -38,6 +38,7 @@ import {
   removeStartupOPFSArtifacts,
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type { PersistedStartupAdapter } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 
@@ -119,7 +120,11 @@ async function run() {
         }
       }, [
         () => database.close?.(),
-        () => removeStartupOPFSArtifacts(databaseName),
+        () =>
+          removeClosedArtifacts(
+            () => removeStartupOPFSArtifacts(databaseName),
+            (cut, value) => console.info(`${name}.opfs ${cut}`, value),
+          ),
       ])
     }
     for (const [state, count] of Object.entries(reach))
@@ -167,7 +172,11 @@ async function run() {
           })
         }, [
           () => database.close?.(),
-          () => removeStartupOPFSArtifacts(databaseName),
+          () =>
+            removeClosedArtifacts(
+              () => removeStartupOPFSArtifacts(databaseName),
+              (cut, value) => console.info(`${name}.opfs ${cut}`, value),
+            ),
         ])
       }
     }
@@ -180,7 +189,7 @@ async function run() {
       artifacts,
       error:
         error instanceof Error
-          ? `${error.stack} ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`
+          ? `${error.stack ?? error.toString()} ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`
           : String(error),
     }
   }

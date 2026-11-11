@@ -47,6 +47,7 @@ import {
   removeStartupOPFSArtifacts,
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 
 export type EagerGapResult = {
@@ -76,7 +77,14 @@ async function database<T>(
   const db = await openBrowserWASQLiteOPFSDatabase({ databaseName: name })
   return withOracleCleanup(
     () => body(createBrowserWASQLitePersistence({ database: db })),
-    [() => db.close?.(), () => removeStartupOPFSArtifacts(name)],
+    [
+      () => db.close?.(),
+      () =>
+        removeClosedArtifacts(
+          () => removeStartupOPFSArtifacts(name),
+          (cut, value) => console.info(`eager-gap.opfs ${cut}`, value),
+        ),
+    ],
   )
 }
 async function removeReloadFiles() {
