@@ -67,6 +67,27 @@ export const properties: ReadonlyArray<string> = [
   `includes-collection.held-ordered-repair`,
   `includes-collection.root-event-observation`,
   `includes-collection.rollback-retained-child`,
+  `includes-alias-shadowing.captured-scope`,
+  `includes-alias-shadowing.two-include-positions`,
+  `includes-alias-shadowing.shared-sibling-builder`,
+  `includes-alias-shadowing.fresh-inner-queryref`,
+  `includes-alias-shadowing.local-equality-shadow`,
+  `includes-alias-shadowing.grandparent-capture`,
+  `includes-alias-shadowing.outer-filter-roles`,
+  `includes-alias-shadowing.captured-projection-pushdown`,
+  `includes-alias-shadowing.same-path-group-keys`,
+  `includes-alias-shadowing.nested-filter-group-keys`,
+  `includes-alias-shadowing.redundant-wrappers`,
+  `includes-alias-shadowing.lazy-join-demand`,
+  `includes-alias-shadowing.recursive-join-bindings`,
+  `includes-alias-shadowing.nested-source-placement`,
+  `includes-alias-shadowing.outer-join-absence`,
+  `includes-alias-shadowing.chained-join-absence`,
+  `includes-alias-shadowing.joined-queryref-lazy-targets`,
+  `includes-alias-shadowing.mixed-outer-join-chains`,
+  `includes-alias-shadowing.captured-join-operands`,
+  `includes-alias-shadowing.grouped-ancestor-references`,
+  `includes-alias-shadowing.joined-subquery-ancestor`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -144,5 +165,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-collection-oracle.property.test.ts`,
     `includes-collection`,
     `retired-held-facade delete-facade-identity facade-application-failure facade-root-publication shared-facade-retirement held-truncate-reorder fixed-relationship exhaustive-two-step checkpoint-failure held-ordered-repair root-event-observation rollback-retained-child`,
+  ],
+  [
+    `db/tests/query/includes-alias-shadowing-oracle.test.ts`,
+    `includes-alias-shadowing`,
+    `captured-scope two-include-positions shared-sibling-builder fresh-inner-queryref local-equality-shadow grandparent-capture outer-filter-roles captured-projection-pushdown same-path-group-keys nested-filter-group-keys redundant-wrappers lazy-join-demand recursive-join-bindings nested-source-placement outer-join-absence chained-join-absence joined-queryref-lazy-targets mixed-outer-join-chains captured-join-operands grouped-ancestor-references joined-subquery-ancestor`,
   ],
 ]
