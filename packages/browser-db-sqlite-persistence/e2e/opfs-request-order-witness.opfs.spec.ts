@@ -6,7 +6,6 @@
  */
 import { expect, test } from '@playwright/test'
 import { requestOrderExamples } from '../tests/opfs-request-order-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import type { OPFSRequestOrderResult } from './opfs-request-order.opfs'
 
@@ -21,11 +20,6 @@ function expectRequestOrderLawsHold(result: {
       .map(({ history, violation }) => ({ history, violation })),
   ).toEqual([])
 }
-
-declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
-  check: [expectRequestOrderLawsHold],
-})
 
 test(`real Chromium OPFS connection answers requests in order and closes after them`, async ({
   page,

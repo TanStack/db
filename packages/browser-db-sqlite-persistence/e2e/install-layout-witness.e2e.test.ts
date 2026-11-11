@@ -52,7 +52,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { buildForProduction, consumerVite } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
@@ -220,11 +219,6 @@ const promisedOutcomes: Record<ConsumerVite, ReadonlyArray<LayoutOutcome>> = {
 }
 
 // Owns nothing: this file checks the installed package layout (build outputs), not a src function.
-declareOracle({
-  check: [expectLayoutOutcome],
-  model: [expectedOutcome],
-  grammar: [layoutCases, promisedOutcomes],
-})
 
 // The check: the installed copy's observed outcome equals the layout model's
 // prediction for the same case and install facts.

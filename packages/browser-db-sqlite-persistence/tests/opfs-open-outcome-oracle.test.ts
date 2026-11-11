@@ -9,7 +9,7 @@
  * initialization requests that a loaded worker receives.
  *
  * No asset lookup runs here, because only the package build defines it. The
- * Chromium driver in `e2e/opfs-open-outcome-oracle.e2e.test.ts` supplies the
+ * Chromium driver in `e2e/opfs-open-outcome-witness.e2e.test.ts` supplies the
  * lookup and the real worker's WASM fetch.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
