@@ -33,6 +33,10 @@ export const properties: ReadonlyArray<string> = [
   `duration-query-equality.calendar-indexing`,
   `index-suggestion.collection-size`,
   `index-suggestion.ordered-diagnostic`,
+  `btree-map.split-comparator`,
+  `btree-map.infinite-comparator`,
+  `btree-map.long-campaign`,
+  `btree-map.dense-cuts`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -75,6 +79,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/index-suggestion-oracle.test.ts`,
     `index-suggestion`,
     `collection-size ordered-diagnostic`,
+  ],
+  [
+    `db/tests/btree-map-oracle.test.ts`,
+    `btree-map`,
+    `split-comparator infinite-comparator long-campaign dense-cuts`,
   ],
   // transactions and mutations
   // IndexedDB and live-query observers
