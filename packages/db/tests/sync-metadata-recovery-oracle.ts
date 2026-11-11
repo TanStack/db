@@ -40,20 +40,24 @@ export type RecoverySchedule = {
 
 // Each generated batch includes all 18 schedules. Payloads and the initial
 // seed's metadata vary without making the timing premise probabilistic.
-export const recoverySchedulesArbitrary = fc
-  .integer({ min: -100, max: 100 })
-  .map((value): Array<RecoverySchedule> =>
-    [false, true].flatMap((bare) =>
-      recoveryPhases.flatMap((phase) =>
-        recoveryInterruptions.map((interruption) => ({
-          phase,
-          interruption,
-          bare,
-          value,
-        })),
-      ),
+export const recoveryValueArbitrary = fc.integer({ min: -100, max: 100 })
+
+/** All 18 schedules of one batch, carrying one payload value. */
+export function recoverySchedulesOf(value: number): Array<RecoverySchedule> {
+  return [false, true].flatMap((bare) =>
+    recoveryPhases.flatMap((phase) =>
+      recoveryInterruptions.map((interruption) => ({
+        phase,
+        interruption,
+        bare,
+        value,
+      })),
     ),
   )
+}
+
+export const recoverySchedulesArbitrary =
+  recoveryValueArbitrary.map(recoverySchedulesOf)
 
 export type RecoveryDriver = SessionDriver & {
   holdRecovery: (phase: RecoveryPhase) => {
@@ -258,6 +262,10 @@ export async function runRecoverySchedule(
 }
 
 declareOracle({
-  grammar: [recoverySchedulesArbitrary],
+  grammar: [
+    recoveryValueArbitrary,
+    recoverySchedulesOf,
+    recoverySchedulesArbitrary,
+  ],
   check: [runRecoverySchedule],
 })

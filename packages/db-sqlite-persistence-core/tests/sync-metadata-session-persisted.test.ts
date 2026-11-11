@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
+  constructRegime,
   describeMismatch,
   historyRegimes,
   persistedCachedGrammar,
@@ -14,29 +15,35 @@ import {
   persistedReadGrammar,
   persistedReadSeedGrammar,
   persistedSeedGrammar,
-  queuedMetadataRepairHistoriesArbitrary,
+  queuedMetadataRepairBatch,
+  queuedMetadataRepairInputArbitrary,
   runSessionHistory,
   seedReinsertReloadReplay,
   sessionHistoryArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
   oraclePropertyOptions,
-  oracleReplayTest,
   oracleRuns,
   readOracleRunConfig,
-  recordOracleReplay,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
-import { requireExecutedHistory } from './sync-metadata-campaign-result'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { createPersistedDriver } from './sync-metadata-session-persisted-driver'
 import {
-  runKeptMetadataDurabilityCampaign,
-  runSeedReinsertReloadCampaign,
+  registerKeptMetadataDurabilityProperty,
+  registerSeedReinsertReloadProperty,
 } from './sync-metadata-session-campaign'
+import {
+  checkSessionRuns,
+  completedSessionRuns,
+  observeSessionRun,
+  sessionRunCalibrations,
+} from './sync-metadata-session-runs'
 import type {
+  ConstructedRegime,
   SessionAction,
   SessionGrammar,
 } from '../../db/tests/sync-metadata-session-oracle'
+import type { OwedSessionRun } from './sync-metadata-session-runs'
 
 /**
  * The persisted wrapper is a second production path for the sync metadata
@@ -374,7 +381,7 @@ const extraProductionPaths: Array<{
   property: string
   seed: number
   runs: number
-  reach: Array<string>
+  reach: Array<ConstructedRegime>
 }> = [
   {
     productionPath: persistedNestedGrammar,
@@ -798,171 +805,187 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
 // The broad peer campaigns can already generate this interaction. This constructive
 // grammar measures its scarce overlap and adjacent legal histories directly;
 // it uses the existing independent model, driver, and per-action comparison.
-const seedReloadProperty = `sync-metadata-session.persisted-seed-reinsert-reload`
-for (const campaign of [`fixed`, `random`] as const) {
-  if (
-    requestedReplayProperty !== undefined &&
-    (requestedReplayProperty !== seedReloadProperty || campaign === `fixed`)
+const persistedSessionDriver = (productionPath: SessionGrammar) =>
+  createPersistedDriver(
+    true,
+    true,
+    false,
+    true,
+    productionPath.fullRows === true,
+    productionPath.onDemand === true,
   )
-    continue
-  it(`keeps inserted metadata across peer reloads (${campaign})`, async () => {
-    await runSeedReinsertReloadCampaign({
-      property: seedReloadProperty,
-      campaign,
-      runHistory: (history, productionPath) =>
-        runSessionHistory(productionPath, history, () =>
-          createPersistedDriver(
-            true,
-            true,
-            false,
-            true,
-            productionPath.fullRows === true,
-            productionPath.onDemand === true,
+registerSeedReinsertReloadProperty({
+  property: `sync-metadata-session.persisted-seed-reinsert-reload`,
+  runHistory: (history, productionPath) =>
+    runSessionHistory(productionPath, history, () =>
+      persistedSessionDriver(productionPath),
+    ),
+  owns: [`src/persisted.ts`],
+})
+
+/**
+ * Nesting and seeds: each production path above is its own property over the
+ * general session grammar, with the same model, persisted driver and
+ * per-action comparison as the flat campaign. Generated histories may hold
+ * actions that are illegal where they fall; the runner skips them, so these
+ * properties do not require every authored action to run.
+ *
+ * Reach: `historyRegimes` reads each declared regime from the model as the
+ * history replays. Every declared regime is required in every campaign by a
+ * constructed history: `constructRegime` splices that regime's prefix of
+ * legal actions (`regimeConstructions` in the session oracle) in front of a
+ * generated history, so the rest stays random. The regime list types each
+ * entry as a `ConstructedRegime`, so a declared regime without a construction
+ * does not compile, and a construction that stops entering its regime fails
+ * its campaign.
+ *
+ * Before this property moved to the oracle framework, each fixed campaign
+ * required at least five of its random histories in each regime, and the
+ * random campaign required none. A required state must not depend on the
+ * seed (oracle framework, declared reach), so each campaign now requires at
+ * least one constructed history per regime, beside the unchanged generated
+ * runs; half of a campaign's histories are constructed.
+ */
+for (const {
+  productionPath,
+  property: productionPathProperty,
+  seed,
+  runs,
+  reach: states,
+} of extraProductionPaths) {
+  oracleProperty<Array<SessionAction>, Array<OwedSessionRun>>({
+    id: productionPathProperty,
+    law: {
+      statement: `A source read through the persisted wrapper gives what the same read gives on a bare Collection: on ${productionPath.name} histories, source reads after every action, consumer rows at the final checkpoint, and in the peer production paths the stored rows, agree with the session model.`,
+      authority: `The sync metadata session oracle's laws and decisions (packages/db/tests/sync-metadata-session-oracle.ts header).`,
+      limits: `Histories of 12 to 48 actions over two rows on one production path; restart and resume reads are outside it.`,
+    },
+    owns: [`src/persisted.ts`],
+    histories: {
+      arbitrary: sessionHistoryArbitrary(productionPath),
+      runs,
+      fixedSeeds: [seed],
+      states,
+      constructed: states.map((regime) => ({
+        name: regime,
+        enters: [regime],
+        build: (generated) =>
+          constructRegime(productionPath, regime, generated),
+      })),
+    },
+    model: (history) => [
+      { path: productionPath.name, name: `history`, actions: history.length },
+    ],
+    driver: (history, observe) =>
+      observeSessionRun(
+        observe,
+        { path: productionPath.name, name: `history`, actions: history.length },
+        history,
+        () =>
+          runSessionHistory(productionPath, history, () =>
+            createPersistedDriver(
+              productionPath.seeds,
+              productionPath.cached === true,
+              productionPath.readHold === true,
+              productionPath.peers === true,
+              productionPath.fullRows === true,
+              productionPath.onDemand === true,
+            ),
           ),
-        ),
-    })
-  }, 120_000)
+      ),
+    check: (_history, observations, owed) =>
+      checkSessionRuns(observations, owed, { constructive: false }),
+    reached: (history) =>
+      [...historyRegimes(productionPath, history)].filter((regime) =>
+        (states as ReadonlyArray<string>).includes(regime),
+      ),
+    calibrations: sessionRunCalibrations({ constructive: false }),
+    timeout: 240_000,
+  })
 }
 
-const describeNested = oracleReplayTest(
-  describe,
-  ...extraProductionPaths.map(({ property }) => property),
-)
-describeNested(
-  `sync metadata session oracle through the persisted wrapper: nesting and seeds`,
-  () => {
-    for (const {
-      productionPath,
-      property: productionPathPropertyName,
-      seed,
-      runs,
-      reach: states,
-    } of extraProductionPaths) {
-      const runProductionPath = (history: Array<SessionAction>) =>
-        assertPersistedHistory(history, productionPath)
-      if (requestedReplayProperty === undefined) {
-        const reach = createOracleReach(
-          `${productionPathPropertyName} (fixed)`,
-          states,
-          {
-            minimum: 5,
-          },
-        )
-        fcTest.prop([sessionHistoryArbitrary(productionPath)], {
-          numRuns: oracleRuns(runs),
-          seed,
-        })(
-          `keeps the session law on ${productionPath.name} histories (fixed)`,
-          (history) => {
-            reach.beginHistory()
-            for (const regime of historyRegimes(productionPath, history))
-              if (states.includes(regime)) reach.reach(regime)
-            return runProductionPath(history)
-          },
-          240_000,
-        )
-        it(`reaches the declared states in the ${productionPath.name} fixed campaign`, () =>
-          reach.assertReached())
-        fcTest.prop(
-          [sessionHistoryArbitrary(productionPath)],
-          oraclePropertyOptions(50, productionPathPropertyName),
-        )(
-          `keeps the session law on ${productionPath.name} histories (random)`,
-          runProductionPath,
-          120_000,
-        )
-      } else if (requestedReplayProperty === productionPathPropertyName) {
-        fcTest.prop(
-          [sessionHistoryArbitrary(productionPath)],
-          oraclePropertyOptions(50, productionPathPropertyName),
-        )(
-          `replays ${productionPath.name} session histories`,
-          runProductionPath,
-          120_000,
-        )
-      }
-    }
-  },
-)
 /**
  * Direct durability is a separate cut from this tab's metadata read. Each
  * generated batch crosses implicit keeps with explicit writes and updates
  * with flat/inner equal re-inserts, before and after named/unknown reloads.
  */
-const durabilityProperty = `sync-metadata-session.persisted-kept-metadata-durability`
-for (const campaign of [`fixed`, `random`] as const) {
-  if (
-    requestedReplayProperty !== undefined &&
-    (requestedReplayProperty !== durabilityProperty || campaign === `fixed`)
-  )
-    continue
-  it(`keeps tab-local and durable metadata distinct (persisted, ${campaign})`, async () => {
-    await runKeptMetadataDurabilityCampaign({
-      property: durabilityProperty,
-      campaign,
-      runHistory: (history, productionPath) =>
-        runSessionHistory(productionPath, history, () =>
-          createPersistedDriver(
-            true,
-            true,
-            false,
-            true,
-            productionPath.fullRows === true,
-            productionPath.onDemand === true,
-          ),
-        ),
-    })
-  }, 240_000)
-}
+registerKeptMetadataDurabilityProperty({
+  property: `sync-metadata-session.persisted-kept-metadata-durability`,
+  runHistory: (history, productionPath) =>
+    runSessionHistory(productionPath, history, () =>
+      persistedSessionDriver(productionPath),
+    ),
+  owns: [`src/persisted.ts`],
+  timeout: 240_000,
+})
 
-// Storage holds belong to this controlled receiver. The native schedule awaits
-// every durable commit separately and uses the same action-level comparison.
-const queuedRepairProperty = `sync-metadata-session.persisted-queued-metadata-repair`
-for (const campaign of [`fixed`, `random`] as const) {
-  if (
-    requestedReplayProperty !== undefined &&
-    (requestedReplayProperty !== queuedRepairProperty || campaign === `fixed`)
-  )
-    continue
-  it(`observes durable metadata between queued commits (${campaign})`, async () => {
-    const name = (bare: boolean, held: boolean) =>
-      `${bare ? `bare` : `metadata`} seed: ${held ? `store hold` : `immediate`}`
-    const states = [false, true].flatMap((bare) =>
-      [false, true].map((held) => name(bare, held)),
-    )
-    const reach = createOracleReach(queuedRepairProperty, states)
-    const result = await fc.check(
-      fc.asyncProperty(
-        queuedMetadataRepairHistoriesArbitrary,
-        async (batch) => {
-          for (const { bare, held, history } of batch) {
-            reach.beginHistory()
-            const result = await runSessionHistory(
-              persistedPeerGrammar,
-              history,
-              () => createPersistedDriver(true, true, false, true),
-            )
-            if (result.mismatch)
-              throw new Error(describeMismatch(history, result.mismatch))
-            if (result.steps !== history.length)
-              throw new Error(`constructive history skipped an authored action`)
-            reach.reach(name(bare, held))
-          }
+/**
+ * Storage holds belong to this controlled receiver. The native schedule awaits
+ * every durable commit separately and uses the same action-level comparison.
+ *
+ * History: the seed's narrowness and the number of inner re-inserts. Its plan
+ * is the constructive batch of both seed metadata forms crossed with immediate
+ * writes and writes queued behind a store hold, so every generated history is
+ * the construction that enters all four declared states.
+ */
+const queuedRepairState = (bare: boolean, held: boolean) =>
+  `${bare ? `bare` : `metadata`} seed: ${held ? `store hold` : `immediate`}`
+const queuedRepairStates = [false, true].flatMap((bare) =>
+  [false, true].map((held) => queuedRepairState(bare, held)),
+)
+type QueuedRepairBatch = ReturnType<typeof queuedMetadataRepairBatch>
+const queuedRepairRuns = (batch: QueuedRepairBatch): Array<OwedSessionRun> =>
+  batch.map(({ bare, held, history }) => ({
+    path: persistedPeerGrammar.name,
+    name: queuedRepairState(bare, held),
+    actions: history.length,
+  }))
+oracleProperty<
+  { narrow: boolean; repeats: number },
+  Array<OwedSessionRun>,
+  QueuedRepairBatch
+>({
+  id: `sync-metadata-session.persisted-queued-metadata-repair`,
+  law: {
+    statement: `A later explicit write repairs a wrong implicit durable keep: with both seed metadata forms, immediate or queued behind a store hold, durable metadata between queued commits and source reads agree with the session model at every checkpoint.`,
+    authority: `Sync metadata session oracle decisions D9 and D18 (packages/db/tests/sync-metadata-session-oracle.ts, queuedMetadataRepairHistoriesArbitrary).`,
+    limits: `The controlled persisted receiver on the peer production path; key 1 only.`,
+  },
+  owns: [`src/persisted.ts`],
+  histories: {
+    arbitrary: queuedMetadataRepairInputArbitrary,
+    runs: 8,
+    fixedSeeds: [2220031],
+    states: queuedRepairStates,
+    constructed: [
+      {
+        name: `both seed metadata forms, immediate and behind a store hold`,
+        enters: queuedRepairStates,
+        build: (input) => input,
+      },
+    ],
+  },
+  resolve: queuedMetadataRepairBatch,
+  model: queuedRepairRuns,
+  driver: async (batch, observe) => {
+    for (const { bare, held, history } of batch)
+      await observeSessionRun(
+        observe,
+        {
+          path: persistedPeerGrammar.name,
+          name: queuedRepairState(bare, held),
+          actions: history.length,
         },
-      ),
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(8), seed: 2220031 }
-        : oraclePropertyOptions(8, queuedRepairProperty),
-    )
-    recordOracleReplay(queuedRepairProperty, result)
-    console.info(
-      `ORACLE_REACH ${JSON.stringify({ property: queuedRepairProperty, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
-    )
-    requireExecutedHistory(queuedRepairProperty, result)
-    if (result.failed)
-      throw new Error(
-        `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
+        history,
+        () =>
+          runSessionHistory(persistedPeerGrammar, history, () =>
+            createPersistedDriver(true, true, false, true),
+          ),
       )
-    reach.assertReached()
-  }, 120_000)
-}
+  },
+  check: (_batch, observations, owed) => checkSessionRuns(observations, owed),
+  reached: (_batch, trace) =>
+    completedSessionRuns(trace).map((run) => run.name),
+  calibrations: sessionRunCalibrations(),
+  timeout: 120_000,
+})

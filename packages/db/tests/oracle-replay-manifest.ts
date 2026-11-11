@@ -2018,7 +2018,34 @@ const nativeReactProperties = new Set([
   `react.ssr-runtime-infinite`,
 ])
 
+// The SQLite package's converted sync metadata session properties. Their
+// random campaigns carry the framework's native name.
+const nativeSyncMetadataProperties = new Set(
+  [
+    `persisted-missing-row-metadata`,
+    `sqlite-missing-row-metadata`,
+    `sqlite-recovery-schedules`,
+    `sqlite-seed-reinsert-reload`,
+    `sqlite-kept-metadata-durability`,
+    `persisted-seed-reinsert-reload`,
+    `persisted-kept-metadata-durability`,
+    `persisted-queued-metadata-repair`,
+    `persisted-nested`,
+    `persisted-seeds`,
+    `persisted-cached`,
+    `persisted-conflicts`,
+    `persisted-reads`,
+    `persisted-reads-seeds`,
+    `persisted-peers`,
+    `persisted-peers-full`,
+    `persisted-peers-on-demand`,
+    `persisted-nested-seeds`,
+  ].map((suffix) => `sync-metadata-session.${suffix}`),
+)
+
 function directReplayTestName(property: string): string | undefined {
+  if (nativeSyncMetadataProperties.has(property))
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
     return `${property.replaceAll(`.`, `\\.`)}.*random seed`
   if (

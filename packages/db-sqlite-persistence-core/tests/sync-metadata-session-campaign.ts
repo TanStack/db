@@ -1,205 +1,304 @@
-import { fc } from '@fast-check/vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   completedSeedReinsertReloadRegime,
-  describeMismatch,
-  keptMetadataDurabilityHistoriesArbitrary,
+  keptMetadataDurabilityBatch,
+  keptMetadataDurabilityInputArbitrary,
   persistedPeerFullGrammar,
   persistedPeerGrammar,
   persistedPeerOnDemandGrammar,
-  seedReinsertReloadHistoryArbitrary,
+  seedReinsertReloadHistory,
+  seedReinsertReloadInputArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  recordOracleReplay,
-} from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
-import { requireExecutedHistory } from './sync-metadata-campaign-result'
+  checkSessionRuns,
+  completedSessionRuns,
+  observeSessionRun,
+  sessionRunCalibrations,
+  sessionRuns,
+} from './sync-metadata-session-runs'
 import type {
+  SeedReinsertReloadInput,
   SessionAction,
   SessionGrammar,
   runSessionHistory,
 } from '../../db/tests/sync-metadata-session-oracle'
+import type { OwedSessionRun } from './sync-metadata-session-runs'
 
 /**
- * Both receiving drivers execute the same generated campaign. The shared
+ * Both receiving drivers run the same generated properties. The shared
  * oracle owns its histories, completed-state classifier and comparison;
- * each host supplies its unchanged runHistory and observation checkpoint.
- * Registration and direct replay selection remain in each host test file.
+ * each host supplies its unchanged runHistory and the production code it
+ * owns. Each property registers its fixed-seed and random campaigns, and
+ * replays through the framework's own selection.
  */
-export async function runSeedReinsertReloadCampaign({
+const productionPaths = [
+  persistedPeerGrammar,
+  persistedPeerFullGrammar,
+  persistedPeerOnDemandGrammar,
+]
+type RunHistory = (
+  history: ReadonlyArray<SessionAction>,
+  productionPath: SessionGrammar,
+) => ReturnType<typeof runSessionHistory>
+
+/**
+ * A source insert can be visible to an inner transaction before it commits;
+ * the inner equal re-insert keeps metadata without writing it (D9 and D18),
+ * and a later named or unknown-author reload follows D11, D15 and D18. Each
+ * history runs through the three peer production paths.
+ *
+ * Reach on each production path: the inner commit ran; the closing named
+ * (`row`) or full-reload (`reload`) notice ran with every authored action;
+ * and the completed kept-seed reload, a full reload after an implicit inner
+ * re-insert while the enclosing write is unaccepted, over a bare key-1 seed
+ * (which only the cached row distinguishes from absence) or a seed with
+ * metadata. The classifier is `completedSeedReinsertReloadRegime`.
+ *
+ * Construction: each state is forced through the history's own choices.
+ * `notice` selects the named or full-reload notice. A completed kept-seed
+ * reload needs the full-reload notice, implicit inner re-inserts, an
+ * enclosing transaction that does not commit (it stays open or is
+ * cancelled), and the seed shape: bare on key 1, or with metadata. The other
+ * choices stay generated. The completed states were required only in the
+ * fixed campaign before (random 40 histories reach the bare key-1
+ * conjunction with probability about 1/24 each); construction now requires
+ * them in every campaign.
+ */
+export function registerSeedReinsertReloadProperty({
   property,
-  campaign,
   runHistory,
+  owns,
 }: {
   property: string
-  campaign: `fixed` | `random`
-  runHistory: (
-    history: ReadonlyArray<SessionAction>,
-    productionPath: SessionGrammar,
-  ) => ReturnType<typeof runSessionHistory>
-}): Promise<void> {
-  const productionPaths = [
-    persistedPeerGrammar,
-    persistedPeerFullGrammar,
-    persistedPeerOnDemandGrammar,
-  ]
-  const states = productionPaths.flatMap((productionPath) => [
-    `${productionPath.name}: inner commit`,
-    `${productionPath.name}: row`,
-    `${productionPath.name}: reload`,
-  ])
-  const completedStates = productionPaths.flatMap((productionPath) => [
-    `${productionPath.name}: completed kept bare seed reload`,
-    `${productionPath.name}: completed kept non-bare seed reload`,
-  ])
-  const reach = createOracleReach(property, states)
-  const completedReach = createOracleReach(property, completedStates)
-  const parameters =
-    campaign === `fixed`
-      ? oracleFixedSeed(527962096, { numRuns: oracleRuns(40) })
-      : oraclePropertyOptions(40, property)
-  oracleRoute(oracleRouteOf(parameters))
-  const result = await fc.check(
-    fc.asyncProperty(seedReinsertReloadHistoryArbitrary, async (history) => {
-      const failures: Array<string> = []
-      for (const productionPath of productionPaths) {
-        reach.beginHistory()
-        completedReach.beginHistory()
-        const result = await runHistory(history, productionPath)
-        if (!result.mismatch && result.steps !== history.length)
-          throw new Error(`constructive history skipped an authored action`)
-        const last = history.at(-1)!
-        const innerCommit = history.findIndex(
-          (action) => action.type === `commit`,
+  runHistory: RunHistory
+  owns: ReadonlyArray<string>
+}): void {
+  const state = (productionPath: string, name: string) =>
+    `${productionPath}: ${name}`
+  const forAllPaths = (name: string) =>
+    productionPaths.map((productionPath) => state(productionPath.name, name))
+  const states = productionPaths.flatMap((productionPath) =>
+    [
+      `inner commit`,
+      `row`,
+      `reload`,
+      `completed kept bare seed reload`,
+      `completed kept non-bare seed reload`,
+    ].map((name) => state(productionPath.name, name)),
+  )
+  const keptSeedReload = (
+    input: SeedReinsertReloadInput,
+    bare: boolean,
+  ): SeedReinsertReloadInput => ({
+    ...input,
+    notice: `reload`,
+    innerMetadata: false,
+    ending: input.ending === `commit` ? `open` : input.ending,
+    bare,
+    ...(bare ? { key: 1 as const } : {}),
+  })
+  oracleProperty<
+    SeedReinsertReloadInput,
+    Array<OwedSessionRun>,
+    Array<SessionAction>
+  >({
+    id: property,
+    law: {
+      statement: `Source metadata reads, consumer rows and durable metadata agree with the session model at every checkpoint of a seed, outer insert over the seed, inner equal re-insert and later named or full-reload notice, on every peer production path: keeping metadata in this tab does not make it durable.`,
+      authority: `Sync metadata session oracle decisions D9, D11, D15 and D18 (packages/db/tests/sync-metadata-session-oracle.ts, seedReinsertReloadHistoryArbitrary).`,
+      limits: `Store and read holds are excluded because their pending work blocks peer notices; the general session grammar covers them. One sync run per history.`,
+    },
+    owns: [...owns],
+    histories: {
+      arbitrary: seedReinsertReloadInputArbitrary,
+      runs: 40,
+      fixedSeeds: [527962096],
+      states,
+      constructed: [
+        {
+          name: `named notice`,
+          enters: [...forAllPaths(`inner commit`), ...forAllPaths(`row`)],
+          build: (input) => ({ ...input, notice: `row` }),
+        },
+        {
+          name: `full-reload notice`,
+          enters: [...forAllPaths(`inner commit`), ...forAllPaths(`reload`)],
+          build: (input) => ({ ...input, notice: `reload` }),
+        },
+        {
+          name: `completed kept bare seed reload`,
+          enters: forAllPaths(`completed kept bare seed reload`),
+          build: (input) => keptSeedReload(input, true),
+        },
+        {
+          name: `completed kept non-bare seed reload`,
+          enters: forAllPaths(`completed kept non-bare seed reload`),
+          build: (input) => keptSeedReload(input, false),
+        },
+      ],
+    },
+    resolve: seedReinsertReloadHistory,
+    model: (history) =>
+      productionPaths.map((productionPath) => ({
+        path: productionPath.name,
+        name: `seed/re-insert/reload`,
+        actions: history.length,
+      })),
+    driver: async (history, observe) => {
+      for (const productionPath of productionPaths)
+        await observeSessionRun(
+          observe,
+          {
+            path: productionPath.name,
+            name: `seed/re-insert/reload`,
+            actions: history.length,
+          },
+          history,
+          () => runHistory(history, productionPath),
         )
-        if (result.steps > innerCommit)
-          reach.reach(`${productionPath.name}: inner commit`)
-        if (last.type === `peer` && result.steps === history.length)
-          reach.reach(`${productionPath.name}: ${last.notice}`)
-        const completed = completedSeedReinsertReloadRegime(history, result)
-        if (completed !== undefined)
-          completedReach.reach(`${productionPath.name}: ${completed}`)
-        if (result.mismatch)
-          failures.push(
-            `${productionPath.name}\n${describeMismatch(history, result.mismatch)}`,
-          )
-      }
-      if (failures.length) throw new Error(failures.join(`\n\n`))
-    }),
-    parameters,
-  )
-  recordOracleReplay(property, result)
-  requireExecutedHistory(property, result)
-  console.info(
-    `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, shrinks: result.numShrinks, completedBranchGuards: campaign === `fixed` ? `enforced` : `measured`, counts: Object.fromEntries([...reach.counts(), ...completedReach.counts()]) })}`,
-  )
-  if (result.failed)
-    throw new Error(
-      `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
-    )
-  reach.assertReached()
-  // The bare-key-1 conjunction has probability 1/24: random40 would miss it
-  // about 18% of the time. The fixed40 campaign enforces completed branch
-  // guards; the identical random40 campaign measures them. Existing
-  // inner/row/reload guards apply to both campaigns.
-  if (campaign === `fixed`) completedReach.assertReached()
+    },
+    check: (_history, observations, owed) =>
+      checkSessionRuns(observations, owed),
+    reached: (history, trace) => {
+      const innerCommit = history.findIndex(
+        (action) => action.type === `commit`,
+      )
+      const last = history.at(-1)!
+      return sessionRuns(trace).flatMap((run) => {
+        const completed = completedSeedReinsertReloadRegime(history, {
+          mismatch:
+            run.mismatch === null
+              ? undefined
+              : {
+                  step: 0,
+                  action: `settle`,
+                  law: run.mismatch.law,
+                  expected: null,
+                  actual: null,
+                },
+          steps: run.steps,
+        })
+        return [
+          ...(run.steps > innerCommit ? [state(run.path, `inner commit`)] : []),
+          ...(last.type === `peer` && run.steps === history.length
+            ? [state(run.path, last.notice)]
+            : []),
+          ...(completed === undefined ? [] : [state(run.path, completed)]),
+        ]
+      })
+    },
+    calibrations: sessionRunCalibrations(),
+    timeout: 120_000,
+  })
 }
 
 /**
- * Every batch reaches every write/seed/metadata/notice premise on each host.
- * Drivers own their real entry point and recovery evidence; this runner shares
- * only campaign mechanics, the common comparison and successful reach checks.
+ * D9 separates keeping metadata in this tab from writing it; D18 says that
+ * storing a row over a DbClient seed stores only the row; D15 lets an
+ * unknown reload expose differing durable metadata. Every generated batch
+ * reaches every write/seed/metadata/notice premise on each production path,
+ * so every generated history is the construction that enters every declared
+ * state; the seed shape, timing and repeats still vary. Drivers own their
+ * real entry point and recovery evidence: `extraStates` and `extraReached`
+ * name a host's own reach facts, read from each completed run's result.
  */
-export async function runKeptMetadataDurabilityCampaign({
+export function registerKeptMetadataDurabilityProperty({
   property,
-  campaign,
   runHistory,
+  owns,
   extraStates = [],
   extraReached = () => [],
+  timeout,
 }: {
   property: string
-  campaign: `fixed` | `random`
-  runHistory: (
-    history: ReadonlyArray<SessionAction>,
-    productionPath: SessionGrammar,
-  ) => ReturnType<typeof runSessionHistory>
+  runHistory: RunHistory
+  owns: ReadonlyArray<string>
   extraStates?: ReadonlyArray<string>
   extraReached?: (
     productionPath: SessionGrammar,
     result: Awaited<ReturnType<typeof runSessionHistory>>,
   ) => ReadonlyArray<string>
-}): Promise<void> {
-  const productionPaths = [
-    persistedPeerGrammar,
-    persistedPeerFullGrammar,
-    persistedPeerOnDemandGrammar,
-  ]
-  const name = (
-    productionPath: SessionGrammar,
-    write: string,
-    bare: boolean,
-    metadata: boolean,
-    notice: string,
-  ) =>
-    `${productionPath.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}: ${notice}`
-  const states = productionPaths.flatMap((productionPath) =>
-    [`update`, `reinsert`, `inner-reinsert`].flatMap((write) =>
+  timeout: number
+}): void {
+  type Batch = ReturnType<typeof keptMetadataDurabilityBatch>
+  type Case = Batch[number]
+  const caseName = ({ write, bare, metadata, notice }: Case) =>
+    `${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}: ${notice}`
+  const state = (productionPath: string, name: string) =>
+    `${productionPath}: ${name}`
+  const caseNames = ([`update`, `reinsert`, `inner-reinsert`] as const).flatMap(
+    (write) =>
       [false, true].flatMap((bare) =>
         [false, true].flatMap((metadata) =>
-          [`none`, `row`, `reload`].map((notice) =>
-            name(productionPath, write, bare, metadata, notice),
+          ([`none`, `row`, `reload`] as const).map((notice) =>
+            caseName({ write, bare, metadata, notice, history: [] }),
           ),
         ),
       ),
+  )
+  const states = [
+    ...productionPaths.flatMap((productionPath) =>
+      caseNames.map((name) => state(productionPath.name, name)),
     ),
-  )
-  const reach = createOracleReach(property, [...states, ...extraStates])
-  const campaignParameters =
-    campaign === `fixed`
-      ? oracleFixedSeed(2220031, { numRuns: oracleRuns(8) })
-      : oraclePropertyOptions(8, property)
-  oracleRoute(oracleRouteOf(campaignParameters))
-  const result = await fc.check(
-    fc.asyncProperty(
-      keptMetadataDurabilityHistoriesArbitrary,
-      async (batch) => {
-        const failures: Array<string> = []
-        for (const productionPath of productionPaths) {
-          for (const { write, bare, metadata, notice, history } of batch) {
-            reach.beginHistory()
-            const result = await runHistory(history, productionPath)
-            if (result.mismatch)
-              failures.push(
-                `${productionPath.name}\n${describeMismatch(history, result.mismatch)}`,
-              )
-            else {
-              if (result.steps !== history.length)
-                throw new Error(
-                  `constructive history skipped an authored action`,
-                )
-              reach.reach(name(productionPath, write, bare, metadata, notice))
-              for (const state of extraReached(productionPath, result))
-                reach.reach(state)
-            }
-          }
-        }
-        if (failures.length) throw new Error(failures.join(`\n\n`))
-      },
-    ),
-    campaignParameters,
-  )
-  recordOracleReplay(property, result)
-  requireExecutedHistory(property, result)
-  console.info(
-    `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
-  )
-  if (result.failed)
-    throw new Error(
-      `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
+    ...extraStates,
+  ]
+  const owedRuns = (batch: Batch): Array<OwedSessionRun> =>
+    productionPaths.flatMap((productionPath) =>
+      batch.map((entry) => ({
+        path: productionPath.name,
+        name: caseName(entry),
+        actions: entry.history.length,
+      })),
     )
-  reach.assertReached()
+  oracleProperty<
+    { narrow: boolean; seedInside: boolean; repeats: number },
+    Array<OwedSessionRun>,
+    Batch
+  >({
+    id: property,
+    law: {
+      statement: `Tab-local and durable metadata stay distinct: cross updates and equal re-inserts with implicit keeps and explicit writes, before no notice, a named notice or a full reload, leave source reads, consumer rows and durable metadata equal to the session model at every checkpoint on every peer production path.`,
+      authority: `Sync metadata session oracle decisions D9, D15 and D18 (packages/db/tests/sync-metadata-session-oracle.ts, keptMetadataDurabilityHistoriesArbitrary).`,
+      limits: `Key 1 with one peer key; one sync run per history; store and read holds are outside this batch.`,
+    },
+    owns: [...owns],
+    histories: {
+      arbitrary: keptMetadataDurabilityInputArbitrary,
+      runs: 8,
+      fixedSeeds: [2220031],
+      states,
+      constructed: [
+        {
+          name: `every write/seed/metadata/notice case on every production path`,
+          enters: states,
+          build: (input) => input,
+        },
+      ],
+    },
+    resolve: keptMetadataDurabilityBatch,
+    model: owedRuns,
+    driver: async (batch, observe) => {
+      for (const productionPath of productionPaths)
+        for (const entry of batch)
+          await observeSessionRun(
+            observe,
+            {
+              path: productionPath.name,
+              name: caseName(entry),
+              actions: entry.history.length,
+            },
+            entry.history,
+            () => runHistory(entry.history, productionPath),
+            (result) => extraReached(productionPath, result),
+          )
+    },
+    check: (_batch, observations, owed) => checkSessionRuns(observations, owed),
+    reached: (_batch, trace) =>
+      completedSessionRuns(trace).flatMap((run) => [
+        state(run.path, run.name),
+        ...(run.facts ?? []),
+      ]),
+    calibrations: sessionRunCalibrations(),
+    timeout,
+  })
 }
