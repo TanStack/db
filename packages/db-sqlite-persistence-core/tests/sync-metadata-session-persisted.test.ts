@@ -469,6 +469,10 @@ const extraProductionPaths: Array<{
     // raw campaign (seed 346038028, path 36:2:4:6:10:14:16:14:14:13:13:13).
     // The native campaign draws other histories for that seed, so the
     // history itself is kept, and runs through the same model and driver.
+    // #2303 (b19094596) repaired it: with that commit's persisted.ts change
+    // reverted, this history fails at step 11 (`metadata.row.get`, row 2
+    // `<absent>` where the model owes `{"s":3}`); with it, it passes. It now
+    // guards that repair.
     fixed: [
       {
         name: `#2317 P8 source-facing metadata witness`,

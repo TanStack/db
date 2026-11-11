@@ -97,7 +97,7 @@ oracleProperty<number, Array<string>, Array<RecoverySchedule>>({
           throw error
         run = {
           schedule: stateOf(schedule),
-          failure: error instanceof Error ? error.message : String(error),
+          failure: error.message,
           sawPhase: false,
           checkpoints: 0,
         }

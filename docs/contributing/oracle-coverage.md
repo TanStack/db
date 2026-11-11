@@ -5311,14 +5311,19 @@ reach, calibration and combined-tree evidence.
 The [P6 current-main revalidation](oracle-reviews/2026-11-02-p6-metadata-closeout.md)
 keeps the withdrawn production diagnosis distinct from the replacement test/model
 patch. The source-facing metadata failure in [#2317](https://github.com/TanStack/db/issues/2317)
-remains separate and open under this owner, with P8 investigating. Its
+was tracked separately under this owner, with P8 investigating. Its
 witness was recorded as property `sync-metadata-session.persisted-peers`, seed
 `346038028`, path `36:2:4:6:10:14:16:14:14:13:13:13` of the earlier raw
 campaign. The native campaign draws other histories for that seed (half of its
 budget is constructed), so that seed and path no longer replay it; the history
 itself is now the property's fixed history `#2317 P8 source-facing metadata
-witness`, which passes on the current tree. P6's durability evidence does not
-close that controlled-notice witness or the broader #2281 persistence reports.
+witness`. #2303 (`b19094596`, "preserve run-only metadata on peer reloads")
+closed this witness: with only that commit's `src/persisted.ts` change
+reverted, the fixed history fails at step 11 under law `source reads its row
+metadata (metadata.row.get)`, row 2 `<absent>` where the model owes
+`{"s":3}` (RED); with the change restored it passes (GREEN, 2026-11-11). The
+issue itself awaits the maintainer's closure. P6's durability evidence does
+not close the broader #2281 persistence reports.
 
 Remaining observation work under this owner: the read-hold and abandonment
 production paths retain source-facing comparisons but do not provide the peer
