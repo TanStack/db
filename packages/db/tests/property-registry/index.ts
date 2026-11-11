@@ -1,5 +1,7 @@
-// Collects each conversion group's property ids and replay owners. See the
-// header of any group file in this directory.
+// The property ids and replay owners of the oracles that moved every test
+// registration into oracleProperty (the declareOracle removal, 2026-11-11),
+// by area. oracle-config.ts registers the ids; oracle-replay-manifest.ts maps
+// each to its replay owner. Each is an enumerated source.
 import * as adapters from './adapters.js'
 import * as dbCollection from './db-collection.js'
 import * as dbCollectionE2e from './db-collection-e2e.js'

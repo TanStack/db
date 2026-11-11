@@ -2,7 +2,7 @@ import { registeredOracleProperties } from './oracle-config.js'
 import {
   convertedOwners,
   convertedProperties,
-} from './converted-properties/index.js'
+} from './property-registry/index.js'
 
 /**
  * This manifest maps a replay name to the source file that can prove it ran.

@@ -8,7 +8,7 @@ import {
   configureOracles,
   validateOraclePropertyRegistry,
 } from '@tanstack/oracles'
-import { convertedProperties } from './converted-properties/index.js'
+import { convertedProperties } from './property-registry/index.js'
 
 export * from '@tanstack/oracles'
 
