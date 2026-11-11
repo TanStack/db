@@ -113,3 +113,21 @@ errors. The same direct replay mutant fails `snapshot 0 applied rows`.
 Changed-file lint passes with the migrated ESLint plugin. No installation
 overrides were needed. The law, grammar bounds, product comparisons and limits
 in the original review remain unchanged.
+
+## Browser CI execution budget
+
+At head `03bb74d426b3d1fc4154e9c8d6fe6b3e5b820c08`, PR workflow
+42967741843 passed in full. Browser E2E job 130348956406 was cancelled by
+the workflow's 35-minute outer deadline while completing live Electric prefix
+comparisons. Every preceding step passed, including IndexedDB, OPFS fairness
+and packaged-consumer checks. Its log contains no assertion failure.
+
+The prior green browser run spent 5.2 minutes in IndexedDB and 11.3 in OPFS
+fairness; the cancelled run spent 6.7 and 14.4. Other builds and provider
+suites also took roughly 25–30% longer. One retry on the identical head
+again took 6.8 minutes in IndexedDB before entering OPFS. The 35-minute
+limit has insufficient headroom for this sequential group on slower runners.
+The browser job now gets 60 minutes; other groups keep 35. Test commands,
+individual test timeouts, oracle run budgets and comparisons are unchanged.
+The repaired oracle blob above is unchanged. Final-head CI must validate this
+workflow change as well as the oracle repair before merge.
