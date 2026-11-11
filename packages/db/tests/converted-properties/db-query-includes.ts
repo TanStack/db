@@ -20,6 +20,12 @@ export const properties: ReadonlyArray<string> = [
   `includes-cross-formulation.grouped-equality`,
   `includes-cross-formulation.equivalence-fixed`,
   `includes-cross-formulation.ordered-window-cases`,
+  `includes-publication.plain-write-checkpoints`,
+  `includes-publication.transient-tear`,
+  `includes-publication.callback-only-tear`,
+  `includes-publication.confirmation-sides`,
+  `includes-publication.missing-callbacks`,
+  `includes-publication.held-repair`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -52,5 +58,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-cross-formulation-oracle.property.test.ts`,
     `includes-cross-formulation`,
     `grouped-equality equivalence-fixed ordered-window-cases`,
+  ],
+  [
+    `db/tests/query/includes-publication-oracle.test.ts`,
+    `includes-publication`,
+    `plain-write-checkpoints transient-tear callback-only-tear confirmation-sides missing-callbacks held-repair`,
   ],
 ]
