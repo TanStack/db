@@ -9,7 +9,7 @@ import { createLiveQueryCollection, eq } from '@tanstack/db'
 // The browser-safe route entry: these suites also run inside the Capacitor
 // and Tauri WebView apps, which cannot load the framework's Node-only main
 // entry, so this witness keeps its routes without oracleProperty.
-import { oracleRoute } from '@tanstack/oracles/declaration'
+import { oracleRoute } from '@tanstack/oracles/route'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
