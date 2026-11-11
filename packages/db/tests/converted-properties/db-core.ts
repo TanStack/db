@@ -21,6 +21,10 @@ export const properties: ReadonlyArray<string> = [
   `proxy.native-array-fixed-row`,
   `proxy.native-typed-fixed-row`,
   `proxy.native-typed-signed-zero`,
+  `proxy.access-path-writes`,
+  `proxy.stored-function-probes`,
+  `proxy.define-property`,
+  `proxy.frozen-nested-writes`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -42,5 +46,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
     `proxy`,
     `native-array-fixed-row native-typed-fixed-row native-typed-signed-zero`,
+  ],
+  [
+    `db/tests/proxy-oracle.test.ts`,
+    `proxy`,
+    `access-path-writes stored-function-probes define-property frozen-nested-writes`,
   ],
 ]
