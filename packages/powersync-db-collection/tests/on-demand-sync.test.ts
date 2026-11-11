@@ -3700,4 +3700,40 @@ describe(`On-Demand Sync Mode`, () => {
       expect(disposeCounts).toEqual([1])
     })
   })
+
+  // A subset without a `where` asks for every row. Merging it with another
+  // subset must keep that, not compile `or(undefined, ...)` to `NULL OR ...`.
+  it(`loads every row when two subsets have no where`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      }),
+    )
+    const all = createLiveQueryCollection({
+      query: (q) => q.from({ product: collection }),
+    })
+    const cheapest = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .orderBy(({ product }) => product.price)
+          .limit(2),
+    })
+    try {
+      await Promise.all([all.preload(), cheapest.preload()])
+      await vi.waitFor(() => expect(all.size).toBe(5))
+      expect(cheapest.toArray.map((row) => row.name)).toEqual([
+        `Product C`,
+        `Product A`,
+      ])
+    } finally {
+      await all.cleanup()
+      await cheapest.cleanup()
+      await collection.cleanup()
+    }
+  })
 })
