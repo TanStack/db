@@ -1112,8 +1112,9 @@ const fixedWindowCase: WindowCase = {
 
 // The fixed parent-window histories, each replayed through the shared window
 // check. Their strict forward-move tally is not reach evidence.
-const windowFixedHistories: Array<{ name: string; testCase: WindowCase }> = [
-  ...[false, true].map((distinct) => ({
+type WindowFixedHistory = { name: string; testCase: WindowCase }
+const windowFixedHistories: Array<WindowFixedHistory> = [
+  ...[false, true].map((distinct): WindowFixedHistory => ({
     name: `loads children only for a late page's parents (distinct=${distinct})`,
     testCase: {
       ...fixedWindowCase,
@@ -1126,14 +1127,16 @@ const windowFixedHistories: Array<{ name: string; testCase: WindowCase }> = [
       history: [{ type: `move`, offset: 10, limit: 3 }],
     },
   })),
-  ...([`ordered`, `limited`, `limited-nested`] as const).map((childForm) => ({
-    name: `moves the parent window, not the ${childForm} child's`,
-    testCase: {
-      ...fixedWindowCase,
-      childForm,
-      history: [{ type: `move`, offset: 3, limit: 2 }],
-    },
-  })),
+  ...([`ordered`, `limited`, `limited-nested`] as const).map(
+    (childForm): WindowFixedHistory => ({
+      name: `moves the parent window, not the ${childForm} child's`,
+      testCase: {
+        ...fixedWindowCase,
+        childForm,
+        history: [{ type: `move`, offset: 3, limit: 2 }],
+      },
+    }),
+  ),
   {
     name: `collapses parents whose selected values match under distinct`,
     testCase: {
@@ -1233,7 +1236,7 @@ const windowFixedHistories: Array<{ name: string; testCase: WindowCase }> = [
       [`on-demand`, false],
       [`on-demand`, true],
     ] as const
-  ).map(([childSource, distinct]) => ({
+  ).map(([childSource, distinct]): WindowFixedHistory => ({
     name: `moves the window forward strictly (${childSource} children, distinct=${distinct})`,
     testCase: {
       ...fixedWindowCase,
@@ -1407,7 +1410,10 @@ describe(`includes work under an ordered parent window`, () => {
       // Exactly the old matcher: only a rejection whose message names the
       // loaded child rows counts; any other failure is rethrown without the
       // shared check's marking and fails this calibration.
-      driver: (plan, observe) =>
+      driver: (
+        plan: WindowFixedHistory,
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
         recordAssertionJudgment(orderedWindowLaw, plan, observe, async () => {
           if (plan.name !== name) return
           try {
