@@ -8,7 +8,7 @@
  *   the `configureOracles({ envPrefix })` call in packages/db/tests/oracle-config.ts.
  * - `implementationModules`: the modules that implement replay selection, so
  *   they may read the replay variables and select a replay from configuration.
- * - `legacyCampaigns`: the shrinking list of files that retain legacy campaigns.
+ * - `legacyCampaigns`: the files that retain legacy campaigns, now none.
  * - `replayWitnessModules`: the module that writes a replay witness, whose
  *   record the standard JSON serializer writes.
  */
@@ -19,13 +19,9 @@ export const oracleLintSettings = {
       `packages/db/tests/oracle-config.ts`,
       `packages/db/tests/oracle-property.ts`,
     ],
-    // Frozen migration baseline: remove entries as their files convert. Never add one.
-    legacyCampaigns: [
-      {
-        file: `packages/db/tests/declared-reach-oracle.property.test.ts`,
-        reason: `compatibility helpers are the implementation under test; the outer campaign uses oracleProperty and preserves the complete independent ledger self-test.`,
-      },
-    ],
+    // Frozen migration baseline, now empty: every file converted. Never add
+    // one; check-legacy-oracle-campaigns.mjs rejects any addition.
+    legacyCampaigns: [],
     replayWitnessModules: [`packages/db/tests/oracle-replay-witness.ts`],
   },
 }
