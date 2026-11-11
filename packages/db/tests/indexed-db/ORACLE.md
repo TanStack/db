@@ -286,7 +286,7 @@ The executable companions keep distinct responsibilities:
 | `pending-history-oracle.test.ts`                                                 | One held multi-row intent, durable rows, exposed base, queued source batches and acknowledgement attribution; public/raw/downstream snapshots at handler entry, each peer step and settlement | 24 CRUD × peer action × decision cases, with all actual peer CRUD operations reached; 30+30 generated histories of up to four peer actions, 1–3 local rows; stress 300+300 |
 | `persistence-oracle.test.ts`                                                     | Three distinct Collection owners, mixed deletes/inserts, two stores and version isolation after each acceptance                                                                               | All six acceptance orders; no cross-Collection atomicity or same-ID identity policy                                                                                        |
 | `settlement.test.ts` (fixed tests; no oracle owner (tracked in #2264))           | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, each a `SerializationError`, with populated replacement rollback                                               |
-| `e2e/indexed-db/cross-tab-oracle.spec.ts`                                        | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; fixed receiving matrix and 10 fixed + 10 random-campaign histories per engine                                                                |
+| `e2e/indexed-db/cross-tab-witness.spec.ts`                                       | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; fixed receiving matrix and 10 fixed + 10 random-campaign histories per engine                                                                |
 
 The transport model combines exposed base and public rows only when local
 mutations have settled. The pending companion keeps them separate. It adapts
@@ -488,7 +488,7 @@ and a valid suffix. Each rejection is a `SerializationError`, not the raw
 The approved capture extension below adds post-submission ownership. Cycles
 and arbitrary custom prototypes remain outside this adapter value corpus.
 
-`e2e/indexed-db/value-oracle.spec.ts` receives those value and first-open premises through
+`e2e/indexed-db/value-witness.spec.ts` receives those value and first-open premises through
 native IndexedDB and BroadcastChannel. Observations inspect rich values inside
 the page before serialization. Raw native Blob preparation fails in the local
 Playwright WebKit provider; those two cells prove matching adapter rejection,
