@@ -82,8 +82,24 @@ const orderedWorkOwners: ReadonlyArray<ConvertedOwnerGroup> = [
 
 // ordered-lifecycle, bucket-facade-rollback, cold-join-reconciliation, and
 // ordered-source-loader-state oracles
-const lifecycleProperties: ReadonlyArray<string> = []
-const lifecycleOwners: ReadonlyArray<ConvertedOwnerGroup> = []
+const lifecycleProperties: ReadonlyArray<string> = [
+  `bucket-facade.rollback-fixed`,
+  `cold-join.equality-predicate`,
+  `cold-join.reconciliation-fixed`,
+  `cold-join.compound-fixed`,
+]
+const lifecycleOwners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
+    `bucket-facade`,
+    `rollback-fixed`,
+  ],
+  [
+    `db/tests/query/cold-join-reconciliation-oracle.test.ts`,
+    `cold-join`,
+    `equality-predicate reconciliation-fixed compound-fixed`,
+  ],
+]
 
 // The remaining query oracles
 const otherProperties: ReadonlyArray<string> = [
@@ -124,6 +140,10 @@ const otherProperties: ReadonlyArray<string> = [
   `ir-identity.output-denotation-fixed`,
   `ir-identity.operator-code-outcome`,
   `ir-identity.operator-code-wide`,
+  `ordered-loader.request-authority-substitution`,
+  `ordered-loader.request-authority-fixed`,
+  `ordered-loader.retirement-receiver-fixed`,
+  `ordered-loader.retained-lease`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -300,6 +320,26 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/ir-stable-identity-oracle.test.ts`,
     `ir-identity`,
     `operator-code-wide`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `request-authority-substitution`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `request-authority-fixed`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `retirement-receiver-fixed`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `retained-lease`,
   ],
 ]
 
