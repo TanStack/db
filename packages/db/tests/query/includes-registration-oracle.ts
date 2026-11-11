@@ -6,7 +6,7 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import type { GeneratedHistories } from '../oracle-config.js'
+import type { Calibration, GeneratedHistories } from '../oracle-config.js'
 
 export type IncludesCampaign<THistory extends ReadonlyArray<unknown>> = {
   property: string
@@ -15,6 +15,12 @@ export type IncludesCampaign<THistory extends ReadonlyArray<unknown>> = {
   examples?: ReadonlyArray<THistory>
   /** The calling owner's production code, forwarded unchanged to oracleProperty. */
   owns?: ReadonlyArray<string>
+  /**
+   * Wrong answers for the generated campaign, forwarded unchanged to its
+   * oracleProperty. A mutant driver receives the same `{ history }` plan, and
+   * its law is the registration's statement.
+   */
+  calibrations?: ReadonlyArray<Calibration<THistory, { history: THistory }>>
   beforeCampaign?: () => void
   afterCampaign?: () => void
 }
@@ -63,6 +69,8 @@ export function registerIncludesProperty<THistory extends Array<unknown>>(
         },
         owns: campaign.owns,
         histories,
+        calibrations:
+          histories === generated ? campaign.calibrations : undefined,
         label: (history) =>
           `retained history ${campaign.examples!.indexOf(history) + 1}`,
         resolve: (history) => ({ history }),

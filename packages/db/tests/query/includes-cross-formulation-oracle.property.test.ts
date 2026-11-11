@@ -1,11 +1,12 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, test } from 'vitest'
+import { describe, expect } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
@@ -20,18 +21,8 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import {
-  oracleCalibrationTest,
-  oracleFixedSeed,
-  oracleProperty,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleRoute,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+import { oracleProperty, readOracleRunConfig } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
-import { runIncludesCalibration } from './includes-calibration.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   assertTlpPartitions,
@@ -1450,141 +1441,8 @@ describe(`includes cross-formulation oracle`, () => {
     check: forwardAssertionJudgment,
   })
 
-  // Checked direct replay witness:
-  // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
-  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
-  // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
-  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
-  // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'includes-cross-formulation\\.equivalence > random seed'
-  // Expected: one main-property failure at cross-formulation checkpoint 0.
-  oracleCalibrationTest(
-    test,
-    `includes-cross-formulation.equivalence`,
-    `missing-parent`,
-  )(
-    `generated equivalence rejects a missing production parent and replays its checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      // The hostile observation is injected after the real nested query is
-      // captured. The same generated driver and refinement comparison execute
-      // during shrinking and direct seed/path replay.
-      const property = fc.asyncProperty(scenarioArbitrary, async (scenario) => {
-        await expectFormulationsEquivalent(scenario, (rows) => rows.slice(1))
-      })
-      const propertyId = `includes-cross-formulation.equivalence`
-      const directReplay = oracleReplayRequested()
-      const failure = await runIncludesCalibration(
-        property,
-        directReplay
-          ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
-          : oracleFixedSeed(1_658_004, { numRuns: oracleRuns(8) }),
-      )
-      expect(failure.failed).toBe(true)
-      expect(String(failure.errorInstance)).toContain(
-        `cross-formulation checkpoint`,
-      )
-      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
-      if (directReplay) {
-        expect(failure.seed).toBe(replay.campaignSeed)
-        expect(replay.replayPath).toBe(
-          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-        )
-        return
-      }
-      expect(failure.numShrinks).toBeGreaterThan(0)
-      if (failure.counterexamplePath === null)
-        throw new Error(`missing-parent mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-      )
-      const replayResult = await runIncludesCalibration(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
-      })
-      expect(replayResult.failed).toBe(true)
-      expect(String(replayResult.errorInstance)).toContain(
-        `cross-formulation checkpoint`,
-      )
-      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
-      expect(replayResult.counterexample).toEqual(failure.counterexample)
-    },
-  )
-
-  // Checked direct replay witness:
-  // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
-  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
-  // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
-  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
-  // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'includes-cross-formulation\\.ordered-window > random seed'
-  // Expected: one main-property failure at ordered-window checkpoint 0.
-  oracleCalibrationTest(
-    test,
-    `includes-cross-formulation.ordered-window`,
-    `extra-child`,
-  )(
-    `generated window rejects an extra production child and replays its checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      const property = fc.asyncProperty(
-        windowedScenarioArbitrary,
-        async (sample) => {
-          const { scenario, offset, limit } = sample
-          await expectWindowedIncludeMatches(scenario, offset, limit, (rows) =>
-            rows.map((parent, index) =>
-              index === 0
-                ? {
-                    ...parent,
-                    children: [...parent.children, scenario.children[0]!],
-                  }
-                : parent,
-            ),
-          )
-        },
-      )
-      const propertyId = `includes-cross-formulation.ordered-window`
-      const directReplay = oracleReplayRequested()
-      const failure = await runIncludesCalibration(
-        property,
-        directReplay
-          ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
-          : oracleFixedSeed(1_658_005, { numRuns: oracleRuns(12) }),
-      )
-      expect(failure.failed).toBe(true)
-      expect(String(failure.errorInstance)).toContain(
-        `ordered-window checkpoint`,
-      )
-      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
-      if (directReplay) {
-        expect(failure.seed).toBe(replay.campaignSeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
-        return
-      }
-      expect(failure.numShrinks).toBeGreaterThan(0)
-      if (failure.counterexamplePath === null)
-        throw new Error(`extra-child mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-      )
-      const replayResult = await runIncludesCalibration(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
-      })
-      expect(replayResult.failed).toBe(true)
-      expect(String(replayResult.errorInstance)).toContain(
-        `ordered-window checkpoint`,
-      )
-      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
-      expect(replayResult.counterexample).toEqual(failure.counterexample)
-    },
-  )
+  const equivalenceStatement = `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`
+  const orderedWindowStatement = `matches recomputation for ordered offset and limit child windows for a fixed seed`
 
   const checkEquivalenceScenario = (scenario: CrossFormulationScenario) =>
     expectFormulationsEquivalent(
@@ -1603,6 +1461,39 @@ describe(`includes cross-formulation oracle`, () => {
       runs: 8,
       fixedSeed: 1658004,
       examples: scenarioExamples,
+      calibrations: [
+        {
+          name: `generated equivalence rejects a missing production parent`,
+          law: equivalenceStatement,
+          // The former calibration's hostile observation: drop the first
+          // nested parent after the real nested query is captured. Exactly
+          // its old matcher: only a cross-formulation comparison failure at
+          // checkpoint 0 counts as the check rejecting it.
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              equivalenceStatement,
+              plan,
+              observe,
+              async () => {
+                try {
+                  await expectFormulationsEquivalent(plan.history[0], (rows) =>
+                    rows.slice(1),
+                  )
+                } catch (error) {
+                  if (
+                    error instanceof Error &&
+                    String(error).includes(`cross-formulation checkpoint`) &&
+                    String(error).includes(`checkpoint":0`)
+                  )
+                    rejectAt(`missing-parent calibration`, error)
+                  throw new Error(
+                    `the missing-parent mutant failed outside the expected rejection: ${String(error)}`,
+                  )
+                }
+              },
+            ),
+        },
+      ],
       owns: [
         `src/collection/change-events.ts#createFilterFunctionFromExpression`,
         `src/collection/index.ts#createCollection`,
@@ -1610,7 +1501,7 @@ describe(`includes cross-formulation oracle`, () => {
         `src/query/query-once.ts#queryOnce`,
       ],
     },
-    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
+    equivalenceStatement,
     (...args: Parameters<typeof checkEquivalenceScenario>) => {
       return checkEquivalenceScenario(...args)
     },
@@ -1651,6 +1542,54 @@ describe(`includes cross-formulation oracle`, () => {
       runs: 12,
       fixedSeed: 1658005,
       examples: windowedExamples,
+      calibrations: [
+        {
+          name: `generated window rejects an extra production child`,
+          law: orderedWindowStatement,
+          // The former calibration's hostile observation: append a source
+          // child to the first published parent. Exactly its old matcher: only
+          // an ordered-window comparison failure at checkpoint 0 counts as the
+          // check rejecting it.
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              orderedWindowStatement,
+              plan,
+              observe,
+              async () => {
+                const [{ scenario, offset, limit }] = plan.history
+                try {
+                  await expectWindowedIncludeMatches(
+                    scenario,
+                    offset,
+                    limit,
+                    (rows) =>
+                      rows.map((parent, index) =>
+                        index === 0
+                          ? {
+                              ...parent,
+                              children: [
+                                ...parent.children,
+                                scenario.children[0]!,
+                              ],
+                            }
+                          : parent,
+                      ),
+                  )
+                } catch (error) {
+                  if (
+                    error instanceof Error &&
+                    String(error).includes(`ordered-window checkpoint`) &&
+                    String(error).includes(`checkpoint":0`)
+                  )
+                    rejectAt(`extra-child calibration`, error)
+                  throw new Error(
+                    `the extra-child mutant failed outside the expected rejection: ${String(error)}`,
+                  )
+                }
+              },
+            ),
+        },
+      ],
       owns: [
         `src/collection/change-events.ts#createFilterFunctionFromExpression`,
         `src/collection/index.ts#createCollection`,
@@ -1658,7 +1597,7 @@ describe(`includes cross-formulation oracle`, () => {
         `src/query/query-once.ts#queryOnce`,
       ],
     },
-    `matches recomputation for ordered offset and limit child windows for a fixed seed`,
+    orderedWindowStatement,
     (...args: Parameters<typeof checkWindowedScenario>) => {
       return checkWindowedScenario(...args)
     },
