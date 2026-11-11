@@ -61,7 +61,6 @@ import fc from 'fast-check'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { differs, oracleProperty, pass, violation } from '../oracle-property.js'
 import {
   asProductionError,
@@ -397,11 +396,6 @@ function snapshotAt(trace: ReadonlyArray<Observation>, index: number) {
   const value = trace[index]?.value
   return isErrorObservation(value) ? undefined : (value as Snapshot)
 }
-
-declareOracle({
-  check: [judgeGroups],
-  model: [expectedGroups],
-})
 
 oracleProperty<History, Array<Array<[string, number]>>, Plan>({
   id: `group-result-key.groups`,

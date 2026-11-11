@@ -30,7 +30,6 @@
  * must not add traversal of projected values. This is not a Set latency law.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration.js'
 import { checkWithCleanup } from './virtual-row-fields-support.js'
 import type { DeltaEvent, EffectConfig } from '../../src/query/effect.js'
 
@@ -225,11 +224,6 @@ function checkDelivery(
     a.channel.localeCompare(b.channel)
   expect([...actual].sort(order)).toStrictEqual([...expected].sort(order))
 }
-declareOracle({
-  model: [expectedPayload, expectedDelivery],
-  grammar: [callbackHistories],
-  check: [checkDelivery],
-})
 
 export async function runCallbackHistory(
   history: CallbackHistory,
