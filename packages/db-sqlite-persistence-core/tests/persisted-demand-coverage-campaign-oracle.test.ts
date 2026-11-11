@@ -1,13 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
-import {
-  IR,
-  createCollection,
-  createLiveQueryCollection,
-  eq,
-} from '@tanstack/db'
-import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
+import { describe, expect, vi } from 'vitest'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -15,7 +10,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
@@ -32,13 +26,20 @@ import {
   withMacrotaskReads,
 } from './helpers/demand-coverage-driver.js'
 import { coverageViolations } from './persisted-demand-coverage-model-oracle.js'
+import {
+  SPECS,
+  WINDOW_LIMIT,
+} from './persisted-demand-coverage-campaign-grammar-oracle.js'
+import type {
+  Demand,
+  Group,
+} from './persisted-demand-coverage-campaign-grammar-oracle.js'
 import type { Row } from './helpers/demand-coverage-driver.js'
 import type {
   CoverageReach,
   CoverageRecord,
   OfflineUpstream,
   QueryObservation,
-  QuerySpec,
   SourceEvent,
 } from './persisted-demand-coverage-model-oracle.js'
 import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
@@ -155,17 +156,12 @@ import type { SQLiteDriver } from '../src/index.js'
  * recovery (Part 2b of the fixed oracle owns it).
  */
 
-type Group = `a` | `b`
 const IDS = [`r1`, `r2`, `r3`, `r4`] as const
 type Id = (typeof IDS)[number]
 type Rank = 1 | 2 | 3
 type RowState = { group: Group; rank: Rank }
-// The demands that live queries read: each group unordered, and the window
-// `group = 'a' orderBy rank limit 2`.
-type Demand = `a` | `b` | `w`
 const DEMANDS: ReadonlyArray<Demand> = [`a`, `b`, `w`]
 const groupOf = (demand: Demand): Group => (demand === `b` ? `b` : `a`)
-const WINDOW_LIMIT = 2
 
 type Command =
   | { type: `start`; demand: Demand }
@@ -187,12 +183,6 @@ type History = {
   offline: { waitMs: 0 | 1000; upstream: OfflineUpstream }
   initial: Partial<Record<Id, RowState>>
   commands: ReadonlyArray<Command>
-}
-
-const SPECS: Record<Demand, QuerySpec> = {
-  a: { group: `a` },
-  b: { group: `b` },
-  w: { group: `a`, orderByRank: true, limit: WINDOW_LIMIT },
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,181 +1238,100 @@ function checkRelease(
   })
 }
 
-declareOracle({
-  check: [coverageViolations, checkFault, checkRelease],
-  grammar: [historyArb, requiredHistoriesArb],
-})
-
-describe(`persisted demand coverage over generated histories`, () => {
-  it.skipIf(oracleReplayRequested())(
-    `keeps the law when any one storage call fails`,
-    async () => {
-      quietConsole()
-      const baseline = await runWithFault(undefined)
-      // Positive witness: without a failure, session 2 settles D offline.
-      expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
-      const reached = new Set<FaultReach>()
-      const expectedReach: Array<FaultReach> = [
-        `coverage read failed`,
-        `row write failed`,
-        `coverage check failed`,
-        `coverage write failed`,
-      ]
-      for (const session of [1, 2] as const) {
-        const count = baseline.calls.filter((c) => c.session === session).length
-        for (let index = 0; index < count; index++) {
-          for (const timing of [`before effect`, `after effect`] as const) {
-            const run = await runWithFault({ session, index, timing })
-            const failed = run.calls.filter((c) => c.session === session)[index]
-            if (!failed) continue
-            try {
-              checkFault(failed, timing, run, (state) => reached.add(state))
-            } catch (error) {
-              throw new Error(
-                `failure at session ${session} call ${index} ` +
-                  `(${failed.method}, ${timing}, late: ${failed.late})`,
-                { cause: error },
-              )
-            }
-          }
+// Part 2's sweep: every call that the history makes without a failure fails
+// once, before and after its effect, and every fault reach is entered.
+async function runStorageFaultSweep(): Promise<void> {
+  quietConsole()
+  const baseline = await runWithFault(undefined)
+  // Positive witness: without a failure, session 2 settles D offline.
+  expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
+  const reached = new Set<FaultReach>()
+  const expectedReach: Array<FaultReach> = [
+    `coverage read failed`,
+    `row write failed`,
+    `coverage check failed`,
+    `coverage write failed`,
+  ]
+  for (const session of [1, 2] as const) {
+    const count = baseline.calls.filter((c) => c.session === session).length
+    for (let index = 0; index < count; index++) {
+      for (const timing of [`before effect`, `after effect`] as const) {
+        const run = await runWithFault({ session, index, timing })
+        const failed = run.calls.filter((c) => c.session === session)[index]
+        if (!failed) continue
+        try {
+          checkFault(failed, timing, run, (state) => reached.add(state))
+        } catch (error) {
+          throw new Error(
+            `failure at session ${session} call ${index} ` +
+              `(${failed.method}, ${timing}, late: ${failed.late})`,
+            { cause: error },
+          )
         }
       }
-      expect(reached).toEqual(new Set(expectedReach))
-    },
-    600_000,
-  )
+    }
+  }
+  expect(reached).toEqual(new Set(expectedReach))
+}
 
-  it.skipIf(oracleReplayRequested())(
-    `owns no wait after a release at any step of a load`,
-    async () => {
-      quietConsole()
-      const driver = createDriver(new DatabaseSync(`:memory:`))
-      await coverGroupA(driver)
-      const reached = new Set<ReleaseReach>()
-      const expectedReach: Array<ReleaseReach> = [
-        `released before the source load`,
-        `released while the source load waited`,
-        `released during a coverage read`,
-      ]
-      for (let steps = 0; steps <= 24; steps++) {
-        checkRelease(
-          steps,
-          await runReleaseAt(driver, steps, (state) => reached.add(state)),
-        )
-      }
-      expect(reached).toEqual(new Set(expectedReach))
-    },
-    300_000,
-  )
+// Part 3's sweep: one covered driver, released after every step up to the
+// step at which the load would have settled, and every release reach is
+// entered.
+async function runReleaseSweep(): Promise<void> {
+  quietConsole()
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverGroupA(driver)
+  const reached = new Set<ReleaseReach>()
+  const expectedReach: Array<ReleaseReach> = [
+    `released before the source load`,
+    `released while the source load waited`,
+    `released during a coverage read`,
+  ]
+  for (let steps = 0; steps <= 24; steps++) {
+    checkRelease(
+      steps,
+      await runReleaseAt(driver, steps, (state) => reached.add(state)),
+    )
+  }
+  expect(reached).toEqual(new Set(expectedReach))
+}
 
-  it.skipIf(oracleReplayRequested())(
-    `rejects observations that ignore lost rows, obsolete loads, or other window rows`,
-    () => {
-      // Checker calibration (ORC-006): the shared judgment must reject a wrong
-      // observation of each kind. Each record below states what production
-      // would wrongly show; the comparison must report it.
-      const loadA: LoadSubsetOptions = {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`group`]),
-          new IR.Value(`a`),
-        ]),
-      }
-      const loadW = {
-        ...loadA,
-        orderBy: [
-          {
-            expression: new IR.PropRef([`rank`]),
-            compareOptions: { direction: `asc`, nulls: `first` },
-          },
-        ],
-        limit: WINDOW_LIMIT,
-      } as unknown as LoadSubsetOptions
-      const rows: SourceEvent = {
-        type: `rows`,
-        rows: [
-          [`r1`, { group: `a`, rank: 1 }],
-          [`r2`, { group: `a`, rank: 2 }],
-        ],
-      }
-      const covered: Array<SourceEvent> = [
-        rows,
-        { type: `settled`, load: loadA, current: true },
-        { type: `settled`, load: loadW, current: true },
-      ]
-      const ready = (ids: Array<string>): QueryObservation => ({
-        status: `ready`,
-        rows: ids,
-      })
-      const record = (
-        events: ReadonlyArray<SourceEvent>,
-        a: QueryObservation,
-        w: QueryObservation,
-      ): CoverageRecord => ({
-        events,
-        // The offline session's own loads of the same demands.
-        queries: {
-          a: { spec: SPECS.a, sent: [{ ...loadA }], observed: a },
-          w: { spec: SPECS.w, sent: [{ ...loadW }], observed: w },
-        },
-        upstream: `never answers`,
-        waitPassed: true,
-      })
-      // The right observations pass.
-      expect(
-        coverageViolations(
-          record(covered, ready([`r1`, `r2`]), ready([`r1`, `r2`])),
-        ),
-      ).toEqual([])
-      // A demand that lost a row, settled anyway.
-      expect(
-        coverageViolations(
-          record([...covered, { type: `delete`, id: `r1` }], ready([`r2`]), {
-            status: `loading`,
-          }),
-        ),
-      ).toHaveLength(1)
-      // An obsolete load treated as coverage.
-      expect(
-        coverageViolations(
-          record(
-            [rows, { type: `settled`, load: loadA, current: false }],
-            ready([`r1`, `r2`]),
-            { status: `loading` },
-          ),
-        ),
-      ).toHaveLength(1)
-      // A released load that the source resolves must not certify its demand.
-      expect(
-        coverageViolations(
-          record(
-            [
-              rows,
-              { type: `settled`, load: loadA, current: true, aborted: true },
-            ],
-            ready([`r1`, `r2`]),
-            { status: `loading` },
-          ),
-        ),
-      ).toHaveLength(1)
-      // A window that holds another row, settled anyway.
-      expect(
-        coverageViolations(
-          record(
-            [
-              ...covered,
-              { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 }]] },
-            ],
-            ready([`r1`, `r2`, `r3`]),
-            ready([`r3`, `r1`]),
-          ),
-        ),
-      ).toHaveLength(1)
-      // A window shown out of order.
-      expect(
-        coverageViolations(
-          record(covered, ready([`r1`, `r2`]), ready([`r2`, `r1`])),
-        ),
-      ).toHaveLength(1)
+describe(`persisted demand coverage over generated histories`, () => {
+  oracleProperty({
+    id: `persisted-demand-coverage.storage-fault`,
+    law: {
+      statement: `With one storage call failed before or after its effect, for every call of the history, session 2 settles D from SQLite only with exactly r1 and r2; a failed coverage read, row write, or coverage check leaves session 2 waiting, and a failed coverage write crashes the Collection.`,
+      authority: `The persisted demand coverage contract stated above, and the glossary's "crash" for a terminal local persistence failure.`,
+      limits: `One history, with the failure swept over every call that it makes without a failure; node:sqlite and the default coordinator only.`,
     },
-  )
+    owns: [`src/persisted.ts`],
+    histories: [{ name: `keeps the law when any one storage call fails` }],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`storage fault`, plan, observe, () =>
+        runStorageFaultSweep(),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 600_000,
+  })
+
+  oracleProperty({
+    id: `persisted-demand-coverage.release`,
+    law: {
+      statement: `A released load owns no wait: after the release, at every step of a load, the source Collection is not loading a subset, and it stays so when the clock passes the wait.`,
+      authority: `ARCHITECTURE.md law 6, as Part 3 above states it.`,
+      limits: `One covered driver, released after each of steps 0 to 24 under a fake clock; node:sqlite and the default coordinator only.`,
+    },
+    owns: [`src/persisted.ts`],
+    histories: [{ name: `owns no wait after a release at any step of a load` }],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`release`, plan, observe, () =>
+        runReleaseSweep(),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 300_000,
+  })
 })
