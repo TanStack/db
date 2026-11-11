@@ -2,7 +2,6 @@ import fc from 'fast-check'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { declareOracle } from './oracle-declaration.js'
 import { differs, oracleProperty, pass, violation } from './oracle-property.js'
 import { ScenarioLifetime } from './conformance/scenario-lifetime.js'
 import type {
@@ -1256,9 +1255,3 @@ for (const [mode, id] of [
       },
     ],
   })
-
-declareOracle({
-  grammar: [subsetHandoffArbitrary],
-  model: [subsetHandoffModel],
-  check: [checkSubsetHandoff],
-})

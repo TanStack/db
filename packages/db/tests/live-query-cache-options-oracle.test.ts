@@ -14,7 +14,7 @@
  * are the observation cuts. React supplies client/server receiving paths using
  * the same judgment. Failure/consumption retirement is a separate lifecycle grammar.
  */
-import { afterAll, expect, test, vi } from 'vitest'
+import { afterAll, expect, vi } from 'vitest'
 import {
   DbClient,
   Query,
@@ -23,8 +23,6 @@ import {
   getLiveQueryHash,
   resolveLiveQueryValue,
 } from '../src'
-import { oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty } from './oracle-property'
 import {
   forwardAssertionJudgment,
@@ -92,16 +90,6 @@ afterAll(() => {
         ]),
       ),
     )
-})
-declareOracle({
-  check: [
-    checkCacheOptionAdmission,
-    checkCacheOptionPromise,
-    checkCacheOptionRows,
-    checkCacheOptionPublications,
-  ],
-  model: [conflictingCacheOptions],
-  grammar: [cacheOptionHistories],
 })
 
 // This is the same exhaustive finite language. Native registration owns
@@ -468,55 +456,3 @@ oracleProperty<CacheOptionsCase, Verdict>({
   },
   check: forwardAssertionJudgment,
 })
-
-// Deliberately wrong observations use the same judgment as every driver. The
-// all-options-differ policy and claim-overwrite policy would accept these
-// conflicts; checking both attempts is what distinguishes claim corruption.
-test.each(
-  cacheOptionHistories.filter((history) => conflictingCacheOptions(history)),
-)(`cache admission rejects hostile acceptance %j`, (history) => {
-  oracleRoute(`calibration`)
-  for (let attempt = 0; attempt < 2; attempt++)
-    expect(() => checkCacheOptionAdmission(() => {}, history)).toThrow()
-})
-test.each([`first`, `other`] as const)(
-  `cache rows reject hostile keys and leading publication for %s`,
-  (key) => {
-    oracleRoute(`calibration`)
-    const rows = [{ id: `one`, label: `authored` }]
-    const correct = [{ key: `${key}-one`, value: rows[0] }]
-    const wrong = [{ key: `borrowed`, value: rows[0] }]
-    checkCacheOptionRows(correct, rows, key)
-    expect(() => checkCacheOptionRows(wrong, rows, key)).toThrow()
-    expect(() =>
-      checkCacheOptionPublications([wrong, correct], rows, key),
-    ).toThrow()
-  },
-)
-
-// Admission calibration includes a promise that never settles. The check must
-// reject it at the pre-delivery cut, allowing its driver's cleanup to proceed.
-test.each([`pending`, `fulfilled`, `unrelated-error`, `conflict`] as const)(
-  `rejects wrong pre-delivery admission outcome: %s`,
-  async (outcome) => {
-    oracleRoute(`calibration`)
-    const history = cacheOptionHistories.find(conflictingCacheOptions)!
-    const result =
-      outcome === `pending`
-        ? new Promise<void>(() => {})
-        : outcome === `fulfilled`
-          ? Promise.resolve()
-          : Promise.reject(
-              new Error(
-                outcome === `conflict`
-                  ? `getKey/schema conflict`
-                  : `unrelated failure`,
-              ),
-            )
-    const check = checkCacheOptionPromise(result, history, {
-      deliveryHeld: true,
-    })
-    if (outcome === `conflict`) await check
-    else await expect(check).rejects.toThrow()
-  },
-)

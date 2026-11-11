@@ -1,6 +1,6 @@
 // Shared by the cross-tab native oracle spec and cross-tab.spec.ts: the page
 // open, observation, cleanup, and evidence wrapper that every native cross-tab
-// scenario uses. The laws they serve are stated in cross-tab-oracle.spec.ts.
+// scenario uses. The laws they serve are stated in cross-tab-witness.spec.ts.
 import { expect, test } from '@playwright/test'
 import type { BrowserContext, Page } from '@playwright/test'
 import type { BrowserEvidence } from './browser'

@@ -10,7 +10,6 @@ import {
   expectedValueRows,
   valueKinds,
 } from '../../tests/indexed-db/structured-clone-oracle'
-import { declareOracle } from '../../tests/oracle-declaration'
 import { test } from './browser-test'
 import type {} from './coverage-browser'
 import { withCoverage } from './coverage-cleanup'
@@ -150,8 +149,6 @@ function expectedFirstOpenRows<T>(
 ): Array<Array<T>> {
   return rows.map((row) => (shared ? rows : [row]))
 }
-
-declareOracle({ model: [expectedFirstOpenRows] })
 
 // Same/independent names distinguish queue sharing from accidental global
 // ownership. Prototype and Unicode store names also receive native creation,

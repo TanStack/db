@@ -1,10 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import * as fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
-import { oracleProperty, oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -801,36 +800,11 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
 
-declareOracle({
-  check: [runHistory],
-  model: [OwnershipModel],
-})
-
-describe(`settled transactions leave every Collection that tracked them`, () => {
-  oracleProperty({
-    id: PROPERTY,
-    law: {
-      statement: `A settled transaction leaves every Collection that tracked it, drops its optimistic rows, and settles its public promise despite subscriber failures.`,
-      authority: `Transaction settlement and Collection ownership contracts stated above`,
-      limits: `Two Collections, four manual transactions, bounded legal mutations and settlement; excludes queued sync holds, offline restoration and mid-history cleanup.`,
-    },
-    // What this oracle owns: the gap report judges the transaction's settlement
-    // and the Collection's tracking of it, by this file's tests.
-    owns: [`src/transactions.ts`, `src/collection/state.ts`],
-    histories: { arbitrary: history, runs: 200, fixedSeeds: [2080] },
-    resolve: (steps) => ({ steps }),
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`transaction ownership`, plan, observe, () =>
-        runHistory(plan.steps),
-      ),
-    check: forwardAssertionJudgment,
-    timeout: 300_000,
-  })
-
-  it(`fixed history: a subscriber throws during an asynchronous success and failure settlement`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+// Named regressions, replayed through the same driver and comparison.
+const fixedHistories: Array<{ name: string; history: Array<Step> }> = [
+  {
+    name: `a subscriber throws during an asynchronous success and failure settlement`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 3 },
       { type: `edit`, tx: 0, on: `B`, key: 1, value: 3 },
@@ -841,12 +815,11 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       { type: `edit`, tx: 0, on: `B`, key: 2, value: 4 },
       { type: `commit`, tx: 0 },
       { type: `settle`, tx: 0, ok: false, throwOn: `A` },
-    ])
-  })
-
-  it(`fixed history: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+    ],
+  },
+  {
+    name: `a merged-away pair, a conflicting rollback that throws, and a truncate rollback`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `cancel`, tx: 0, on: `A` },
       { type: `commit`, tx: 0 },
@@ -860,12 +833,11 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 3, on: `B`, key: 2, value: 5 },
       { type: `truncateRollback`, tx: 3, on: `B` },
-    ])
-  })
-
-  it(`fixed history: a rolled-back transaction does not remove a live one that shares its id`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+    ],
+  },
+  {
+    name: `a rolled-back transaction does not remove a live one that shares its id`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
       { type: `open`, reuse: 0 },
@@ -876,22 +848,20 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       // Pending 0 and 2: the rollback of 2 also rolls back 0, which shares A1.
       { type: `edit`, tx: 1, on: `A`, key: 1, value: 7 },
       { type: `rollback`, tx: 1, throwOn: undefined },
-    ])
-  })
-
-  it(`fixed history: a second live transaction with a tracked id is rejected`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+    ],
+  },
+  {
+    name: `a second live transaction with a tracked id is rejected`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
       { type: `open`, reuse: 0 },
       { type: `edit`, tx: 1, on: `A`, key: 2, value: 6 },
-    ])
-  })
-
-  it(`fixed history: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+    ],
+  },
+  {
+    name: `conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
       { type: `open`, reuse: undefined },
@@ -901,16 +871,43 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       { type: `edit`, tx: 2, on: `A`, key: 1, value: 7 },
       { type: `edit`, tx: 2, on: `B`, key: 2, value: 7 },
       { type: `rollback`, tx: 0, throwOn: `both` },
-    ])
-  })
-
-  it(`fixed history: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
+    ],
+  },
+  {
+    name: `a failed commit whose rollback subscriber throws keeps the mutation error`,
+    history: [
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
       { type: `commit`, tx: 0 },
       { type: `settle`, tx: 0, ok: false, throwOn: `A` },
-    ])
+    ],
+  },
+]
+
+describe(`settled transactions leave every Collection that tracked them`, () => {
+  oracleProperty({
+    id: PROPERTY,
+    law: {
+      statement: `A settled transaction leaves every Collection that tracked it, drops its optimistic rows, and settles its public promise despite subscriber failures.`,
+      authority: `Transaction settlement and Collection ownership contracts stated above`,
+      limits: `Two Collections, four manual transactions, bounded legal mutations and settlement; excludes queued sync holds, offline restoration and mid-history cleanup.`,
+    },
+    // What this oracle owns: the gap report judges the transaction's settlement
+    // and the Collection's tracking of it, by this file's tests.
+    owns: [`src/transactions.ts`, `src/collection/state.ts`],
+    histories: {
+      arbitrary: history,
+      runs: 200,
+      fixedSeeds: [2080],
+      fixed: fixedHistories,
+    },
+    resolve: (steps) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`transaction ownership`, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 300_000,
   })
 })

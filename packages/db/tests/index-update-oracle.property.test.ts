@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
@@ -8,19 +8,16 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config'
-import { declareOracle } from './oracle-declaration'
+import { oracleProperty } from './oracle-config'
 import { expectExactIdentities } from './index-identity-oracle'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from './oracle-assertion-adapter'
+import { clean, rejection } from './calibration-rejection'
 import { indexTypes, withCollectionCleanup } from './index-update-support'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 
@@ -299,30 +296,6 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     expectIndexMatchesModel(rebuilt, rows)
   }
 
-  // These original examples use mapped string keys. Fast-check cannot
-  // reconstruct their map context for native fixed-history admission, so keep
-  // them as direct inputs to the same independent helper.
-  test.skipIf(oracleReplayRequested()).each([
-    {
-      name: `replacement continuation`,
-      history: [
-        { type: `put`, key: `0`, value: 1 },
-        { type: `build`, entries: [[`1`, -1]] },
-        { type: `put`, key: `1`, value: 2 },
-      ] satisfies Array<IndexAction>,
-    },
-    {
-      name: `signed zero values`,
-      history: [
-        { type: `put`, key: `0`, value: 0 },
-        { type: `put`, key: `1`, value: -0 },
-      ] satisfies Array<IndexAction>,
-    },
-  ])(`refines the fixed reference history $name`, ({ history }) => {
-    oracleRoute(`fixed history`)
-    return runIndexReferenceModel(history)
-  })
-
   oracleProperty({
     id: `index-update.reference-model`,
     law: {
@@ -348,103 +321,272 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
         () => runIndexReferenceModel(plan.history),
       ),
     check: forwardAssertionJudgment,
+    // Each calibration replays its old body as a mutant driver: the shared
+    // check must reject every wrong answer with an error that the old matcher
+    // accepted, and every clean check in the body must still pass.
+    calibrations: [
+      ...(
+        [
+          [`duplicate key`, `takeFromStart`, [`a`, `a`]],
+          [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
+        ] as const
+      ).map(([name, method, wrongKeys]) => ({
+        name: `full traversal rejects a ${name}`,
+        law: `index-update.reference-model`,
+        driver: (
+          plan: { history: Array<IndexAction> },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          recordAssertionJudgment(
+            `index-update.reference-model`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(`a`, { value: 1 })
+              index.add(`b`, { value: 2 })
+              const wrongOutput = vi
+                .spyOn(index, method)
+                .mockReturnValue([...wrongKeys])
+              try {
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () =>
+                      expectIndexMatchesModel(
+                        index,
+                        new Map([
+                          [`a`, 1],
+                          [`b`, 2],
+                        ]),
+                      ),
+                  ),
+                )
+                expect(wrongOutput).toHaveBeenCalled()
+              } finally {
+                wrongOutput.mockRestore()
+              }
+
+              rejectAt(
+                `calibration: full traversal rejects a ${name}`,
+                rejections[0]!,
+              )
+            },
+          ),
+      })),
+      {
+        name: `inclusive lower bound rejects an exclusive-boundary result`,
+        law: `index-update.reference-model`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.reference-model`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(`boundary`, { value: -2 })
+              const rangeQuery = index.rangeQuery.bind(index)
+              const wrongOutput = vi
+                .spyOn(index, `rangeQuery`)
+                .mockImplementation((options) =>
+                  options.from === -2 ? new Set() : rangeQuery(options),
+                )
+              try {
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () =>
+                      expectIndexMatchesModel(
+                        index,
+                        new Map([[`boundary`, -2]]),
+                      ),
+                  ),
+                )
+              } finally {
+                wrongOutput.mockRestore()
+              }
+
+              rejectAt(
+                `calibration: inclusive lower bound rejects an exclusive-boundary result`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+      {
+        name: `upper-only range rejects a dropped minimum when the lower flag is exclusive`,
+        law: `index-update.reference-model`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.reference-model`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(`minimum`, { value: -2 })
+              const rangeQuery = index.rangeQuery.bind(index)
+              const wrongOutput = vi
+                .spyOn(index, `rangeQuery`)
+                .mockImplementation((options) => {
+                  const result = rangeQuery(options)
+                  if (!(`from` in options) && options.fromInclusive === false) {
+                    result.delete(`minimum`)
+                  }
+                  return result
+                })
+              try {
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () =>
+                      expectIndexMatchesModel(
+                        index,
+                        new Map([[`minimum`, -2]]),
+                      ),
+                  ),
+                )
+              } finally {
+                wrongOutput.mockRestore()
+              }
+
+              rejectAt(
+                `calibration: upper-only range rejects a dropped minimum when the lower flag is exclusive`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+      {
+        name: `explicit exclusive lower bound rejects an included boundary value`,
+        law: `index-update.reference-model`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.reference-model`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(`boundary`, { value: -2 })
+              index.add(`later`, { value: 0 })
+              const rangeQuery = index.rangeQuery.bind(index)
+              const wrongOutput = vi
+                .spyOn(index, `rangeQuery`)
+                .mockImplementation((options) => {
+                  const result = rangeQuery(options)
+                  if (
+                    options.from === -2 &&
+                    options.to === 2 &&
+                    options.fromInclusive === false
+                  ) {
+                    result.add(`boundary`)
+                  }
+                  return result
+                })
+              try {
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () =>
+                      expectIndexMatchesModel(
+                        index,
+                        new Map([
+                          [`boundary`, -2],
+                          [`later`, 0],
+                        ]),
+                      ),
+                  ),
+                )
+              } finally {
+                wrongOutput.mockRestore()
+              }
+
+              rejectAt(
+                `calibration: explicit exclusive lower bound rejects an included boundary value`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+      {
+        name: `rejects append-only replacement state and accepts replacement continuation`,
+        law: `index-update.reference-model`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.reference-model`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(`old`, { value: -1 })
+              index.add(`new`, { value: 1 })
+              const replacement = new Map([[`new`, 1]])
+              // This is the raw state an append-only build would expose, not a source mutant.
+              rejections.push(
+                rejection(
+                  (error) => /expected/.test(error.message),
+                  () => expectIndexMatchesModel(index, replacement),
+                ),
+              )
+              index.build([[`new`, { value: 1 }]])
+              clean(() => expectIndexMatchesModel(index, replacement))
+              index.update(`new`, { value: 1 }, { value: 2 })
+              clean(() => expectIndexMatchesModel(index, new Map([[`new`, 2]])))
+
+              rejectAt(
+                `calibration: rejects append-only replacement state and accepts replacement continuation`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+    ],
   })
-  test.each([
-    [`duplicate key`, `takeFromStart`, [`a`, `a`]],
-    [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
-  ] as const)(`full traversal rejects a %s`, (_name, method, wrongKeys) => {
-    oracleRoute(`calibration`)
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(`a`, { value: 1 })
-    index.add(`b`, { value: 2 })
-    const wrongOutput = vi.spyOn(index, method).mockReturnValue([...wrongKeys])
-    try {
-      expect(() =>
-        expectIndexMatchesModel(
-          index,
-          new Map([
-            [`a`, 1],
-            [`b`, 2],
-          ]),
-        ),
-      ).toThrowError(/expected/)
-      expect(wrongOutput).toHaveBeenCalled()
-    } finally {
-      wrongOutput.mockRestore()
-    }
-  })
-  test(`inclusive lower bound rejects an exclusive-boundary result`, () => {
-    oracleRoute(`calibration`)
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(`boundary`, { value: -2 })
-    const rangeQuery = index.rangeQuery.bind(index)
-    const wrongOutput = vi
-      .spyOn(index, `rangeQuery`)
-      .mockImplementation((options) =>
-        options.from === -2 ? new Set() : rangeQuery(options),
-      )
-    try {
-      expect(() =>
-        expectIndexMatchesModel(index, new Map([[`boundary`, -2]])),
-      ).toThrowError(/expected/)
-    } finally {
-      wrongOutput.mockRestore()
-    }
-  })
-  test(`upper-only range rejects a dropped minimum when the lower flag is exclusive`, () => {
-    oracleRoute(`calibration`)
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(`minimum`, { value: -2 })
-    const rangeQuery = index.rangeQuery.bind(index)
-    const wrongOutput = vi
-      .spyOn(index, `rangeQuery`)
-      .mockImplementation((options) => {
-        const result = rangeQuery(options)
-        if (!(`from` in options) && options.fromInclusive === false) {
-          result.delete(`minimum`)
-        }
-        return result
-      })
-    try {
-      expect(() =>
-        expectIndexMatchesModel(index, new Map([[`minimum`, -2]])),
-      ).toThrowError(/expected/)
-    } finally {
-      wrongOutput.mockRestore()
-    }
-  })
-  test(`explicit exclusive lower bound rejects an included boundary value`, () => {
-    oracleRoute(`calibration`)
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(`boundary`, { value: -2 })
-    index.add(`later`, { value: 0 })
-    const rangeQuery = index.rangeQuery.bind(index)
-    const wrongOutput = vi
-      .spyOn(index, `rangeQuery`)
-      .mockImplementation((options) => {
-        const result = rangeQuery(options)
-        if (
-          options.from === -2 &&
-          options.to === 2 &&
-          options.fromInclusive === false
-        ) {
-          result.add(`boundary`)
-        }
-        return result
-      })
-    try {
-      expect(() =>
-        expectIndexMatchesModel(
-          index,
-          new Map([
-            [`boundary`, -2],
-            [`later`, 0],
-          ]),
-        ),
-      ).toThrowError(/expected/)
-    } finally {
-      wrongOutput.mockRestore()
-    }
+
+  // These original examples use mapped string keys. Fast-check cannot
+  // reconstruct their map context for native fixed-history admission, so one
+  // enumerated property replays them through the same independent helper.
+  oracleProperty({
+    id: `index-update.reference-model-fixed`,
+    law: {
+      statement: `Each direct index action refines an independent source Map across lookups, traversal and rebuild.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `The two fixed reference histories: replacement continuation and signed zero values.`,
+    },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: [
+      {
+        name: `replacement continuation`,
+        history: [
+          { type: `put`, key: `0`, value: 1 },
+          { type: `build`, entries: [[`1`, -1]] },
+          { type: `put`, key: `1`, value: 2 },
+        ] satisfies Array<IndexAction>,
+      },
+      {
+        name: `signed zero values`,
+        history: [
+          { type: `put`, key: `0`, value: 0 },
+          { type: `put`, key: `1`, value: -0 },
+        ] satisfies Array<IndexAction>,
+      },
+    ],
+    label: ({ name }) => `refines the fixed reference history ${name}`,
+    resolve: ({ history }) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.reference-model-fixed`,
+        plan,
+        observe,
+        () => runIndexReferenceModel(plan.history),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -760,214 +902,9 @@ function applyNullishAction(
   expectNullishMembership(index, rows)
 }
 
-declareOracle({
-  check: [
-    expectIndexMatchesModel,
-    expectCustomGroups,
-    expectExactIdentities,
-    expectExactMembership,
-    expectNullishMembership,
-    expectComparatorStepRefines,
-    expectPublishedKeysMatchCollection,
-    expectStringMembershipMatches,
-    expectSnapshotKeysMatchSource,
-    expectBinaryValueMembership,
-    expectConservedIndexKeys,
-  ],
-  model: [groupKeysByValue, nullishPosition, predictMonthDayOwners],
-})
-
 describe.each(indexTypes)(
   `%s nullish direct index refinement`,
   (_indexName, IndexType) => {
-    test.each([
-      [`undefined to null`, undefined, null],
-      [`null to undefined`, null, undefined],
-      [`defined to undefined`, 1, undefined],
-      [`undefined to defined`, undefined, 1],
-      [`undefined to undefined`, undefined, undefined],
-    ] as const)(`keeps membership after %s`, (_label, before, after) => {
-      oracleRoute(`case`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, { type: `put`, key: `a`, value: before })
-      applyNullishAction(index, rows, { type: `put`, key: `a`, value: after })
-    })
-
-    test(`keeps coexisting null and undefined buckets distinct`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`null1`, null],
-        [`undef1`, undefined],
-        [`num1`, 1],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`finds every undefined owner beside distinct string values`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`status`]))
-      const rows = new Map<string, string | undefined>()
-      const exactProbes = [undefined, `active`, `inactive`]
-      const inProbes = [[undefined], [undefined, `active`]]
-      for (const [key, value] of [
-        [`a`, `active`],
-        [`b`, undefined],
-        [`c`, `inactive`],
-        [`d`, undefined],
-      ] as const) {
-        index.add(key, { status: value })
-        rows.set(key, value)
-        expectExactMembership(index, rows, exactProbes, inProbes)
-      }
-    })
-
-    test(`returns no undefined key from a nonempty all-defined index`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, { type: `put`, key: `a`, value: 1 })
-      applyNullishAction(index, rows, { type: `put`, key: `b`, value: 2 })
-    })
-
-    test(`unites undefined and defined IN members without distractors`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`undef`, undefined],
-        [`one`, 1],
-        [`two`, 2],
-        [`three`, 3],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`returns every undefined owner from a singleton IN list`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`undef1`, undefined],
-        [`undef2`, undefined],
-        [`one`, 1],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`distinguishes endpoint reads from explicit undefined cursors`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`a`, undefined],
-        [`b`, 1],
-        [`c`, 2],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`traverses every undefined owner before continuing to numbers`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`undef1`, undefined],
-        [`undef2`, undefined],
-        [`undef3`, undefined],
-        [`one`, 1],
-        [`two`, 2],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`retains the second undefined owner after removing the first`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `a`,
-        value: undefined,
-      })
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `b`,
-        value: undefined,
-      })
-      applyNullishAction(index, rows, { type: `delete`, key: `a` })
-    })
-
-    test(`distinguishes explicit and omitted undefined lower bounds`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`undef`, undefined],
-        [`one`, 1],
-        [`two`, 2],
-        [`three`, 3],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`includes both undefined owners within double undefined bounds`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      for (const [key, value] of [
-        [`a`, undefined],
-        [`b`, undefined],
-        [`c`, 1],
-      ] as const) {
-        applyNullishAction(index, rows, { type: `put`, key, value })
-      }
-    })
-
-    test(`build preserves nulls-first ordered reads and ranges`, () => {
-      oracleRoute(`fixed history`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `build`,
-        entries: [
-          [`undefined`, undefined],
-          [`one`, 1],
-        ],
-      })
-      // A second build changes insertion order; the model still predicts the
-      // same returned key order and complete upper-bound results.
-      applyNullishAction(index, rows, {
-        type: `build`,
-        entries: [
-          [`one`, 1],
-          [`undefined`, undefined],
-        ],
-      })
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `two`,
-        value: 2,
-      })
-      applyNullishAction(index, rows, {
-        type: `build`,
-        entries: [
-          [`undef2`, undefined],
-          [`null`, null],
-          [`undef1`, undefined],
-          [`one`, 1],
-        ],
-      })
-    })
-
     const runNullishMembership = async (actions: Array<NullishIndexAction>) => {
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
@@ -1003,337 +940,774 @@ describe.each(indexTypes)(
           () => runNullishMembership(plan.history),
         ),
       check: forwardAssertionJudgment,
+      // Each calibration replays its old body as a mutant driver.
+      calibrations: [
+        {
+          name: `rejects a skipped undefined-to-null update`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>()
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `a`,
+                    value: undefined,
+                  }),
+                )
+                const skipped = vi
+                  .spyOn(index, `update`)
+                  .mockImplementation(() => {})
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () =>
+                        applyNullishAction(index, rows, {
+                          type: `put`,
+                          key: `a`,
+                          value: null,
+                        }),
+                    ),
+                  )
+                  expect(skipped).toHaveBeenCalledOnce()
+                } finally {
+                  skipped.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects a skipped undefined-to-null update`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects lookup dispatch that unites nullish buckets`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>()
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `null1`,
+                    value: null,
+                  }),
+                )
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `undef1`,
+                    value: undefined,
+                  }),
+                )
+                const lookup = index.lookup.bind(index)
+                const united = vi
+                  .spyOn(index, `lookup`)
+                  .mockImplementation((op, value) =>
+                    op === `eq` && value === undefined
+                      ? new Set([`null1`, `undef1`])
+                      : lookup(op, value),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishMembership(index, rows),
+                    ),
+                  )
+                  expect(united).toHaveBeenCalledWith(`eq`, undefined)
+                } finally {
+                  united.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects lookup dispatch that unites nullish buckets`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects an exact lookup that loses one undefined owner`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`status`]))
+                const rows = new Map<string, string | undefined>([
+                  [`a`, `active`],
+                  [`b`, undefined],
+                  [`c`, `inactive`],
+                  [`d`, undefined],
+                ])
+                for (const [key, status] of rows) index.add(key, { status })
+                const lookup = index.equalityLookup.bind(index)
+                const truncated = vi
+                  .spyOn(index, `equalityLookup`)
+                  .mockImplementation((value) =>
+                    value === undefined ? new Set([`b`]) : lookup(value),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () =>
+                        expectExactMembership(
+                          index,
+                          rows,
+                          [undefined],
+                          [[undefined]],
+                        ),
+                    ),
+                  )
+                  expect(truncated).toHaveBeenCalledWith(undefined)
+                } finally {
+                  truncated.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects an exact lookup that loses one undefined owner`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects an IN lookup that drops an undefined operand`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>()
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `undef`,
+                    value: undefined,
+                  }),
+                )
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `one`,
+                    value: 1,
+                  }),
+                )
+                const lookup = index.inArrayLookup.bind(index)
+                const dropped = vi
+                  .spyOn(index, `inArrayLookup`)
+                  .mockImplementation((values) =>
+                    values.length === 2 &&
+                    values[0] === 1 &&
+                    values[1] === undefined
+                      ? new Set([`one`])
+                      : lookup(values),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishMembership(index, rows),
+                    ),
+                  )
+                  expect(dropped).toHaveBeenCalledWith([1, undefined])
+                } finally {
+                  dropped.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects an IN lookup that drops an undefined operand`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects an IN lookup that loses a same-value owner`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>()
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `undef1`,
+                    value: undefined,
+                  }),
+                )
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `undef2`,
+                    value: undefined,
+                  }),
+                )
+                const lookup = index.inArrayLookup.bind(index)
+                const truncated = vi
+                  .spyOn(index, `inArrayLookup`)
+                  .mockImplementation((values) =>
+                    values.length === 1 && values[0] === undefined
+                      ? new Set([`undef1`])
+                      : lookup(values),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishMembership(index, rows),
+                    ),
+                  )
+                  expect(truncated).toHaveBeenCalledWith([undefined])
+                } finally {
+                  truncated.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects an IN lookup that loses a same-value owner`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects IN dispatch that returns only its first value group`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>()
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `undef`,
+                    value: undefined,
+                  }),
+                )
+                clean(() =>
+                  applyNullishAction(index, rows, {
+                    type: `put`,
+                    key: `one`,
+                    value: 1,
+                  }),
+                )
+                const lookup = index.lookup.bind(index)
+                const firstOnly = vi
+                  .spyOn(index, `lookup`)
+                  .mockImplementation((op, value) =>
+                    op === `in` &&
+                    Array.isArray(value) &&
+                    value.length === 2 &&
+                    value[0] === undefined &&
+                    value[1] === 1
+                      ? new Set([`undef`])
+                      : lookup(op, value),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishMembership(index, rows),
+                    ),
+                  )
+                  expect(firstOnly).toHaveBeenCalledWith(`in`, [undefined, 1])
+                } finally {
+                  firstOnly.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects IN dispatch that returns only its first value group`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects an endpoint read that drops the undefined owner`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>([
+                  [`a`, undefined],
+                  [`b`, 1],
+                  [`c`, 2],
+                ])
+                for (const [key, value] of rows) index.add(key, { value })
+                const dropped = vi
+                  .spyOn(index, `takeFromStart`)
+                  .mockImplementation(() => [`b`, `c`])
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishOrderedReads(index, rows),
+                    ),
+                  )
+                  expect(dropped).toHaveBeenCalled()
+                } finally {
+                  dropped.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects an endpoint read that drops the undefined owner`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects a cursor that repeats the last undefined owner`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>([
+                  [`undef1`, undefined],
+                  [`undef2`, undefined],
+                  [`undef3`, undefined],
+                  [`one`, 1],
+                  [`two`, 2],
+                ])
+                for (const [key, value] of rows) index.add(key, { value })
+                const take = index.take.bind(index)
+                const repeated = vi
+                  .spyOn(index, `take`)
+                  .mockImplementation((n, from, filter) =>
+                    n === 10 && from === undefined
+                      ? [`undef3`, `one`, `two`]
+                      : take(n, from, filter),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishOrderedReads(index, rows),
+                    ),
+                  )
+                  expect(repeated).toHaveBeenCalledWith(10, undefined)
+                } finally {
+                  repeated.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects a cursor that repeats the last undefined owner`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects a forward range that drops an explicit undefined lower bound`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>([
+                  [`undef`, undefined],
+                  [`one`, 1],
+                  [`two`, 2],
+                  [`three`, 3],
+                ])
+                for (const [key, value] of rows) index.add(key, { value })
+                const rangeQuery = index.rangeQuery.bind(index)
+                const dropped = vi
+                  .spyOn(index, `rangeQuery`)
+                  .mockImplementation((options) =>
+                    `from` in options &&
+                    options.from === undefined &&
+                    options.to === 2 &&
+                    options.fromInclusive === true
+                      ? new Set([`one`, `two`])
+                      : rangeQuery(options),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishOrderedReads(index, rows),
+                    ),
+                  )
+                  expect(dropped).toHaveBeenCalledWith({
+                    from: undefined,
+                    fromInclusive: true,
+                    to: 2,
+                    toInclusive: true,
+                  })
+                } finally {
+                  dropped.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects a forward range that drops an explicit undefined lower bound`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects a double undefined range that loses one owner`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>([
+                  [`a`, undefined],
+                  [`b`, undefined],
+                  [`c`, 1],
+                ])
+                for (const [key, value] of rows) index.add(key, { value })
+                const rangeQuery = index.rangeQuery.bind(index)
+                const truncated = vi
+                  .spyOn(index, `rangeQuery`)
+                  .mockImplementation((options) =>
+                    `from` in options &&
+                    options.from === undefined &&
+                    `to` in options &&
+                    options.to === undefined
+                      ? new Set([`a`])
+                      : rangeQuery(options),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishOrderedReads(index, rows),
+                    ),
+                  )
+                  expect(truncated).toHaveBeenCalledWith({
+                    from: undefined,
+                    fromInclusive: true,
+                    to: undefined,
+                    toInclusive: true,
+                  })
+                } finally {
+                  truncated.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects a double undefined range that loses one owner`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+        {
+          name: `rejects a null bound that drops its undefined peer`,
+          law: `index-update.nullish-membership`,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `index-update.nullish-membership`,
+              plan,
+              observe,
+              () => {
+                const rejections: Array<Error> = []
+                const index = new IndexType(1, new PropRef([`value`]))
+                const rows = new Map<string, NullishIndexValue>([
+                  [`a`, undefined],
+                  [`b`, null],
+                  [`c`, 1],
+                ])
+                for (const [key, value] of rows) index.add(key, { value })
+                const rangeQuery = index.rangeQuery.bind(index)
+                const exactOnly = vi
+                  .spyOn(index, `rangeQuery`)
+                  .mockImplementation((options) =>
+                    `from` in options &&
+                    options.from === null &&
+                    `to` in options &&
+                    options.to === null
+                      ? new Set([`b`])
+                      : rangeQuery(options),
+                  )
+                try {
+                  rejections.push(
+                    rejection(
+                      (error) => /expected/.test(error.message),
+                      () => expectNullishOrderedReads(index, rows),
+                    ),
+                  )
+                  expect(exactOnly).toHaveBeenCalledWith({
+                    from: null,
+                    fromInclusive: true,
+                    to: null,
+                    toInclusive: true,
+                  })
+                } finally {
+                  exactOnly.mockRestore()
+                }
+
+                rejectAt(
+                  `calibration: rejects a null bound that drops its undefined peer`,
+                  rejections[0]!,
+                )
+              },
+            ),
+        },
+      ],
     })
 
-    test(`rejects a skipped undefined-to-null update`, () => {
-      oracleRoute(`calibration`)
+    // The fixed nullish histories. Each starts from an empty index and applies
+    // its direct actions through the shared nullish helper, which compares the
+    // index with the source Map after every action.
+    const runNullishFixed = (actions: ReadonlyArray<NullishIndexAction>) => {
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `a`,
-        value: undefined,
-      })
-      const skipped = vi.spyOn(index, `update`).mockImplementation(() => {})
-      try {
-        expect(() =>
-          applyNullishAction(index, rows, {
-            type: `put`,
-            key: `a`,
-            value: null,
-          }),
-        ).toThrowError(/expected/)
-        expect(skipped).toHaveBeenCalledOnce()
-      } finally {
-        skipped.mockRestore()
-      }
+      for (const action of actions) applyNullishAction(index, rows, action)
+    }
+    oracleProperty({
+      id: `index-update.nullish-fixed`,
+      law: {
+        statement: `Null and undefined preserve exact membership and ordered-read semantics after each direct index action.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `The named fixed nullish histories: single-key transitions, coexisting buckets, IN lists, endpoint and cursor reads, removal, lower bounds and builds.`,
+      },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: [
+        {
+          label: `keeps membership after undefined to null`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `a`, value: null },
+          ],
+        },
+        {
+          label: `keeps membership after null to undefined`,
+          actions: [
+            { type: `put`, key: `a`, value: null },
+            { type: `put`, key: `a`, value: undefined },
+          ],
+        },
+        {
+          label: `keeps membership after defined to undefined`,
+          actions: [
+            { type: `put`, key: `a`, value: 1 },
+            { type: `put`, key: `a`, value: undefined },
+          ],
+        },
+        {
+          label: `keeps membership after undefined to defined`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `a`, value: 1 },
+          ],
+        },
+        {
+          label: `keeps membership after undefined to undefined`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `a`, value: undefined },
+          ],
+        },
+        {
+          label: `keeps coexisting null and undefined buckets distinct`,
+          actions: [
+            { type: `put`, key: `null1`, value: null },
+            { type: `put`, key: `undef1`, value: undefined },
+            { type: `put`, key: `num1`, value: 1 },
+          ],
+        },
+        {
+          label: `returns no undefined key from a nonempty all-defined index`,
+          actions: [
+            { type: `put`, key: `a`, value: 1 },
+            { type: `put`, key: `b`, value: 2 },
+          ],
+        },
+        {
+          label: `unites undefined and defined IN members without distractors`,
+          actions: [
+            { type: `put`, key: `undef`, value: undefined },
+            { type: `put`, key: `one`, value: 1 },
+            { type: `put`, key: `two`, value: 2 },
+            { type: `put`, key: `three`, value: 3 },
+          ],
+        },
+        {
+          label: `returns every undefined owner from a singleton IN list`,
+          actions: [
+            { type: `put`, key: `undef1`, value: undefined },
+            { type: `put`, key: `undef2`, value: undefined },
+            { type: `put`, key: `one`, value: 1 },
+          ],
+        },
+        {
+          label: `distinguishes endpoint reads from explicit undefined cursors`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `b`, value: 1 },
+            { type: `put`, key: `c`, value: 2 },
+          ],
+        },
+        {
+          label: `traverses every undefined owner before continuing to numbers`,
+          actions: [
+            { type: `put`, key: `undef1`, value: undefined },
+            { type: `put`, key: `undef2`, value: undefined },
+            { type: `put`, key: `undef3`, value: undefined },
+            { type: `put`, key: `one`, value: 1 },
+            { type: `put`, key: `two`, value: 2 },
+          ],
+        },
+        {
+          label: `retains the second undefined owner after removing the first`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `b`, value: undefined },
+            { type: `delete`, key: `a` },
+          ],
+        },
+        {
+          label: `distinguishes explicit and omitted undefined lower bounds`,
+          actions: [
+            { type: `put`, key: `undef`, value: undefined },
+            { type: `put`, key: `one`, value: 1 },
+            { type: `put`, key: `two`, value: 2 },
+            { type: `put`, key: `three`, value: 3 },
+          ],
+        },
+        {
+          label: `includes both undefined owners within double undefined bounds`,
+          actions: [
+            { type: `put`, key: `a`, value: undefined },
+            { type: `put`, key: `b`, value: undefined },
+            { type: `put`, key: `c`, value: 1 },
+          ],
+        },
+        {
+          label: `build preserves nulls-first ordered reads and ranges`,
+          // A second build changes insertion order; the model still predicts the
+          // same returned key order and complete upper-bound results.
+          actions: [
+            {
+              type: `build`,
+              entries: [
+                [`undefined`, undefined],
+                [`one`, 1],
+              ],
+            },
+            {
+              type: `build`,
+              entries: [
+                [`one`, 1],
+                [`undefined`, undefined],
+              ],
+            },
+            { type: `put`, key: `two`, value: 2 },
+            {
+              type: `build`,
+              entries: [
+                [`undef2`, undefined],
+                [`null`, null],
+                [`undef1`, undefined],
+                [`one`, 1],
+              ],
+            },
+          ],
+        },
+      ] satisfies Array<{ label: string; actions: Array<NullishIndexAction> }>,
+      label: ({ label }) => label,
+      resolve: ({ actions }) => ({ actions }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.nullish-fixed`,
+          plan,
+          observe,
+          () => runNullishFixed(plan.actions),
+        ),
+      check: forwardAssertionJudgment,
     })
 
-    test(`rejects lookup dispatch that unites nullish buckets`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `null1`,
-        value: null,
-      })
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `undef1`,
-        value: undefined,
-      })
-      const lookup = index.lookup.bind(index)
-      const united = vi
-        .spyOn(index, `lookup`)
-        .mockImplementation((op, value) =>
-          op === `eq` && value === undefined
-            ? new Set([`null1`, `undef1`])
-            : lookup(op, value),
-        )
-      try {
-        expect(() => expectNullishMembership(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(united).toHaveBeenCalledWith(`eq`, undefined)
-      } finally {
-        united.mockRestore()
-      }
-    })
-
-    test(`rejects an exact lookup that loses one undefined owner`, () => {
-      oracleRoute(`calibration`)
+    const runUndefinedStringOwners = () => {
       const index = new IndexType(1, new PropRef([`status`]))
-      const rows = new Map<string, string | undefined>([
+      const rows = new Map<string, string | undefined>()
+      const exactProbes = [undefined, `active`, `inactive`]
+      const inProbes = [[undefined], [undefined, `active`]]
+      for (const [key, value] of [
         [`a`, `active`],
         [`b`, undefined],
         [`c`, `inactive`],
         [`d`, undefined],
-      ])
-      for (const [key, status] of rows) index.add(key, { status })
-      const lookup = index.equalityLookup.bind(index)
-      const truncated = vi
-        .spyOn(index, `equalityLookup`)
-        .mockImplementation((value) =>
-          value === undefined ? new Set([`b`]) : lookup(value),
-        )
-      try {
-        expect(() =>
-          expectExactMembership(index, rows, [undefined], [[undefined]]),
-        ).toThrowError(/expected/)
-        expect(truncated).toHaveBeenCalledWith(undefined)
-      } finally {
-        truncated.mockRestore()
+      ] as const) {
+        index.add(key, { status: value })
+        rows.set(key, value)
+        expectExactMembership(index, rows, exactProbes, inProbes)
       }
-    })
-
-    test(`rejects an IN lookup that drops an undefined operand`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `undef`,
-        value: undefined,
-      })
-      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
-      const lookup = index.inArrayLookup.bind(index)
-      const dropped = vi
-        .spyOn(index, `inArrayLookup`)
-        .mockImplementation((values) =>
-          values.length === 2 && values[0] === 1 && values[1] === undefined
-            ? new Set([`one`])
-            : lookup(values),
-        )
-      try {
-        expect(() => expectNullishMembership(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(dropped).toHaveBeenCalledWith([1, undefined])
-      } finally {
-        dropped.mockRestore()
-      }
-    })
-
-    test(`rejects an IN lookup that loses a same-value owner`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `undef1`,
-        value: undefined,
-      })
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `undef2`,
-        value: undefined,
-      })
-      const lookup = index.inArrayLookup.bind(index)
-      const truncated = vi
-        .spyOn(index, `inArrayLookup`)
-        .mockImplementation((values) =>
-          values.length === 1 && values[0] === undefined
-            ? new Set([`undef1`])
-            : lookup(values),
-        )
-      try {
-        expect(() => expectNullishMembership(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(truncated).toHaveBeenCalledWith([undefined])
-      } finally {
-        truncated.mockRestore()
-      }
-    })
-
-    test(`rejects IN dispatch that returns only its first value group`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>()
-      applyNullishAction(index, rows, {
-        type: `put`,
-        key: `undef`,
-        value: undefined,
-      })
-      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
-      const lookup = index.lookup.bind(index)
-      const firstOnly = vi
-        .spyOn(index, `lookup`)
-        .mockImplementation((op, value) =>
-          op === `in` &&
-          Array.isArray(value) &&
-          value.length === 2 &&
-          value[0] === undefined &&
-          value[1] === 1
-            ? new Set([`undef`])
-            : lookup(op, value),
-        )
-      try {
-        expect(() => expectNullishMembership(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(firstOnly).toHaveBeenCalledWith(`in`, [undefined, 1])
-      } finally {
-        firstOnly.mockRestore()
-      }
-    })
-
-    test(`rejects an endpoint read that drops the undefined owner`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>([
-        [`a`, undefined],
-        [`b`, 1],
-        [`c`, 2],
-      ])
-      for (const [key, value] of rows) index.add(key, { value })
-      const dropped = vi
-        .spyOn(index, `takeFromStart`)
-        .mockImplementation(() => [`b`, `c`])
-      try {
-        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(dropped).toHaveBeenCalled()
-      } finally {
-        dropped.mockRestore()
-      }
-    })
-
-    test(`rejects a cursor that repeats the last undefined owner`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>([
-        [`undef1`, undefined],
-        [`undef2`, undefined],
-        [`undef3`, undefined],
-        [`one`, 1],
-        [`two`, 2],
-      ])
-      for (const [key, value] of rows) index.add(key, { value })
-      const take = index.take.bind(index)
-      const repeated = vi
-        .spyOn(index, `take`)
-        .mockImplementation((n, from, filter) =>
-          n === 10 && from === undefined
-            ? [`undef3`, `one`, `two`]
-            : take(n, from, filter),
-        )
-      try {
-        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(repeated).toHaveBeenCalledWith(10, undefined)
-      } finally {
-        repeated.mockRestore()
-      }
-    })
-
-    test(`rejects a forward range that drops an explicit undefined lower bound`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>([
-        [`undef`, undefined],
-        [`one`, 1],
-        [`two`, 2],
-        [`three`, 3],
-      ])
-      for (const [key, value] of rows) index.add(key, { value })
-      const rangeQuery = index.rangeQuery.bind(index)
-      const dropped = vi
-        .spyOn(index, `rangeQuery`)
-        .mockImplementation((options) =>
-          `from` in options &&
-          options.from === undefined &&
-          options.to === 2 &&
-          options.fromInclusive === true
-            ? new Set([`one`, `two`])
-            : rangeQuery(options),
-        )
-      try {
-        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(dropped).toHaveBeenCalledWith({
-          from: undefined,
-          fromInclusive: true,
-          to: 2,
-          toInclusive: true,
-        })
-      } finally {
-        dropped.mockRestore()
-      }
-    })
-
-    test(`rejects a double undefined range that loses one owner`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>([
-        [`a`, undefined],
-        [`b`, undefined],
-        [`c`, 1],
-      ])
-      for (const [key, value] of rows) index.add(key, { value })
-      const rangeQuery = index.rangeQuery.bind(index)
-      const truncated = vi
-        .spyOn(index, `rangeQuery`)
-        .mockImplementation((options) =>
-          `from` in options &&
-          options.from === undefined &&
-          `to` in options &&
-          options.to === undefined
-            ? new Set([`a`])
-            : rangeQuery(options),
-        )
-      try {
-        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(truncated).toHaveBeenCalledWith({
-          from: undefined,
-          fromInclusive: true,
-          to: undefined,
-          toInclusive: true,
-        })
-      } finally {
-        truncated.mockRestore()
-      }
-    })
-
-    test(`rejects a null bound that drops its undefined peer`, () => {
-      oracleRoute(`calibration`)
-      const index = new IndexType(1, new PropRef([`value`]))
-      const rows = new Map<string, NullishIndexValue>([
-        [`a`, undefined],
-        [`b`, null],
-        [`c`, 1],
-      ])
-      for (const [key, value] of rows) index.add(key, { value })
-      const rangeQuery = index.rangeQuery.bind(index)
-      const exactOnly = vi
-        .spyOn(index, `rangeQuery`)
-        .mockImplementation((options) =>
-          `from` in options &&
-          options.from === null &&
-          `to` in options &&
-          options.to === null
-            ? new Set([`b`])
-            : rangeQuery(options),
-        )
-      try {
-        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
-          /expected/,
-        )
-        expect(exactOnly).toHaveBeenCalledWith({
-          from: null,
-          fromInclusive: true,
-          to: null,
-          toInclusive: true,
-        })
-      } finally {
-        exactOnly.mockRestore()
-      }
+    }
+    oracleProperty({
+      id: `index-update.nullish-string-owners`,
+      law: {
+        statement: `Exact and IN lookups find every undefined owner beside distinct string values after each add.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `One fixed history of four string-or-undefined status rows with exact and IN probes.`,
+      },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: [`finds every undefined owner beside distinct string values`],
+      label: (name) => name,
+      resolve: (name) => ({ name }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.nullish-string-owners`,
+          plan,
+          observe,
+          runUndefinedStringOwners,
+        ),
+      check: forwardAssertionJudgment,
     })
   },
 )
@@ -1439,52 +1813,96 @@ describe.each(indexTypes)(
       `$name comparator`,
       ({ compare, ordersNumbers }) => {
         describe.each(probes)(`$name`, ({ run, atomic }) => {
-          test.each([0, 1, 4, 5, 32, 33, 65])(
-            `throws exactly when it receives an invalid result after %s rows`,
-            (size) => {
-              oracleRoute(`case`)
-              const { index, step } = createRecordedIndex(compare)
-              const rows = new Map<string, IndexValue>()
-              for (let value = 0; value < size; value++) {
-                if (step(() => index.add(String(value), { value }))) return
-                rows.set(String(value), value)
-              }
-              if (step(() => run(index, size)) && atomic && ordersNumbers)
-                expectIndexMatchesModel(index, rows)
+          const runInvalidComparator = (size: number) => {
+            const { index, step } = createRecordedIndex(compare)
+            const rows = new Map<string, IndexValue>()
+            for (let value = 0; value < size; value++) {
+              if (step(() => index.add(String(value), { value }))) return
+              rows.set(String(value), value)
+            }
+            if (step(() => run(index, size)) && atomic && ordersNumbers)
+              expectIndexMatchesModel(index, rows)
+          }
+          oracleProperty({
+            id: `index-update.invalid-comparator`,
+            law: {
+              statement: `An index operation throws a comparator TypeError exactly when its comparator returned an invalid result, and an atomic rejected write leaves the numeric model intact.`,
+              authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+              limits: `Three comparators by seven probes, after 0, 1, 4, 5, 32, 33 and 65 accepted rows.`,
             },
-          )
+            owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+            histories: [0, 1, 4, 5, 32, 33, 65],
+            label: (size) =>
+              `throws exactly when it receives an invalid result after ${size} rows`,
+            resolve: (size) => ({ size }),
+            model: recordedAssertionJudgment,
+            driver: (plan, observe) =>
+              recordAssertionJudgment(
+                `index-update.invalid-comparator`,
+                plan,
+                observe,
+                () => runInvalidComparator(plan.size),
+              ),
+            check: forwardAssertionJudgment,
+          })
         })
       },
     )
-    test(`crashes at the second write of the reported string rows`, () => {
-      oracleRoute(`fixed history`)
-      const { index, step } = createRecordedIndex((left, right) => left - right)
-      expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
-      expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
-    })
-    test(`a rejected remove leaves its row indexed`, () => {
-      oracleRoute(`fixed history`)
-      const { index, step } = createRecordedIndex((left, right) => left - right)
-      expect(step(() => index.add(`x`, { value: `x` }))).toBe(false)
-      expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
-      expect(index.keyCount).toBe(1)
-      expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
-    })
-    test(`a rejected remove preserves other exact values`, () => {
-      oracleRoute(`fixed history`)
-      const { index, step } = createRecordedIndex((left, right) =>
-        left === `x` && right === `x`
-          ? NaN
-          : String(left).localeCompare(String(right)),
-      )
-      for (const value of [`a`, `x`, `z`]) {
-        expect(step(() => index.add(value, { value }))).toBe(false)
-      }
-      expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
-      expect(index.keyCount).toBe(3)
-      for (const value of [`a`, `x`, `z`]) {
-        expect(index.lookup(`eq`, value)).toEqual(new Set([value]))
-      }
+    const runRejectedComparatorWrite = (name: string) => {
+      if (name === `crashes at the second write of the reported string rows`) {
+        const { index, step } = createRecordedIndex(
+          (left, right) => left - right,
+        )
+        expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
+        expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
+      } else if (name === `a rejected remove leaves its row indexed`) {
+        const { index, step } = createRecordedIndex(
+          (left, right) => left - right,
+        )
+        expect(step(() => index.add(`x`, { value: `x` }))).toBe(false)
+        expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
+        expect(index.keyCount).toBe(1)
+        expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
+      } else if (name === `a rejected remove preserves other exact values`) {
+        const { index, step } = createRecordedIndex((left, right) =>
+          left === `x` && right === `x`
+            ? NaN
+            : String(left).localeCompare(String(right)),
+        )
+        for (const value of [`a`, `x`, `z`]) {
+          expect(step(() => index.add(value, { value }))).toBe(false)
+        }
+        expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
+        expect(index.keyCount).toBe(3)
+        for (const value of [`a`, `x`, `z`]) {
+          expect(index.lookup(`eq`, value)).toEqual(new Set([value]))
+        }
+      } else throw new Error(`unknown rejected comparator history: ${name}`)
+    }
+    oracleProperty({
+      id: `index-update.rejected-comparator-writes`,
+      law: {
+        statement: `A write that receives an invalid comparator result throws, and a rejected remove leaves its row and the other exact values indexed.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `Three fixed string-row histories: the second write of the reported rows, and a rejected remove with and without peers.`,
+      },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: [
+        `crashes at the second write of the reported string rows`,
+        `a rejected remove leaves its row indexed`,
+        `a rejected remove preserves other exact values`,
+      ],
+      label: (name) => name,
+      resolve: (name) => ({ name }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.rejected-comparator-writes`,
+          plan,
+          observe,
+          () => runRejectedComparatorWrite(plan.name),
+        ),
+      check: forwardAssertionJudgment,
     })
   },
 )
@@ -1573,33 +1991,55 @@ describe.each([
       return { collection, sync: () => syncApi! }
     }
 
-    test.each(writePaths)(
-      `$name crashes the collection instead of publishing partial success`,
-      async ({ write }) => {
-        oracleRoute(`case`)
-        const { collection, sync } = createNamedCollection()
-        await withCollectionCleanup(collection, () => {
-          const published = new Set<number>()
-          collection.subscribeChanges((changes) => {
-            for (const change of changes)
-              if (change.type === `delete`) published.delete(change.key)
-              else published.add(change.key)
-          })
-
-          write(collection, sync, { id: 1, name: `ann` })
-          expect(collection.status).toBe(`ready`)
-          expectPublishedKeysMatchCollection(published, collection)
-
-          expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
-            TypeError,
-          )
-          expect(collection.status).toBe(`crashed`)
-          expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
-            CollectionInErrorStateError,
-          )
+    const runCollectionBoundary = async ({
+      write,
+    }: (typeof writePaths)[number]) => {
+      const { collection, sync } = createNamedCollection()
+      await withCollectionCleanup(collection, () => {
+        const published = new Set<number>()
+        collection.subscribeChanges((changes) => {
+          for (const change of changes)
+            if (change.type === `delete`) published.delete(change.key)
+            else published.add(change.key)
         })
+
+        write(collection, sync, { id: 1, name: `ann` })
+        expect(collection.status).toBe(`ready`)
+        expectPublishedKeysMatchCollection(published, collection)
+
+        expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
+          TypeError,
+        )
+        expect(collection.status).toBe(`crashed`)
+        expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
+          CollectionInErrorStateError,
+        )
+      })
+    }
+    oracleProperty({
+      id: `index-update.collection-boundary`,
+      law: {
+        statement: `An index throw during a Collection write crashes the Collection instead of publishing partial success: published keys equal live keys until the throw, then the status is crashed and the next mutation throws.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `BasicIndex and BTreeIndex with a subtracting comparator over string names, through an optimistic insert and a sync commit.`,
       },
-    )
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: writePaths.map(({ name }) => name),
+      label: (name) =>
+        `${name} crashes the collection instead of publishing partial success`,
+      resolve: (name) => ({
+        path: writePaths.find((candidate) => candidate.name === name)!,
+      }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.collection-boundary`,
+          plan,
+          observe,
+          () => runCollectionBoundary(plan.path),
+        ),
+      check: forwardAssertionJudgment,
+    })
   },
 )
 
@@ -1633,101 +2073,7 @@ function expectStringMembershipMatches<Value extends string>(
 }
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
-  test(`rejects stale retired identity outputs without rejecting live reuse`, () => {
-    oracleRoute(`calibration`)
-    const symbol = Symbol(`same group`)
-    const retired = { key: `old`, groupId: 0, value: [symbol] }
-    const live = { key: `live`, groupId: 0, value: [symbol] }
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(retired.key, retired)
-    index.add(live.key, live)
-    index.remove(retired.key, retired)
-    const identities = [retired.value, live.value]
-    expectExactIdentities(index, [live], identities)
-    const lookup = index.equalityLookup.bind(index)
-    const wrongOutput = vi
-      .spyOn(index, `equalityLookup`)
-      .mockImplementation((value) =>
-        value === retired.value ? new Set([retired.key]) : lookup(value),
-      )
-    try {
-      // The former live-only observation accepts this stale retired bucket.
-      expectExactIdentities(index, [live], [live.value])
-      expect(() =>
-        expectExactIdentities(index, [live], identities),
-      ).toThrowError(/expected/)
-    } finally {
-      wrongOutput.mockRestore()
-    }
-    const reused = { ...retired, key: `reused` }
-    index.add(reused.key, reused)
-    expectExactIdentities(index, [live, reused], identities)
-  })
-
-  test(`rejects append-only replacement state and accepts replacement continuation`, () => {
-    oracleRoute(`calibration`)
-    const index = new IndexType(1, new PropRef([`value`]))
-    index.add(`old`, { value: -1 })
-    index.add(`new`, { value: 1 })
-    const replacement = new Map([[`new`, 1]])
-    // This is the raw state an append-only build would expose, not a source mutant.
-    expect(() => expectIndexMatchesModel(index, replacement)).toThrowError(
-      /expected/,
-    )
-    index.build([[`new`, { value: 1 }]])
-    expectIndexMatchesModel(index, replacement)
-    index.update(`new`, { value: 1 }, { value: 2 })
-    expectIndexMatchesModel(index, new Map([[`new`, 2]]))
-  })
-
-  test(`custom facts reject mutated payload groups and insertion-order ties`, () => {
-    oracleRoute(`calibration`)
-    const rows = [1, 1, 2].map((groupId, position) =>
-      Object.freeze({
-        key: String(position),
-        groupId,
-        value: { groupId, position },
-      }),
-    )
-    const identities = rows.map((row) => row.value)
-    const index = new IndexType(1, new PropRef([`value`]), undefined, {
-      compareFn: (left, right) =>
-        (left as { groupId: number }).groupId -
-        (right as { groupId: number }).groupId,
-    })
-    for (const row of [...rows].reverse())
-      index.add(row.key, { value: row.value })
-    expectCustomGroups(index, rows, identities)
-    const wrongOutput = vi
-      .spyOn(index, `takeFromStart`)
-      .mockReturnValue([`1`, `0`, `2`])
-    try {
-      expect(() => expectCustomGroups(index, rows, identities)).toThrowError(
-        /expected/,
-      )
-    } finally {
-      wrongOutput.mockRestore()
-    }
-    // The driver-visible objects can change without rewriting the authority.
-    for (const row of rows) row.value.groupId = 0
-    index.build(rows.map((row) => [row.key, { value: row.value }]))
-    expect(rows.map((row) => row.groupId)).toEqual([1, 1, 2])
-    // Re-reading payload fields as facts reproduces the old false green.
-    const driftedAuthority = rows.map((row) => ({
-      ...row,
-      groupId: row.value.groupId,
-    }))
-    expectCustomGroups(index, driftedAuthority, identities)
-    expect(() => expectCustomGroups(index, rows, identities)).toThrowError(
-      /expected/,
-    )
-    for (const row of rows) row.value.groupId = row.groupId
-    index.build(rows.map((row) => [row.key, { value: row.value }]))
-    expectCustomGroups(index, rows, identities)
-  })
-
-  test(`moves exact string membership across a comparator-equal update`, () => {
-    oracleRoute(`fixed history`)
+  const runComparatorEqualUpdate = () => {
     // The input facts put A/a in one order group and B/b in another. The
     // comparator implements that order, but the expected exact memberships
     // come from the source Map's unchanged strings, not from the comparator.
@@ -1806,6 +2152,29 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
     } finally {
       wrongLookup.mockRestore()
     }
+  }
+  oracleProperty({
+    id: `index-update.comparator-equal-update`,
+    law: {
+      statement: `Exact string membership follows the source value across comparator-equal updates, while a range over a comparator group returns every key of that group.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `One fixed history over A/a and B/b in two comparator groups, with two inline wrong-dispatch spies that the shared check must reject.`,
+    },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: [
+      `moves exact string membership across a comparator-equal update`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.comparator-equal-update`,
+        plan,
+        observe,
+        runComparatorEqualUpdate,
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // Group grammar: 2..20 generated IDs in 0..4, with a forced duplicate first
@@ -1965,6 +2334,61 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
         () => runExactIdentityHistory(plan.history),
       ),
     check: forwardAssertionJudgment,
+    // The calibration replays its old body as a mutant driver.
+    calibrations: [
+      {
+        name: `rejects stale retired identity outputs without rejecting live reuse`,
+        law: `index-update.exact-identity`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.exact-identity`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const symbol = Symbol(`same group`)
+              const retired = { key: `old`, groupId: 0, value: [symbol] }
+              const live = { key: `live`, groupId: 0, value: [symbol] }
+              const index = new IndexType(1, new PropRef([`value`]))
+              index.add(retired.key, retired)
+              index.add(live.key, live)
+              index.remove(retired.key, retired)
+              const identities = [retired.value, live.value]
+              clean(() => expectExactIdentities(index, [live], identities))
+              const lookup = index.equalityLookup.bind(index)
+              const wrongOutput = vi
+                .spyOn(index, `equalityLookup`)
+                .mockImplementation((value) =>
+                  value === retired.value
+                    ? new Set([retired.key])
+                    : lookup(value),
+                )
+              try {
+                // The former live-only observation accepts this stale retired bucket.
+                clean(() => expectExactIdentities(index, [live], [live.value]))
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () => expectExactIdentities(index, [live], identities),
+                  ),
+                )
+              } finally {
+                wrongOutput.mockRestore()
+              }
+              const reused = { ...retired, key: `reused` }
+              index.add(reused.key, reused)
+              clean(() =>
+                expectExactIdentities(index, [live, reused], identities),
+              )
+
+              rejectAt(
+                `calibration: rejects stale retired identity outputs without rejecting live reuse`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+    ],
   })
 
   const runCustomComparatorHistory = async (generatedGroups: Array<number>) => {
@@ -2096,6 +2520,82 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
         () => runCustomComparatorHistory(plan.history),
       ),
     check: forwardAssertionJudgment,
+    // The calibration replays its old body as a mutant driver.
+    calibrations: [
+      {
+        name: `custom facts reject mutated payload groups and insertion-order ties`,
+        law: `index-update.custom-comparator`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `index-update.custom-comparator`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              const rows = [1, 1, 2].map((groupId, position) =>
+                Object.freeze({
+                  key: String(position),
+                  groupId,
+                  value: { groupId, position },
+                }),
+              )
+              const identities = rows.map((row) => row.value)
+              const index = new IndexType(
+                1,
+                new PropRef([`value`]),
+                undefined,
+                {
+                  compareFn: (left, right) =>
+                    (left as { groupId: number }).groupId -
+                    (right as { groupId: number }).groupId,
+                },
+              )
+              for (const row of [...rows].reverse())
+                index.add(row.key, { value: row.value })
+              clean(() => expectCustomGroups(index, rows, identities))
+              const wrongOutput = vi
+                .spyOn(index, `takeFromStart`)
+                .mockReturnValue([`1`, `0`, `2`])
+              try {
+                rejections.push(
+                  rejection(
+                    (error) => /expected/.test(error.message),
+                    () => expectCustomGroups(index, rows, identities),
+                  ),
+                )
+              } finally {
+                wrongOutput.mockRestore()
+              }
+              // The driver-visible objects can change without rewriting the authority.
+              for (const row of rows) row.value.groupId = 0
+              index.build(rows.map((row) => [row.key, { value: row.value }]))
+              expect(rows.map((row) => row.groupId)).toEqual([1, 1, 2])
+              // Re-reading payload fields as facts reproduces the old false green.
+              const driftedAuthority = rows.map((row) => ({
+                ...row,
+                groupId: row.value.groupId,
+              }))
+              clean(() =>
+                expectCustomGroups(index, driftedAuthority, identities),
+              )
+              rejections.push(
+                rejection(
+                  (error) => /expected/.test(error.message),
+                  () => expectCustomGroups(index, rows, identities),
+                ),
+              )
+              for (const row of rows) row.value.groupId = row.groupId
+              index.build(rows.map((row) => [row.key, { value: row.value }]))
+              clean(() => expectCustomGroups(index, rows, identities))
+
+              rejectAt(
+                `calibration: custom facts reject mutated payload groups and insertion-order ties`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+    ],
   })
 })
 
@@ -2141,25 +2641,41 @@ function expectConservedIndexKeys(
 describe.each(indexTypes)(
   `%s mixed-value key conservation`,
   (_indexName, IndexType) => {
-    test.each(mixedRows)(
-      `keeps every surviving key once after deleting $id`,
-      (removed) => {
-        oracleRoute(`case`)
-        const index = new IndexType(1, new PropRef([`value`]))
-        const rows = new Map<string, number | string>()
-        for (const row of mixedRows) {
-          index.add(row.id, row)
-          rows.set(row.id, row.value)
-          expectConservedIndexKeys(index, rows)
-        }
-        index.remove(removed.id, removed)
-        rows.delete(removed.id)
+    const runMixedKeyDeletion = (removed: (typeof mixedRows)[number]) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, number | string>()
+      for (const row of mixedRows) {
+        index.add(row.id, row)
+        rows.set(row.id, row.value)
         expectConservedIndexKeys(index, rows)
+      }
+      index.remove(removed.id, removed)
+      rows.delete(removed.id)
+      expectConservedIndexKeys(index, rows)
+    }
+    oracleProperty({
+      id: `index-update.mixed-key-deletion`,
+      law: {
+        statement: `A full ordered read of a mixed number/string index returns each live source key once after each add and a deletion.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `The fixed mixed number/string rows, each deleted once after all are added; key conservation only, not relative order.`,
       },
-    )
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: mixedRows,
+      label: ({ id }) => `keeps every surviving key once after deleting ${id}`,
+      resolve: (removed) => ({ removed }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.mixed-key-deletion`,
+          plan,
+          observe,
+          () => runMixedKeyDeletion(plan.removed),
+        ),
+      check: forwardAssertionJudgment,
+    })
 
-    test(`keeps one copy of each key after a mixed-value delete, update, and add`, () => {
-      oracleRoute(`fixed history`)
+    const runMixedKeyHistory = () => {
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, number | string>()
       const add = (id: string, value: number | string) => {
@@ -2178,9 +2694,32 @@ describe.each(indexTypes)(
       rows.set(`b`, 2)
       expectConservedIndexKeys(index, rows)
       add(`a`, `2`)
+    }
+    oracleProperty({
+      id: `index-update.mixed-key-history`,
+      law: {
+        statement: `A full ordered read of a mixed number/string index returns each live source key once after each action.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `One fixed history of adds, a delete, a cross-type update and a re-add over equal-looking number and string values.`,
+      },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: [
+        `keeps one copy of each key after a mixed-value delete, update, and add`,
+      ],
+      label: (name) => name,
+      resolve: (name) => ({ name }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.mixed-key-history`,
+          plan,
+          observe,
+          runMixedKeyHistory,
+        ),
+      check: forwardAssertionJudgment,
     })
 
-    test.each([
+    const temporalOwnerRows = [
       {
         name: `ZonedDateTime`,
         first:
@@ -2195,26 +2734,51 @@ describe.each(indexTypes)(
         second: Temporal.Duration.from({ nanoseconds: 10 }),
         text: `tanstack-db:temporal:Temporal.Duration:time:5:fake`,
       },
-    ])(
-      `keeps $name and ordinary-string owners after deletion`,
-      ({ first, second, text }) => {
-        oracleRoute(`case`)
-        const index = new IndexType(1, new PropRef([`value`]))
-        const rows = new Map<string, unknown>()
-        for (const [id, value] of [
-          [`a`, first],
-          [`b`, second],
-          [`c`, text],
-        ] as const) {
-          index.add(id, { id, value })
-          rows.set(id, value)
-          expectConservedIndexKeys(index, rows)
-        }
-        index.remove(`b`, { id: `b`, value: second })
-        rows.delete(`b`)
+    ]
+    const runTemporalOwners = ({
+      first,
+      second,
+      text,
+    }: (typeof temporalOwnerRows)[number]) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, unknown>()
+      for (const [id, value] of [
+        [`a`, first],
+        [`b`, second],
+        [`c`, text],
+      ] as const) {
+        index.add(id, { id, value })
+        rows.set(id, value)
         expectConservedIndexKeys(index, rows)
+      }
+      index.remove(`b`, { id: `b`, value: second })
+      rows.delete(`b`)
+      expectConservedIndexKeys(index, rows)
+    }
+    oracleProperty({
+      id: `index-update.temporal-key-owners`,
+      law: {
+        statement: `A full ordered read returns each live source key once when Temporal values share an index with an ordinary string that imitates their encoding.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `ZonedDateTime and Duration values beside one imitating string, after adds and one deletion.`,
       },
-    )
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: temporalOwnerRows.map(({ name }) => name),
+      label: (name) =>
+        `keeps ${name} and ordinary-string owners after deletion`,
+      resolve: (name) => ({
+        row: temporalOwnerRows.find((candidate) => candidate.name === name)!,
+      }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.temporal-key-owners`,
+          plan,
+          observe,
+          () => runTemporalOwners(plan.row),
+        ),
+      check: forwardAssertionJudgment,
+    })
   },
 )
 
@@ -2222,8 +2786,7 @@ describe.each([
   [`BasicIndex`, BasicIndex],
   [`BTreeIndex`, BTreeIndex],
 ] as const)(`%s mixed-value public snapshot`, (_indexName, IndexType) => {
-  test(`returns each surviving key once after a source deletion`, async () => {
-    oracleRoute(`fixed history`)
+  const runMixedPublicSnapshot = async () => {
     const options = mockSyncCollectionOptions<{
       id: string
       value: number | string
@@ -2266,6 +2829,27 @@ describe.each([
         rows,
       )
     })
+  }
+  oracleProperty({
+    id: `index-update.mixed-public-snapshot`,
+    law: {
+      statement: `A complete bounded indexed public snapshot returns each surviving source key once after a source deletion.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `One fixed history: the mixed rows, one synced deletion, then an optimized ordered read through the created index.`,
+    },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: [`returns each surviving key once after a source deletion`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.mixed-public-snapshot`,
+        plan,
+        observe,
+        runMixedPublicSnapshot,
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -2307,8 +2891,7 @@ function expectBinaryValueMembership(
 }
 
 describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
-  test(`does not retain an ordered entry after equal-content removal`, () => {
-    oracleRoute(`fixed history`)
+  const runBinaryOwnership = () => {
     const index = new IndexType(1, new PropRef([`value`]))
     const rows = new Map<string, Uint8Array>()
     const bytes = (value = 1) => new Uint8Array([value])
@@ -2336,6 +2919,27 @@ describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
     index.update(`d`, { value: oldBytes }, { value: bytes() })
     rows.set(`d`, bytes())
     check()
+  }
+  oracleProperty({
+    id: `index-update.binary-ownership`,
+    law: {
+      statement: `Exact membership and both complete index reads of byte values agree with the source Map after each action.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `One fixed history of equal-content and distinct byte adds, removes and an update; byte order is not part of the law.`,
+    },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: [`does not retain an ordered entry after equal-content removal`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.binary-ownership`,
+        plan,
+        observe,
+        runBinaryOwnership,
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -2367,8 +2971,7 @@ function predictMonthDayOwners(
 describe.each(indexTypes)(
   `%s unordered Temporal equality`,
   (_name, IndexType) => {
-    test(`accepts distinct PlainMonthDay values for exact lookup`, async () => {
-      oracleRoute(`fixed history`)
+    const runMonthDayEquality = async () => {
       const rows = [
         { id: `jan`, value: Temporal.PlainMonthDay.from(`--01-01`) },
         { id: `feb`, value: Temporal.PlainMonthDay.from(`--02-01`) },
@@ -2402,6 +3005,27 @@ describe.each(indexTypes)(
         expect(read()).toEqual([...expected].sort())
         expect(lookup).toHaveBeenCalled()
       })
+    }
+    oracleProperty({
+      id: `index-update.month-day-equality`,
+      law: {
+        statement: `Exact lookup and public eq reads of PlainMonthDay values return the source keys with the same month code and day, before and after index creation.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `One fixed two-row history probing a copy of February 1.`,
+      },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: [`accepts distinct PlainMonthDay values for exact lookup`],
+      label: (name) => name,
+      resolve: (name) => ({ name }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.month-day-equality`,
+          plan,
+          observe,
+          runMonthDayEquality,
+        ),
+      check: forwardAssertionJudgment,
     })
   },
 )

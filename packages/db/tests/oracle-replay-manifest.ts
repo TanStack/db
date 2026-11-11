@@ -1148,7 +1148,7 @@ const ownerGroups: ReadonlyArray<
   ],
   [`db/tests/proxy-oracle.test.ts`, `proxy`, `callback-history`],
   [
-    `db/e2e/indexed-db/cross-tab-oracle.spec.ts`,
+    `db/e2e/indexed-db/cross-tab-witness.spec.ts`,
     `indexeddb`,
     `browser-native-history`,
   ],

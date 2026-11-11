@@ -6,7 +6,6 @@
  * compare identity are outside this law. React and Preact are receiving drivers.
  */
 import { expect } from 'vitest'
-import { declareOracle } from './oracle-declaration.js'
 
 export const boundOptionHistories = (
   [`getKey`, `schema`, `both`] as const
@@ -239,20 +238,3 @@ export function boundSchemaGrammar(history: BoundSchemaHistory) {
 export const boundSchemaReachStates = boundSchemaHistories.flatMap((history) =>
   boundSchemaCuts.map((cut) => `${boundSchemaGrammar(history)}/${cut}`),
 )
-
-declareOracle({
-  grammar: [boundOptionHistories, boundSchemaHistories],
-  model: [
-    modelBoundSchemaBinding,
-    modelBoundSchemaKey,
-    modelBoundSchemaLabel,
-    modelBoundSchemaRows,
-    modelBoundSchemaMutation,
-  ],
-  check: [
-    checkBoundOptions,
-    checkBoundSchemaRows,
-    checkBoundSchemaValues,
-    checkBoundSchemaMutation,
-  ],
-})

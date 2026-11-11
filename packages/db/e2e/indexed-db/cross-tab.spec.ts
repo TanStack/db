@@ -1,4 +1,4 @@
-// Ordinary native cross-tab scenarios. cross-tab-oracle.spec.ts owns the
+// Ordinary native cross-tab scenarios. cross-tab-witness.spec.ts owns the
 // browser-side history and publication laws; these two tests compare with
 // literal observations, and one is a harness self-test of the primary-mismatch
 // cleanup. Their helpers are in cross-tab-support.ts.

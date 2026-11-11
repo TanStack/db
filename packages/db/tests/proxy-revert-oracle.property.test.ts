@@ -1,10 +1,44 @@
-import { describe, expect, it as vitestIt } from 'vitest'
-import { fc } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
 import { createChangeProxy } from '../src/proxy'
-import { oracleFixedSeed, oracleReplayTest, oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty, pass } from './oracle-property'
+import {
+  FIELDS,
+  FIXED_SEED,
+  HOLE,
+  S,
+  Secret,
+  applicable,
+  canon,
+  classWriteArb,
+  encode,
+  expectedChanges,
+  historyArb,
+  nativeHistoryArb,
+  nestedRoundTripArb,
+  partialRevertArb,
+  prim,
+  realize,
+  realizeRoot,
+  resolve,
+  signedZeroArb,
+  signedZeroHistory,
+  signedZeroPaths,
+  step,
+  typedKind,
+} from './proxy-revert-model-oracle'
 import type { Observation, Verdict } from './oracle-property'
+import type {
+  Field,
+  History,
+  MapValue,
+  NativeHistory,
+  NativeRow,
+  Op,
+  Primitive,
+  Root,
+  SignedZeroInput,
+  Spec,
+} from './proxy-revert-model-oracle'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -78,578 +112,6 @@ import type { Observation, Verdict } from './oracle-property'
  *   draft reads a class instance of the original row as a plain object; the
  *   detachment contract owns that boundary.
  */
-
-// ---------------------------------------------------------------------------
-// Value specs. The model works on plain-data specs and never reads a draft.
-
-const S = Symbol(`s`)
-const PRIMITIVES = [0, -0, 1, NaN, `a`, `b`, null, undefined] as const
-type Primitive = (typeof PRIMITIVES)[number]
-
-type Spec =
-  | { k: `prim`; v: Primitive }
-  | { k: `date`; t: number }
-  | { k: `regex`; flags: string; lastIndex: number }
-  | { k: `map`; entries: Array<[string, MapValue]> }
-  | { k: `set`; values: Array<string> }
-  | { k: `array`; items: Array<Primitive | typeof HOLE> }
-  | { k: `obj`; a?: Primitive; b?: Primitive; sym?: Primitive }
-  | { k: `rows`; rows: Array<{ a: Primitive }> }
-  | { k: `typed`; ctor: TypedKind; values: Array<number> }
-  | { k: `url`; path: `a` | `b` }
-  | { k: `secret`; v: number }
-  | { k: `point`; a: Primitive }
-
-// A Map value is a primitive or a nested Set, so draft rules must also hold
-// inside Map values.
-type MapValue = Primitive | { set: Array<string> }
-const isSetValue = (v: MapValue): v is { set: Array<string> } =>
-  typeof v === `object` && v !== null
-const mapValue = (v: MapValue): unknown =>
-  isSetValue(v) ? [`set`, v.set] : prim(v)
-
-// Typed arrays, including a subclass whose constructor ignores its argument,
-// so a clone must not rely on constructor arguments to copy elements.
-type TypedKind = `f64` | `u8` | `vec3`
-class Vec3 extends Float64Array {
-  constructor() {
-    super(3)
-  }
-}
-const typedKind = (value: unknown): TypedKind | undefined =>
-  value instanceof Vec3
-    ? `vec3`
-    : value instanceof Float64Array
-      ? `f64`
-      : value instanceof Uint8Array
-        ? `u8`
-        : undefined
-
-// A class whose only state is a private field, so it has no enumerable keys.
-class Secret {
-  #v: number
-  constructor(v: number) {
-    this.#v = v
-  }
-  read(): number {
-    return this.#v
-  }
-}
-
-// A class instance with one enumerable key.
-class Point {
-  constructor(public a: unknown) {}
-}
-
-const HOLE = Symbol(`hole`)
-const FIELDS = [`f`, `g`, `h`] as const
-type Field = (typeof FIELDS)[number]
-type Root = Partial<Record<Field, Spec>>
-
-// Draft equality as an encoding. Equal encodings mean equal values.
-function encode(spec: Spec | undefined): string {
-  return JSON.stringify(canon(spec))
-}
-// SameValue preserves the sign that String(number) and JSON numbers erase.
-// This token is independent of the production draft comparator.
-function numberToken(value: number): string {
-  return Object.is(value, -0) ? `-0` : String(value)
-}
-function prim(v: Primitive | undefined): unknown {
-  return typeof v === `number` ? [`num`, numberToken(v)] : [typeof v, v ?? null]
-}
-function canon(spec: Spec | undefined): unknown {
-  if (spec === undefined) return [`absent`]
-  switch (spec.k) {
-    case `prim`:
-      return prim(spec.v)
-    case `date`:
-      return [`date`, String(spec.t)]
-    case `regex`:
-      return [`regex`, spec.flags, spec.lastIndex]
-    case `map`:
-      return [`map`, spec.entries.map(([key, v]) => [key, mapValue(v)])]
-    case `set`:
-      return [`set`, spec.values]
-    case `array`:
-      return [
-        `array`,
-        spec.items.length,
-        spec.items.flatMap((v, i) => (v === HOLE ? [] : [[i, prim(v)]])),
-      ]
-    case `obj`:
-      return [
-        `obj`,
-        `a` in spec ? prim(spec.a) : `-`,
-        `b` in spec ? prim(spec.b) : `-`,
-        `sym` in spec ? prim(spec.sym) : `-`,
-      ]
-    case `rows`:
-      return [`rows`, spec.rows.map((row) => prim(row.a))]
-    case `typed`:
-      // Elements follow rule 1: -0 differs from 0 and NaN equals NaN. The class is
-      // part of the value.
-      return [`typed`, spec.ctor, spec.values.map(numberToken)]
-    case `url`:
-      return [`url`, spec.path]
-    case `point`:
-      // Rule 9: a Point compares by keys with the plain object a draft
-      // snapshot holds, so it encodes as that object.
-      return canon({ k: `obj`, a: spec.a })
-    case `secret`:
-      // Rule 9. Secrets appear only as written values, and the original is
-      // never a Secret, so the value is enough to compare written states.
-      return [`secret`, spec.v]
-  }
-}
-
-function realize(spec: Spec): unknown {
-  switch (spec.k) {
-    case `prim`:
-      return spec.v
-    case `date`:
-      return new Date(spec.t)
-    case `regex`: {
-      const value = new RegExp(`x`, spec.flags)
-      value.lastIndex = spec.lastIndex
-      return value
-    }
-    case `map`:
-      return new Map(
-        spec.entries.map(([key, v]) => [
-          key,
-          isSetValue(v) ? new Set(v.set) : v,
-        ]),
-      )
-    case `set`:
-      return new Set(spec.values)
-    case `array`: {
-      const value: Array<unknown> = []
-      value.length = spec.items.length
-      spec.items.forEach((v, i) => {
-        if (v !== HOLE) value[i] = v
-      })
-      return value
-    }
-    case `obj`: {
-      const value: Record<PropertyKey, unknown> = {}
-      if (`a` in spec) value.a = spec.a
-      if (`b` in spec) value.b = spec.b
-      if (`sym` in spec) value[S] = spec.sym
-      return value
-    }
-    case `rows`:
-      return spec.rows.map((row) => ({ a: row.a }))
-    case `typed`: {
-      if (spec.ctor === `u8`) return Uint8Array.from(spec.values)
-      const value =
-        spec.ctor === `vec3` ? new Vec3() : new Float64Array(spec.values.length)
-      spec.values.forEach((v, i) => (value[i] = v))
-      return value
-    }
-    case `url`:
-      return new URL(`https://example.com/${spec.path}`)
-    case `secret`:
-      return new Secret(spec.v)
-    case `point`:
-      return new Point(spec.a)
-  }
-}
-
-function realizeRoot(root: Root): Record<string, unknown> {
-  const value: Record<string, unknown> = {}
-  for (const field of FIELDS) {
-    const spec = root[field]
-    if (spec) value[field] = realize(spec)
-  }
-  return value
-}
-
-// ---------------------------------------------------------------------------
-// Grammar.
-
-const primArb = fc.constantFrom(...PRIMITIVES)
-const specArb: fc.Arbitrary<Spec> = fc.oneof(
-  { weight: 2, arbitrary: primArb.map((v) => ({ k: `prim` as const, v })) },
-  fc.constantFrom(0, 1, NaN).map((t) => ({ k: `date` as const, t })),
-  fc.record({
-    k: fc.constant(`regex` as const),
-    flags: fc.constantFrom(``, `g`),
-    lastIndex: fc.nat(1),
-  }),
-  fc
-    .uniqueArray(
-      fc.tuple(
-        fc.constantFrom(`x`, `y`),
-        fc.oneof(
-          primArb,
-          fc
-            .uniqueArray(fc.constantFrom(`x`, `y`), { maxLength: 2 })
-            .map((set): MapValue => ({ set })),
-        ),
-      ),
-      { maxLength: 2, selector: ([key]) => key },
-    )
-    .map((entries) => ({ k: `map` as const, entries })),
-  fc
-    .uniqueArray(fc.constantFrom(`x`, `y`), { maxLength: 2 })
-    .map((values) => ({ k: `set` as const, values })),
-  fc
-    .array(fc.oneof(primArb, fc.constant(HOLE)), { maxLength: 3 })
-    .map((items) => ({ k: `array` as const, items })),
-  fc.record(
-    { k: fc.constant(`obj` as const), a: primArb, b: primArb, sym: primArb },
-    { requiredKeys: [`k`] },
-  ),
-  fc
-    .array(fc.record({ a: primArb }), { minLength: 1, maxLength: 3 })
-    .map((rows) => ({ k: `rows` as const, rows })),
-  fc.oneof(
-    fc
-      .array(fc.constantFrom(0, -0, 1, NaN, 1.5), { maxLength: 3 })
-      .map((values): Spec => ({ k: `typed`, ctor: `f64`, values })),
-    fc
-      .array(fc.constantFrom(0, 1, 255), { maxLength: 3 })
-      .map((values): Spec => ({ k: `typed`, ctor: `u8`, values })),
-    fc
-      .tuple(...[0, 1, 2].map(() => fc.constantFrom(0, -0, 1, NaN)))
-      .map((values): Spec => ({ k: `typed`, ctor: `vec3`, values })),
-  ),
-  fc
-    .constantFrom(`a` as const, `b` as const)
-    .map((path): Spec => ({ k: `url`, path })),
-  primArb.map((a): Spec => ({ k: `point`, a })),
-)
-// Written values may also be class instances with only private state.
-const writtenArb: fc.Arbitrary<Spec> = fc.oneof(
-  { weight: 9, arbitrary: specArb },
-  fc.constantFrom(1, 2).map((v): Spec => ({ k: `secret`, v })),
-)
-
-type Op =
-  | { op: `set`; field: Field; value: Spec }
-  // `same` writes the original row's own value back instead of an equal
-  // fresh value, so identity-based paths are reached too.
-  | { op: `revert`; field: Field; same?: boolean }
-  | { op: `delete`; field: Field }
-  | { op: `nested`; field: Field; key: `a` | `b` | `sym`; value: Primitive }
-  | { op: `nestedDelete`; field: Field; key: `a` | `b` | `sym` }
-  | { op: `index`; field: Field; index: number; value: Primitive }
-  | { op: `forOf`; field: Field; index: number; value: Primitive }
-
-const opArb: fc.Arbitrary<Op> = fc.oneof(
-  fc.record({
-    op: fc.constant(`set` as const),
-    field: fc.constantFrom(...FIELDS),
-    value: writtenArb,
-  }),
-  {
-    weight: 3,
-    arbitrary: fc.record({
-      op: fc.constant(`revert` as const),
-      field: fc.constantFrom(...FIELDS),
-      same: fc.boolean(),
-    }),
-  },
-  fc.record({
-    op: fc.constant(`delete` as const),
-    field: fc.constantFrom(...FIELDS),
-  }),
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      op: fc.constant(`nested` as const),
-      field: fc.constantFrom(...FIELDS),
-      key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
-      value: primArb,
-    }),
-  },
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      op: fc.constant(`nestedDelete` as const),
-      field: fc.constantFrom(...FIELDS),
-      key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
-    }),
-  },
-  fc.record({
-    op: fc.constant(`index` as const),
-    field: fc.constantFrom(...FIELDS),
-    index: fc.nat(2),
-    value: primArb,
-  }),
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      op: fc.constant(`forOf` as const),
-      field: fc.constantFrom(...FIELDS),
-      index: fc.nat(2),
-      value: primArb,
-    }),
-  },
-)
-
-// Generated ops also include a revert of a field that is currently changed,
-// so most reverts run the set trap's revert branch. `resolve` turns it into a
-// concrete revert of one changed field, or nothing.
-type GeneratedOp = Op | { op: `revertChanged`; pick: number }
-type History = { original: Root; ops: Array<GeneratedOp> }
-
-function resolve(state: Root, original: Root, op: GeneratedOp): Op | undefined {
-  if (op.op !== `revertChanged`) return op
-  const changed = FIELDS.filter(
-    (field) => encode(state[field]) !== encode(original[field]),
-  )
-  return changed.length > 0
-    ? { op: `revert`, field: changed[op.pick % changed.length]! }
-    : undefined
-}
-const historyArb: fc.Arbitrary<History> = fc.record({
-  original: fc.record(
-    { f: specArb, g: specArb, h: specArb },
-    { requiredKeys: [] },
-  ),
-  ops: fc.array(
-    fc.oneof(
-      { weight: 3, arbitrary: opArb as fc.Arbitrary<GeneratedOp> },
-      {
-        weight: 2,
-        arbitrary: fc.record({
-          op: fc.constant(`revertChanged` as const),
-          pick: fc.nat(2),
-        }),
-      },
-    ),
-    { minLength: 1, maxLength: 8 },
-  ),
-})
-
-// Partial reverts by construction: change two or three fields in some order,
-// then revert every changed field but one. The model decides whether a change
-// survives (a new value can equal the original).
-const partialRevertArb: fc.Arbitrary<History> = fc
-  .record({
-    original: fc.record({ f: specArb, g: specArb, h: specArb }),
-    values: fc.tuple(specArb, specArb, specArb),
-    order: fc.shuffledSubarray([...FIELDS], { minLength: 2 }),
-    keep: fc.nat(2),
-  })
-  .map(({ original, values, order, keep }) => {
-    const kept = order[keep % order.length]!
-    const changes: Array<GeneratedOp> = order.map((field) => ({
-      op: `set`,
-      field,
-      value: values[FIELDS.indexOf(field)]!,
-    }))
-    const reverts: Array<GeneratedOp> = order
-      .filter((field) => field !== kept)
-      .map((field) => ({ op: `revert`, field }))
-    return { original, ops: [...changes, ...reverts] }
-  })
-
-// Two writes of URLs or keyless Secrets to one field, with up to two other
-// ops in between and an optional revert. The original field is a URL, an
-// object without keys, or any value.
-const urlOrSecretArb: fc.Arbitrary<Spec> = fc.oneof(
-  fc
-    .constantFrom(`a` as const, `b` as const)
-    .map((path): Spec => ({ k: `url`, path })),
-  fc.constantFrom(1, 2).map((v): Spec => ({ k: `secret`, v })),
-)
-const classWriteArb: fc.Arbitrary<History> = fc
-  .record({
-    f: fc.oneof(
-      urlOrSecretArb.filter((spec) => spec.k === `url`),
-      fc.constant<Spec>({ k: `obj` }),
-      specArb,
-    ),
-    g: specArb,
-    first: urlOrSecretArb,
-    second: urlOrSecretArb,
-    between: fc.array(opArb, { maxLength: 2 }),
-    revert: fc.boolean(),
-  })
-  .map(({ f, g, first, second, between, revert }): History => ({
-    original: { f, g },
-    ops: [
-      { op: `set`, field: `f`, value: first },
-      ...between,
-      { op: `set`, field: `f`, value: second },
-      ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
-    ],
-  }))
-
-// Nested round trips. Either add a key the original object lacks and later
-// delete it, or change an existing key and later write its original value
-// back, with up to two other ops in between. Other ops may leave other fields
-// changed, so the nested object must stop counting as a change on its own.
-const nestedRoundTripArb: fc.Arbitrary<History> = fc
-  .record({
-    a: primArb,
-    sym: fc.option(primArb, { nil: undefined }),
-    g: specArb,
-    mode: fc.constantFrom(
-      `delete` as const,
-      `restore` as const,
-      `replace` as const,
-    ),
-    value: primArb,
-    between: fc.array(opArb, { maxLength: 2 }),
-  })
-  .map(({ a, sym, g, mode, value, between }): History => {
-    const f: Spec = sym === undefined ? { k: `obj`, a } : { k: `obj`, a, sym }
-    // `replace` assigns a new object without `a`; the nested write that
-    // restores `a` makes the field equal its original again.
-    const replacement: Spec =
-      sym === undefined ? { k: `obj` } : { k: `obj`, sym }
-    const first: GeneratedOp =
-      mode === `delete`
-        ? { op: `nested`, field: `f`, key: `b`, value }
-        : mode === `replace`
-          ? { op: `set`, field: `f`, value: replacement }
-          : { op: `nested`, field: `f`, key: `a`, value }
-    const last: GeneratedOp =
-      mode === `delete`
-        ? { op: `nestedDelete`, field: `f`, key: `b` }
-        : { op: `nested`, field: `f`, key: `a`, value: a }
-    return { original: { f, g }, ops: [first, ...between, last] }
-  })
-
-// A sign-only write must survive each assignment path. Random fields, nested
-// keys and typed-array positions vary the access path without another value
-// change masking a lost zero sign. Both signs are legal; Uint8Array is excluded
-// because native integer conversion cannot retain -0. Removing a path loses
-// its draft boundary; removing the sign distinction admits the old comparator.
-const signedZeroPaths = [`root`, `nested`, `float64`] as const
-const signedZeroArb = fc.record({
-  path: fc.constantFrom(...signedZeroPaths),
-  field: fc.constantFrom(...FIELDS),
-  negative: fc.boolean(),
-  key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
-  width: fc.integer({ min: 1, max: 3 }),
-  index: fc.nat(2),
-})
-type SignedZeroInput =
-  typeof signedZeroArb extends fc.Arbitrary<infer T> ? T : never
-function signedZeroHistory(input: SignedZeroInput): History {
-  const before = input.negative ? -0 : 0
-  const after = input.negative ? 0 : -0
-  let original: Spec
-  let op: Op
-  if (input.path === `root`) {
-    original = { k: `prim`, v: before }
-    op = { op: `set`, field: input.field, value: { k: `prim`, v: after } }
-  } else if (input.path === `nested`) {
-    original = { k: `obj`, [input.key]: before }
-    op = { op: `nested`, field: input.field, key: input.key, value: after }
-  } else {
-    const index = input.index % input.width
-    original = {
-      k: `typed`,
-      ctor: `f64`,
-      values: Array.from({ length: input.width }, (_, at) =>
-        at === index ? before : 1,
-      ),
-    }
-    op = { op: `index`, field: input.field, index, value: after }
-  }
-  return { original: { [input.field]: original }, ops: [op] }
-}
-
-// ---------------------------------------------------------------------------
-// Model: apply each op to the spec state. An op whose target has the wrong
-// shape does nothing, and the driver skips it the same way.
-
-function applicable(state: Root, original: Root, op: Op): boolean {
-  const current = state[op.field]
-  switch (op.op) {
-    case `set`:
-      return true
-    case `revert`:
-      // Restoring a deleted field is a revert too. Skip only when the field
-      // is absent both originally and now.
-      return original[op.field] !== undefined || current !== undefined
-    case `delete`:
-      return current !== undefined
-    case `nested`:
-      return current?.k === `obj`
-    case `nestedDelete`:
-      return current?.k === `obj` && op.key in current
-    case `index`:
-      // Float typed arrays store any number exactly; Uint8Array would coerce.
-      if (current?.k === `typed`)
-        return (
-          current.ctor !== `u8` &&
-          typeof op.value === `number` &&
-          op.index < current.values.length
-        )
-      return current?.k === `array` && op.index < current.items.length
-    case `forOf`:
-      return current?.k === `rows` && op.index < current.rows.length
-  }
-}
-
-function step(state: Root, original: Root, op: Op): Root {
-  const next: Root = { ...state }
-  const current = state[op.field]
-  switch (op.op) {
-    case `set`:
-      next[op.field] = op.value
-      break
-    case `revert`:
-      if (original[op.field] === undefined) delete next[op.field]
-      else next[op.field] = original[op.field]
-      break
-    case `delete`:
-      delete next[op.field]
-      break
-    case `nested`:
-      next[op.field] = {
-        ...(current as Extract<Spec, { k: `obj` }>),
-        [op.key]: op.value,
-      }
-      break
-    case `nestedDelete`: {
-      const obj = { ...(current as Extract<Spec, { k: `obj` }>) }
-      delete obj[op.key]
-      next[op.field] = obj
-      break
-    }
-    case `index`: {
-      if (current?.k === `typed`) {
-        const values = [...current.values]
-        values[op.index] = op.value as number
-        next[op.field] = { ...current, values }
-        break
-      }
-      const items = [...(current as Extract<Spec, { k: `array` }>).items]
-      items[op.index] = op.value
-      next[op.field] = { k: `array`, items }
-      break
-    }
-    case `forOf`: {
-      const rows = (current as Extract<Spec, { k: `rows` }>).rows.map(
-        (row) => ({ ...row }),
-      )
-      rows[op.index] = { a: op.value }
-      next[op.field] = { k: `rows`, rows }
-      break
-    }
-  }
-  return next
-}
-
-function expectedChanges(
-  original: Root,
-  final: Root,
-): Map<Field, Spec | undefined> {
-  const changes = new Map<Field, Spec | undefined>()
-  for (const field of FIELDS) {
-    if (encode(final[field]) === encode(original[field])) continue
-    changes.set(field, final[field])
-  }
-  return changes
-}
 
 // ---------------------------------------------------------------------------
 // Driver.
@@ -882,10 +344,6 @@ function expectHistoryObservation(
     ).toBe(observed.before[field])
 }
 
-function expectHistory(history: History): void {
-  expectHistoryObservation(history, driveHistory(history))
-}
-
 function checkHistory(
   history: History,
   trace: ReadonlyArray<Observation>,
@@ -932,15 +390,12 @@ const revertLaw = {
 // runs its recorded history once and every other test stands aside. A seed
 // alone reseeds the random campaigns.
 
-const FIXED_SEED = 2026101
 const WRITE_HISTORY = `proxy.revert-history`
 const NESTED_ROUND_TRIPS = `proxy.revert-nested-round-trips`
 const CLASS_WRITES = `proxy.revert-class-writes`
 const PARTIAL_REVERTS = `proxy.revert-partial-reverts`
 const NATIVE_HISTORIES = `proxy.revert-native-histories`
 const SIGNED_ZERO = `proxy.revert-signed-zero`
-
-const it = oracleReplayTest(vitestIt)
 
 describe(`draft revert oracle`, () => {
   // These six fixed histories reconstruct the scalar false-green witness and
@@ -1040,373 +495,282 @@ describe(`draft revert oracle`, () => {
     check: checkHistory,
   })
 
-  // Positive execution witness: the fixed campaign reaches each operation, a
-  // partial revert (some change survives one revert), a full revert, and a
-  // change made only under a nested symbol key.
-  it(`reaches every operation and both revert outcomes in the fixed campaign`, () => {
-    oracleRoute(`fixed seed`)
-    const sample = fc.sample(
-      historyArb,
-      oracleFixedSeed(FIXED_SEED, { numRuns: 400 }),
-    )
-    const reached = new Set<string>()
-    let partial = 0
-    let full = 0
-    let symbolOnly = 0
-    // Reverts that write the row's own object back, a class instance included.
-    let sameObjectReverts = 0
-    let samePointReverts = 0
-    for (const { original, ops } of sample) {
-      let state: Root = { ...original }
-      // A revert counts only when the field differs from its original, so
-      // the set trap's revert branch runs. Other reverts write an equal value.
-      let effectiveReverts = 0
-      for (const generated of ops) {
-        const op = resolve(state, original, generated)
-        if (op === undefined || !applicable(state, original, op)) continue
-        reached.add(op.op)
-        const restored = original[op.field]
-        if (
-          op.op === `revert` &&
-          op.same &&
-          restored !== undefined &&
-          !(restored.k === `prim` || restored.k === `date`)
-        )
-          sameObjectReverts +=
-            restored.k === `point` ? (samePointReverts++, 1) : 1
-        if (
-          op.op === `revert` &&
-          encode(state[op.field]) !== encode(original[op.field])
-        )
-          effectiveReverts++
-        state = step(state, original, op)
-      }
-      const changed = expectedChanges(original, state).size
-      if (effectiveReverts > 0 && changed > 0) partial++
-      if (effectiveReverts > 0 && changed === 0) full++
-      for (const field of FIELDS) {
-        const a = original[field]
-        const b = state[field]
-        if (
-          a?.k === `obj` &&
-          b?.k === `obj` &&
-          a.sym !== b.sym &&
-          encode({ ...a, sym: undefined }) ===
-            encode({ ...b, sym: undefined }) &&
-          !Object.is(a.sym, b.sym) &&
-          encode(a) !== encode(b)
-        )
-          symbolOnly++
-      }
-    }
-    expect([...reached].sort()).toEqual([
-      `delete`,
-      `forOf`,
-      `index`,
-      `nested`,
-      `nestedDelete`,
-      `revert`,
-      `set`,
-    ])
-    expect(partial).toBeGreaterThanOrEqual(5)
-    expect(full).toBeGreaterThanOrEqual(30)
-    expect(symbolOnly).toBeGreaterThan(0)
-    expect(sameObjectReverts).toBeGreaterThanOrEqual(20)
-    expect(samePointReverts).toBeGreaterThan(0)
-  })
-
-  // Writes that a keyless comparison would call equal: another URL, or a
-  // Secret over another Secret or over an object without keys.
-  it(`reaches writes over URLs and keyless objects in the fixed campaign`, () => {
-    oracleRoute(`fixed seed`)
-    let urlWrites = 0
-    let keylessWrites = 0
-    const sample = fc.sample(
-      classWriteArb,
-      oracleFixedSeed(FIXED_SEED, { numRuns: 200 }),
-    )
-    for (const { original, ops } of sample) {
-      let state: Root = { ...original }
-      for (const generated of ops) {
-        const op = resolve(state, original, generated)
-        if (op === undefined || !applicable(state, original, op)) continue
-        const current = state[op.field]
-        if (op.op === `set` && op.value.k === `url` && current?.k === `url`)
-          if (op.value.path !== current.path) urlWrites++
-        if (op.op === `set` && op.value.k === `secret`)
-          if (
-            (current?.k === `secret` && current.v !== op.value.v) ||
-            (current?.k === `obj` && encode(current) === encode({ k: `obj` }))
-          )
-            keylessWrites++
-        state = step(state, original, op)
-      }
-    }
-    expect(urlWrites).toBeGreaterThanOrEqual(10)
-    expect(keylessWrites).toBeGreaterThanOrEqual(10)
-  })
-
-  // Fixed histories.
-  it.each<[string, History]>([
+  // Fixed histories. The generated grammars cannot take these back, so one
+  // enumerated property replays them through the campaign's model, draft
+  // driver and final getChanges/draft/isolation check.
+  const fixedHistories: Array<{ name: string; history: History }> = (
     [
-      `reverting one of two changed fields keeps the other change`,
-      {
-        original: { f: { k: `prim`, v: `a` }, g: { k: `prim`, v: `a` } },
-        ops: [
-          { op: `set`, field: `f`, value: { k: `prim`, v: `b` } },
-          { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
-          { op: `revert`, field: `f` },
-        ],
-      },
-    ],
-    [
-      `adding a nested key and deleting it again is not a change`,
-      {
-        original: { f: { k: `obj`, a: 1 } },
-        ops: [
-          { op: `nested`, field: `f`, key: `b`, value: 2 },
-          { op: `nestedDelete`, field: `f`, key: `b` },
-        ],
-      },
-    ],
-    [
-      `restoring a nested value is not a change while a sibling stays changed`,
-      {
-        original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
-        ops: [
-          { op: `nested`, field: `f`, key: `a`, value: 2 },
-          { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
-          { op: `nested`, field: `f`, key: `a`, value: 1 },
-        ],
-      },
-    ],
-    [
-      `deleting an added nested key is not a change while a sibling stays changed`,
-      {
-        original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
-        ops: [
-          { op: `nested`, field: `f`, key: `b`, value: 2 },
-          { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
-          { op: `nestedDelete`, field: `f`, key: `b` },
-        ],
-      },
-    ],
-    [
-      `a replaced object that returns to its new value is still a change`,
-      {
-        original: { f: { k: `obj`, a: 1 } },
-        ops: [
-          { op: `set`, field: `f`, value: { k: `obj`, a: 2 } },
-          { op: `nested`, field: `f`, key: `a`, value: 3 },
-          { op: `nested`, field: `f`, key: `a`, value: 2 },
-        ],
-      },
-    ],
-    [
-      `a replaced object restored to its original by a nested write reports at most its original value`,
-      {
-        original: { f: { k: `obj`, a: 0 } },
-        ops: [
-          { op: `set`, field: `f`, value: { k: `obj` } },
-          { op: `nested`, field: `f`, key: `a`, value: 0 },
-        ],
-      },
-    ],
-    [
-      `a replaced object restored with its symbol key kept reports at most its original value`,
-      {
-        original: {
-          f: { k: `obj`, a: 0, sym: 1 },
-          g: { k: `map`, entries: [] },
+      [
+        `reverting one of two changed fields keeps the other change`,
+        {
+          original: { f: { k: `prim`, v: `a` }, g: { k: `prim`, v: `a` } },
+          ops: [
+            { op: `set`, field: `f`, value: { k: `prim`, v: `b` } },
+            { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+            { op: `revert`, field: `f` },
+          ],
         },
-        ops: [
-          { op: `nested`, field: `f`, key: `a`, value: 0 },
-          { op: `set`, field: `f`, value: { k: `obj`, sym: 1 } },
-          { op: `nested`, field: `f`, key: `a`, value: 0 },
-        ],
-      },
-    ],
-    [
-      `an array replaced by an empty Set is a change`,
-      {
-        original: { g: { k: `array`, items: [] } },
-        ops: [{ op: `set`, field: `g`, value: { k: `set`, values: [] } }],
-      },
-    ],
-    [
-      `a key added with the value undefined stays a change after a sibling revert`,
-      {
-        original: { f: { k: `obj`, a: 0 } },
-        ops: [
-          { op: `nested`, field: `f`, key: `b`, value: 0 },
-          { op: `set`, field: `h`, value: { k: `prim`, v: undefined } },
-          { op: `nestedDelete`, field: `f`, key: `b` },
-        ],
-      },
-    ],
-    [
-      `a typed-array subclass keeps its elements in the draft`,
-      {
-        original: { f: { k: `typed`, ctor: `vec3`, values: [1, 2, 3] } },
-        ops: [{ op: `index`, field: `f`, index: 0, value: 9 }],
-      },
-    ],
-    [
-      `rewriting NaN into a Float64Array is not a change`,
-      {
-        original: { f: { k: `typed`, ctor: `f64`, values: [NaN, 1] } },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: { k: `typed`, ctor: `f64`, values: [NaN, 1] },
-          },
-          { op: `index`, field: `f`, index: 0, value: NaN },
-        ],
-      },
-    ],
-    [
-      `a typed array of another class is a change`,
-      {
-        original: { f: { k: `typed`, ctor: `f64`, values: [1, 0] } },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: { k: `typed`, ctor: `u8`, values: [1, 0] },
-          },
-        ],
-      },
-    ],
-    [
-      `deleting a field and writing its original back is a revert`,
-      {
-        original: { f: { k: `prim`, v: `a` }, g: { k: `prim`, v: `a` } },
-        ops: [
-          { op: `delete`, field: `f` },
-          { op: `revert`, field: `f` },
-        ],
-      },
-    ],
-    [
-      `a nested write through for...of records the row change`,
-      {
-        original: { f: { k: `rows`, rows: [{ a: 0 }, { a: 1 }] } },
-        ops: [{ op: `forOf`, field: `f`, index: 1, value: `a` }],
-      },
-    ],
-    [
-      `a nested write through for...of that restores the value is a revert`,
-      {
-        original: { f: { k: `rows`, rows: [{ a: 0 }, { a: 1 }] } },
-        ops: [
-          { op: `forOf`, field: `f`, index: 1, value: `a` },
-          { op: `forOf`, field: `f`, index: 1, value: 1 },
-        ],
-      },
-    ],
-    [
-      `a change made only under a nested symbol key is recorded`,
-      {
-        original: { f: { k: `obj`, a: 1, sym: `a` } },
-        ops: [{ op: `nested`, field: `f`, key: `sym`, value: `b` }],
-      },
-    ],
-    [
-      `replacing a nested object with one that differs only under a symbol key is recorded`,
-      {
-        original: { f: { k: `obj`, a: 1, sym: `a` } },
-        ops: [{ op: `set`, field: `f`, value: { k: `obj`, a: 1, sym: `b` } }],
-      },
-    ],
-    [
-      `Map entry order is a change`,
-      {
-        original: {
-          f: {
-            k: `map`,
-            entries: [
-              [`x`, 1],
-              [`y`, 0],
-            ],
-          },
+      ],
+      [
+        `adding a nested key and deleting it again is not a change`,
+        {
+          original: { f: { k: `obj`, a: 1 } },
+          ops: [
+            { op: `nested`, field: `f`, key: `b`, value: 2 },
+            { op: `nestedDelete`, field: `f`, key: `b` },
+          ],
         },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: {
+      ],
+      [
+        `restoring a nested value is not a change while a sibling stays changed`,
+        {
+          original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
+          ops: [
+            { op: `nested`, field: `f`, key: `a`, value: 2 },
+            { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+            { op: `nested`, field: `f`, key: `a`, value: 1 },
+          ],
+        },
+      ],
+      [
+        `deleting an added nested key is not a change while a sibling stays changed`,
+        {
+          original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
+          ops: [
+            { op: `nested`, field: `f`, key: `b`, value: 2 },
+            { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+            { op: `nestedDelete`, field: `f`, key: `b` },
+          ],
+        },
+      ],
+      [
+        `a replaced object that returns to its new value is still a change`,
+        {
+          original: { f: { k: `obj`, a: 1 } },
+          ops: [
+            { op: `set`, field: `f`, value: { k: `obj`, a: 2 } },
+            { op: `nested`, field: `f`, key: `a`, value: 3 },
+            { op: `nested`, field: `f`, key: `a`, value: 2 },
+          ],
+        },
+      ],
+      [
+        `a replaced object restored to its original by a nested write reports at most its original value`,
+        {
+          original: { f: { k: `obj`, a: 0 } },
+          ops: [
+            { op: `set`, field: `f`, value: { k: `obj` } },
+            { op: `nested`, field: `f`, key: `a`, value: 0 },
+          ],
+        },
+      ],
+      [
+        `a replaced object restored with its symbol key kept reports at most its original value`,
+        {
+          original: {
+            f: { k: `obj`, a: 0, sym: 1 },
+            g: { k: `map`, entries: [] },
+          },
+          ops: [
+            { op: `nested`, field: `f`, key: `a`, value: 0 },
+            { op: `set`, field: `f`, value: { k: `obj`, sym: 1 } },
+            { op: `nested`, field: `f`, key: `a`, value: 0 },
+          ],
+        },
+      ],
+      [
+        `an array replaced by an empty Set is a change`,
+        {
+          original: { g: { k: `array`, items: [] } },
+          ops: [{ op: `set`, field: `g`, value: { k: `set`, values: [] } }],
+        },
+      ],
+      [
+        `a key added with the value undefined stays a change after a sibling revert`,
+        {
+          original: { f: { k: `obj`, a: 0 } },
+          ops: [
+            { op: `nested`, field: `f`, key: `b`, value: 0 },
+            { op: `set`, field: `h`, value: { k: `prim`, v: undefined } },
+            { op: `nestedDelete`, field: `f`, key: `b` },
+          ],
+        },
+      ],
+      [
+        `a typed-array subclass keeps its elements in the draft`,
+        {
+          original: { f: { k: `typed`, ctor: `vec3`, values: [1, 2, 3] } },
+          ops: [{ op: `index`, field: `f`, index: 0, value: 9 }],
+        },
+      ],
+      [
+        `rewriting NaN into a Float64Array is not a change`,
+        {
+          original: { f: { k: `typed`, ctor: `f64`, values: [NaN, 1] } },
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: { k: `typed`, ctor: `f64`, values: [NaN, 1] },
+            },
+            { op: `index`, field: `f`, index: 0, value: NaN },
+          ],
+        },
+      ],
+      [
+        `a typed array of another class is a change`,
+        {
+          original: { f: { k: `typed`, ctor: `f64`, values: [1, 0] } },
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: { k: `typed`, ctor: `u8`, values: [1, 0] },
+            },
+          ],
+        },
+      ],
+      [
+        `deleting a field and writing its original back is a revert`,
+        {
+          original: { f: { k: `prim`, v: `a` }, g: { k: `prim`, v: `a` } },
+          ops: [
+            { op: `delete`, field: `f` },
+            { op: `revert`, field: `f` },
+          ],
+        },
+      ],
+      [
+        `a nested write through for...of records the row change`,
+        {
+          original: { f: { k: `rows`, rows: [{ a: 0 }, { a: 1 }] } },
+          ops: [{ op: `forOf`, field: `f`, index: 1, value: `a` }],
+        },
+      ],
+      [
+        `a nested write through for...of that restores the value is a revert`,
+        {
+          original: { f: { k: `rows`, rows: [{ a: 0 }, { a: 1 }] } },
+          ops: [
+            { op: `forOf`, field: `f`, index: 1, value: `a` },
+            { op: `forOf`, field: `f`, index: 1, value: 1 },
+          ],
+        },
+      ],
+      [
+        `a change made only under a nested symbol key is recorded`,
+        {
+          original: { f: { k: `obj`, a: 1, sym: `a` } },
+          ops: [{ op: `nested`, field: `f`, key: `sym`, value: `b` }],
+        },
+      ],
+      [
+        `replacing a nested object with one that differs only under a symbol key is recorded`,
+        {
+          original: { f: { k: `obj`, a: 1, sym: `a` } },
+          ops: [{ op: `set`, field: `f`, value: { k: `obj`, a: 1, sym: `b` } }],
+        },
+      ],
+      [
+        `Map entry order is a change`,
+        {
+          original: {
+            f: {
               k: `map`,
               entries: [
-                [`y`, 0],
                 [`x`, 1],
+                [`y`, 0],
               ],
             },
           },
-        ],
-      },
-    ],
-    [
-      `a reordered Set inside a Map value is a change`,
-      {
-        original: { f: { k: `map`, entries: [[`x`, { set: [`x`, `y`] }]] } },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: { k: `map`, entries: [[`x`, { set: [`y`, `x`] }]] },
-          },
-        ],
-      },
-    ],
-    [
-      `Set value order is a change`,
-      {
-        original: { f: { k: `set`, values: [`x`, `y`] } },
-        ops: [
-          { op: `set`, field: `f`, value: { k: `set`, values: [`y`, `x`] } },
-        ],
-      },
-    ],
-    [
-      `RegExp lastIndex is a change`,
-      {
-        original: { f: { k: `regex`, flags: `g`, lastIndex: 0 } },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: { k: `regex`, flags: `g`, lastIndex: 1 },
-          },
-        ],
-      },
-    ],
-    [
-      `a hole replaced by undefined is a change`,
-      {
-        original: { f: { k: `array`, items: [HOLE, 1] } },
-        ops: [
-          {
-            op: `set`,
-            field: `f`,
-            value: { k: `array`, items: [undefined, 1] },
-          },
-        ],
-      },
-    ],
-    [
-      `a zero-sign rewrite changes while NaN remains equal`,
-      {
-        original: { f: { k: `prim`, v: 0 }, g: { k: `prim`, v: NaN } },
-        ops: [
-          { op: `set`, field: `f`, value: { k: `prim`, v: -0 } },
-          { op: `set`, field: `g`, value: { k: `prim`, v: NaN } },
-        ],
-      },
-    ],
-  ])(`%s`, (_name, history) => {
-    oracleRoute(`fixed history`)
-    return expectHistory(history)
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: {
+                k: `map`,
+                entries: [
+                  [`y`, 0],
+                  [`x`, 1],
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      [
+        `a reordered Set inside a Map value is a change`,
+        {
+          original: { f: { k: `map`, entries: [[`x`, { set: [`x`, `y`] }]] } },
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: { k: `map`, entries: [[`x`, { set: [`y`, `x`] }]] },
+            },
+          ],
+        },
+      ],
+      [
+        `Set value order is a change`,
+        {
+          original: { f: { k: `set`, values: [`x`, `y`] } },
+          ops: [
+            { op: `set`, field: `f`, value: { k: `set`, values: [`y`, `x`] } },
+          ],
+        },
+      ],
+      [
+        `RegExp lastIndex is a change`,
+        {
+          original: { f: { k: `regex`, flags: `g`, lastIndex: 0 } },
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: { k: `regex`, flags: `g`, lastIndex: 1 },
+            },
+          ],
+        },
+      ],
+      [
+        `a hole replaced by undefined is a change`,
+        {
+          original: { f: { k: `array`, items: [HOLE, 1] } },
+          ops: [
+            {
+              op: `set`,
+              field: `f`,
+              value: { k: `array`, items: [undefined, 1] },
+            },
+          ],
+        },
+      ],
+      [
+        `a zero-sign rewrite changes while NaN remains equal`,
+        {
+          original: { f: { k: `prim`, v: 0 }, g: { k: `prim`, v: NaN } },
+          ops: [
+            { op: `set`, field: `f`, value: { k: `prim`, v: -0 } },
+            { op: `set`, field: `g`, value: { k: `prim`, v: NaN } },
+          ],
+        },
+      ],
+    ] satisfies Array<[string, History]>
+  ).map(([name, history]) => ({ name, history }))
+  oracleProperty({
+    id: `proxy.revert-fixed-histories`,
+    law: revertLaw,
+    owns: [`src/proxy.ts`],
+    // Some fixed histories hold symbol keys or values, which are not history
+    // data, so each history is its name and resolve looks up its value.
+    histories: fixedHistories.map(({ name }) => name),
+    label: (name) => name,
+    resolve: (name) =>
+      fixedHistories.find((entry) => entry.name === name)!.history,
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
   })
 })
 
@@ -1433,46 +797,6 @@ describe(`draft revert oracle`, () => {
 //   When it equals the original, `f` may be reported only if the history wrote
 //   the live `f` value, and then only with its final value.
 // - Reading the draft gives the model's final row.
-
-type NativeRow = { x: number; f: { arr: Array<number>; g: { a?: number } } }
-type NativeOp =
-  | { op: `push`; v: number }
-  | { op: `pop` }
-  | { op: `reverse` }
-  | { op: `assignArr`; items: Array<number> }
-  | { op: `restoreArr` }
-  | { op: `replaceG` }
-  | { op: `setGa`; v: number }
-  | { op: `retain` }
-  | { op: `pushHandle`; v: number }
-  | { op: `setX`; v: number }
-
-const smallInt = fc.integer({ min: 0, max: 2 })
-const nativeOpArb: fc.Arbitrary<NativeOp> = fc.oneof(
-  smallInt.map((v): NativeOp => ({ op: `push`, v })),
-  fc.constant<NativeOp>({ op: `pop` }),
-  fc.constant<NativeOp>({ op: `reverse` }),
-  fc
-    .array(smallInt, { maxLength: 3 })
-    .map((items): NativeOp => ({ op: `assignArr`, items })),
-  { weight: 2, arbitrary: fc.constant<NativeOp>({ op: `restoreArr` }) },
-  fc.constant<NativeOp>({ op: `replaceG` }),
-  { weight: 2, arbitrary: smallInt.map((v): NativeOp => ({ op: `setGa`, v })) },
-  fc.constant<NativeOp>({ op: `retain` }),
-  smallInt.map((v): NativeOp => ({ op: `pushHandle`, v })),
-  smallInt.map((v): NativeOp => ({ op: `setX`, v })),
-)
-type NativeHistory = { original: NativeRow; ops: Array<NativeOp> }
-const nativeHistoryArb: fc.Arbitrary<NativeHistory> = fc.record({
-  original: fc.record({
-    x: smallInt,
-    f: fc.record({
-      arr: fc.array(smallInt, { maxLength: 3 }),
-      g: fc.record({ a: smallInt }),
-    }),
-  }),
-  ops: fc.array(nativeOpArb, { minLength: 1, maxLength: 8 }),
-})
 
 const cloneRow = (row: NativeRow): NativeRow => ({
   x: row.x,
@@ -1610,53 +934,63 @@ function expectNativeResult(
   )
 }
 
-function expectNativeHistory(history: NativeHistory): void {
-  expectNativeResult(history, driveNative(history))
+function checkNativeHistory(
+  history: NativeHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof nativeModel>,
+): Verdict {
+  try {
+    const final = trace.find((entry) => entry.checkpoint === `final`)
+    expect(final, `final native draft observation`).toBeDefined()
+    expectNativeResult(
+      history,
+      final!.value as ReturnType<typeof driveNative>,
+      expected,
+    )
+    return pass
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== `AssertionError`)
+      throw error
+    return {
+      kind: `violation`,
+      law: `native draft revert`,
+      checkpoint: `final`,
+      difference: error.message,
+      cause: error,
+    }
+  }
 }
 
-declareOracle({
-  check: [
-    expectHistory,
-    expectHistoryObservation,
-    checkHistory,
-    expectNativeResult,
-  ],
-  model: [numberToken, step, expectedChanges, historyExpectation, nativeModel],
-  grammar: [signedZeroArb, signedZeroHistory, nativeHistoryArb],
-})
+const nativeRevertLaw = {
+  ...revertLaw,
+  statement: `Array mutators, assignments, and detached handles preserve the existing final row and permitted change-report law.`,
+  limits: `The existing bounded numeric native-history grammar; Map and Set mutators are not mixed with assignments.`,
+}
 
-describe(`draft revert oracle: native mutators mixed with assignments`, () => {
-  it(`rejects an unwritten field in the change report`, () => {
-    oracleRoute(`calibration`)
-    const histories: Array<NativeHistory> = [
-      {
+// The two histories of the unwritten-field calibration: an f that the history
+// never wrote must stay out of the change report.
+const unwrittenFieldHistories: Array<{ name: string; history: NativeHistory }> =
+  [
+    {
+      name: `setX 1`,
+      history: {
         original: { x: 0, f: { arr: [1], g: { a: 0 } } },
         ops: [{ op: `setX`, v: 1 }],
       },
-      {
+    },
+    {
+      name: `setGa 0`,
+      history: {
         original: { x: 0, f: { arr: [1], g: { a: 0 } } },
         ops: [{ op: `setGa`, v: 0 }],
       },
-    ]
-    for (const history of histories) {
-      const observed = driveNative(history)
-      expect(() =>
-        expectNativeResult(history, {
-          ...observed,
-          changes: { ...observed.changes, f: history.original.f },
-        }),
-      ).toThrow()
-      expectNativeResult(history, observed)
-    }
-  })
+    },
+  ]
 
+describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   oracleProperty({
     id: NATIVE_HISTORIES,
-    law: {
-      ...revertLaw,
-      statement: `Array mutators, assignments, and detached handles preserve the existing final row and permitted change-report law.`,
-      limits: `The existing bounded numeric native-history grammar; Map and Set mutators are not mixed with assignments.`,
-    },
+    law: nativeRevertLaw,
     owns: [`src/proxy.ts`],
     histories: {
       arbitrary: nativeHistoryArb,
@@ -1665,105 +999,89 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
     },
     model: nativeModel,
     driver: (history, observe) => observe(`final`, driveNative(history)),
-    check: (history, trace, expected) => {
-      try {
-        const final = trace.find((entry) => entry.checkpoint === `final`)
-        expect(final, `final native draft observation`).toBeDefined()
-        expectNativeResult(
-          history,
-          final!.value as ReturnType<typeof driveNative>,
-          expected,
-        )
-        return pass
-      } catch (error) {
-        if (!(error instanceof Error) || error.name !== `AssertionError`)
-          throw error
-        return {
-          kind: `violation`,
-          law: `native draft revert`,
-          checkpoint: `final`,
-          difference: error.message,
-          cause: error,
-        }
-      }
-    },
+    check: checkNativeHistory,
   })
 
-  // Positive execution witness: the fixed campaign reaches a native write
-  // that an assignment then replaces, and a mutator through a detached handle.
-  it(`reaches replaced native writes and detached handles in the fixed campaign`, () => {
-    oracleRoute(`fixed seed`)
-    const sample = fc.sample(
-      nativeHistoryArb,
-      oracleFixedSeed(FIXED_SEED, { numRuns: 400 }),
-    )
-    const replaced = sample.filter((h) => {
-      const first = h.ops.findIndex((o) =>
-        [`push`, `pop`, `reverse`].includes(o.op),
-      )
-      return (
-        first >= 0 &&
-        h.ops
-          .slice(first)
-          .some((o) => o.op === `assignArr` || o.op === `restoreArr`)
-      )
-    })
-    const detached = sample.filter((h) => {
-      const retain = h.ops.findIndex((o) => o.op === `retain`)
-      if (retain < 0) return false
-      const after = h.ops.slice(retain + 1)
-      const replace = after.findIndex(
-        (o) => o.op === `assignArr` || o.op === `restoreArr`,
-      )
-      return (
-        replace >= 0 &&
-        after.slice(replace + 1).some((o) => o.op === `pushHandle`)
-      )
-    })
-    expect(replaced.length).toBeGreaterThan(20)
-    expect(detached.length).toBeGreaterThan(3)
-  })
-
-  it.each<[string, NativeHistory]>([
+  // Fixed native histories. The generated grammar cannot take them back, so
+  // one enumerated property replays them, and the unwritten-field calibration
+  // histories, through the campaign's model, draft driver and check.
+  const nativeFixedHistories: Array<{ name: string; history: NativeHistory }> =
     [
-      `a native write that an assignment then restores reports at most its original value`,
-      {
-        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
-        ops: [
-          { op: `setX`, v: 1 },
-          { op: `push`, v: 2 },
-          { op: `restoreArr` },
-          { op: `replaceG` },
-          { op: `setGa`, v: 0 },
-        ],
-      },
-    ],
-    [
-      `a mutator through a detached handle changes nothing in the row`,
-      {
-        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
-        ops: [
-          { op: `retain` },
-          { op: `assignArr`, items: [1, 2] },
-          { op: `restoreArr` },
-          { op: `pushHandle`, v: 0 },
-        ],
-      },
-    ],
-    [
-      `restoring the last native write reports at most the original value`,
-      {
-        original: { x: 0, f: { arr: [0], g: { a: 0 } } },
-        ops: [
-          { op: `pop` },
-          { op: `replaceG` },
-          { op: `restoreArr` },
-          { op: `setGa`, v: 0 },
-        ],
-      },
-    ],
-  ])(`%s`, (_name, history) => {
-    oracleRoute(`fixed history`)
-    return expectNativeHistory(history)
+      ...(
+        [
+          [
+            `a native write that an assignment then restores reports at most its original value`,
+            {
+              original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+              ops: [
+                { op: `setX`, v: 1 },
+                { op: `push`, v: 2 },
+                { op: `restoreArr` },
+                { op: `replaceG` },
+                { op: `setGa`, v: 0 },
+              ],
+            },
+          ],
+          [
+            `a mutator through a detached handle changes nothing in the row`,
+            {
+              original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+              ops: [
+                { op: `retain` },
+                { op: `assignArr`, items: [1, 2] },
+                { op: `restoreArr` },
+                { op: `pushHandle`, v: 0 },
+              ],
+            },
+          ],
+          [
+            `restoring the last native write reports at most the original value`,
+            {
+              original: { x: 0, f: { arr: [0], g: { a: 0 } } },
+              ops: [
+                { op: `pop` },
+                { op: `replaceG` },
+                { op: `restoreArr` },
+                { op: `setGa`, v: 0 },
+              ],
+            },
+          ],
+        ] satisfies Array<[string, NativeHistory]>
+      ).map(([name, history]) => ({ name, history })),
+      ...unwrittenFieldHistories.map(({ name, history }) => ({
+        name: `unwritten-field calibration history: ${name}`,
+        history,
+      })),
+    ]
+  oracleProperty({
+    id: `proxy.revert-native-fixed-histories`,
+    law: nativeRevertLaw,
+    owns: [`src/proxy.ts`],
+    histories: nativeFixedHistories,
+    label: ({ name }) => name,
+    resolve: ({ history }) => history,
+    model: nativeModel,
+    driver: (history, observe) => observe(`final`, driveNative(history)),
+    check: checkNativeHistory,
+    // The check must reject a report of the unwritten f, at its original
+    // value, in each calibration history's recorded final observation.
+    calibrations: unwrittenFieldHistories.map(({ name, history: target }) => ({
+      name: `rejects an unwritten field in the change report: ${name}`,
+      law: `native draft revert`,
+      corrupt: (trace: ReadonlyArray<Observation>, history: NativeHistory) =>
+        history !== target
+          ? undefined
+          : trace.map((entry) => {
+              if (entry.checkpoint !== `final`) return entry
+              const observed = entry.value as ReturnType<typeof driveNative>
+              return {
+                ...entry,
+                value: {
+                  ...observed,
+                  changes: { ...observed.changes, f: history.original.f },
+                },
+              }
+            }),
+    })),
   })
 })

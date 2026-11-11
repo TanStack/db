@@ -3,12 +3,12 @@
  * finite grammar. Each pair of admitted declarations supplies the opposite of
  * the promised identity relation: a shared output despite independent bindings. Rejected
  * declarations supply no output and impose no output-identity comparison.
- * This tests checker sensitivity, not another production receiving path.
+ * This tests checker sensitivity, not another production receiving path, so
+ * these are ordinary calibration tests: they run no production. The shared
+ * checker, model, and grammar live in indexing-config-oracle.ts.
  */
 import { expect, test } from 'vitest'
 import { BTreeIndex, BasicIndex } from '../../src'
-import { declareOracle } from '../oracle-declaration'
-import { oracleRoute } from '../oracle-config'
 import {
   expectIndependentIndexingOutputs,
   expectedIndexing,
@@ -22,19 +22,9 @@ const histories = indexConfigurationPairs(
     indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   }),
 )
-// Owns no production entry: this file calibrates the shared identity checker
-// with planted wrong relations, so it judges no production code.
-declareOracle({
-  owns: ['src/indexes/basic-index.ts', 'src/indexes/btree-index.ts'],
-  grammar: [indexConfigurationPairs],
-  model: [expectedIndexing],
-  check: [expectIndependentIndexingOutputs],
-})
-
 test.each(histories)(
   `identity comparison rejects the opposite relation: %j`,
   ({ first, second }) => {
-    oracleRoute(`calibration`)
     const left = expectedIndexing(first).rejects ? undefined : {}
     const right = expectedIndexing(second).rejects ? undefined : {}
     if (!left || !right) {
@@ -55,7 +45,6 @@ test.each(histories)(
 test.each([`BasicIndex`, `x`])(
   `configuration labels survive equal names: %s`,
   (name) => {
-    oracleRoute(`case`)
     const basic = class extends BasicIndex {}
     const btree = class extends BTreeIndex {}
     Object.defineProperty(basic, `name`, { value: name })

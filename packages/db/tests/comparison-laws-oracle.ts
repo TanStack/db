@@ -9,7 +9,6 @@ import { expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { ascComparator, defaultComparator } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
-import { declareOracle } from './oracle-declaration.js'
 // Input grammar: finite numbers, strings, booleans, valid Dates, and bounded
 // arrays of those primitives; same-type pairs/triples isolate order laws.
 // Null placement, direction, and string mode are separate option axes. Removing
@@ -237,17 +236,6 @@ function assertTransitive(ab: number, bc: number, ac: number): void {
 
 // This companion holds the shared order and equality checks. The native owner
 // retains the direct function-return campaigns and their fixed inputs.
-declareOracle({
-  owns: [`src/utils/comparison.ts`],
-  check: [
-    checkAntisymmetry,
-    assertNonFiniteOrder,
-    assertChangedBytes,
-    assertTransitive,
-  ],
-  model: [taggedOrderValues, taggedOrderSign],
-})
-
 export {
   arbitraryComparablePrimitive,
   arbitraryDate,

@@ -6,7 +6,6 @@
  */
 import { fc } from '@fast-check/vitest'
 import { edgeCarriers } from './deep-equals-support'
-import { declareOracle } from './oracle-declaration'
 
 export const arbitraryExtraProperty = fc
   .tuple(
@@ -38,5 +37,3 @@ export const ringArbitrary = fc.array(
 // them with the shared grammar preserves source-level run-budget tracking.
 export const ringNoSkipsCampaign = { seed: 101301, numRuns: 100 }
 export const ringComparatorCalibration = { seed: 101302, numRuns: 10 }
-
-declareOracle({ grammar: [arbitraryExtraProperty, ringArbitrary] })

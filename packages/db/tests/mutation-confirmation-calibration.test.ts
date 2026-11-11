@@ -3,6 +3,8 @@
  * controls use the same grammar, model and comparison as the Query and Electric
  * receivers. A legal model observation passes before each mutation is applied.
  * They establish checker sensitivity, not execution of either adapter.
+ * They run no production, so they are ordinary tests beside the shared
+ * judgment in mutation-confirmation-oracle.ts.
  */
 import { expect, test } from 'vitest'
 import {
@@ -11,8 +13,6 @@ import {
   mutationConfirmationHistories,
   mutationConfirmationRows,
 } from './mutation-confirmation-oracle'
-import { oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import type {
   MutationConfirmationHistory,
   MutationConfirmationObservation,
@@ -116,7 +116,6 @@ const controls: Array<{
 test.each(controls)(
   `rejects wrong mutation observation: $name`,
   ({ applies, corrupt }) => {
-    oracleRoute(`calibration`)
     const failure = new Error(`handler failure`)
     const selected = histories.filter(applies)
     expect(selected.length).toBeGreaterThan(0)
@@ -137,7 +136,6 @@ test.each(controls)(
 test.each([`query`, `electric`] as const)(
   `rejects early acknowledgement in %s`,
   (adapter) => {
-    oracleRoute(`calibration`)
     const failure = new Error(`handler failure`)
     for (const history of mutationConfirmationHistories(adapter).filter(
       (h) => h.confirmation === (adapter === `query` ? `refetch` : `txid`),
@@ -165,12 +163,3 @@ test.each([`query`, `electric`] as const)(
     }
   },
 )
-
-// No owns: this file calibrates the shared checker with planted wrong
-// observations. The adapter code it judges (Query and Electric) lives outside
-// packages/db, and the model and grammar it names belong to its companion.
-declareOracle({
-  check: [checkMutationConfirmation],
-  model: [expectedMutationConfirmation],
-  grammar: [mutationConfirmationHistories],
-})

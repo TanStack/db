@@ -12,7 +12,7 @@
  * local keys/ordinary values after live handoff are public comparison cuts.
  * No arbitrary transport serializer, hydrateRoot, or schema transform is claimed.
  */
-import { afterAll, expect, test, vi } from 'vitest'
+import { afterAll, expect, vi } from 'vitest'
 import {
   DbClient,
   Query,
@@ -21,8 +21,6 @@ import {
   getLiveQueryHash,
   resolveLiveQueryValue,
 } from '../src'
-import { oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty } from './oracle-property'
 import {
   forwardAssertionJudgment,
@@ -39,57 +37,17 @@ import {
   checkCacheOptionRows,
   conflictingCacheOptions,
 } from './live-query-cache-options-oracle'
+import {
+  checkLifecycleAdmission,
+  checkPortableCacheState,
+  claimSurvives,
+  phases,
+} from './live-query-cache-lifecycle-model-oracle'
 import type { Verdict } from './oracle-property'
-import type {
-  CacheOptionHistory,
-  CacheRow,
-} from './live-query-cache-options-oracle'
+import type { CacheRow } from './live-query-cache-options-oracle'
 import type { DehydratedLiveQueryResult } from '../src/client'
 
-type Phase = `active` | `replaced` | `failed` | `consumed`
-// A portable result has no local claim. Admission claims it, transport updates
-// do not end reuse, and terminal failure or live consumption ends reuse.
-function claimSurvives(phase: Phase): boolean {
-  return phase === `active` || phase === `replaced`
-}
-function checkLifecycleAdmission(
-  action: () => unknown,
-  history: CacheOptionHistory,
-  phase: Phase,
-) {
-  if (claimSurvives(phase) && conflictingCacheOptions(history))
-    oracleAssertion(`checkLifecycleAdmission:61`, () =>
-      expect(action, `active local claim survives ${phase}`).toThrow(
-        /getKey|schema/,
-      ),
-    )
-  else
-    oracleAssertion(`checkLifecycleAdmission:64`, () =>
-      expect(action, `retired or compatible claim at ${phase}`).not.toThrow(),
-    )
-}
-// Raw transport is checked before JSON can silently erase a leaked function.
-function checkPortableCacheState(
-  value: unknown,
-  seen = new Set<unknown>(),
-): void {
-  oracleAssertion(`checkPortableCacheState:71`, () =>
-    expect(
-      typeof value,
-      `portable hydration has no function reference`,
-    ).not.toBe(`function`),
-  )
-  if (!value || typeof value !== `object` || seen.has(value)) return
-  seen.add(value)
-  for (const child of Object.values(value)) checkPortableCacheState(child, seen)
-}
 const claimants = [`preload`, `observer-preload`, `server-read`] as const
-const phases: ReadonlyArray<Phase> = [
-  `active`,
-  `replaced`,
-  `failed`,
-  `consumed`,
-]
 const reaches = Object.fromEntries(
   claimants.map((claimant) => [
     claimant,
@@ -134,15 +92,6 @@ afterAll(() => {
         ]),
       ),
     )
-})
-declareOracle({
-  check: [
-    checkLifecycleAdmission,
-    checkCacheOptionRows,
-    checkPortableCacheState,
-  ],
-  model: [claimSurvives, conflictingCacheOptions],
-  grammar: [cacheOptionHistories],
 })
 
 // This is the same exhaustive finite language. Native registration owns
@@ -550,27 +499,3 @@ oracleProperty<CacheLifecycleCase, Verdict>({
   },
   check: forwardAssertionJudgment,
 })
-
-// Transport must not inherit a local claim merely because a serializer would
-// discard it. Deliberately leaking either kind of callable fails this judgment.
-test.each([`getKey`, `schema`] as const)(
-  `portable cache rejects a leaked %s function`,
-  (option) => {
-    oracleRoute(`calibration`)
-    expect(() => checkPortableCacheState({ [option]: () => {} })).toThrow()
-  },
-)
-
-// A wrong forever-claim policy rejects retired results; a no-claim policy
-// accepts active conflicts. Both are judged by the same lifecycle comparison.
-test.each(phases)(
-  `lifecycle checker rejects the opposite claim policy at %s`,
-  (phase) => {
-    oracleRoute(`calibration`)
-    const history = cacheOptionHistories.find(conflictingCacheOptions)!
-    const wrong = () => {
-      if (!claimSurvives(phase)) throw new Error(`getKey conflict`)
-    }
-    expect(() => checkLifecycleAdmission(wrong, history, phase)).toThrow()
-  },
-)

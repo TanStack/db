@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { describe, expect } from 'vitest'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { stripVirtualProps } from './utils.js'
 import {
   initial,
@@ -73,65 +77,79 @@ function expectVisibleRow(
   expect(stripVirtualProps(collection.get(1))).toEqual(expectedRow)
 }
 
-// What this oracle owns: the gap report judges the optimistic row overlay in
-// CollectionStateManager.recomputeOptimisticState and the transaction
-// mutate/rollback path by this file's one-key matrix.
-declareOracle({
-  owns: [
-    `src/collection/state.ts#CollectionStateManager.recomputeOptimisticState`,
-    `src/transactions.ts`,
-  ],
-  check: [expectVisibleRow],
-  model: [expectedOwnedRow],
-})
+async function runOwnershipCase({
+  order,
+  phase,
+  removed,
+  fields,
+}: (typeof cases)[number]): Promise<void> {
+  const fixture = source()
+  const pending = [
+    pendingTransaction(),
+    pendingTransaction(),
+    pendingTransaction(),
+  ]
+  const patches: Array<Partial<Row>> =
+    fields === `disjoint`
+      ? [{ a: `a1` }, { b: `b2` }, { c: `c3` }]
+      : [{ a: `a1` }, { a: `a2`, b: `b2` }, { c: `c3` }]
+  const snapshots: Array<Row | undefined> = [undefined, undefined, undefined]
+  const expected = (excluded = -1) =>
+    expectedOwnedRow(snapshots, initial, excluded)
+  try {
+    await fixture.collection.preload()
+    for (const index of order) {
+      snapshots[index] = { ...expected(), ...patches[index] }
+      pending[index]!.tx.mutate(() =>
+        fixture.collection.update(1, (row) => {
+          Object.assign(row, patches[index])
+        }),
+      )
+    }
+    if (phase === `persisting`) {
+      for (const entry of pending) void entry.tx.commit().catch(() => {})
+    }
+    expectVisibleRow(fixture.collection, expected())
+    // Isolate one rollback's projection; conflict-cascade policy is unchanged.
+    pending[removed]!.tx.rollback({ isSecondaryRollback: true })
+    expectVisibleRow(fixture.collection, expected(removed))
+  } finally {
+    for (const entry of pending) {
+      entry.tx.rollback({ isSecondaryRollback: true })
+      entry.done.resolve()
+    }
+    await Promise.all(pending.map((entry) => entry.settled))
+    await fixture.collection.cleanup()
+  }
+}
 
 describe(`optimistic snapshot ownership`, () => {
-  it.each(cases)(
-    `$order / $phase / rollback $removed / $fields`,
-    async ({ order, phase, removed, fields }) => {
-      oracleRoute(`case`)
-      const fixture = source()
-      const pending = [
-        pendingTransaction(),
-        pendingTransaction(),
-        pendingTransaction(),
-      ]
-      const patches: Array<Partial<Row>> =
-        fields === `disjoint`
-          ? [{ a: `a1` }, { b: `b2` }, { c: `c3` }]
-          : [{ a: `a1` }, { a: `a2`, b: `b2` }, { c: `c3` }]
-      const snapshots: Array<Row | undefined> = [
-        undefined,
-        undefined,
-        undefined,
-      ]
-      const expected = (excluded = -1) =>
-        expectedOwnedRow(snapshots, initial, excluded)
-      try {
-        await fixture.collection.preload()
-        for (const index of order) {
-          snapshots[index] = { ...expected(), ...patches[index] }
-          pending[index]!.tx.mutate(() =>
-            fixture.collection.update(1, (row) => {
-              Object.assign(row, patches[index])
-            }),
-          )
-        }
-        if (phase === `persisting`) {
-          for (const entry of pending) void entry.tx.commit().catch(() => {})
-        }
-        expectVisibleRow(fixture.collection, expected())
-        // Isolate one rollback's projection; conflict-cascade policy is unchanged.
-        pending[removed]!.tx.rollback({ isSecondaryRollback: true })
-        expectVisibleRow(fixture.collection, expected(removed))
-      } finally {
-        for (const entry of pending) {
-          entry.tx.rollback({ isSecondaryRollback: true })
-          entry.done.resolve()
-        }
-        await Promise.all(pending.map((entry) => entry.settled))
-        await fixture.collection.cleanup()
-      }
+  // What this oracle owns: the gap report judges the optimistic row overlay in
+  // CollectionStateManager.recomputeOptimisticState and the transaction
+  // mutate/rollback path by this file's one-key matrix.
+  oracleProperty({
+    id: `collection-state.optimistic-composition`,
+    law: {
+      statement: `A key shows the snapshot of its newest live optimistic transaction, or its synced row when none is live, before and after one member rolls back.`,
+      authority: `The optimistic snapshot contract stated above and owned by optimistic-history-oracle.ts`,
+      limits: `One key, every creation order of three updates, both live phases, each rolled-back member, and disjoint or overlapping fields.`,
     },
-  )
+    owns: [
+      `src/collection/state.ts#CollectionStateManager.recomputeOptimisticState`,
+      `src/transactions.ts`,
+    ],
+    histories: cases,
+    label: ({ order, phase, removed, fields }) =>
+      `[ ${order.join(`, `)} ] / ${phase} / rollback ${removed} / ${fields}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.optimistic-composition`,
+        plan,
+        observe,
+        () => runOwnershipCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -17,7 +17,6 @@
  */
 import fc from 'fast-check'
 import { oracleRuns } from '../oracle-config'
-import { declareOracle } from '../oracle-declaration'
 import { differs, oracleProperty, pass, violation } from '../oracle-property'
 import { selectedRowKeys } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
@@ -526,8 +525,3 @@ export function registerResultShapeOracle(driver: LiveQueryDriver): void {
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({
-  check: [checkResultShape],
-  model: [shapeModel],
-  grammar: [resultShapeHistories],
-})

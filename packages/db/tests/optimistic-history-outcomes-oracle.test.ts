@@ -1,28 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import fc from 'fast-check'
-import { createDeferred } from '../src/deferred.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
-import {
-  expectHistoryOutcome,
-  observeHistoryPromise,
-  runOptimisticHistory,
-  withHistoryCleanup,
-} from './optimistic-history-oracle.js'
-import type {
-  HistoryOutcome,
-  OptimisticStep,
-} from './optimistic-history-oracle.js'
+import { runOptimisticHistory } from './optimistic-history-oracle.js'
+import type { OptimisticStep } from './optimistic-history-oracle.js'
 
 /**
  * # Do callers observe the exact optimistic request outcome?
@@ -38,14 +24,11 @@ import type {
  * and that a shrunk failure can be replayed by seed and path.
  */
 
-// The outcome checker is imported from the companion, which does not declare
-// it. This file's calibrations reach it through the same check.
 // What this oracle owns: the gap report judges the request-outcome paths of
 // transactions (src/transactions.ts) by this file's outcome matrix, its
-// generated failed-request histories, and its completion histories.
-declareOracle({
-  check: [expectHistoryOutcome],
-})
+// generated failed-request histories, and its completion histories. The
+// outcome-observer calibrations are in
+// optimistic-history-outcomes-calibration.test.ts.
 
 type Scenario = {
   existing: boolean
@@ -91,6 +74,12 @@ async function runOutcomeScenario(scenario: Scenario) {
   )
 }
 
+const outcomesLaw = {
+  statement: `Each failed optimistic request exposes its exact outcome while independently modeled peer and source work survives.`,
+  authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
+  limits: `The existing bounded two-request grammar with controlled sync work; provider timing and arbitrary overlapping request histories remain outside this driver.`,
+}
+
 describe(`Optimistic request outcome histories`, () => {
   const cells = [false, true].flatMap((existing) =>
     [false, true].flatMap((optimistic) =>
@@ -101,21 +90,38 @@ describe(`Optimistic request outcome histories`, () => {
       })),
     ),
   )
-  it.each(cells)(`observes exact request outcomes: %j`, async (cell) => {
-    oracleRoute(`case`)
-    for (const queued of [false, true]) {
-      for (const settlePeer of [false, true]) {
-        await runOutcomeScenario({ ...cell, queued, settlePeer, a: 2, b: 3 })
-      }
-    }
+  oracleProperty({
+    id: `collection-state.optimistic-outcome-cells`,
+    law: outcomesLaw,
+    owns: [`src/transactions.ts`],
+    histories: cells,
+    label: (cell) => `observes exact request outcomes: ${JSON.stringify(cell)}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.optimistic-outcomes`,
+        plan,
+        observe,
+        async () => {
+          for (const queued of [false, true]) {
+            for (const settlePeer of [false, true]) {
+              await runOutcomeScenario({
+                ...plan.cell,
+                queued,
+                settlePeer,
+                a: 2,
+                b: 3,
+              })
+            }
+          }
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
   oracleProperty({
     id: `collection-state.optimistic-outcomes`,
-    law: {
-      statement: `Each failed optimistic request exposes its exact outcome while independently modeled peer and source work survives.`,
-      authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
-      limits: `The existing bounded two-request grammar with controlled sync work; provider timing and arbitrary overlapping request histories remain outside this driver.`,
-    },
+    law: outcomesLaw,
     owns: [`src/transactions.ts`],
     histories: {
       arbitrary: fc.record({
@@ -153,130 +159,69 @@ const pendingPeerCases = [true, false].flatMap((sameKey) =>
     { failure: `reject` as const, cascade: false },
   ].map((decision) => ({ sameKey, ...decision })),
 )
-it.each(pendingPeerCases)(
-  `settles a pending manual peer after failure, sameKey=$sameKey failure=$failure cascade=$cascade`,
-  async ({ sameKey, failure, cascade }) => {
-    oracleRoute(`case`)
-    const peerSurvives = !sameKey || (failure === `rollback` && !cascade)
-    const counts = await runOptimisticHistory(
-      [],
-      [
-        {
-          type: `edit`,
-          key: 1,
-          fields: { a: 1 },
-          optimistic: true,
-          pending: true,
-        },
-        {
-          type: `edit`,
-          key: sameKey ? 1 : 2,
-          fields: { b: 2 },
-          optimistic: true,
-        },
-        { type: `settle`, slot: 1, success: false, cascade, failure },
-        ...(peerSurvives
-          ? [
-              {
-                type: `settle` as const,
-                slot: 0,
-                success: true,
-                cascade: false,
-              },
-            ]
-          : []),
-      ],
-    )
-    expect(counts).toMatchObject({
-      edits: 2,
-      settlements: peerSurvives ? 2 : 1,
-      failures: 1,
-    })
-  },
-)
-
-describe(`Outcome observer calibration`, () => {
-  it.each([
-    `early-success`,
-    `wrong-value`,
-    `wrong-error`,
-    `missing-error`,
-    `receipt-error`,
-  ] as const)(
-    `rejects %s through the actual outcome checker`,
-    async (fault) => {
-      oracleRoute(`calibration`)
-      const value = { id: 1 }
-      const error = new Error(`original`)
-      let expected: HistoryOutcome<unknown>
-      let bad: HistoryOutcome<unknown>
-      if (fault === `early-success`) {
-        expected = { status: `pending` }
-        bad = { status: `fulfilled`, value }
-      } else if (fault === `wrong-value`) {
-        expected = { status: `fulfilled`, value }
-        bad = { status: `fulfilled`, value: { ...value } }
-      } else if (fault === `receipt-error`) {
-        expected = { status: `fulfilled`, value: undefined }
-        bad = { status: `rejected`, reason: error }
-      } else {
-        expected = { status: `rejected`, reason: error }
-        bad = {
-          status: `rejected`,
-          reason: fault === `wrong-error` ? new Error(`original`) : undefined,
-        }
-      }
-      expectHistoryOutcome(expected, expected, `valid neighbor`)
-      expect(() => expectHistoryOutcome(bad, expected, fault)).toThrowError(
-        expect.objectContaining({ name: `AssertionError` }),
-      )
-      const gate = createDeferred<unknown>()
-      const observed = observeHistoryPromise(gate.promise)
-      expectHistoryOutcome(
-        observed.read(),
-        { status: `pending` },
-        `before settlement`,
-      )
-      if (expected.status === `rejected`) gate.reject(error)
-      else gate.resolve(value)
-      await observed.settled
-      expectHistoryOutcome(
-        observed.read(),
-        expected.status === `rejected`
-          ? expected
-          : { status: `fulfilled`, value },
-        `after settlement`,
-      )
-    },
-  )
-  it(`preserves successful results and single errors without wrappers`, async () => {
-    const value = { id: 1 }
-    expect(
-      await withHistoryCleanup(
-        () => Promise.resolve(value),
-        () => [() => {}],
-      ),
-    ).toBe(value)
-    const error = Object.freeze(new Error(`single`))
-    for (const fromCleanup of [false, true]) {
-      const observed = observeHistoryPromise(
-        withHistoryCleanup(
-          () => (fromCleanup ? Promise.resolve(value) : Promise.reject(error)),
-          () => [
-            () => {
-              if (fromCleanup) throw error
+async function settlePendingPeer({
+  sameKey,
+  failure,
+  cascade,
+}: (typeof pendingPeerCases)[number]): Promise<void> {
+  const peerSurvives = !sameKey || (failure === `rollback` && !cascade)
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      {
+        type: `edit`,
+        key: 1,
+        fields: { a: 1 },
+        optimistic: true,
+        pending: true,
+      },
+      {
+        type: `edit`,
+        key: sameKey ? 1 : 2,
+        fields: { b: 2 },
+        optimistic: true,
+      },
+      { type: `settle`, slot: 1, success: false, cascade, failure },
+      ...(peerSurvives
+        ? [
+            {
+              type: `settle` as const,
+              slot: 0,
+              success: true,
+              cascade: false,
             },
-          ],
-        ),
-      )
-      await observed.settled
-      expectHistoryOutcome(
-        observed.read(),
-        { status: `rejected`, reason: error },
-        `single error`,
-      )
-    }
+          ]
+        : []),
+    ],
+  )
+  expect(counts).toMatchObject({
+    edits: 2,
+    settlements: peerSurvives ? 2 : 1,
+    failures: 1,
   })
+}
+
+oracleProperty({
+  id: `collection-state.pending-peer-settlement`,
+  law: {
+    statement: `A failed persisting edit cancels a pending same-key manual peer only when rollback cascades; otherwise the peer stays pending and its later commit settles its own request.`,
+    authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
+    limits: `Same and distinct keys crossed with a cascading rollback, a secondary rollback and a rejection, through runOptimisticHistory.`,
+  },
+  owns: [`src/transactions.ts`],
+  histories: pendingPeerCases,
+  label: ({ sameKey, failure, cascade }) =>
+    `settles a pending manual peer after failure, sameKey=${sameKey} failure=${failure} cascade=${cascade}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `collection-state.pending-peer-settlement`,
+      plan,
+      observe,
+      () => settlePendingPeer(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 /** External completion shares the primary optimistic model. The finite grammar
@@ -316,89 +261,108 @@ const completionHistories = completionStates.flatMap((state) =>
   ),
 )
 
-describe(`external completion with peers and source work`, () => {
-  it.each(completionHistories)(
-    `preserves completion admission and independent work: %j`,
-    async ({ state, peer, source, attempts }) => {
-      oracleRoute(`case`)
-      const reachStates = [
-        `attempts-compared`,
-        `later-source-compared`,
-      ] as const
-      const reached = new Set<(typeof reachStates)[number]>()
-      const steps: Array<OptimisticStep> = [
-        {
-          type: `edit`,
-          key: 1,
-          fields: { a: 1 },
-          optimistic: true,
-          pending: state === `pending`,
-        },
-      ]
-      if (peer !== `none`)
-        steps.push({
-          type: `edit`,
-          key: peer.endsWith(`same`) ? 1 : 2,
-          fields: { b: 2 },
-          optimistic: true,
-          pending: peer.startsWith(`pending`),
-        })
-      if (state === `completed` || state === `failed`)
-        steps.push({
-          type: `settle`,
-          slot: 0,
-          success: state === `completed`,
-          cascade: false,
-        })
-      if (source !== `none`)
-        steps.push({
-          type: `sync`,
-          rows: [
-            {
-              id: source === `other` ? 3 : source === `peer` ? 2 : 1,
-              a: 7,
-              b: 8,
-              c: 9,
-            },
-          ],
-          truncate: source === `truncate`,
-          copies: 1,
-        })
-      for (let i = 0; i < attempts; i++)
-        steps.push({ type: `complete`, slot: 0 })
-      // Drain each still-active request by its own explicit success. Target
-      // and peer are independently held; an accepted completion removes only
-      // the pending target from this active ordering.
-      if (state === `persisting`)
-        steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
-      if (peer !== `none`)
-        steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
-      steps.push({
-        type: `sync`,
-        rows: [
-          { id: 1, a: 11, b: 12, c: 13 },
-          { id: 2, a: 21, b: 22, c: 23 },
-        ],
-        truncate: false,
-        copies: 1,
-      })
-      const counts = await runOptimisticHistory(
-        [{ id: 1, a: 0, b: 0, c: 0 }],
-        steps,
-      )
-      expect(counts.edits).toBe(peer === `none` ? 1 : 2)
-      expect(counts.completionAttempts).toBe(attempts)
-      expect(counts.completionRejections).toBe(
-        attempts - (state === `pending` ? 1 : 0),
-      )
-      reached.add(`attempts-compared`)
-      reached.add(`later-source-compared`)
-      if (!oracleReplayRequested())
-        for (const reachedState of reachStates)
-          expect(
-            reached.has(reachedState),
-            `${reachedState} history minimum`,
-          ).toBe(true)
+async function runCompletionHistory({
+  state,
+  peer,
+  source,
+  attempts,
+}: (typeof completionHistories)[number]): Promise<void> {
+  const reachStates = [`attempts-compared`, `later-source-compared`] as const
+  const reached = new Set<(typeof reachStates)[number]>()
+  const steps: Array<OptimisticStep> = [
+    {
+      type: `edit`,
+      key: 1,
+      fields: { a: 1 },
+      optimistic: true,
+      pending: state === `pending`,
     },
+  ]
+  if (peer !== `none`)
+    steps.push({
+      type: `edit`,
+      key: peer.endsWith(`same`) ? 1 : 2,
+      fields: { b: 2 },
+      optimistic: true,
+      pending: peer.startsWith(`pending`),
+    })
+  if (state === `completed` || state === `failed`)
+    steps.push({
+      type: `settle`,
+      slot: 0,
+      success: state === `completed`,
+      cascade: false,
+    })
+  if (source !== `none`)
+    steps.push({
+      type: `sync`,
+      rows: [
+        {
+          id: source === `other` ? 3 : source === `peer` ? 2 : 1,
+          a: 7,
+          b: 8,
+          c: 9,
+        },
+      ],
+      truncate: source === `truncate`,
+      copies: 1,
+    })
+  for (let i = 0; i < attempts; i++) steps.push({ type: `complete`, slot: 0 })
+  // Drain each still-active request by its own explicit success. Target
+  // and peer are independently held; an accepted completion removes only
+  // the pending target from this active ordering.
+  if (state === `persisting`)
+    steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
+  if (peer !== `none`)
+    steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
+  steps.push({
+    type: `sync`,
+    rows: [
+      { id: 1, a: 11, b: 12, c: 13 },
+      { id: 2, a: 21, b: 22, c: 23 },
+    ],
+    truncate: false,
+    copies: 1,
+  })
+  const counts = await runOptimisticHistory(
+    [{ id: 1, a: 0, b: 0, c: 0 }],
+    steps,
   )
+  expect(counts.edits).toBe(peer === `none` ? 1 : 2)
+  expect(counts.completionAttempts).toBe(attempts)
+  expect(counts.completionRejections).toBe(
+    attempts - (state === `pending` ? 1 : 0),
+  )
+  reached.add(`attempts-compared`)
+  reached.add(`later-source-compared`)
+  if (!oracleReplayRequested())
+    for (const reachedState of reachStates)
+      expect(reached.has(reachedState), `${reachedState} history minimum`).toBe(
+        true,
+      )
+}
+
+describe(`external completion with peers and source work`, () => {
+  oracleProperty({
+    id: `collection-state.external-completion`,
+    law: {
+      statement: `Only pending target work admits its first external completion; every repeated or other-state attempt rejects, while independent peers, queued source work and the later usable Collection are preserved.`,
+      authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
+      limits: `The finite grammar above: four admission states, five peers, the source transactions, and one to three attempts, through runOptimisticHistory.`,
+    },
+    owns: [`src/transactions.ts`],
+    histories: completionHistories,
+    label: (history) =>
+      `preserves completion admission and independent work: ${JSON.stringify(history)}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.external-completion`,
+        plan,
+        observe,
+        () => runCompletionHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
