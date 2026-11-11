@@ -17,17 +17,12 @@
  * keep the previous window and rows (ARCHITECTURE.md, Atomic window publication).
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { createDeferred } from '../../src/deferred.js'
-import { declareOracle } from '../oracle-declaration.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -420,12 +415,6 @@ async function runHistory(
   )
 }
 
-declareOracle({
-  check: [checkAdmission, checkSettlement],
-  model: [admitted, selected],
-  grammar: [historyArbitrary],
-})
-
 // Every payload already crosses every required admission/settlement cut for
 // its path. The identity builder preserves generated ranks, bounds and the
 // candidate/outcome loops. The negative map's inverse above only makes that
@@ -458,14 +447,15 @@ async function judgeLimitHistory(
 
 export function registerLimitAdmissionOracle(): void {
   describe(`negative limit admission`, () => {
-    for (const path of [
+    const paths = [
       `builder`,
       `unstarted`,
       `ready`,
       `initial-pending`,
       `move-pending`,
       `replay-pending`,
-    ] as const) {
+    ] as const
+    for (const path of paths) {
       for (const negative of [false, true]) {
         const property = `pagination.limit-admission-${path}-${negative ? `negative` : `valid`}`
         const states = [
@@ -475,15 +465,6 @@ export function registerLimitAdmissionOracle(): void {
           ...(path.endsWith(`pending`) ? [`successful-settlement`] : []),
           ...(negative && path === `move-pending` ? [`failed-settlement`] : []),
         ]
-        // The previous explicit history has ranks outside the random grammar.
-        // Retain it through the same model, driver and comparison rather than
-        // widening that grammar to satisfy native fixed-history membership.
-        if (!oracleReplayRequested())
-          it(`${path} ${negative ? `rejects negatives` : `admits valid neighbors`} (fixed history)`, async () => {
-            oracleRoute(`case`)
-            await judgeLimitHistory(example, path, negative, () => {})
-          }, 30000)
-
         // Native campaigns preserve the first law. Keep the existing fidelity
         // wrapper as well: it distinguishes the original law AND checkpoint
         // and retains original/reduced traces and cleanup diagnostics. A fresh
@@ -538,5 +519,41 @@ export function registerLimitAdmissionOracle(): void {
         })
       }
     }
+
+    // The previous explicit history has ranks outside the random grammar.
+    // Retain it through the same model, driver and comparison rather than
+    // widening that grammar to satisfy native fixed-history membership. Each
+    // path and sign replays it under the law of its generated property.
+    const fixedCases = paths.flatMap((path) =>
+      [false, true].map((negative) => ({ path, negative })),
+    )
+    oracleProperty({
+      id: `pagination.limit-admission-fixed`,
+      law: {
+        statement: `Negative limits reject synchronously without changing query construction, public windows, demand, rows or an admitted operation's outcome. Valid neighboring limits remain usable.`,
+        authority: `The 2026-11-02 maintainer decision and ARCHITECTURE.md, Atomic window publication, stated above.`,
+        limits: `The reported -2 example, outside the random grammar, on each of the unchanged six core admission paths with controlled on-demand acquisition settlement; no NaN, positive-fraction or real-provider timing policy.`,
+      },
+      histories: fixedCases,
+      label: ({ path, negative }) =>
+        `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} (fixed history)`,
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan: { history: (typeof fixedCases)[number] }, observe) =>
+        recordAssertionJudgment(
+          `pagination.limit-admission-${plan.history.path}-${plan.history.negative ? `negative` : `valid`}`,
+          plan,
+          observe,
+          () =>
+            judgeLimitHistory(
+              example,
+              plan.history.path,
+              plan.history.negative,
+              () => {},
+            ),
+        ),
+      check: forwardAssertionJudgment,
+      timeout: 30000,
+    })
   })
 }
