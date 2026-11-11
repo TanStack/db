@@ -134,6 +134,14 @@ const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
     parse,
     serialize,
   } = options
+  // Updates and deletes match their row by the key columns. Without any, the
+  // request has no row filter and PostgREST applies it to every row the policy
+  // allows.
+  if (keys.length === 0) {
+    throw new Error(
+      `supabaseCollectionOptions for "${tableName}" needs at least one key column in \`keys\``,
+    )
+  }
   // if the query client is not provided, use the global query client
   const queryClient = options.queryClient ?? getQueryClient()
 

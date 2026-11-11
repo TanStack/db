@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { z } from 'zod'
 import { supabaseCollectionOptions } from '../src/index'
 import { SUPABASE_KEY, SUPABASE_URL } from './test.utils'
@@ -60,6 +60,12 @@ describe(`collection keys`, () => {
       expect(sameKey).toBe(left.every((part, index) => part === right[index]))
     },
   )
+
+  test(`a collection without key columns is rejected`, () => {
+    // With no key columns an update or delete would have no row filter, and
+    // PostgREST would apply it to every row the policy allows.
+    expect(() => getKeyFor([])).toThrow(/at least one key column/)
+  })
 
   fcTest.prop([value], { numRuns: 100 })(
     `a single key column is the column value itself`,
