@@ -5,19 +5,23 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { applyPredicates } from '../e2e/query-filter.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
 import { isNarrowRankTieProbe } from './optimistic-ordered-refetch-probe.js'
+import {
+  checkOrderedMutationObservation,
+  expectedPublicWindow,
+} from './optimistic-ordered-refetch-model-oracle.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type { QueryCollectionConfig } from '../src/query'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { Row } from './optimistic-ordered-refetch-probe.js'
+import type { OrderedMutationHistory } from './optimistic-ordered-refetch-model-oracle.js'
 
 type ProviderPhase =
   `initial` | `optimistic` | `held-invalidation` | `handler-refetch`
@@ -50,15 +54,6 @@ type ProviderPhase =
  * immediate, held-refetch, and settled checkpoints. The backend evaluator is
  * only driver wiring: it never computes the expected window.
  */
-type OrderedMutationHistory = {
-  operation: `insert` | `update` | `delete`
-  ending:
-    | `fulfilled-void`
-    | `fulfilled-legacy`
-    | `reject-before-write`
-    | `reject-after-write`
-  reportDuringHold: boolean
-}
 const orderedMutationHistories: Array<OrderedMutationHistory> = (
   [`insert`, `update`, `delete`] as const
 ).flatMap((operation) =>
@@ -326,34 +321,6 @@ async function driveOptimisticOrderedRefetch(
   ])
 }
 
-/**
- * The public window of the live query `inbox` order `at desc` limit 2, computed
- * from the plain remote row ledger. This is the model that the check compares
- * the live rows against at each checkpoint.
- */
-function expectedPublicWindow(remote: ReadonlyArray<Row>): Array<number> {
-  return remote
-    .filter(({ folder }) => folder === `inbox`)
-    .sort((left, right) => right.at - left.at)
-    .slice(0, 2)
-    .map(({ id }) => id)
-}
-
-// Ordering derives from the backend ledger, while outcome derives from the
-// handler's Promise. Rejecting after confirmation changes only the latter.
-function checkOrderedMutationObservation(
-  remote: ReadonlyArray<Row>,
-  ending: OrderedMutationHistory[`ending`],
-  observed: { ids: Array<number>; error: unknown; state: string },
-  failure: Error,
-): void {
-  expect(observed.ids).toEqual(expectedPublicWindow(remote))
-  expect(observed.error).toBe(ending.startsWith(`reject`) ? failure : undefined)
-  expect(observed.state).toBe(
-    ending.startsWith(`reject`) ? `failed` : `completed`,
-  )
-}
-
 // Recompute the original immediate and settled windows from the authored
 // operation and handler ending. Request shapes stay observations of the real
 // adapter; they do not decide the independent row ledger.
@@ -485,41 +452,4 @@ oracleProperty({
   model: modelOrderedMutation,
   driver: driveOptimisticOrderedRefetch,
   check: checkOrderedMutationTrace,
-})
-
-// These controls challenge the same public-window/outcome comparison. They
-// establish sensitivity without changing any production code.
-it.each([
-  `rollback-confirmed-row`,
-  `discarded-value-failure`,
-  `reversed-order`,
-] as const)(`rejects ordered wrong observation: %s`, (fault) => {
-  oracleRoute(`calibration`)
-  const remote: Array<Row> = [
-    { id: 1, folder: `inbox`, at: 1 },
-    { id: 2, folder: `inbox`, at: 2 },
-  ]
-  const ending =
-    fault === `rollback-confirmed-row`
-      ? `reject-after-write`
-      : `fulfilled-legacy`
-  const failure = new Error(`handler failure`)
-  const actual = {
-    ids: expectedPublicWindow(remote),
-    error:
-      ending === `reject-after-write`
-        ? (failure as unknown)
-        : (undefined as unknown),
-    state: ending === `reject-after-write` ? `failed` : `completed`,
-  }
-  checkOrderedMutationObservation(remote, ending, actual, failure)
-  if (fault === `rollback-confirmed-row`) actual.ids = [3, 2]
-  if (fault === `discarded-value-failure`) {
-    actual.error = new Error(`legacy value`)
-    actual.state = `failed`
-  }
-  if (fault === `reversed-order`) actual.ids.reverse()
-  expect(() =>
-    checkOrderedMutationObservation(remote, ending, actual, failure),
-  ).toThrow()
 })

@@ -21,7 +21,7 @@
  */
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -29,7 +29,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { rejectsAs } from './calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type {
@@ -483,6 +483,13 @@ oracleProperty({
       `true-and-throw`,
       `quiescent-settlement`,
     ] as const,
+    // The faulty-adapter calibrations below corrupt this history.
+    fixed: [
+      {
+        name: `three responses in two batches`,
+        history: { responses: 3, batches: 2, reverse: false, text: `` },
+      },
+    ],
     constructed: [
       {
         name: `existing constructive history`,
@@ -510,35 +517,40 @@ oracleProperty({
         reach: (state) => observe(`reach`, state),
       }),
     ),
+  // The prompt-cancel fault is observable only on a canceled history, as in
+  // the old calibration; every other fault runs the uncanceled history.
+  calibrations: (
+    [
+      `borrow-peer`,
+      `first-only`,
+      `skip-response`,
+      `content-only`,
+      `prompt-cancel`,
+      `stranded`,
+    ] as const
+  ).map((fault) => ({
+    name: `rejects the ${fault} faulty adapter at the real Collection boundary`,
+    law: `convex.lazy-exact-receipt`,
+    driver: async (
+      plan: {
+        history: AssertionHistory<typeof convex_lazy_exact_receiptHistory>
+      },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(`convex.lazy-exact-receipt`, plan, observe, () =>
+        rejectsAs(
+          `lazy-paging-receipt-oracle.property.test.ts:434:toThrow`,
+          () =>
+            receiptHistory(
+              { ...plan.history, cancel: fault === `prompt-cancel` },
+              fault,
+            ),
+          (failure) =>
+            expect(() => {
+              throw failure
+            }).toThrow(/receipt (law|progress)/),
+        ),
+      ),
+  })),
   timeout: 60000,
 })
-
-it.each([
-  `borrow-peer`,
-  `first-only`,
-  `skip-response`,
-  `content-only`,
-  `prompt-cancel`,
-  `stranded`,
-] as const)(
-  `rejects the %s faulty adapter at the real Collection boundary`,
-  async (fault) => {
-    oracleRoute(`calibration`)
-    await oracleAssertion(
-      `lazy-paging-receipt-oracle.property.test.ts:434:toThrow`,
-      () =>
-        expect(
-          receiptHistory(
-            {
-              responses: 3,
-              batches: 2,
-              cancel: fault === `prompt-cancel`,
-              reverse: false,
-              text: ``,
-            },
-            fault,
-          ),
-        ).rejects.toThrow(/receipt (law|progress)/),
-    )
-  },
-)

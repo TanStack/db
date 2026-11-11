@@ -17,7 +17,13 @@ import { ConvexClient, ConvexHttpClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { createCollection } from '@tanstack/db'
-import { expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexCollectionOptions } from '../src/index'
 import { withTestCleanup } from '../tests/helpers'
 
@@ -87,87 +93,109 @@ const history: ReadonlyArray<Step> = [
   { role: `admin`, operation: `delete` },
 ]
 
-it.each([`javascript`, `react`] as const)(
-  `receives genuine authenticated role transitions with the %s client`,
-  async (kind) => {
-    const http = new ConvexHttpClient(url)
-    await expect(http.query(list, {})).rejects.toThrow(`Not signed in`)
-    const result = await http.action(signIn, { provider: `anonymous` })
-    expect(result.tokens?.token.split(`.`)).toHaveLength(3)
-    const token = result.tokens!.token
-    const invalid = new ConvexHttpClient(url)
-    invalid.setAuth(`${token.slice(0, -3)}bad`)
-    await expect(invalid.query(list, {})).rejects.toThrow()
-    const makeClient = () =>
-      kind === `javascript`
-        ? new ConvexClient(url, { unsavedChangesWarning: false, logger: false })
-        : new ConvexReactClient(url, {
-            unsavedChangesWarning: false,
-            logger: false,
-          })
-    const unauthenticated = makeClient()
-    const denied = createCollection(
-      convexCollectionOptions({
-        client: unauthenticated,
-        query: list,
-        queryArgs: {},
-        getKey: (row) => row._id,
-        gcTime: 0,
-      }),
-    )
-    await withTestCleanup(
-      async () => {
-        await expect(denied.preload()).rejects.toThrow(`Not signed in`)
-        expect([...denied.values()]).toEqual([])
-      },
-      () => denied.cleanup(),
-      () => unauthenticated.close(),
-    )
-    const client = makeClient()
-    client.setAuth(() => Promise.resolve(token))
-    const collection = createCollection(
-      convexCollectionOptions({
-        client,
-        query: list,
-        queryArgs: {},
-        getKey: (row) => row._id,
-        gcTime: 0,
-      }),
-    )
-    const marker = `auth-${kind}-${crypto.randomUUID()}`
-    await withTestCleanup(
-      async () => {
-        await collection.preload()
-        let model: Array<string> = []
-        for (const step of history) {
-          // This is the upstream demo's public role selector, not admin auth.
-          await client.mutation(role, { role: step.role })
-          const predicted = stepModel(model, step, marker)
-          const inserted = [...collection.values()].find(
-            (row) => row.body === marker,
-          )
-          const attempt =
-            step.operation === `send`
-              ? client.mutation(send, { body: marker })
-              : client.mutation(remove, { messageId: inserted!._id })
-          if (predicted.allowed) {
-            await attempt
-            model = predicted.next
-          } else
-            await expect(attempt).rejects.toThrow(`Insufficient permissions`)
-          await collection.utils.awaitSync()
-          // Compare at every accepted source checkpoint, including denials and
-          // demotion. Two successful equal-body sends remain two model rows.
-          expect(
-            [...collection.values()]
-              .filter((row) => row.body === marker)
-              .map((row) => row.body)
-              .sort(),
-          ).toEqual([...model].sort())
-        }
-      },
-      () => collection.cleanup(),
-      () => client.close(),
-    )
+const clients = [`javascript`, `react`] as const
+
+// One SDK client signs in through the upstream application and runs the
+// authored role history. At every accepted source checkpoint the public rows
+// must equal the stepModel multiset.
+async function receiveRoleTransitions(
+  kind: (typeof clients)[number],
+): Promise<void> {
+  const http = new ConvexHttpClient(url)
+  await expect(http.query(list, {})).rejects.toThrow(`Not signed in`)
+  const result = await http.action(signIn, { provider: `anonymous` })
+  expect(result.tokens?.token.split(`.`)).toHaveLength(3)
+  const token = result.tokens!.token
+  const invalid = new ConvexHttpClient(url)
+  invalid.setAuth(`${token.slice(0, -3)}bad`)
+  await expect(invalid.query(list, {})).rejects.toThrow()
+  const makeClient = () =>
+    kind === `javascript`
+      ? new ConvexClient(url, { unsavedChangesWarning: false, logger: false })
+      : new ConvexReactClient(url, {
+          unsavedChangesWarning: false,
+          logger: false,
+        })
+  const unauthenticated = makeClient()
+  const denied = createCollection(
+    convexCollectionOptions({
+      client: unauthenticated,
+      query: list,
+      queryArgs: {},
+      getKey: (row) => row._id,
+      gcTime: 0,
+    }),
+  )
+  await withTestCleanup(
+    async () => {
+      await expect(denied.preload()).rejects.toThrow(`Not signed in`)
+      expect([...denied.values()]).toEqual([])
+    },
+    () => denied.cleanup(),
+    () => unauthenticated.close(),
+  )
+  const client = makeClient()
+  client.setAuth(() => Promise.resolve(token))
+  const collection = createCollection(
+    convexCollectionOptions({
+      client,
+      query: list,
+      queryArgs: {},
+      getKey: (row) => row._id,
+      gcTime: 0,
+    }),
+  )
+  const marker = `auth-${kind}-${crypto.randomUUID()}`
+  await withTestCleanup(
+    async () => {
+      await collection.preload()
+      let model: Array<string> = []
+      for (const step of history) {
+        // This is the upstream demo's public role selector, not admin auth.
+        await client.mutation(role, { role: step.role })
+        const predicted = stepModel(model, step, marker)
+        const inserted = [...collection.values()].find(
+          (row) => row.body === marker,
+        )
+        const attempt =
+          step.operation === `send`
+            ? client.mutation(send, { body: marker })
+            : client.mutation(remove, { messageId: inserted!._id })
+        if (predicted.allowed) {
+          await attempt
+          model = predicted.next
+        } else await expect(attempt).rejects.toThrow(`Insufficient permissions`)
+        await collection.utils.awaitSync()
+        // Compare at every accepted source checkpoint, including denials and
+        // demotion. Two successful equal-body sends remain two model rows.
+        expect(
+          [...collection.values()]
+            .filter((row) => row.body === marker)
+            .map((row) => row.body)
+            .sort(),
+        ).toEqual([...model].sort())
+      }
+    },
+    () => collection.cleanup(),
+    () => client.close(),
+  )
+}
+
+oracleProperty({
+  id: `convex.auth-app-roles`,
+  law: {
+    statement: `A rejected operation leaves the public Collection unchanged, and a permitted send or deletion reaches its rows after awaitSync accepts the source, as the independent role table predicts.`,
+    authority: `The role-based Convex Auth application pinned in auth-app/README.md and its server functions' read/write/admin access, as stated at the top of this file.`,
+    limits: `One bounded authored role history through the upstream application, with both SDK WebSocket clients; no OAuth, token refresh, role administration security or browser claim.`,
   },
-)
+  histories: clients,
+  label: (kind) =>
+    `receives genuine authenticated role transitions with the ${kind} client`,
+  resolve: (kind) => ({ kind }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`convex auth roles`, plan, observe, () =>
+      receiveRoleTransitions(plan.kind),
+    ),
+  check: forwardAssertionJudgment,
+})

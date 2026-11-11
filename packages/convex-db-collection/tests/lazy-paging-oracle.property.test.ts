@@ -20,13 +20,8 @@
  * diagnostic and does not claim arbitrary nonquiescent termination coverage.
  */
 import fc from 'fast-check'
-import {
-  IR,
-  createCollection,
-  createLiveQueryCollection,
-  createTransaction,
-} from '@tanstack/db'
-import { expect, it } from 'vitest'
+import { IR, createLiveQueryCollection, createTransaction } from '@tanstack/db'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -34,20 +29,12 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from './helpers'
-import {
-  lazyFixture,
-  lazyOrder,
-  lazyQuery,
-  lazyRequest,
-} from './lazy-paging-driver'
+import { lazyFixture, lazyOrder, lazyRequest } from './lazy-paging-driver'
 import {
   assertLazyCoverage,
   assertLazyPublications,
   copyLazyRows,
-  deliveredScopeComplete,
   expectedLazyRows,
   ordered,
 } from './lazy-paging-model-oracle'
@@ -1133,95 +1120,3 @@ oracleProperty({
     ),
   timeout: 60000,
 })
-
-// Wrong-answer controls distinguish missing same-rank coverage, skipped
-// overshoot, transient publication and hidden-suffix knowledge independently
-// of the production driver. Legal batch/cached and reacquisition behavior
-// carries no mandatory second-receipt or retained-tail assertion.
-it(`rejects wrong coverage and transient windows while preserving discovery freedom`, () => {
-  oracleRoute(`calibration`)
-  const rows = [
-    { id: `a`, rank: 1, text: `` },
-    { id: `b`, rank: 1, text: `` },
-    { id: `c`, rank: 2, text: `` },
-  ]
-  oracleAssertion(`lazy-paging-oracle.property.test.ts:942:toThrow`, () =>
-    expect(() => assertLazyCoverage([rows[0]!], rows, { limit: 1 })).toThrow(
-      `lazy coverage`,
-    ),
-  )
-  oracleAssertion(`lazy-paging-oracle.property.test.ts:945:toThrow`, () =>
-    expect(() => assertLazyPublications([[rows[0]!]], [], rows)).toThrow(
-      `lazy publication`,
-    ),
-  )
-  for (const suffix of [
-    [{ id: `c`, rank: 3, text: `` }],
-    [{ id: `d`, rank: 2, text: `` }],
-  ]) {
-    const delivered = [
-      { id: `a`, rank: 1, text: `` },
-      { id: `b`, rank: 2, text: `` },
-    ]
-    oracleAssertion(`lazy-paging-oracle.property.test.ts:956:toBe`, () =>
-      expect(deliveredScopeComplete(delivered, false, { limit: 2 })).toBe(
-        false,
-      ),
-    )
-    oracleAssertion(`lazy-paging-oracle.property.test.ts:957:toEqual`, () =>
-      expect(expectedLazyRows([...delivered, ...suffix], { limit: 2 })).toEqual(
-        delivered,
-      ),
-    )
-  }
-})
-
-it.each([0, -1, 1.5, Infinity, NaN])(
-  `rejects invalid lazy row caps before readiness: %s`,
-  async (maxRows) => {
-    oracleRoute(`case`)
-    const f = lazyFixture([], 1)
-    await f.source.cleanup()
-    const source = createCollection(
-      convexPaginatedCollectionOptions({
-        client: f.remote.client,
-        query: lazyQuery,
-        queryArgs: {},
-        syncMode: `on-demand`,
-        queryOrder: { field: `rank`, direction: `asc` },
-        maxRows,
-        getKey: (row) => row.id,
-      }),
-    )
-    const statuses: Array<string> = []
-    const off = source.on(`status:change`, ({ status }) => {
-      statuses.push(status)
-    })
-    await withTestCleanup(
-      async () => {
-        await oracleAssertion(
-          `lazy-paging-oracle.property.test.ts:986:toBeInstanceOf`,
-          () => expect(source.preload()).rejects.toBeInstanceOf(Error),
-        )
-        oracleAssertion(
-          `lazy-paging-oracle.property.test.ts:987:toBeInstanceOf`,
-          () => expect(source.utils.getSyncError()).toBeInstanceOf(RangeError),
-        )
-        oracleAssertion(
-          `lazy-paging-oracle.property.test.ts:988:toContain`,
-          () =>
-            expect(
-              statuses,
-              `lazy startup: invalid provider config reported ready`,
-            ).not.toContain(`ready`),
-        )
-        oracleAssertion(
-          `lazy-paging-oracle.property.test.ts:992:toHaveLength`,
-          () => expect(f.remote.slots).toHaveLength(0),
-        )
-      },
-      off,
-      () => source.cleanup(),
-    )
-  },
-)

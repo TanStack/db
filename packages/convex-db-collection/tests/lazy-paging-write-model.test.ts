@@ -1,12 +1,10 @@
 import { expect, it } from 'vitest'
-import { oracleRoute } from '../../db/tests/oracle-config'
 import { LazyWriteModel } from './lazy-paging-write-model-oracle'
 
 /** Calibration of the two-sided law, independently of a backend driver. The
  * same source row distinguishes a confirmed lost write from a rejected write
  * that leaked remotely. These controls preserve both permitted counterparts. */
 it(`rejects lost confirmations and remote effects of atomic rejection`, () => {
-  oracleRoute(`calibration`)
   const original = { id: `a`, rank: 1, text: `before` }
   const changed = { ...original, rank: 0, text: `after` }
   for (const confirmed of [false, true]) {
@@ -39,7 +37,6 @@ it(`rejects lost confirmations and remote effects of atomic rejection`, () => {
 /** A rejected overlay can reveal an older applied source while a newer remote
  * revision waits. After the newer source is public, the old one cannot return. */
 it(`separates optimistic rollback from source rollback and atomic source mixing`, () => {
-  oracleRoute(`calibration`)
   const a = { id: `a`, rank: 0, text: `a0` }
   const b = { id: `b`, rank: 1, text: `b0` }
   const nextA = { ...a, text: `a1` }

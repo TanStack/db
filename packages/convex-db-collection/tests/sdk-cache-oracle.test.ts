@@ -8,8 +8,13 @@ import { Buffer } from 'node:buffer'
 import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
-import { expect, it } from 'vitest'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   assertLazyPublications,
   expectedLazyRows,
@@ -51,99 +56,121 @@ const timestamp = (value: number) => {
   return bytes.toString(`base64`)
 }
 
-it.each([`javascript`, `react`] as const)(
-  `reads coherent range caches before every %s SDK callback`,
-  async (kind) => {
-    oracleRoute(`case`)
-    const options = {
-      webSocketConstructor: Socket as unknown as typeof WebSocket,
-      unsavedChangesWarning: false,
-      logger: false as const,
-    }
-    const client =
-      kind === `javascript`
-        ? new ConvexClient(`https://test.convex.cloud`, options)
-        : new ConvexReactClient(`https://test.convex.cloud`, options)
-    const query = makeFunctionReference<
-      `query`,
-      { paginationOpts: PaginationOptions },
-      PaginationResult<LazyRow>
-    >(`tasks:list`)
-    const handles: Array<{
-      read: () => PaginationResult<LazyRow> | undefined
-      release: () => void
-    }> = []
-    const trace: Array<Array<LazyRow>> = []
-    const record = () =>
-      trace.push(handles.flatMap((handle) => handle.read()?.page ?? []))
-    await withTestCleanup(
-      () => {
-        for (const cursor of [null, `boundary`]) {
-          const args = { paginationOpts: { cursor, numItems: 1 } }
-          if (`onUpdate` in client) {
-            const sub = client.onUpdate(query, args, record)
-            handles.push({ read: () => sub.getCurrentValue(), release: sub })
-          } else {
-            const watch = client.watchQuery(query, args)
-            handles.push({
-              read: () => watch.localQueryResult(),
-              release: watch.onUpdate(record),
-            })
-          }
-        }
-        const socket = Socket.instances.at(-1)!
-        socket.open()
-        const messages = socket.sent.filter(
-          (message) => message.type === `ModifyQuerySet`,
-        )
-        const version = messages.at(-1)!.newVersion
-        const adds = messages
-          .flatMap((message) => message.modifications)
-          .filter((item) => item.type === `Add`)
-        expect(adds).toHaveLength(2)
-        let prior: Array<LazyRow> = []
-        for (let revision = 1; revision <= 2; revision++) {
-          const authored = [0, 1].map((rank) => ({
-            id: String(rank),
-            rank,
-            text: `revision ${revision}`,
-          }))
-          const start = trace.length
-          socket.receive({
-            type: `Transition`,
-            startVersion: {
-              querySet: revision === 1 ? 0 : version,
-              ts: timestamp(revision - 1),
-              identity: 0,
-            },
-            endVersion: {
-              querySet: version,
-              ts: timestamp(revision),
-              identity: 0,
-            },
-            modifications: adds.map((item, index) => ({
-              type: `QueryUpdated`,
-              queryId: item.queryId,
-              value: {
-                page: [authored[index]],
-                isDone: index === 1,
-                continueCursor: `end-${index}`,
-              },
-              logLines: [],
-              journal: null,
-            })),
+const sdks = [`javascript`, `react`] as const
+
+// One SDK receives two legal multi-query transitions. At every callback the
+// shared row and publication model judges the pages that the cached range
+// queries hold.
+async function readCoherentRangeCaches(
+  kind: (typeof sdks)[number],
+): Promise<void> {
+  const options = {
+    webSocketConstructor: Socket as unknown as typeof WebSocket,
+    unsavedChangesWarning: false,
+    logger: false as const,
+  }
+  const client =
+    kind === `javascript`
+      ? new ConvexClient(`https://test.convex.cloud`, options)
+      : new ConvexReactClient(`https://test.convex.cloud`, options)
+  const query = makeFunctionReference<
+    `query`,
+    { paginationOpts: PaginationOptions },
+    PaginationResult<LazyRow>
+  >(`tasks:list`)
+  const handles: Array<{
+    read: () => PaginationResult<LazyRow> | undefined
+    release: () => void
+  }> = []
+  const trace: Array<Array<LazyRow>> = []
+  const record = () =>
+    trace.push(handles.flatMap((handle) => handle.read()?.page ?? []))
+  await withTestCleanup(
+    () => {
+      for (const cursor of [null, `boundary`]) {
+        const args = { paginationOpts: { cursor, numItems: 1 } }
+        if (`onUpdate` in client) {
+          const sub = client.onUpdate(query, args, record)
+          handles.push({ read: () => sub.getCurrentValue(), release: sub })
+        } else {
+          const watch = client.watchQuery(query, args)
+          handles.push({
+            read: () => watch.localQueryResult(),
+            release: watch.onUpdate(record),
           })
-          expect(trace.length).toBeGreaterThan(start)
-          const expected = expectedLazyRows(authored, {})
-          assertLazyPublications(trace.slice(start), prior, expected)
-          expect(trace.at(-1)).toEqual(expected)
-          prior = expected
         }
-      },
-      () => {
-        for (const handle of handles) handle.release()
-      },
-      () => client.close(),
-    )
+      }
+      const socket = Socket.instances.at(-1)!
+      socket.open()
+      const messages = socket.sent.filter(
+        (message) => message.type === `ModifyQuerySet`,
+      )
+      const version = messages.at(-1)!.newVersion
+      const adds = messages
+        .flatMap((message) => message.modifications)
+        .filter((item) => item.type === `Add`)
+      expect(adds).toHaveLength(2)
+      let prior: Array<LazyRow> = []
+      for (let revision = 1; revision <= 2; revision++) {
+        const authored = [0, 1].map((rank) => ({
+          id: String(rank),
+          rank,
+          text: `revision ${revision}`,
+        }))
+        const start = trace.length
+        socket.receive({
+          type: `Transition`,
+          startVersion: {
+            querySet: revision === 1 ? 0 : version,
+            ts: timestamp(revision - 1),
+            identity: 0,
+          },
+          endVersion: {
+            querySet: version,
+            ts: timestamp(revision),
+            identity: 0,
+          },
+          modifications: adds.map((item, index) => ({
+            type: `QueryUpdated`,
+            queryId: item.queryId,
+            value: {
+              page: [authored[index]],
+              isDone: index === 1,
+              continueCursor: `end-${index}`,
+            },
+            logLines: [],
+            journal: null,
+          })),
+        })
+        expect(trace.length).toBeGreaterThan(start)
+        const expected = expectedLazyRows(authored, {})
+        assertLazyPublications(trace.slice(start), prior, expected)
+        expect(trace.at(-1)).toEqual(expected)
+        prior = expected
+      }
+    },
+    () => {
+      for (const handle of handles) handle.release()
+    },
+    () => client.close(),
+  )
+}
+
+oracleProperty({
+  id: `convex.sdk-cache`,
+  law: {
+    statement: `A Convex query transition installs every changed query cache before it dispatches any listener, so each SDK callback reads a coherent prefix of one authored revision.`,
+    authority: `The receiving premise of lazy-paging-model-oracle.ts stated at the top of this file; docs/collections/convex-collection.md.`,
+    limits: `Two legal multi-query wire transitions through a controlled socket, in the JavaScript and React SDKs. It checks SDK scheduling, not server cursor correctness.`,
   },
-)
+  histories: sdks,
+  label: (kind) =>
+    `reads coherent range caches before every ${kind} SDK callback`,
+  resolve: (kind) => ({ kind }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`convex.sdk-cache`, plan, observe, () =>
+      readCoherentRangeCaches(plan.kind),
+    ),
+  check: forwardAssertionJudgment,
+})

@@ -25,6 +25,7 @@ export default defineConfig({
         // and the typecheck program still check them.
         `tests/reload-housekeeping-oracle.test.ts`,
         `tests/failing-queries-oracle.test.ts`,
+        `tests/optimistic-ordered-refetch-oracle.test.ts`,
       ],
     },
   },

@@ -24,7 +24,7 @@
  */
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -32,7 +32,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { rejectsAs } from './calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { lazyOracleBaseRuns, receiveBothSdks } from './lazy-paging-campaign'
@@ -394,6 +394,20 @@ oracleProperty({
       `javascript`,
       `react`,
     ] as const,
+    // The applied-content calibration below corrupts this history, so it is
+    // the first named history that the calibration tries.
+    fixed: [
+      {
+        name: `an equal-valued held receipt whose first caller aborts`,
+        history: {
+          size: 5,
+          pageSize: 2,
+          descending: false,
+          cancelFirst: true,
+          text: ``,
+        },
+      },
+    ],
     constructed: [
       {
         name: `existing constructive history`,
@@ -421,92 +435,22 @@ oracleProperty({
         reach: (state) => observe(`reach`, state),
       }),
     ),
-  timeout: 60000,
-})
-
-it(`rejects applied-content substitution for an equal-valued held receipt`, async () => {
-  oracleRoute(`calibration`)
-  await oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:359:toThrow`,
-    () =>
-      expect(
-        receive(
-          {
-            size: 5,
-            pageSize: 2,
-            descending: false,
-            cancelFirst: true,
-            text: ``,
-          },
-          `javascript`,
-          true,
+  calibrations: [
+    {
+      name: `rejects applied-content substitution for an equal-valued held receipt`,
+      law: `convex.revalidation`,
+      driver: async (plan: { history: History }, observe) =>
+        recordAssertionJudgment(`convex.revalidation`, plan, observe, () =>
+          rejectsAs(
+            `lazy-paging-revalidation-oracle.property.test.ts:359:toThrow`,
+            () => receive(plan.history, `javascript`, true),
+            (failure) =>
+              expect(() => {
+                throw failure
+              }).toThrow(/receipt law/),
+          ),
         ),
-      ).rejects.toThrow(/receipt law/),
-  )
-})
-
-it(`calibrates cleanup authority without treating cleanup as receipt application`, () => {
-  oracleRoute(`calibration`)
-  const model = new LazyReceiptModel()
-  model.acquire(`a`, [`equal`])
-  model.accept(`actual`, [`equal`], [`a`])
-  model.abort(`a`)
-  oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:374:toThrow`,
-    () =>
-      expect(() => model.abandon(`actual`)).toThrow(
-        /abandonment without pending cleanup work/,
-      ),
-  )
-  model.cleanup()
-  oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:378:toThrow`,
-    () =>
-      expect(() => model.observe(`a`, `canceled`)).toThrow(
-        /settled before actual applied/,
-      ),
-  )
-  model.abandon(`actual`)
-  oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:382:toThrow`,
-    () =>
-      expect(() => model.observe(`a`, `success`)).toThrow(
-        /settled before actual applied/,
-      ),
-  )
-  model.observe(`a`, `canceled`)
-  model.complete()
-})
-
-it(`calibrates exact window order while accepting coherent skipped revisions`, () => {
-  oracleRoute(`calibration`)
-  const a = { id: `a`, rank: 0, text: `old` }
-  const b = { id: `b`, rank: 1, text: `old` }
-  const latest = [
-    { ...a, text: `latest` },
-    { ...b, text: `latest` },
-  ]
-  const model = new LazyVersionModel(`sequence`)
-  model.offer([a, b])
-  model.offer([
-    { ...a, text: `middle` },
-    { ...b, text: `middle` },
-  ])
-  model.offer(latest)
-  model.observe([a, b])
-  oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:405:toThrow`,
-    () =>
-      expect(() => model.observe([b, a])).toThrow(
-        /mixed revision or public rollback/,
-      ),
-  )
-  model.observe(latest)
-  oracleAssertion(
-    `lazy-paging-revalidation-oracle.property.test.ts:409:toThrow`,
-    () =>
-      expect(() => model.observe([a, b])).toThrow(
-        /mixed revision or public rollback/,
-      ),
-  )
+    },
+  ],
+  timeout: 60000,
 })

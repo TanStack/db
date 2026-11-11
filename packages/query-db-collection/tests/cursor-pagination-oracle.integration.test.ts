@@ -1,8 +1,12 @@
 import { QueryClient } from '@tanstack/query-core'
 import { createCollection } from '@tanstack/db'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import fc from 'fast-check'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   differs,
   oracleProperty,
@@ -116,6 +120,140 @@ function checkManualWriteTrace(
       Object.keys(expected).length,
     ) ?? pass
   )
+}
+
+const refreshCases = [false, true].flatMap((descending) =>
+  [2, 5].map((backendSize) => ({ descending, backendSize })),
+)
+
+// The backend changes behind a loaded window. A row-query refetch alone must
+// leave the window unchanged; the explicit refresh must reach the model's
+// window before fetchNextPage grows it.
+async function refreshBeforeGrowth({
+  descending,
+  backendSize,
+}: (typeof refreshCases)[number]): Promise<void> {
+  const rows = Array.from({ length: 3 }, (_, id) => ({
+    id,
+    rank: 0,
+    group: 0,
+  }))
+  const scope = { group: undefined, descending }
+  const fixture = createFixture(rows, scope, backendSize)
+  const controller = createLiveQueryWindowController(fixture.live, {
+    pageSize: 3,
+  })
+  const stop = controller.subscribe(() => {})
+  try {
+    await controller.preload()
+    expect(observeRows(controller.getSnapshot().data)).toEqual(
+      expectedWindow(rows, scope, 3).rows,
+    )
+    expect(controller.getSnapshot().hasNextPage).toBe(false)
+    for (const count of [9, 2, 0, 7]) {
+      const previous = observeRows(controller.getSnapshot().data)
+      const calls = fixture.backend.calls.length
+      rows.splice(
+        0,
+        rows.length,
+        ...Array.from({ length: count }, (_, id) => ({
+          id,
+          rank: Math.floor(id / 6),
+          group: count,
+        })),
+      )
+      // Refreshing only the outer row query still allows its fresh page
+      // cache. Prefix invalidation is the explicit two-cache refresh path.
+      await fixture.source.utils.refetch({ throwOnError: true })
+      expect(observeRows(controller.getSnapshot().data)).toEqual(previous)
+      expect(fixture.backend.calls).toHaveLength(calls)
+      await fixture.refresh()
+      const expected = expectedWindow(rows, scope, 3)
+      await vi.waitFor(() => {
+        expect(observeRows(controller.getSnapshot().data)).toEqual(
+          expected.rows,
+        )
+        expect(controller.getSnapshot().hasNextPage).toBe(expected.hasNextPage)
+      })
+    }
+    await controller.fetchNextPage()
+    expect(observeRows(controller.getSnapshot().data)).toEqual(
+      expectedWindow(rows, scope, 6).rows,
+    )
+    expect(controller.getSnapshot().hasNextPage).toBe(true)
+  } finally {
+    stop()
+    controller.dispose()
+    await fixture.cleanup()
+  }
+}
+
+// One matrix cell: grow the window page by page and compare each snapshot
+// and every ready publication with the model's window.
+async function publishExactPages({
+  count,
+  backendSize,
+  pageSize,
+  descending,
+}: (typeof matrix)[number]): Promise<void> {
+  const rows = Array.from({ length: count }, (_, id) => ({
+    id,
+    rank: Math.floor(id / 6),
+    group: id % 2,
+  }))
+  const scope = { group: undefined, descending }
+  const fixture = createFixture(rows, scope, backendSize)
+  const controller = createLiveQueryWindowController(fixture.live, {
+    pageSize,
+  })
+  const publications: Array<{
+    rows: Array<Row>
+    pages: number
+    more: boolean
+    ready: boolean
+  }> = []
+  const unsubscribe = controller.subscribe(() => {
+    const snapshot = controller.getSnapshot()
+    publications.push({
+      rows: observeRows(snapshot.data),
+      pages: snapshot.pageParams.length,
+      more: snapshot.hasNextPage,
+      ready: snapshot.isReady,
+    })
+  })
+  try {
+    await controller.preload()
+    for (let page = 1; page <= Math.ceil(count / pageSize) + 1; page++) {
+      const expected = expectedWindow(rows, scope, page * pageSize)
+      const snapshot = controller.getSnapshot()
+      expect(observeRows(snapshot.data)).toEqual(expected.rows)
+      expect(snapshot.hasNextPage).toBe(expected.hasNextPage)
+      expect(observeRows(snapshot.pages.flat())).toEqual(expected.rows)
+      if (!expected.hasNextPage) break
+      await controller.fetchNextPage()
+    }
+    expect(publications.length).toBeGreaterThan(0)
+    expect(publications.some((published) => published.ready)).toBe(true)
+    for (const published of publications) {
+      if (published.ready) {
+        const expected = expectedWindow(rows, scope, published.pages * pageSize)
+        expect(published.rows).toEqual(expected.rows)
+        expect(published.more).toBe(expected.hasNextPage)
+      }
+    }
+    expect(fixture.requests.length).toBeGreaterThan(0)
+    expect(fixture.requests[0]?.limit).toBe(pageSize + 1)
+    if (count > pageSize) {
+      expect(fixture.cursorRequestCount()).toBeGreaterThan(0)
+    }
+    expect(fixture.backend.calls).toHaveLength(
+      Math.max(1, Math.ceil(count / backendSize)),
+    )
+  } finally {
+    unsubscribe()
+    controller.dispose()
+    await fixture.cleanup()
+  }
 }
 
 describe(`cursor adapter through production pagination`, () => {
@@ -308,138 +446,49 @@ describe(`cursor adapter through production pagination`, () => {
       })
     },
   )
-  it.each(
-    [false, true].flatMap((descending) =>
-      [2, 5].map((backendSize) => ({ descending, backendSize })),
-    ),
-  )(
-    `refreshes changed backend rows before growing the window $descending/$backendSize`,
-    async ({ descending, backendSize }) => {
-      oracleRoute(`case`)
-      const rows = Array.from({ length: 3 }, (_, id) => ({
-        id,
-        rank: 0,
-        group: 0,
-      }))
-      const scope = { group: undefined, descending }
-      const fixture = createFixture(rows, scope, backendSize)
-      const controller = createLiveQueryWindowController(fixture.live, {
-        pageSize: 3,
-      })
-      const stop = controller.subscribe(() => {})
-      try {
-        await controller.preload()
-        expect(observeRows(controller.getSnapshot().data)).toEqual(
-          expectedWindow(rows, scope, 3).rows,
-        )
-        expect(controller.getSnapshot().hasNextPage).toBe(false)
-        for (const count of [9, 2, 0, 7]) {
-          const previous = observeRows(controller.getSnapshot().data)
-          const calls = fixture.backend.calls.length
-          rows.splice(
-            0,
-            rows.length,
-            ...Array.from({ length: count }, (_, id) => ({
-              id,
-              rank: Math.floor(id / 6),
-              group: count,
-            })),
-          )
-          // Refreshing only the outer row query still allows its fresh page
-          // cache. Prefix invalidation is the explicit two-cache refresh path.
-          await fixture.source.utils.refetch({ throwOnError: true })
-          expect(observeRows(controller.getSnapshot().data)).toEqual(previous)
-          expect(fixture.backend.calls).toHaveLength(calls)
-          await fixture.refresh()
-          const expected = expectedWindow(rows, scope, 3)
-          await vi.waitFor(() => {
-            expect(observeRows(controller.getSnapshot().data)).toEqual(
-              expected.rows,
-            )
-            expect(controller.getSnapshot().hasNextPage).toBe(
-              expected.hasNextPage,
-            )
-          })
-        }
-        await controller.fetchNextPage()
-        expect(observeRows(controller.getSnapshot().data)).toEqual(
-          expectedWindow(rows, scope, 6).rows,
-        )
-        expect(controller.getSnapshot().hasNextPage).toBe(true)
-      } finally {
-        stop()
-        controller.dispose()
-        await fixture.cleanup()
-      }
+  oracleProperty({
+    id: `cursor-pagination.refresh-before-growth`,
+    law: {
+      statement: `After the backend changes, the visible window and hasNextPage keep their prior values until the page caches refresh, and then match the independent full-relation window before the window grows.`,
+      authority: `cursor-pagination/README.md; the end-to-end contract at the top of this file.`,
+      limits: `Three to nine rows of one rank, both directions and backend page sizes 2 and 5, through a real QueryCollection and live-query window controller.`,
     },
-  )
+    owns: [
+      `src/cursor-pagination.ts#createCursorPager`,
+      `src/query.ts#queryCollectionOptions`,
+    ],
+    histories: refreshCases,
+    label: ({ descending, backendSize }) =>
+      `refreshes changed backend rows before growing the window ${descending}/${backendSize}`,
+    resolve: (refreshCase) => ({ refreshCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`refresh before growth`, plan, observe, () =>
+        refreshBeforeGrowth(plan.refreshCase),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-  it.each(matrix)(
-    `publishes exact pages and exhaustion $count/$backendSize/$pageSize/$descending`,
-    async ({ count, backendSize, pageSize, descending }) => {
-      oracleRoute(`case`)
-      const rows = Array.from({ length: count }, (_, id) => ({
-        id,
-        rank: Math.floor(id / 6),
-        group: id % 2,
-      }))
-      const scope = { group: undefined, descending }
-      const fixture = createFixture(rows, scope, backendSize)
-      const controller = createLiveQueryWindowController(fixture.live, {
-        pageSize,
-      })
-      const publications: Array<{
-        rows: Array<Row>
-        pages: number
-        more: boolean
-        ready: boolean
-      }> = []
-      const unsubscribe = controller.subscribe(() => {
-        const snapshot = controller.getSnapshot()
-        publications.push({
-          rows: observeRows(snapshot.data),
-          pages: snapshot.pageParams.length,
-          more: snapshot.hasNextPage,
-          ready: snapshot.isReady,
-        })
-      })
-      try {
-        await controller.preload()
-        for (let page = 1; page <= Math.ceil(count / pageSize) + 1; page++) {
-          const expected = expectedWindow(rows, scope, page * pageSize)
-          const snapshot = controller.getSnapshot()
-          expect(observeRows(snapshot.data)).toEqual(expected.rows)
-          expect(snapshot.hasNextPage).toBe(expected.hasNextPage)
-          expect(observeRows(snapshot.pages.flat())).toEqual(expected.rows)
-          if (!expected.hasNextPage) break
-          await controller.fetchNextPage()
-        }
-        expect(publications.length).toBeGreaterThan(0)
-        expect(publications.some((published) => published.ready)).toBe(true)
-        for (const published of publications) {
-          if (published.ready) {
-            const expected = expectedWindow(
-              rows,
-              scope,
-              published.pages * pageSize,
-            )
-            expect(published.rows).toEqual(expected.rows)
-            expect(published.more).toBe(expected.hasNextPage)
-          }
-        }
-        expect(fixture.requests.length).toBeGreaterThan(0)
-        expect(fixture.requests[0]?.limit).toBe(pageSize + 1)
-        if (count > pageSize) {
-          expect(fixture.cursorRequestCount()).toBeGreaterThan(0)
-        }
-        expect(fixture.backend.calls).toHaveLength(
-          Math.max(1, Math.ceil(count / backendSize)),
-        )
-      } finally {
-        unsubscribe()
-        controller.dispose()
-        await fixture.cleanup()
-      }
+  oracleProperty({
+    id: `cursor-pagination.exact-pages`,
+    law: {
+      statement: `Every ready publication and every page of the window equals the independent full-relation window for its page count, with exact exhaustion and one backend read per backend page.`,
+      authority: `cursor-pagination/README.md; the end-to-end contract at the top of this file.`,
+      limits: `The finite matrix of row counts 0, 1, 9 and 20, backend page sizes 2 and 5, window page sizes 3 and 7 and both directions.`,
     },
-  )
+    owns: [
+      `src/cursor-pagination.ts#createCursorPager`,
+      `src/query.ts#queryCollectionOptions`,
+    ],
+    histories: matrix,
+    label: ({ count, backendSize, pageSize, descending }) =>
+      `publishes exact pages and exhaustion ${count}/${backendSize}/${pageSize}/${descending}`,
+    resolve: (pageCase) => ({ pageCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`exact pages`, plan, observe, () =>
+        publishExactPages(plan.pageCase),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

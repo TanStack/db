@@ -14,7 +14,7 @@
  */
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -22,7 +22,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { rejectsAs } from './calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
@@ -355,6 +355,20 @@ oracleProperty({
       `javascript`,
       `react`,
     ] as const,
+    // The startup-receipt calibration below corrupts this history.
+    fixed: [
+      {
+        name: `eight rows in pages of two through the JavaScript receiver`,
+        history: {
+          size: 8,
+          pageSize: 2,
+          descending: false,
+          react: false,
+          reverse: false,
+          text: ``,
+        },
+      },
+    ],
     constructed: [
       ...([false, true] as const).map((react) => ({
         name: react
@@ -388,27 +402,31 @@ oracleProperty({
         reach: (state) => observe(`reach`, state),
       }),
     ),
-  timeout: 60000,
-})
-
-it(`rejects a native receiver borrowing the applied startup receipt`, async () => {
-  oracleRoute(`calibration`)
-  await oracleAssertion(
-    `lazy-paging-native-receipt-oracle.property.test.ts:317:toThrow`,
-    () =>
-      expect(
-        nativeHistory(
-          {
-            size: 8,
-            pageSize: 2,
-            descending: false,
-            react: false,
-            cancel: false,
-            reverse: false,
-            text: ``,
-          },
-          true,
+  calibrations: [
+    {
+      name: `rejects a native receiver borrowing the applied startup receipt`,
+      law: `convex.lazy-native-receipt`,
+      driver: async (
+        plan: {
+          history: AssertionHistory<typeof convex_lazy_native_receiptHistory>
+        },
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
+        recordAssertionJudgment(
+          `convex.lazy-native-receipt`,
+          plan,
+          observe,
+          () =>
+            rejectsAs(
+              `lazy-paging-native-receipt-oracle.property.test.ts:317:toThrow`,
+              () => nativeHistory({ ...plan.history, cancel: false }, true),
+              (failure) =>
+                expect(() => {
+                  throw failure
+                }).toThrow(/receipt law/),
+            ),
         ),
-      ).rejects.toThrow(/receipt law/),
-  )
+    },
+  ],
+  timeout: 60000,
 })

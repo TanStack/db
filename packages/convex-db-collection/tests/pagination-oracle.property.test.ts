@@ -23,7 +23,7 @@
  */
 import fc from 'fast-check'
 import { createCollection } from '@tanstack/db'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -32,9 +32,9 @@ import {
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { oracleRoute } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { copyRows, keyedRows, provider, query } from './pagination-support'
+import { expectRevisionTrace } from './pagination-trace-model-oracle'
 import type { Row } from './pagination-support'
 
 type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
@@ -110,80 +110,6 @@ const rowStates = [
   `pending-range-with-prior-snapshot`,
   `public-snapshot-publication`,
 ] as const
-
-function sameRows(
-  left: ReadonlyArray<Row>,
-  right: ReadonlyArray<Row>,
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (row, index) =>
-        row.id === right[index]!.id &&
-        row.rank === right[index]!.rank &&
-        row.text === right[index]!.text,
-    )
-  )
-}
-
-// During one coherent source revision, observations may retain the prior
-// complete snapshot and then expose the new complete snapshot. Repeated
-// observations are permitted. Once the new snapshot appears, stale prior rows
-// cannot reappear without another source revision. Keep every observation:
-// overwriting one variable would hide a prefix immediately repaired in-turn.
-function expectRevisionTrace(
-  boundary: string,
-  observations: ReadonlyArray<ReadonlyArray<Row>>,
-  prior: ReadonlyArray<Row>,
-  current: ReadonlyArray<Row>,
-): void {
-  let currentSeen = false
-  for (const observation of observations) {
-    if (sameRows(observation, current)) currentSeen = true
-    else
-      oracleAssertion(`pagination-oracle.property.test.ts:104:toEqual`, () =>
-        expect(
-          observation,
-          `${boundary}: complete monotone source snapshots`,
-        ).toEqual(currentSeen ? current : prior),
-      )
-  }
-}
-
-// Calibrate both recorders' shared trace relation without imposing one callback
-// per revision. Repeated old/new snapshots are legal; prefixes and rollback
-// after the new snapshot are not, even when a final callback repairs the result.
-it.each([`select`, `Collection publication`])(
-  `calibrates complete monotone snapshots at %s`,
-  (boundary) => {
-    oracleRoute(`calibration`)
-    const current = Array.from({ length: 3 }, (_, rank) => ({
-      id: String(rank),
-      rank,
-      text: String(rank),
-    }))
-    oracleAssertion(`pagination-oracle.property.test.ts:131:toThrow`, () =>
-      expect(() =>
-        expectRevisionTrace(boundary, [[], [], current, current], [], current),
-      ).not.toThrow(),
-    )
-    oracleAssertion(`pagination-oracle.property.test.ts:134:toThrow`, () =>
-      expect(() =>
-        expectRevisionTrace(
-          boundary,
-          [current.slice(0, 1), current],
-          [],
-          current,
-        ),
-      ).toThrow(),
-    )
-    oracleAssertion(`pagination-oracle.property.test.ts:142:toThrow`, () =>
-      expect(() =>
-        expectRevisionTrace(boundary, [current, [], current], [], current),
-      ).toThrow(),
-    )
-  },
-)
 
 // Calibration: publishing a one-row prefix before the full result, or
 // republishing the empty prior snapshot after the full result, fails the select
