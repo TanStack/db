@@ -8489,6 +8489,30 @@ one no-stale-step flag while the production probe saw no obsolete step. That
 run's random seed was not recorded, and 16 seeds did not reproduce it; it may
 be a false flag of the law's over-approximating premise.
 
+Review follow-up: two false flags on unchanged production, found by the
+review at the default random budget (2 of 40 seeds failed with no mutant),
+are repaired in the oracle only.
+
+- The no-stale-step law counted any full-source read that a settlement
+  started as proof of an obsolete step. A genuine replacement start whose
+  settlement falls back to a full-source read (a head insert, or an
+  unexpressible boundary rank) was flagged. Witness: request-authority,
+  seed 4, path `17698:0:0:0:10:16:17:17:17`. The law now counts a full-source
+  read only when every installed rank is finite.
+- The fake's drain settled a pending replay while a request issued inside
+  that replay attempt was still in flight, and the held law then flagged the
+  retirement that followed. ARCHITECTURE.md (Replay participants) publishes a
+  replay only after every acquisition of its attempt settles. Witness: seed
+  119, path `1430:0:1:1:5:4:10:12:14:15:15`. The drain now settles those
+  requests first.
+
+After both repairs, 40 random seeds (300 to 339) pass the whole file with no
+mutant. With the review's production mutants at seed 7, `nofix` fails 8
+tests, `restart` 6, `droprefill` 6, `retireown` 29, and `smaller` 1. One
+premise risk remains undrawn: a fresh start whose prefix returns empty would
+issue a refill prefix from its own settlement and be flagged. The fake never
+returns an empty start prefix there.
+
 Awaiting maintainer decision. Owner: this oracle.
 
 - `m3`: a blocked pass drops a staged continuation. The refill is later
