@@ -1,6 +1,9 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
 import oraclePlugin from '@tanstack/eslint-plugin-oracles'
-import { oracleLintSettings } from './scripts/oracle-lint-settings.mjs'
+import {
+  oracleLintSettings,
+  registrationExceptionConfig,
+} from './scripts/oracle-lint-settings.mjs'
 
 export default [
   ...tanstackConfig,
@@ -58,6 +61,8 @@ export default [
   { settings: oracleLintSettings },
   oraclePlugin.configs.recommended,
   oraclePlugin.configs.production,
+  // The reviewed exception list: see scripts/oracle-lint-settings.mjs.
+  registrationExceptionConfig,
   // Receiving witnesses for runtimes that are not Vitest on Node (maintainer
   // decision, 2026-11-11). oracleProperty registers through Vitest and its
   // main entry is Node-only, so Playwright specs and the shared suites that

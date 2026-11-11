@@ -4347,7 +4347,16 @@ Every oracle file registers its tests only through `oracleProperty`
 lists every test that moved to an ordinary file, the receiving witnesses
 renamed `*-witness.*`, the known-defect witness files, and the open
 exceptions: two multi-tab `it.fails` witnesses (#2267, #2209) and the
-production-running reach censuses that wait for enforced reach minimums.
+production-running reach censuses that wait for enforced reach minimums. Those
+eight registrations in five files are the reviewed exception list
+`registrationExceptions` in `scripts/oracle-lint-settings.mjs`, under the
+maintainer decision "merge sooner and then remove once F33 is in"
+(2026-11-11). ESLint turns `oracle/no-unit-test` off for those files only,
+and `scripts/check-registration-exceptions.mjs`, run by `pnpm lint:oracles`,
+fails when a file's report count differs from its recorded count, or when
+the list grows against the merge-base. An entry is removed when its retiring
+work lands: F33 for the censuses, and extracting the multi-tab driver for
+the two witnesses.
 
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,

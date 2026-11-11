@@ -20,7 +20,7 @@
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint:check": "pnpm --filter \"./packages/**\" lint --fix=false",
     "lint:changed": "node scripts/agent-lint-feedback.mjs",
-    "lint:oracles": "node scripts/agent-lint-feedback.mjs --all",
+    "lint:oracles": "node scripts/agent-lint-feedback.mjs --all && node scripts/check-registration-exceptions.mjs",
     "lint:run-budgets": "node scripts/check-oracle-run-counts.mjs",
     "gap-report": "oracle-gaps --env-prefix TANSTACK_DB_ORACLE",
     "test:lint-rules": "vitest run --config scripts/oracle-scripts.vitest.config.mjs",
