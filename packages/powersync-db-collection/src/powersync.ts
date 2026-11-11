@@ -257,6 +257,7 @@ function createPowerSyncCollectionConfig<
     schema: inputSchema,
     syncBatchSize = DEFAULT_BATCH_SIZE,
     syncMode = 'eager',
+    numericIds = false,
     ...restConfig
   } = config
 
@@ -284,10 +285,12 @@ function createPowerSyncCollectionConfig<
     const validationSchema = deserializationSchema || schema
     const validation = validationSchema[`~standard`].validate(value)
     if (`value` in validation) {
+      // A numeric key must name exactly one stored id, so eviction and
+      // writes can derive one from the other.
       const id = (validation.value as { id?: unknown }).id
       if (
-        typeof id === `number` &&
-        (!Number.isSafeInteger(id) || String(id) !== value.id)
+        numericIds &&
+        !(Number.isSafeInteger(id) && String(id) === value.id)
       ) {
         const message = `A numeric PowerSync id must round-trip as a canonical safe integer`
         database.logger.log({ level: LogLevels.error, message })
@@ -878,18 +881,15 @@ function createPowerSyncCollectionConfig<
                   active.length === 1
                     ? active[0]
                     : or(active[0], active[1], ...active.slice(2))
-                const compiledNewData = compileSQLite(
-                  { where: combinedWhere },
-                  { jsonColumn: 'NEW.data' },
+                const newDataWhenClause = compileWhere(
+                  combinedWhere,
+                  'NEW.data',
                 )
-                const compiledOldData = compileSQLite(
-                  { where: combinedWhere },
-                  { jsonColumn: 'OLD.data' },
+                const oldDataWhenClause = compileWhere(
+                  combinedWhere,
+                  'OLD.data',
                 )
-                const compiledView = compileSQLite({ where: combinedWhere })
-                const newDataWhenClause = toInlinedWhereClause(compiledNewData)
-                const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
-                const viewWhereClause = toInlinedWhereClause(compiledView)
+                const viewWhereClause = compileWhere(combinedWhere)
                 await establishTracking(
                   {
                     setupContext: ctx,
@@ -1016,10 +1016,16 @@ function createPowerSyncCollectionConfig<
           return task
         }
 
-        const toInlinedWhereClause = (compiled: {
-          where?: string
-          params: Array<unknown>
-        }): string => {
+        // Loading, tracking, and eviction all compile predicates here, so
+        // they compare `id` the same way.
+        const compileWhere = (
+          where: LoadSubsetOptions[`where`],
+          jsonColumn?: string,
+        ): string => {
+          const compiled = compileSQLite(
+            { where },
+            { jsonColumn, numericId: numericIds },
+          )
           if (!compiled.where) return 'TRUE'
           const sqlParts = compiled.where.split('?')
           return sanitizeSQL(
@@ -1092,39 +1098,37 @@ function createPowerSyncCollectionConfig<
         const performPhysicalRelease = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
-          const compiledDeparting = compileSQLite({ where: options.where })
-          const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
-          let rowsToEvict: Array<TableType>
+          const departingWhereSQL = compileWhere(options.where)
+          let rowsToEvict: Array<{ id: string }>
           for (;;) {
             if (stopped) return
             const revision = trackingRevision
             const active = activeWhereExpressions()
             let evictionSQL: string
             if (active.length === 0) {
-              evictionSQL = `SELECT * FROM ${viewName} WHERE ${departingWhereSQL}`
+              evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
             } else {
               const combinedRemaining =
                 active.length === 1
                   ? active[0]!
                   : or(active[0], active[1], ...active.slice(2))
-              const compiledRemaining = compileSQLite({
-                where: combinedRemaining,
-              })
-              const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
-              evictionSQL = `SELECT * FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
+              const remainingWhereSQL = compileWhere(combinedRemaining)
+              evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
             }
 
-            rowsToEvict = await database.getAll<TableType>(evictionSQL)
+            rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
             if (stopped) return
             if (trackingRevision === revision) break
           }
-          if (rowsToEvict.length > 0) {
-            // Derive every key before the transaction opens: a row that fails
-            // deserialization must not leave it open.
-            const keys = rowsToEvict.map((row) =>
-              getKey(deserializeSyncRow(row)),
-            )
+          // Eviction does not revalidate rows. A loaded row's key is its stored
+          // id, or with numericIds the number that round-trips to it; a row
+          // with any other id was never loaded.
+          const keys = rowsToEvict.flatMap(({ id }) => {
+            const key = numericIds ? Number(id) : id
+            return String(key) === id ? [key as PowerSyncKey] : []
+          })
+          if (keys.length > 0) {
             begin()
             for (const key of keys) write({ type: `delete`, key })
             void commit()
@@ -1268,11 +1272,12 @@ function createPowerSyncCollectionConfig<
 
   const getKey = (record: OutputType): PowerSyncKey => {
     const { id } = record as { id?: unknown }
-    if (typeof id !== `string` && typeof id !== `number`) {
-      throw new Error(`Record must have a string or number id field`)
-    }
-    if (typeof id === `number` && !Number.isSafeInteger(id)) {
-      throw new Error(`A numeric PowerSync id must be a safe integer`)
+    if (numericIds ? !Number.isSafeInteger(id) : typeof id !== `string`) {
+      throw new Error(
+        numericIds
+          ? `With numericIds, a record id must be a safe integer`
+          : `Record must have a string id field; set numericIds for number ids`,
+      )
     }
     return id as PowerSyncKey
   }

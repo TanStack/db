@@ -90,4 +90,35 @@ describe(`PowerSync collection type tests`, () => {
       },
     })
   })
+
+  it(`requires numericIds exactly when the schema outputs a number id`, () => {
+    const schema = z.object({
+      id: z.number(),
+      name: z.string().nullable(),
+      author: z.string().nullable(),
+      created_at: z.string().nullable(),
+    })
+    const base = {
+      database: {} as PowerSyncDatabase,
+      table: APP_SCHEMA.props.documents,
+      schema,
+      deserializationSchema: schema.extend({ id: z.coerce.number<string>() }),
+      onDeserializationError: () => {},
+    }
+
+    const options = powerSyncCollectionOptions({ ...base, numericIds: true })
+    expectTypeOf(createCollection(options).get)
+      .parameter(0)
+      .toEqualTypeOf<number>()
+
+    // @ts-expect-error a number id needs numericIds
+    powerSyncCollectionOptions(base)
+
+    powerSyncCollectionOptions({
+      database: {} as PowerSyncDatabase,
+      table: APP_SCHEMA.props.documents,
+      // @ts-expect-error a text id cannot use numericIds
+      numericIds: true,
+    })
+  })
 })

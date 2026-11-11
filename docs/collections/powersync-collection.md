@@ -401,11 +401,11 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 
 ### Integer Primary Keys
 
-SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`.
+SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema` and set `numericIds: true`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`. Predicates on `id`, such as `gt(product.id, 2)`, compare numbers in on-demand loads, change tracking, and eviction.
 
 ```typescript
 const productSchema = z.object({
-  id: z.coerce.number(), // SQLite TEXT '5' to the key 5
+  id: z.number(),
   name: z.string().nullable(),
 })
 
@@ -414,7 +414,10 @@ const products = createCollection(
     database: db,
     table: APP_SCHEMA.props.products,
     schema: productSchema,
-    deserializationSchema: productSchema,
+    deserializationSchema: productSchema.extend({
+      id: z.coerce.number<string>(), // SQLite TEXT '5' to the key 5
+    }),
+    numericIds: true,
     onDeserializationError: (error) => {
       // Present fatal error
     },
@@ -424,7 +427,7 @@ const products = createCollection(
 products.get(5)
 ```
 
-Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
+TypeScript requires `numericIds: true` when the schema outputs a number `id`, and rejects it otherwise. Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
 
 ### Optimistic Updates
 

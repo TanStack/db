@@ -14,26 +14,31 @@ import { powerSyncCollectionOptions } from '../src'
 import type { PowerSyncLogger } from '@powersync/node'
 
 // SQLite stores every PowerSync id as text. A backend with integer primary
-// keys converts `id` to a number in `deserializationSchema`, so the
-// collection key is the deserialized number and integer foreign keys match
-// it. Every path that writes a key must derive it from the deserialized row,
-// not from SQLite's text id.
+// keys sets `numericIds` and converts `id` to a number in
+// `deserializationSchema`, so the collection key is the deserialized number
+// and integer foreign keys match it. Every path that writes a key must use
+// that number, and every path that filters by `id` must compare numbers.
 
 const APP_SCHEMA = new Schema({
   products: new Table({ name: column.text, category: column.text }),
 })
 
 const row = z.object({
-  id: z.coerce.number(),
+  id: z.number(),
   name: z.string().nullable(),
   category: z.string().nullable(),
 })
+// Rows read from SQLite carry the id as text.
+const sqliteRow = row.extend({ id: z.coerce.number<string>() })
 
 const categoryEquals = (category: string) =>
   new IR.Func<boolean>(`eq`, [
     new IR.PropRef([`category`]),
     new IR.Value(category),
   ])
+
+const idGreaterThan = (id: number) =>
+  new IR.Func<boolean>(`gt`, [new IR.PropRef([`id`]), new IR.Value(id)])
 
 async function createDatabase() {
   const errors: Array<string> = []
@@ -72,8 +77,9 @@ function createNumericCollection(
       database: db,
       table: APP_SCHEMA.props.products,
       schema: row,
-      deserializationSchema: row,
+      deserializationSchema: sqliteRow,
       onDeserializationError: () => {},
+      numericIds: true,
       syncMode,
     }),
   )
@@ -147,6 +153,30 @@ describe(`numeric collection keys`, () => {
     expect(errors).toEqual([])
   })
 
+  // As text, '10' < '2'. The subset load, the trigger that tracks later
+  // writes, and eviction must all compare ids as numbers.
+  it(`compares ids as numbers when loading, tracking, and evicting`, async () => {
+    const { db, errors } = await createDatabase()
+    await db.execute(
+      `INSERT INTO products (id, name, category) VALUES ('10', 'E', 'z')`,
+    )
+    const collection = createNumericCollection(db, `on-demand`)
+    const subset = { where: idGreaterThan(2) }
+    await collection._sync.loadSubset(subset)
+    expect([...collection.keys()].sort((a, b) => a - b)).toEqual([3, 10])
+
+    // One write, so once 100 arrives the tracking has judged 0 as well.
+    await db.execute(
+      `INSERT INTO products (id, name, category) VALUES ('0', 'F', 'z'), ('100', 'G', 'z')`,
+    )
+    await vi.waitFor(() => expect(collection.has(100)).toBe(true))
+    expect(collection.has(0)).toBe(false)
+
+    collection._sync.unloadSubset(subset)
+    await vi.waitFor(() => expect(collection.size).toBe(0))
+    expect(errors).toEqual([])
+  })
+
   it(`keeps held rows after a tracking outage`, async () => {
     vi.useFakeTimers()
     const { db } = await createDatabase()
@@ -180,78 +210,89 @@ describe(`numeric collection keys`, () => {
   })
 })
 
-// Deriving a key deserializes the row, and deserialization can fail. A sync
-// transaction opens only after every key is derived, so a failing row leaves
-// no open transaction behind.
+// A load deserializes every row, and deserialization can fail. A sync
+// transaction opens only after every row is deserialized, so a failing row
+// leaves no open transaction behind. A release does not deserialize: it
+// derives each key from the stored id, so a row that fails validation cannot
+// keep the release from evicting the rows it loaded.
 describe(`a row that fails deserialization`, () => {
-  function createGatedCollection(db: PowerSyncDatabase) {
-    const gate = { valid: true }
-    const gated = row.extend({
-      id: z.coerce.number().refine(() => gate.valid),
-    })
-    const collection = createCollection(
-      powerSyncCollectionOptions({
-        database: db,
-        table: APP_SCHEMA.props.products,
-        schema: gated,
-        deserializationSchema: gated,
-        onDeserializationError: () => {},
-        syncMode: `on-demand`,
-      }),
-    )
+  // A row fails validation while its stored id is in `invalid`.
+  function createGatedCollection(
+    db: PowerSyncDatabase,
+    ids: `numeric` | `string`,
+  ) {
+    const invalid = new Set<string>()
+    const valid = (id: string | number) => !invalid.has(String(id))
+    const base = {
+      database: db,
+      table: APP_SCHEMA.props.products,
+      onDeserializationError: () => {},
+      syncMode: `on-demand` as const,
+    }
+    const numeric = row.extend({ id: z.coerce.number<string>().refine(valid) })
+    const text = row.extend({ id: z.string().refine(valid) })
+    const collection =
+      ids === `numeric`
+        ? createCollection(
+            powerSyncCollectionOptions({
+              ...base,
+              schema: row,
+              deserializationSchema: numeric,
+              numericIds: true,
+            }),
+          )
+        : createCollection(
+            powerSyncCollectionOptions({
+              ...base,
+              schema: text,
+              deserializationSchema: text,
+            }),
+          )
+    onTestFinished(() => collection.cleanup())
     const openTransactions = () =>
       collection._state.pendingSyncedTransactions.filter(
         (transaction) => !transaction.committed,
       ).length
-    return { collection, gate, openTransactions }
+    return { collection, invalid, openTransactions }
   }
 
   it(`fails a load without leaving a sync transaction open`, async () => {
     const { db } = await createDatabase()
-    const { collection, gate, openTransactions } = createGatedCollection(db)
-    try {
-      gate.valid = false
-      await expect(
-        Promise.resolve(
-          collection._sync.loadSubset({ where: categoryEquals(`x`) }),
-        ),
-      ).rejects.toThrow()
-      expect(openTransactions()).toBe(0)
-      expect(collection.size).toBe(0)
+    const { collection, invalid, openTransactions } = createGatedCollection(
+      db,
+      `numeric`,
+    )
+    invalid.add(`2`)
+    await expect(
+      Promise.resolve(
+        collection._sync.loadSubset({ where: categoryEquals(`x`) }),
+      ),
+    ).rejects.toThrow()
+    expect(openTransactions()).toBe(0)
+    expect(collection.size).toBe(0)
 
-      gate.valid = true
-      await collection._sync.loadSubset({ where: categoryEquals(`x`) })
-      expect([...collection.keys()].sort()).toEqual([1, 2])
-    } finally {
-      await collection.cleanup()
-    }
+    invalid.clear()
+    await collection._sync.loadSubset({ where: categoryEquals(`x`) })
+    expect(collection.size).toBe(2)
   })
 
-  it(`retries an eviction without leaving a sync transaction open`, async () => {
-    vi.useFakeTimers()
-    const { db, errors } = await createDatabase()
-    const { collection, gate, openTransactions } = createGatedCollection(db)
-    const first = { where: categoryEquals(`x`) }
-    try {
-      await collection._sync.loadSubset(first)
-      gate.valid = false
-      collection._sync.unloadSubset(first)
-      await vi.waitFor(() =>
-        expect(errors).toContainEqual(
-          expect.stringContaining(`Could not release subset tracking`),
-        ),
+  it.each([`numeric`, `string`] as const)(
+    `releases a subset that holds a permanently invalid row (%s ids)`,
+    async (ids) => {
+      const { db, errors } = await createDatabase()
+      const { collection, invalid, openTransactions } = createGatedCollection(
+        db,
+        ids,
       )
-      expect(openTransactions()).toBe(0)
-      expect([...collection.keys()].sort()).toEqual([1, 2])
+      const subset = { where: categoryEquals(`x`) }
+      await collection._sync.loadSubset(subset)
+      expect(collection.size).toBe(2)
 
-      gate.valid = true
-      await vi.advanceTimersByTimeAsync(1_000)
+      invalid.add(`2`)
+      collection._sync.unloadSubset(subset)
       await vi.waitFor(() => expect(collection.size).toBe(0))
       expect(openTransactions()).toBe(0)
-    } finally {
-      await collection.cleanup()
-      await vi.runOnlyPendingTimersAsync()
-      vi.useRealTimers()
-    }
-  })
+      expect(errors).toEqual([])
+    },
+  )
 })

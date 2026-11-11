@@ -37,6 +37,17 @@ export type InferPowerSyncKey<TOutput> = TOutput extends { id: infer TId }
   : string
 
 /**
+ * SQLite stores every PowerSync `id` as text. Set `numericIds: true` when the
+ * schema converts `id` to a number, as for a backend with integer primary
+ * keys. Predicates on `id` then compare numbers, and the collection key is
+ * the number. The option is required exactly when the output `id` is a number.
+ */
+export type NumericIdsConfig<TOutput> =
+  InferPowerSyncKey<TOutput> extends number
+    ? { numericIds: true }
+    : { numericIds?: false }
+
+/**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.
  *
  * This type allows you to override, for keys in the input object (`TOutput`), a function that transforms
@@ -240,7 +251,8 @@ export type BasePowerSyncCollectionConfig<
    *   streaming of initial results, at the cost of more query calls.
    */
   syncBatchSize?: number
-} & (EagerSyncHooks | OnDemandSyncHooks)
+} & NumericIdsConfig<InferPowerSyncOutputType<TTable, TSchema>> &
+  (EagerSyncHooks | OnDemandSyncHooks)
 
 /**
  * Configuration interface for PowerSync collection options.
