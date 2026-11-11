@@ -54,33 +54,78 @@
  * load error, one line with its message. A hook hands the line to the agent and
  * exits 0. A command-line run writes it to stderr and exits 1, because CI and
  * the pre-commit hook must not pass a lint that did not run.
+ *
+ * Every other failure ends the same way, with one `oracle lint failed:` line
+ * (maintainer, 2026-11-10: "we should never just crash"): an unknown
+ * `--format` or `--event`, a hook input that is not a JSON object, a checkout
+ * with no main branch for the merge-base, and an error thrown while linting.
+ * An unknown format has no harness to answer through, so it answers on the
+ * command line. An unknown event in a harness's format answers on the edit
+ * event's channel.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { failureLine, loadFailureLine } from './lint-load-failure.mjs'
 import { oracleLintSettings } from './oracle-lint-settings.mjs'
 
-const { values: options, positionals } = parseArgs({
-  options: {
-    format: { type: `string`, default: `text` },
-    event: { type: `string`, default: `edit` },
-    all: { type: `boolean`, default: false },
-  },
-  allowPositionals: true,
-})
-
 const formats = new Set([`claude`, `codex`, `gemini`, `copilot`, `text`])
-if (!formats.has(options.format)) {
-  throw new Error(`--format must be one of ${[...formats].join(`, `)}`)
+
+/** The hook input, which is empty or a JSON object. */
+function parseHookInput(text) {
+  if (text.trim() === ``) return {}
+  try {
+    const value = JSON.parse(text)
+    if (value !== null && typeof value === `object` && !Array.isArray(value))
+      return value
+  } catch {
+    // Not JSON, which is reported below.
+  }
+  throw new Error(`the hook input is not a JSON object`)
 }
-if (![`edit`, `stop`].includes(options.event)) {
-  throw new Error(`--event must be edit or stop`)
+
+/**
+ * The run's options and hook input, and `failure`, the line that says why
+ * they cannot be used, if one does. The options that were read before the
+ * failure choose how it is reported.
+ */
+function readInvocation() {
+  const invocation = {
+    options: { format: `text`, event: `edit`, all: false },
+    positionals: [],
+    inputText: ``,
+    input: {},
+  }
+  try {
+    const { values, positionals } = parseArgs({
+      options: {
+        format: { type: `string`, default: `text` },
+        event: { type: `string`, default: `edit` },
+        all: { type: `boolean`, default: false },
+      },
+      allowPositionals: true,
+    })
+    invocation.positionals = positionals
+    if (!formats.has(values.format))
+      throw new Error(`--format must be one of ${[...formats].join(`, `)}`)
+    invocation.options = { ...values, event: `edit` }
+    if (![`edit`, `stop`].includes(values.event))
+      throw new Error(`--event must be edit or stop`)
+    invocation.options.event = values.event
+    if (values.format !== `text`) {
+      invocation.inputText = readFileSync(0, `utf8`)
+      invocation.input = parseHookInput(invocation.inputText)
+    }
+  } catch (error) {
+    invocation.failure = failureLine(error)
+  }
+  return invocation
 }
+
+const { options, positionals, inputText, input, failure } = readInvocation()
 const isHook = options.format !== `text`
-const inputText = isHook ? readFileSync(0, `utf8`) : ``
-const input = inputText.trim() === `` ? {} : JSON.parse(inputText)
 const scriptRoot = realpathSync(fileURLToPath(new URL(`../`, import.meta.url)))
 
 /** The top level of the git checkout that holds `cwd`, or undefined. */
@@ -102,13 +147,8 @@ const root =
   (typeof input.cwd === `string` ? checkoutOf(input.cwd) : undefined) ??
   scriptRoot
 const ownScript = join(root, `scripts`, `agent-lint-feedback.mjs`)
-const delegate = root !== scriptRoot && existsSync(ownScript)
-
-// Packages that are absent, or present without the file that an import names.
-const missingModule = new Set([
-  `ERR_MODULE_NOT_FOUND`,
-  `ERR_PACKAGE_PATH_NOT_EXPORTED`,
-])
+const delegate =
+  failure === undefined && root !== scriptRoot && existsSync(ownScript)
 
 /**
  * The lint modules, or `unavailable`: the one line that says why they cannot
@@ -144,15 +184,12 @@ async function loadLint() {
       ...runBudgets,
     }
   } catch (error) {
-    return {
-      unavailable: missingModule.has(error?.code)
-        ? `oracle lint skipped: dependencies are not installed in ${scriptRoot}; run pnpm install`
-        : `oracle lint failed: ${String(error?.message ?? error).split(`\n`)[0]}`,
-    }
+    return { unavailable: loadFailureLine(error, scriptRoot) }
   }
 }
 
-// A delegating run lints nothing itself, so it loads nothing.
+// A delegating run, or one that cannot run, lints nothing itself, so it loads
+// nothing.
 const {
   tsParser,
   ESLint,
@@ -164,7 +201,7 @@ const {
   mergeBase,
   outerPlugin,
   unavailable,
-} = delegate ? {} : await loadLint()
+} = delegate || failure !== undefined ? {} : await loadLint()
 
 function git(...args) {
   return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
@@ -505,7 +542,9 @@ function runBudgetReport(scope) {
     .join(`\n`)
 }
 
-if (delegate) {
+if (failure !== undefined) {
+  respond(failure, input, `unavailable`)
+} else if (delegate) {
   // The session's checkout runs its own copy, which writes the response.
   const result = spawnSync(
     process.execPath,
@@ -516,12 +555,18 @@ if (delegate) {
 } else if (unavailable !== undefined) {
   respond(unavailable, input, `unavailable`)
 } else {
-  const { scope, files } = selectFiles(input)
-  const report = [
-    reportText(await lint(createLinter(), files)),
-    runBudgetReport(scope),
-  ]
-    .filter(Boolean)
-    .join(`\n`)
-  respond(report, input, scope, outerPlugin)
+  // A missing main branch, or an error thrown while linting, is reported in
+  // one line, as a load failure is.
+  try {
+    const { scope, files } = selectFiles(input)
+    const report = [
+      reportText(await lint(createLinter(), files)),
+      runBudgetReport(scope),
+    ]
+      .filter(Boolean)
+      .join(`\n`)
+    respond(report, input, scope, outerPlugin)
+  } catch (error) {
+    respond(failureLine(error), input, `unavailable`)
+  }
 }

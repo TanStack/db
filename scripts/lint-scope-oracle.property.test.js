@@ -49,7 +49,18 @@
  * does. The command-line forms (`pnpm lint:changed`, the named scope that the
  * pre-commit hook runs, and `--all`, which `pnpm lint:oracles` runs in CI)
  * write the line to stderr and exit nonzero, so a run that lints nothing
- * cannot pass as a clean one.
+ * cannot pass as a clean one. `pnpm lint:run-budgets` follows the same rule:
+ * without an install, it writes the skip line to stderr and exits nonzero.
+ *
+ * No other failure crashes either. An unknown `--format` or `--event`, a hook
+ * input on stdin that is not a JSON object, a checkout with no `main` branch
+ * for the merge-base, and an error that the rule throws while it lints each
+ * end with one line, `oracle lint failed: <message>`. A run whose format is a
+ * harness's exits 0 and hands the line to the agent on that harness's
+ * channel, as a skip does; with an unknown event, it uses the channel for an
+ * edit. Any other run writes the line to stderr and exits nonzero. A form
+ * that lints no file cannot meet the rule's error, so it answers as a clean
+ * run does.
  *
  * Authority: AGENTS.md "Lint feedback while you work" says the hooks and
  * `pnpm lint:changed` return the oracle reports for the files that were edited,
@@ -72,7 +83,10 @@
  * review of that change asked that a hook's line reach the agent, and that a
  * partial install skip as a missing one does. The outer-plugin rule is the
  * maintainer's decision of 2026-11-11 ("using outer checkout's plugin seems
- * fine"): lint with the launch checkout's rule and say so. The harnesses' hook
+ * fine"): lint with the launch checkout's rule and say so. The failure rule for
+ * arguments, hook input, the merge-base, and lint errors is the same 2026-11-10
+ * decision, which review finding F26 applied to the paths that still
+ * crashed. The harnesses' hook
  * documentation fixes each format's channel to the agent.
  *
  * Limits. The grammar draws up to three oracle files, two or three support
@@ -112,9 +126,14 @@
  * with `stop_hook_active` are not drawn. A worktree session under an installed
  * launch checkout has its own copy of the plugin or none; with none, ESLint,
  * the parser, and the plugin all come from the launch checkout. A launch
- * checkout's plugin linked from outside every checkout is not drawn. Without a
- * full install, the import graph does not matter, so those histories enter no
- * selection state.
+ * checkout's plugin linked from outside every checkout is not drawn. A failure
+ * history has a full install of its own. Its unknown values are three formats
+ * and three events, and its hook inputs are two texts that are not JSON and
+ * three JSON values that are not objects. Without `main`, it runs only the
+ * forms that always need the merge-base: the changed scope, the stop hooks,
+ * and `pnpm lint:run-budgets`. Its lint error is one that the rule throws on
+ * every file. Without a full install, or with a failure, the import graph
+ * does not matter, so those histories enter no selection state.
  *
  * Structure:
  *   1. The grammar draws a module graph, the edited and untracked modules, and
@@ -198,6 +217,20 @@ const CORRUPT_INSTALL = `corrupt`
 const BROKEN_INSTALLS = [...PARTIAL_INSTALLS, CORRUPT_INSTALL]
 // A package that no checkout installs.
 const ABSENT_PACKAGE = `oracle-lint-absent-package`
+// The failures that end in one line: an unknown format or event, a hook input
+// that is not a JSON object, a checkout with no `main`, and an error that the
+// rule throws while it lints.
+const FAULTS = [
+  `unknown-format`,
+  `unknown-event`,
+  `invalid-input`,
+  `no-main`,
+  `lint-error`,
+]
+const UNKNOWN_FORMATS = [`cursor`, ``, `Claude`]
+const UNKNOWN_EVENTS = [`commit`, ``, `Stop`]
+const INVALID_INPUTS = [`{`, `not json`, `null`, `[]`, `3`]
+const valueOf = (values, program) => values[program.faultValue % values.length]
 
 // -- 1. Grammar ---------------------------------------------------------------
 //
@@ -329,6 +362,14 @@ const skeletonArbitrary = fc.record({
     { weight: 3, arbitrary: fc.constant(`own`) },
     { weight: 1, arbitrary: fc.constant(`none`) },
   ),
+  // A failure that the run must report in one line, if any, and which of the
+  // failure's values it uses. Drawn last, so the fields above keep their
+  // draws.
+  fault: fc.oneof(
+    { weight: 40, arbitrary: fc.constant(`none`) },
+    ...FAULTS.map((fault) => ({ weight: 1, arbitrary: fc.constant(fault) })),
+  ),
+  faultValue: fc.nat({ max: 5 }),
 })
 
 function programOf({ shape, ...skeleton }) {
@@ -397,6 +438,7 @@ const constructions = [
   ...installedConstructions.map((build) => (skeleton) => ({
     ...build(skeleton),
     dependencies: `installed`,
+    fault: `none`,
   })),
   ...[`launch`, `worktree`].map((session) => (skeleton) => ({
     ...skeleton,
@@ -412,7 +454,14 @@ const constructions = [
     session: `worktree`,
     dependencies: `installed`,
     worktreeInstall: `none`,
+    fault: `none`,
   }),
+  ...FAULTS.map((fault) => (skeleton) => ({
+    ...skeleton,
+    dependencies: `installed`,
+    worktreeInstall: `own`,
+    fault,
+  })),
 ]
 
 const shapes = {
@@ -591,6 +640,13 @@ function buildProgram(skeleton) {
   reexports.set(production.name, new Set())
   const modules = [...oracles, ...supports, ...driver, production]
   const ofKind = modules.filter((module) => module.kind === skeleton.hookKind)
+  // An installed launch checkout under a worktree that has no install of its
+  // own. A launch session has no outer checkout, and a missing or broken
+  // install is drawn only in the session checkout.
+  const outerInstall =
+    skeleton.session === `worktree` &&
+    skeleton.dependencies === `installed` &&
+    skeleton.worktreeInstall === `none`
   const hookTarget =
     skeleton.hookName ??
     (ofKind.length === 0
@@ -606,13 +662,13 @@ function buildProgram(skeleton) {
     scratch: skeleton.scratch,
     lockfile: skeleton.lockfile,
     dependencies: skeleton.dependencies,
-    // An installed launch checkout under a worktree that has no install of
-    // its own. A launch session has no outer checkout, and a missing or broken
-    // install is drawn only in the session checkout.
-    outerInstall:
-      skeleton.session === `worktree` &&
-      skeleton.dependencies === `installed` &&
-      skeleton.worktreeInstall === `none`,
+    outerInstall,
+    // A failure is drawn only with the session checkout's own full install.
+    fault:
+      skeleton.dependencies === `installed` && !outerInstall
+        ? skeleton.fault
+        : `none`,
+    faultValue: skeleton.faultValue,
     edges,
     reexports,
     modules,
@@ -752,12 +808,30 @@ function agentChannel(format, event, text) {
   }
 }
 
+// A run that lints nothing answers as a clean run: exit 0 and no output, but
+// Codex reads JSON from a stop hook that exits 0, so it gets `{}`.
+const CLEAN = { exit: `zero`, stdout: ``, stderr: [] }
+const cleanRun = (format, event) =>
+  format === `codex` && event === `stop` ? { ...CLEAN, stdout: {} } : CLEAN
+const CLI_FAILURE = { exit: `nonzero`, stdout: ``, stderr: [FAILURE_LINE] }
+const hookFailure = (format, event) => ({
+  exit: `zero`,
+  stdout: agentChannel(format, event, FAILURE_LINE),
+  stderr: [],
+})
+
 /** The skip that each form owes, by the form's name. */
 function predictSkips(program) {
   const line =
     program.dependencies === CORRUPT_INSTALL ? FAILURE_LINE : SKIP_LINE
   const cli = { exit: `nonzero`, stdout: ``, stderr: [line] }
-  const skips = { changed: cli, all: cli }
+  // The run-budget report needs only the parser, so a broken plugin leaves
+  // it clean.
+  const skips = {
+    changed: cli,
+    all: cli,
+    'run-budgets': program.dependencies === `missing` ? cli : CLEAN,
+  }
   if (editedByScope(program).named.length > 0) skips.named = cli
   for (const format of HOOK_FORMATS) {
     for (const event of HOOK_EVENTS) {
@@ -769,6 +843,59 @@ function predictSkips(program) {
     }
   }
   return skips
+}
+
+// A failure owes one line in each form that it reaches. An unknown format
+// leaves no harness to answer through, so the run answers on the command
+// line. An unknown event in a harness's format answers on its edit channel.
+// A hook input that is not a JSON object fails both hook events. Without
+// `main`, the forms that always compare with the merge-base fail. A rule that
+// throws fails each form that lints a file, which is each form whose
+// selection is not empty; `--all` lints every oracle file, so it always
+// fails, and the run-budget report runs no rule.
+
+/** The run that each failure owes, by the form's name. */
+function predictFaults(program) {
+  const runs = {}
+  const { fault } = program
+  if (fault === `unknown-format`)
+    for (const event of HOOK_EVENTS) runs[`unknown-${event}`] = CLI_FAILURE
+  if (fault === `unknown-event`) {
+    runs.text = CLI_FAILURE
+    for (const format of HOOK_FORMATS)
+      runs[format] = hookFailure(format, `edit`)
+  }
+  for (const format of HOOK_FORMATS) {
+    for (const event of HOOK_EVENTS) {
+      if (fault === `invalid-input`)
+        runs[`${format}-${event}`] = hookFailure(format, event)
+    }
+  }
+  if (fault === `no-main`) {
+    runs.changed = CLI_FAILURE
+    runs[`run-budgets`] = CLI_FAILURE
+    for (const format of HOOK_FORMATS)
+      runs[`${format}-stop`] = hookFailure(format, `stop`)
+  }
+  if (fault === `lint-error`) {
+    const scopes = editedByScope(program)
+    const lints = (edited) => predictSelected(program, edited).length > 0
+    runs.changed = lints(scopes.changed) ? CLI_FAILURE : CLEAN
+    runs.all = CLI_FAILURE
+    runs[`run-budgets`] = CLEAN
+    if (scopes.named.length > 0)
+      runs.named = lints(scopes.named) ? CLI_FAILURE : CLEAN
+    for (const format of HOOK_FORMATS) {
+      for (const event of HOOK_EVENTS) {
+        runs[`${format}-${event}`] = lints(
+          event === `edit` ? scopes.hook : scopes.stop,
+        )
+          ? hookFailure(format, event)
+          : cleanRun(format, event)
+      }
+    }
+  }
+  return runs
 }
 
 // -- 3. Driver ----------------------------------------------------------------
@@ -798,6 +925,8 @@ const SCRATCH = `.worktrees/scratch/${APP}/tests/scratch-oracle.test.ts`
 // copy of the rule adds to it.
 const RULE_MESSAGE = `registers tests and declares no oracle part.`
 const RULE_MARK = `[branch rule]`
+// The start of the rule's `create`, where a lint error is thrown.
+const RULE_CREATE = `create(context) {`
 
 // Packages that nothing depends on, which make a large lockfile larger than
 // the 1 MiB default output buffer of a child process (about 1.2 MiB).
@@ -895,6 +1024,7 @@ let pluginPackage
 let settingsFile
 let feedbackScript
 let runCountScript
+let loadFailureModule
 let gitignoreFile
 
 beforeAll(() => {
@@ -910,6 +1040,7 @@ beforeAll(() => {
     process.env.LINT_SCOPE_SCRIPT ??
     join(repoRoot, `scripts`, `agent-lint-feedback.mjs`)
   runCountScript = join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`)
+  loadFailureModule = join(repoRoot, `scripts`, `lint-load-failure.mjs`)
   gitignoreFile =
     process.env.LINT_SCOPE_GITIGNORE ?? join(repoRoot, `.gitignore`)
 })
@@ -1000,7 +1131,14 @@ function modulePath(checkout, name) {
  */
 function repositoryOf(program) {
   const launch = mkdtempSync(join(work, `r`))
-  gitIn(launch, `init`, `-q`, `-b`, `main`)
+  // A checkout without `main` names its first branch otherwise.
+  gitIn(
+    launch,
+    `init`,
+    `-q`,
+    `-b`,
+    program.fault === `no-main` ? `trunk` : `main`,
+  )
   writeFileSync(
     join(launch, `package.json`),
     // The repository's root is an ES module package, as here.
@@ -1028,6 +1166,10 @@ function repositoryOf(program) {
   writeFileSync(
     join(launch, `scripts`, `check-oracle-run-counts.mjs`),
     readFileSync(runCountScript, `utf8`),
+  )
+  writeFileSync(
+    join(launch, `scripts`, `lint-load-failure.mjs`),
+    readFileSync(loadFailureModule, `utf8`),
   )
   for (const module of program.modules) {
     if (!module.untracked)
@@ -1097,6 +1239,20 @@ function repositoryOf(program) {
     writeFileSync(
       rule,
       text.replace(RULE_MESSAGE, `${RULE_MESSAGE} ${RULE_MARK}`),
+    )
+  }
+  if (program.fault === `lint-error`) {
+    // The session checkout's rule throws on every file that it lints.
+    const rule = join(checkout, RULE_SOURCE)
+    const text = readFileSync(rule, `utf8`)
+    if (!text.includes(RULE_CREATE))
+      throw new Error(`the rule no longer has ${RULE_CREATE}`)
+    writeFileSync(
+      rule,
+      text.replace(
+        RULE_CREATE,
+        `${RULE_CREATE}\n    throw new Error('the rule crashed')`,
+      ),
     )
   }
   return {
@@ -1242,6 +1398,7 @@ function observedSkips(program, repository) {
   const skips = {
     changed: runRaw(checkout, own, [`--format=text`], ``, repository),
     all: runRaw(checkout, own, [`--format=text`, `--all`], ``, repository),
+    'run-budgets': runBudgets(repository),
   }
   if (named.length > 0)
     skips.named = runRaw(
@@ -1272,6 +1429,75 @@ function observedSkips(program, repository) {
   return skips
 }
 
+/** The run-budget report, as `pnpm lint:run-budgets` runs it in the checkout. */
+function runBudgets(repository) {
+  const { checkout } = repository
+  return runRaw(
+    checkout,
+    join(checkout, `scripts`, `check-oracle-run-counts.mjs`),
+    [],
+    ``,
+    repository,
+  )
+}
+
+/**
+ * What each form does in a failure history. The hooks run from the launch
+ * checkout, as a harness runs them, and the command-line forms in the session
+ * checkout. A rule that throws is observed in every form that a missing
+ * install is.
+ */
+function observedFaults(program, repository) {
+  const { launch, checkout, pathOf } = repository
+  const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
+  const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
+  const hookInput = (event) =>
+    JSON.stringify(
+      event === `edit`
+        ? {
+            cwd: checkout,
+            tool_input: { file_path: pathOf(program.hookTarget) },
+          }
+        : { cwd: checkout },
+    )
+  const hook = (format, event, input = hookInput(event)) =>
+    runRaw(
+      launch,
+      launchScript,
+      [`--format=${format}`, `--event=${event}`],
+      input,
+      repository,
+    )
+  const runs = {}
+  const { fault } = program
+  if (fault === `lint-error`) return observedSkips(program, repository)
+  if (fault === `unknown-format`) {
+    for (const event of HOOK_EVENTS)
+      runs[`unknown-${event}`] = hook(valueOf(UNKNOWN_FORMATS, program), event)
+  }
+  if (fault === `unknown-event`) {
+    for (const format of [`text`, ...HOOK_FORMATS])
+      runs[format] = hook(format, valueOf(UNKNOWN_EVENTS, program))
+  }
+  if (fault === `invalid-input`) {
+    for (const format of HOOK_FORMATS) {
+      for (const event of HOOK_EVENTS)
+        runs[`${format}-${event}`] = hook(
+          format,
+          event,
+          valueOf(INVALID_INPUTS, program),
+        )
+    }
+  }
+  if (fault === `no-main`) {
+    runs.changed = runRaw(checkout, own, [`--format=text`], ``, repository)
+    runs[`run-budgets`] = runBudgets(repository)
+    for (const format of HOOK_FORMATS)
+      runs[`${format}-stop`] = hook(format, `stop`)
+  }
+  return runs
+}
+
 /** What each scope reports, from one repository. */
 function observedSelections(program) {
   const repository = repositoryOf(program)
@@ -1279,6 +1505,8 @@ function observedSelections(program) {
   try {
     if (program.dependencies !== `installed`)
       return { skips: observedSkips(program, repository) }
+    if (program.fault !== `none`)
+      return { faults: observedFaults(program, repository) }
     const scopes = editedByScope(program)
     const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
     const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
@@ -1402,7 +1630,9 @@ function comparePluginLocation(notices, expected) {
 //     checkout's plugin directory is installed, but its entry file, its
 //     subpath rule module, or a package that it imports is missing.
 //   corrupt-install: the session checkout's plugin entry file is cut off.
-//   Histories without a full install lint nothing, so they enter no other
+//   unknown-format-fault, unknown-event-fault, invalid-input-fault,
+//     no-main-fault, lint-error-fault: the run meets that failure.
+//   Histories without a full install, or with a failure, enter no other
 //   state.
 
 const STATES = [
@@ -1436,6 +1666,7 @@ const STATES = [
   `missing-dependencies-launch`,
   `missing-dependencies-worktree`,
   ...BROKEN_INSTALLS.map((kind) => `${kind}-install`),
+  ...FAULTS.map((fault) => `${fault}-fault`),
 ]
 const counts = new Map(STATES.map((state) => [state, 0]))
 
@@ -1476,6 +1707,11 @@ function recordStates(program, observe) {
         ? `missing-dependencies-${program.session}`
         : `${program.dependencies}-install`,
     )
+    countStates(states, observe)
+    return
+  }
+  if (program.fault !== `none`) {
+    states.add(`${program.fault}-fault`)
     countStates(states, observe)
     return
   }
@@ -1620,14 +1856,15 @@ const constructedStates = [
   `missing-dependencies-worktree`,
   ...BROKEN_INSTALLS.map((kind) => `${kind}-install`),
   `worktree-outer-plugin`,
+  ...FAULTS.map((fault) => `${fault}-fault`),
 ]
 
 oracleProperty({
   id: PROPERTY,
   law: {
-    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule, or, for a worktree with no install of its own, the launch checkout's rule with one line that names its location. Without a full install, every form produces one line that names the checkout, or the load error: a hook exits 0 and hands it to the agent, and a command-line run writes it to stderr and exits nonzero.`,
-    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10; maintainer decision 2026-11-10 that the hook never crashes; maintainer decision 2026-11-11 to lint with the outer checkout's plugin and say so; the harnesses' hook output documentation.`,
-    limits: `The bounded import, checkout, hook, lockfile, and install language described above.`,
+    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule, or, for a worktree with no install of its own, the launch checkout's rule with one line that names its location. Without a full install, every form produces one line that names the checkout, or the load error, and so does each other failure: a hook exits 0 and hands it to the agent, and a command-line run writes it to stderr and exits nonzero.`,
+    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10; maintainer decision 2026-11-10 that the hook never crashes, applied by review finding F26; maintainer decision 2026-11-11 to lint with the outer checkout's plugin and say so; the harnesses' hook output documentation.`,
+    limits: `The bounded import, checkout, hook, lockfile, install, and failure language described above.`,
   },
   histories: {
     arbitrary: new SkeletonWithProductionPrefix(),
@@ -1645,6 +1882,7 @@ oracleProperty({
   model: (program) => {
     if (program.dependencies !== `installed`)
       return { skips: predictSkips(program) }
+    if (program.fault !== `none`) return { faults: predictFaults(program) }
     const scopes = editedByScope(program)
     return {
       marked: predictRuleMarked(program),
@@ -1666,8 +1904,9 @@ oracleProperty({
       Object.fromEntries(
         Object.entries(observed).map(([scope, value]) => [
           scope,
-          // A skip record is plain data; a selection's marks are a set.
-          value === undefined || scope === `skips`
+          // A skip or failure record is plain data; a selection's marks are
+          // a set.
+          value === undefined || scope === `skips` || scope === `faults`
             ? value
             : { ...value, marks: [...value.marks] },
         ]),
@@ -1685,6 +1924,15 @@ oracleProperty({
           `missing install`,
           observed?.skips,
           expected.skips,
+        ) ?? pass
+      )
+    if (expected.faults !== undefined)
+      return (
+        differs(
+          `completed selections`,
+          `one failure line`,
+          observed?.faults,
+          expected.faults,
         ) ?? pass
       )
     if (observed === undefined)
