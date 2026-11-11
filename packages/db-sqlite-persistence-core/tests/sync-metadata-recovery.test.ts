@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
+  RecoveryComparisonError,
   recoveryInterruptions,
   recoveryPhases,
   recoverySchedulesOf,
@@ -85,8 +86,15 @@ oracleProperty<number, Array<string>, Array<RecoverySchedule>>({
           checkpoints: outcome.checkpoints,
         }
       } catch (error) {
-        // The schedule's first differing cut, or its cleanup failure, is the
-        // observation the law judges.
+        // Only the schedule's first differing cut is the observation the law
+        // judges. A setup, timing or cleanup failure (an AggregateError with
+        // cleanup failures, or any other cause) surfaces as itself.
+        if (
+          error instanceof AggregateError ||
+          !(error instanceof Error) ||
+          !(error.cause instanceof RecoveryComparisonError)
+        )
+          throw error
         run = {
           schedule: stateOf(schedule),
           failure: error instanceof Error ? error.message : String(error),

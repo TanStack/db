@@ -73,6 +73,16 @@ export type RecoveryDriver = SessionDriver & {
 }
 
 /**
+ * A held or completed cut whose source reads, recovery events, recovery
+ * inputs or durable metadata differ from the session model: the law's own
+ * failure. Any other error from a schedule is a setup, timing or cleanup
+ * failure and keeps its own identity.
+ */
+export class RecoveryComparisonError extends Error {
+  override name = `RecoveryComparisonError`
+}
+
+/**
  * The held cuts compare source reads before application and after the
  * interruption. The completed cut uses D15 against model-owned storage.
  * Cleanup compares stale source reads against an empty sync run. Durable
@@ -96,7 +106,8 @@ export async function runRecoverySchedule(
       expected,
       driver.observe(),
     )
-    if (mismatch) throw new Error(`${cut}: ${JSON.stringify(mismatch)}`)
+    if (mismatch)
+      throw new RecoveryComparisonError(`${cut}: ${JSON.stringify(mismatch)}`)
   }
   const history: Array<SessionAction> = [
     { type: `seed`, key: 1, bare: schedule.bare },
@@ -164,7 +175,7 @@ export async function runRecoverySchedule(
     if (
       JSON.stringify(driver.recoveryEvents()) !== JSON.stringify(expectedEvents)
     )
-      throw new Error(
+      throw new RecoveryComparisonError(
         `the recovery hold did not preserve its response/read/application prefix`,
       )
     checkSource(`held ${schedule.phase}`)
@@ -209,9 +220,13 @@ export async function runRecoverySchedule(
     )
     const inputs = driver.takeRecoveryInputs?.() ?? []
     if (schedule.interruption !== `cleanup` && inputs.length === 0)
-      throw new Error(`completed recovery supplied no storage input`)
+      throw new RecoveryComparisonError(
+        `completed recovery supplied no storage input`,
+      )
     if (schedule.interruption === `cleanup` && inputs.length !== 0)
-      throw new Error(`an invalidated sync run supplied a recovery input`)
+      throw new RecoveryComparisonError(
+        `an invalidated sync run supplied a recovery input`,
+      )
     const expected = model.storedRowMetadata()
     const actual = driver.storedRowMetadata?.()
     if (JSON.stringify(expected) !== JSON.stringify(actual)) {
@@ -222,7 +237,7 @@ export async function runRecoverySchedule(
         expected,
         actual,
       }
-      throw new Error(JSON.stringify(mismatch))
+      throw new RecoveryComparisonError(JSON.stringify(mismatch))
     }
     outcome = {
       checkpoints,

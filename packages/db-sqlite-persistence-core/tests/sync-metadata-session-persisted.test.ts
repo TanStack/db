@@ -382,6 +382,7 @@ const extraProductionPaths: Array<{
   seed: number
   runs: number
   reach: Array<ConstructedRegime>
+  fixed?: Array<{ name: string; history: Array<SessionAction> }>
 }> = [
   {
     productionPath: persistedNestedGrammar,
@@ -463,6 +464,34 @@ const extraProductionPaths: Array<{
       `full reload over a held seed`,
       `peer write during an open insert`,
       `peer write during a hold`,
+    ],
+    // The #2317 / P8 witness, recorded as a seed and shrink path of the earlier
+    // raw campaign (seed 346038028, path 36:2:4:6:10:14:16:14:14:13:13:13).
+    // The native campaign draws other histories for that seed, so the
+    // history itself is kept, and runs through the same model and driver.
+    fixed: [
+      {
+        name: `#2317 P8 source-facing metadata witness`,
+        history: [
+          { type: `seed`, key: 2, narrow: false, bare: true },
+          { type: `begin` },
+          { type: `begin` },
+          { type: `rowSet`, key: 2 },
+          { type: `commit` },
+          { type: `upsert`, key: 2, metadata: false },
+          { type: `commit` },
+          { type: `commit` },
+          { type: `truncate` },
+          { type: `collectionDelete`, key: `cursor` },
+          { type: `release` },
+          { type: `peer`, key: 1, notice: `row`, keepsValue: true },
+          { type: `commit` },
+          { type: `peer`, key: 1, notice: `row`, keepsValue: true },
+          { type: `seed`, key: 1, narrow: false, bare: true },
+          { type: `collectionSet`, key: `cursor` },
+          { type: `release` },
+        ],
+      },
     ],
   },
   // The peer production path under full row updates: an update replaces its row, so
@@ -784,7 +813,8 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
   it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerFullGrammar),
   )
-  // Fixed history from the persisted-peers-full random campaign (seed 654774679):
+  // Fixed history found by the earlier raw persisted-peers-full random campaign
+  // (seed 654774679; the native campaign draws other histories for that seed):
   // an outer transaction inserts over a bare seed and an inner equal re-insert
   // commits first. Its implicit metadata keep writes no metadata to storage;
   // the shared model judges source reads and the later unknown-author reload
@@ -852,6 +882,7 @@ for (const {
   seed,
   runs,
   reach: states,
+  fixed,
 } of extraProductionPaths) {
   oracleProperty<Array<SessionAction>, Array<OwedSessionRun>>({
     id: productionPathProperty,
@@ -872,6 +903,7 @@ for (const {
         build: (generated) =>
           constructRegime(productionPath, regime, generated),
       })),
+      ...(fixed === undefined ? {} : { fixed }),
     },
     model: (history) => [
       { path: productionPath.name, name: `history`, actions: history.length },
