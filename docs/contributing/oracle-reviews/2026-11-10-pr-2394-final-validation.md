@@ -131,3 +131,29 @@ pass (119 tests). The integrated RxDB eager/startup/lifecycle run passes 281
 tests across three files. PowerSync and pushed-head integration checks remain
 in progress at this record's checkpoint. Earlier finite coverage and the
 explicit mutation-decision limits above remain applicable.
+
+## Maintainer allowance and CI fixture correction
+
+Decision `PR2394-GAP-ALLOWANCE-2026-11-11`: Kyle Mathews explicitly answered
+"Grant this PR-specific allowance" to the merge-specific question identifying
+the 27 exact surviving mutations in this record and the linked inventories.
+The scope is six Query survivors, TrailBase M151, eighteen automatic
+PowerSync/RxDB survivors and two authored live-iterator alternatives. Their
+exact source anchors, replacements and hashes remain in the linked reports and
+audit JSON. The allowance permits this PR to merge after green CI and the
+other readiness checks. It does not claim those mutations were killed or
+that the oracle gaps were repaired.
+
+The same answer accepts the supplementary sweep's partial discovery limits:
+twelve inconclusive outcomes and fifty-eight unrun or interrupted operators.
+Those outcomes retain their original classifications. They are not oracle
+kills or demonstrated product defects.
+
+The later local PowerSync integration run completed successfully: four files,
+387 tests. The actual Chromium TrailBase receiver also passed 119 tests. CI
+then exposed one ordinary RxDB unit-test fixture that omitted the Collection's
+required `health` object. Its isolated local run reproduced the exact
+`health.reloading` TypeError. Adding `health: { reloading: false }` describes
+the fixture's existing first-load state without changing its assertions or
+production behavior. The full `tests/rxdb.test.ts` file then passed all nineteen
+tests. Final pushed-head CI remains pending at this checkpoint.
