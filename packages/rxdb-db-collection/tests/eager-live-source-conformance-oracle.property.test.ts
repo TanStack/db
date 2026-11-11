@@ -40,6 +40,7 @@ describe(`eager live-source conformance: rxdb`, () => {
 
   oracleProperty({
     id: property,
+    owns: [`src/rxdb.ts#rxdbCollectionOptions`],
     ...eagerLiveSourceOracle(driver),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -51,7 +52,6 @@ describe(`eager live-source conformance: rxdb`, () => {
   })
 
   declareOracle({
-    owns: [`src/rxdb.ts#rxdbCollectionOptions`],
     check: [checkEagerLiveSourceHistory],
     model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
     grammar: [historyArb],

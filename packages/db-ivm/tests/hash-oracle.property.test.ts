@@ -52,7 +52,6 @@ const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 // The flat-value law remains a differential comparison between independent
 // equivalent constructors; each cell records its original pair of results.
 declareOracle({
-  owns: [`src/hashing/hash.ts#hash`],
   check: [checkHashComparisons],
   model: [comparisonReferences],
   grammar: [arbitraryNonIndexEntries],
@@ -79,6 +78,7 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
           authority: `The existing deterministic fingerprint and equal-constructor laws documented above.`,
           limits: `The original flat-value constructor domain for this cell; distinct digests and graph topology are outside this owner.`,
         },
+        owns: [`src/hashing/hash.ts#hash`],
         histories: {
           arbitrary: fc.tuple(...arbitraries) as Arbitrary<Ts>,
           runs: 100,

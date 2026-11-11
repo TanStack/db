@@ -28,7 +28,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexMutationCodec } from '../src/offline'
 import { cleanupOfflineOracle } from '../../offline-transactions/tests/oracle-lifecycle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type {
   OfflineTransaction,
   StorageAdapter,
@@ -39,10 +38,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-declareOracle({
-  owns: [`src/offline.ts`],
-})
 
 type Tree =
   | undefined
@@ -364,6 +359,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/offline.ts`],
   histories: {
     arbitrary: convex_valuesHistory,
     runs: 100,

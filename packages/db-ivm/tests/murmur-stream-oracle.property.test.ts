@@ -95,13 +95,7 @@ function expectDigestsMatchReference(
 ): void {
   expect(digests(Stream, chunks)).toEqual(digests(Model, chunks))
 }
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/hashing/murmur.ts#MurmurHashStream.update`,
-    `src/hashing/murmur.ts#MurmurHashStream.digest`,
-  ],
   check: [expectDigestsMatchReference],
 })
 
@@ -112,6 +106,12 @@ oracleProperty({
     authority: `Existing byte-framing contract documented above; ReferenceByteStream.`,
     limits: `One to eight string, number or bigint chunks; no symbol identity or independent murmur3 block/finalizer proof.`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [
+    `src/hashing/murmur.ts#MurmurHashStream.update`,
+    `src/hashing/murmur.ts#MurmurHashStream.digest`,
+  ],
   histories: {
     arbitrary: fc.array(chunk, { minLength: 1, maxLength: 8 }),
     runs: 2000,

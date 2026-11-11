@@ -383,12 +383,7 @@ const historyArbitrary = fc.record({
   age: fc.integer({ min: 0, max: 80 }),
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
-// What this oracle owns: the gap report judges the garbage-collection
-// retention of Collections touched by a mutation, in lifecycle.ts, by this
-// file's tests. The companion retention module declares the shared check and
-// model.
 declareOracle({
-  owns: [`src/collection/lifecycle.ts`],
   grammar: [historyArbitrary],
 })
 
@@ -423,6 +418,11 @@ describe(`mutation retention campaign reach`, () => {
       authority: `BaseCollectionConfig.gcTime and transaction-ownership-oracle admission contract stated above`,
       limits: `The existing controlled idle-delivery mutation grammar; queued sync writes, multiple local transactions, restart, provider I/O and offline or paced mutations are outside this driver.`,
     },
+    // What this oracle owns: the gap report judges the garbage-collection
+    // retention of Collections touched by a mutation, in lifecycle.ts, by this
+    // file's tests. The companion retention module declares the shared check and
+    // model.
+    owns: [`src/collection/lifecycle.ts`],
     histories: {
       arbitrary: historyArbitrary,
       runs: 150,

@@ -913,7 +913,6 @@ path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
 declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runFailureHistory],
   model: [expectedCloseSettlements],
 })
@@ -932,6 +931,7 @@ function registerFixedHistory<T>(
   oracleProperty({
     id,
     law: lifecycleLaw,
+    owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
     histories: examples.map(([history], index) => ({ history, index })),
     label: (entry) => String(entry.index),
     resolve: (entry) => ({ history: entry.history }),
@@ -946,6 +946,7 @@ function registerFixedHistory<T>(
 oracleProperty({
   id: `opfs.page-lifecycle`,
   law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: pagehideHistory, runs: 48, fixedSeeds: [1844] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -963,6 +964,7 @@ registerFixedHistory(
 oracleProperty({
   id: `opfs.mixed-execute`,
   law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: mixedExecuteHistory, runs: 32, fixedSeeds: [1845] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -980,6 +982,7 @@ registerFixedHistory(
 oracleProperty({
   id: `opfs.terminal-event`,
   law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: terminalEventHistory, runs: 24, fixedSeeds: [1847] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -997,6 +1000,7 @@ registerFixedHistory(
 oracleProperty({
   id: `opfs.close`,
   law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: closeHistory, runs: 32, fixedSeeds: [1848] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -1010,6 +1014,7 @@ registerFixedHistory(`opfs.close-fixed`, closeExamples, runCloseHistory)
 oracleProperty({
   id: `opfs.failure-cleanup`,
   law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: failureHistory, runs: 18, fixedSeeds: [1846] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,

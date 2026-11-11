@@ -221,11 +221,7 @@ const runCancellationHistory = ({
     initialMetadata,
   )
 
-// What this oracle owns: the gap report judges the metadata-only sync
-// transaction and its metadata writes in sync.ts, and the publication of
-// row and metadata changes to subscribers in state.ts, by this file's tests.
 declareOracle({
-  owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
   check: [applyRound, expectMetadataCancellationOwnership],
 })
 
@@ -237,6 +233,10 @@ describe(`generated metadata publication histories`, () => {
       authority: `The established Collection sync metadata and change subscription contracts stated above`,
       limits: `Three existing numeric row keys, one to eight rounds and the existing structured metadata grammar; absent source rows, Collection metadata and other provider hosts remain outside this driver.`,
     },
+    // What this oracle owns: the gap report judges the metadata-only sync
+    // transaction and its metadata writes in sync.ts, and the publication of
+    // row and metadata changes to subscribers in state.ts, by this file's tests.
+    owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
     histories: {
       arbitrary: publicationHistoryArbitrary,
       runs: 50,
@@ -257,6 +257,7 @@ describe(`generated metadata publication histories`, () => {
       authority: `The established Collection sync metadata and change subscription contracts stated above`,
       limits: `Three numeric row keys and two queued metadata owners with the existing structured metadata grammar; absent source rows, Collection metadata and other provider hosts remain outside this driver.`,
     },
+    owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
     histories: {
       arbitrary: metadataCancellationArbitrary,
       runs: 50,

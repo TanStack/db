@@ -252,11 +252,7 @@ function expectRetainedState(
   )
 }
 
-// What this oracle owns: the gap report judges the retained Collection state,
-// in state.ts and the sync writes that feed it in sync.ts, by this file's
-// tests.
 declareOracle({
-  owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
   check: [expectRetainedState],
 })
 
@@ -545,6 +541,10 @@ describe(`retained state campaign reach`, () => {
       authority: `The Collection sync and cleanup contracts, including the signed-zero reinsertion decision stated above`,
       limits: `The existing four-key source grammar and controlled restart callbacks; broader provider timing and concurrent local mutation histories remain outside this driver.`,
     },
+    // What this oracle owns: the gap report judges the retained Collection state,
+    // in state.ts and the sync writes that feed it in sync.ts, by this file's
+    // tests.
+    owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
     histories: {
       arbitrary: retentionHistory,
       runs: 100,
@@ -1177,6 +1177,7 @@ for (const timing of [
       authority: `The optimistic snapshot, settlement and source replacement laws in optimistic-history-oracle.ts`,
       limits: `The existing one-key truncate and delete ordering grammar with controlled source work; other provider hosts and arbitrary overlapping histories remain outside this driver.`,
     },
+    owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
     histories: {
       arbitrary: fc.tuple(historyRow, fc.boolean()),
       runs: 30,
@@ -1317,6 +1318,7 @@ oracleProperty({
     authority: `The optimistic snapshot and settlement laws in optimistic-history-oracle.ts`,
     limits: `The existing bounded optimistic-history grammar and controlled Collection sync path; provider acknowledgement timing and other framework hosts remain outside this driver.`,
   },
+  owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
   histories: {
     arbitrary: optimisticHistory,
     runs: 100,
@@ -1380,6 +1382,7 @@ oracleProperty({
     authority: `The partial-update and optimistic settlement laws in optimistic-history-oracle.ts`,
     limits: `The existing partial marks over the bounded optimistic-history grammar and controlled Collection sync path; provider timing and other framework hosts remain outside this driver.`,
   },
+  owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
   histories: {
     arbitrary: partialHistory,
     runs: 100,

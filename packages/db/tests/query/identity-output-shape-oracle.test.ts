@@ -415,6 +415,16 @@ oracleProperty({
     authority: `The query identity and compiled output shape contract stated above; expectedShapeRows independently predicts both initial and updated bags.`,
     limits: `The original five query forms, six safe alias names, bounded labels and finite source rows; no arbitrary cache history or framework scheduling claim.`,
   },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: {
     arbitrary: shapeHistories,
     runs: 60,
@@ -595,6 +605,16 @@ oracleProperty({
     authority: `The supported equality-value and equality-operand contract stated at the start of this owner.`,
     limits: `The unchanged primitive, Date, Temporal, binary and reference-pair grammar; no complete JavaScript-value or collision-freedom claim.`,
   },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: {
     arbitrary: equalityPairArbitrary,
     runs: 160,
@@ -759,16 +779,6 @@ describe(`compound join identity and output`, () => {
   }
 })
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/compiler/evaluators.ts#compileExpression',
-    'src/query/compiler/index.ts#compileQuery',
-    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
-    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
-    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
-    'src/query/ir-stable-identity.ts#getQueryIdentity',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [checkShapes, checkEqualityPair],
   model: [
     expectedShapeRows,

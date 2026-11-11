@@ -41,6 +41,7 @@ describe(`eager live-source conformance: trailbase`, () => {
 
   oracleProperty({
     id: property,
+    owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
     ...eagerLiveSourceOracle(driver),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -52,7 +53,6 @@ describe(`eager live-source conformance: trailbase`, () => {
   })
 
   declareOracle({
-    owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
     check: [checkEagerLiveSourceHistory],
     model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
     grammar: [historyArb],

@@ -44,7 +44,6 @@ import type {
 // transactions (src/transactions.ts) by this file's outcome matrix, its
 // generated failed-request histories, and its completion histories.
 declareOracle({
-  owns: [`src/transactions.ts`],
   check: [expectHistoryOutcome],
 })
 
@@ -117,6 +116,7 @@ describe(`Optimistic request outcome histories`, () => {
       authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
       limits: `The existing bounded two-request grammar with controlled sync work; provider timing and arbitrary overlapping request histories remain outside this driver.`,
     },
+    owns: [`src/transactions.ts`],
     histories: {
       arbitrary: fc.record({
         existing: fc.boolean(),

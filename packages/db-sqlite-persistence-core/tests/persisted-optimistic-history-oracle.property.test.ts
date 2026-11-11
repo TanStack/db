@@ -266,7 +266,6 @@ const abortReleasingHold = (
 }
 
 declareOracle({
-  owns: [`src/persisted.ts`],
   check: [checkOptimisticHistory],
   model: [optimisticHistoryModel],
 })
@@ -278,6 +277,7 @@ oracleProperty({
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract, held rows behind a wrapping sync)`,
     limits: `An in-memory adapter, not SQLite timing or coordinator messages; no awaited acceptance during a hold; no schema, partial-update, or reentrant grammar.`,
   },
+  owns: [`src/persisted.ts`],
   histories: {
     arbitrary: wrappingSyncHistory,
     states: [`deferred-hold`, `abort-release`],

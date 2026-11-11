@@ -90,12 +90,6 @@ async function expectPooledReleaseMatchesCollection(
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/live-query-observer.ts#createLiveQueryObserver',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/pooled-live-query.ts#createPooledLiveQuery',
-  ],
   check: [
     expectPooledReleaseMatchesCollection,
     checkCallbackHistory,
@@ -493,6 +487,12 @@ describe(`pooled live query gcTime`, () => {
         authority: `The observer ownership and ARCHITECTURE.md pooled substitution/cleanup laws stated above.`,
         limits: `The unchanged bounded synchronous core bootstrap/cleanup callback grammar on ordinary and pooled receiving paths.`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/live-query-observer.ts#createLiveQueryObserver',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/pooled-live-query.ts#createPooledLiveQuery',
+      ],
       histories: {
         arbitrary: callbackHistory,
         runs: 80,
@@ -551,6 +551,12 @@ describe(`pooled live query gcTime`, () => {
       authority: `The failed-construction ownership and synchronous late cleanup callback contract stated above.`,
       limits: `The unchanged bounded pooled core registration grammar after partition release with controlled adapter cleanup.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
     histories: {
       arbitrary: lateCleanupHistory,
       runs: 40,
@@ -891,6 +897,12 @@ describe(`pooled live query cleanup admission`, () => {
       authority: `ARCHITECTURE.md law 14 and Pooled live queries, stated above.`,
       limits: `The unchanged two/three-view, six-step synchronous core grammar with live-query readers and no framework schedules.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
     histories: {
       arbitrary: cleanupHistory,
       runs: 80,

@@ -173,7 +173,6 @@ function checkRecordedReload(
 }
 
 declareOracle({
-  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
   model: [model],
   check: [check, checkRecordedReload],
   grammar: [reloadHistoryArb],
@@ -186,6 +185,7 @@ oracleProperty({
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `Node Browser receiving driver with the existing in-process host controls; no claim about real cross-process scheduling or physical OPFS.`,
   },
+  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
   histories: {
     arbitrary: reloadHistoryArb,
     runs: 12,
@@ -205,6 +205,7 @@ oracleProperty({
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `The named fixed histories on this existing in-process receiving driver.`,
   },
+  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
   histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
   label: (entry) => entry.name,
   resolve: (entry) => entry.history,

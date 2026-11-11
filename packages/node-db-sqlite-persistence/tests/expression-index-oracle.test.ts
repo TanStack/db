@@ -946,7 +946,6 @@ function expectedNativePolarityKeys(
 }
 
 declareOracle({
-  owns: [`src/node-driver.ts`],
   check: [assertExpressionIndexHistory],
   model: [expectedKeysFromScan, expectedRangeKeys, expectedNativePolarityKeys],
   grammar: [generatedScenarioMatrixArbitrary],
@@ -960,6 +959,7 @@ describe(`SQLite expression-index oracle`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: [{ name: `large Number range directions and wrappers` }],
 
     driver: (plan, observe) =>
@@ -1058,6 +1058,7 @@ describe(`SQLite expression-index oracle`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
       runs: DEFAULT_ORACLE_RUNS,
@@ -1129,6 +1130,7 @@ describe(`SQLite expression-index oracle`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: fc.oneof(
         fc
@@ -1196,6 +1198,7 @@ describe(`SQLite expression-index oracle`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: [
       {
         path: [`threadId`],
@@ -1222,6 +1225,7 @@ describe(`SQLite expression-index oracle`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: generatedScenarioMatrixArbitrary,
       runs: DEFAULT_ORACLE_RUNS,
@@ -1445,6 +1449,7 @@ describe(`Temporal expression-index refinement`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: temporalFamilies,
 
     label: (family) => `${family.kind}/${family.name}`,
@@ -1533,6 +1538,7 @@ describe(`Temporal expression-index refinement`, () => {
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: temporalFamilies,
 
     label: (family) => `${family.kind}/${family.name}`,

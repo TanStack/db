@@ -322,7 +322,6 @@ function checkCampaign(
 }
 
 declareOracle({
-  owns: [`src/hashing/hash.ts#hash`],
   model: [isAcyclic, unfoldGraph, expectedCampaign],
   check: [checkMixedGraph, checkCampaign],
   grammar: [graphArbitrary],
@@ -335,6 +334,7 @@ oracleProperty({
     authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives; hash-graph oracle.`,
     limits: `One to six nodes, zero to three ordered edges per node, labels 0..2, six recursive carriers, and in-range targets. No collision freedom, ordering invariance, opaque references, work/depth limits, or retry atomicity.`,
   },
+  owns: [`src/hashing/hash.ts#hash`],
   histories: {
     arbitrary: graphArbitrary,
     runs: 150,

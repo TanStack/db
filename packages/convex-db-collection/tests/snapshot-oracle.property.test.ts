@@ -37,7 +37,6 @@ import {
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
 
@@ -46,10 +45,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-declareOracle({
-  owns: [`src/index.ts#convexCollectionOptions`],
-})
 
 type KeyedRow = Row & { key: string | number }
 const query = makeFunctionReference<
@@ -289,6 +284,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/index.ts#convexCollectionOptions`],
   histories: {
     arbitrary: convex_snapshotHistory,
     runs: 150,

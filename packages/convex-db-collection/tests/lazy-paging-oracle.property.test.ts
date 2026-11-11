@@ -36,7 +36,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import {
   lazyFixture,
@@ -59,10 +58,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-declareOracle({
-  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
-})
 
 const history = fc.record({
   size: fc.integer({ min: 16, max: 32 }),
@@ -253,6 +248,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_valuesHistory,
     runs: 60,
@@ -411,6 +407,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_workHistory,
     runs: 60,
@@ -596,6 +593,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_publicationHistory,
     runs: 60,
@@ -920,6 +918,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_lifecycleHistory,
     runs: 60,
@@ -1102,6 +1101,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_receiptHistory,
     runs: 60,

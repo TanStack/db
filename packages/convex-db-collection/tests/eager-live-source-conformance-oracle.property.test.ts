@@ -41,6 +41,7 @@ describe(`eager live-source conformance: convex`, () => {
 
   oracleProperty({
     id: property,
+    owns: [`src/index.ts#convexCollectionOptions`],
     ...eagerLiveSourceOracle(driver),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -57,6 +58,7 @@ describe(`eager live-source conformance: convex`, () => {
     const receiving = convexConformanceDriver({ client })
     oracleProperty({
       id: `${property}.${client}`,
+      owns: [`src/index.ts#convexCollectionOptions`],
       ...eagerLiveSourceOracle(receiving),
       check: checkEagerLiveSourceObservations,
       histories: {
@@ -69,7 +71,6 @@ describe(`eager live-source conformance: convex`, () => {
   }
 
   declareOracle({
-    owns: [`src/index.ts#convexCollectionOptions`],
     check: [checkEagerLiveSourceHistory],
     model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
     grammar: [historyArb],

@@ -42,7 +42,6 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 const family = distinctCollisionFamily(hash)
 
 declareOracle({
-  owns: [`src/operators/distinct.ts#distinct`],
   check: [checkDistinctRepresentatives],
   grammar: [distinctBucketRecipe],
 })
@@ -182,6 +181,7 @@ oracleProperty({
   ...cell0,
   check: checkDistinctCampaign,
   id: `ivm.distinct-representatives`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell0.histories, runs: 100, fixedSeeds: [2309] },
 })
 
@@ -190,6 +190,7 @@ oracleProperty({
   ...cell1,
   check: checkDistinctCampaign,
   id: `ivm.distinct-representatives-unit-split`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell1.histories, runs: 100, fixedSeeds: [2309] },
 })
 

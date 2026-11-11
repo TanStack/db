@@ -420,7 +420,6 @@ function describe_(events: ReadonlyArray<Event>): string {
     .join(` > `)
 }
 declareOracle({
-  owns: [`src/persisted.ts`],
   model: [expected],
   grammar: [histories],
 })
@@ -433,6 +432,7 @@ oracleProperty({
     authority: `The existing contract and maintainer decisions stated above the independent model.`,
     limits: `The existing finite histories and controlled in-memory persistence boundary; no new provider, schedule, or gap-closure claim.`,
   },
+  owns: [`src/persisted.ts`],
   histories,
   label: (history) => `${history.effects}: ${describe_(history.events)}`,
   resolve: (history) => ({ history }),

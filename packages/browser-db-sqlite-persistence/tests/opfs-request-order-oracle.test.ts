@@ -252,7 +252,6 @@ const requestOrderHistory = fc
   )
 const requestOrderProperty = `opfs.request-order`
 declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runRequestOrderHistory],
   grammar: [requestOrderHistory],
 })
@@ -264,6 +263,7 @@ const requestOrderLaw = {
 oracleProperty({
   id: requestOrderProperty,
   law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: requestOrderHistory, runs: 24, fixedSeeds: [1849] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -276,6 +276,7 @@ oracleProperty({
 oracleProperty({
   id: `opfs.request-order-fixed`,
   law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: requestOrderExamples.map((history, index) => ({ history, index })),
   label: (entry) => String(entry.index),
   resolve: (entry) => ({ history: entry.history }),

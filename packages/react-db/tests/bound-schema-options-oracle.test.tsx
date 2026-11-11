@@ -85,6 +85,10 @@ for (const hook of [`live`, `suspense`] as const) {
       authority: `packages/db/tests/live-query-bound-options-oracle.ts; schema guide TInput/TOutput contract, optimistic-history contract and maintainer inline-option decision.`,
       limits: `72 finite synchronous-schema/key/identity cases per ordinary or ready-source Suspense hook, with settled updates before replacement; controlled sources, no typed-schema, initial-suspension, SSR, provider or concurrent-render claim.`,
     },
+    owns: [
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories,
     label: boundSchemaGrammar,
     model: modelBoundSchemaReceiver,
@@ -341,10 +345,6 @@ test.each(boundSchemaHistories)(
   },
 )
 declareOracle({
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   grammar: [histories, boundSchemaHistories],
   model: [modelBoundSchemaReceiver],
   check: [

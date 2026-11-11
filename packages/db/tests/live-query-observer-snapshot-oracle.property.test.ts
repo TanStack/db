@@ -375,11 +375,7 @@ async function checkHistory(
   }
 }
 
-// What this oracle owns: the gap report judges every function in
-// src/live-query-observer.ts by this file's snapshot histories, which read
-// retained getSnapshot() objects and the health tree of the observer.
 declareOracle({
-  owns: [`src/live-query-observer.ts`],
   check: [checkRead, checkHistory, checkHealthHistory],
   model: [modelRows],
 })
@@ -410,6 +406,10 @@ describe(`retained live-query snapshots are point-in-time`, () => {
       authority: `The point-in-time snapshot contract and ownership table above.`,
       limits: `Keys a..d, versions 0..9, local-only source and prepared client getter identity; transport and framework scheduling have separate owners.`,
     },
+    // What this oracle owns: the gap report judges every function in
+    // src/live-query-observer.ts by this file's snapshot histories, which read
+    // retained getSnapshot() objects and the health tree of the observer.
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: fc.tuple(history, reads),
       runs: 40,
@@ -763,6 +763,7 @@ describe(`a snapshot shows the current health tree`, () => {
       authority: `ARCHITECTURE.md law 17 and the glossary health-tree and sync-error contracts, as specified above.`,
       limits: `One ready controlled source, failureReason only, no hydration seed or framework.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: fc.array(healthCommand, { minLength: 1, maxLength: 24 }),
       runs: 80,
@@ -1143,6 +1144,7 @@ describe(`metadata snapshots share immutable row containers`, () => {
       authority: `Maintainer decision 2026-11-01 and the independent key/version model above.`,
       limits: `Direct controlled Collection, both observer modes and attachment cuts, zero to three initial rows; query shapes and hydration belong to the next driver.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: containerHistory,
       runs: 40,
@@ -1660,6 +1662,7 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
       authority: `The retained-snapshot contract and Collection deferred-publication contract described above.`,
       limits: `Two or three controlled rows, one or two nested deferrals, the existing 12-command generated language; no provider or framework scheduling claim.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: capturePathHistory,
       runs: 40,
@@ -2042,6 +2045,7 @@ describe(`publications preserve nested record shape`, () => {
       authority: `Maintainer decision 2026-11-03 and the shape-name/value model above.`,
       limits: `Plain, class, and null-prototype records through the four existing carriers, direct/projected Collections and both modes; no exotic subclasses or descriptors.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: payloadHistory,
       runs: 40,
@@ -2319,6 +2323,7 @@ describe(`array value publication`, () => {
       authority: `The shared sparse-array value law and positional model in sparse-array-value-oracle.ts.`,
       limits: `The existing one-to-five-position grammar, three carriers, both modes and direct/projected attached/detached receivers; no provider or framework scheduling claim.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: sparseArrayCase,
       runs: 20,

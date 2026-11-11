@@ -95,11 +95,7 @@ it(`accepts infinite comparison results that still provide an order`, () => {
   }
 })
 
-// What this oracle owns: the gap report judges the B+ tree in
-// utils/btree.ts by this file's tests. The refinement check and the Map model
-// judge every public observation of the tree.
 declareOracle({
-  owns: [`src/utils/btree.ts`],
   check: [expectRefinement],
   model: [stepModel],
 })
@@ -163,6 +159,10 @@ describe(`BTree Map oracle`, () => {
       authority: `BTree public API numeric Map contract stated above`,
       limits: `Numeric keys, plain payloads and node sizes 4 through 8; comparator validation belongs to the index-update oracle.`,
     },
+    // What this oracle owns: the gap report judges the B+ tree in
+    // utils/btree.ts by this file's tests. The refinement check and the Map model
+    // judge every public observation of the tree.
+    owns: [`src/utils/btree.ts`],
     histories: {
       arbitrary: fc.tuple(
         fc.integer({ min: 4, max: 8 }),

@@ -888,12 +888,7 @@ const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
   { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
 
-// What this oracle owns: the gap report judges the garbage-collection
-// retention of Collections, in lifecycle.ts, by this file's tests. The
-// companion retention module declares the shared check and model that these
-// histories are compared with.
 declareOracle({
-  owns: [`src/collection/lifecycle.ts`],
   grammar: [boundaryHistoryArbitrary],
 })
 
@@ -927,6 +922,11 @@ describe(`GC boundary campaign reach`, () => {
       authority: `BaseCollectionConfig.gcTime and the shared GC retention oracle's maintainer decisions`,
       limits: `The existing controlled timing and transaction grammar; cleanup restart, pending-row restoration, provider I/O and arbitrary host scheduling remain outside this driver.`,
     },
+    // What this oracle owns: the gap report judges the garbage-collection
+    // retention of Collections, in lifecycle.ts, by this file's tests. The
+    // companion retention module declares the shared check and model that these
+    // histories are compared with.
+    owns: [`src/collection/lifecycle.ts`],
     histories: {
       arbitrary: boundaryHistoryArbitrary,
       runs: 250,

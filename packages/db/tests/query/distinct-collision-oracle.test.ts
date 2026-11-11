@@ -35,10 +35,6 @@ import type {
 
 const values = distinctCollisionValues(hash)
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [checkDistinctSnapshot],
   grammar: [distinctRecipe],
 })
@@ -158,6 +154,10 @@ const unordered = receivingOptions(false)
 oracleProperty({
   ...unordered,
   id: `query.distinct-collisions`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: { ...unordered.histories, runs: 100, fixedSeeds: [2306] },
   check: checkDistinctCampaign,
 })
@@ -165,6 +165,10 @@ const ordered = receivingOptions(true)
 oracleProperty({
   ...ordered,
   id: `query.distinct-collisions-ordered`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: { ...ordered.histories, runs: 100, fixedSeeds: [2306] },
   check: checkDistinctCampaign,
 })

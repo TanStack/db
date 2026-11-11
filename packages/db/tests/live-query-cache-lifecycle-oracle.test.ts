@@ -135,13 +135,7 @@ afterAll(() => {
       ),
     )
 })
-// What this oracle owns: the gap report judges DbClient.dehydrate and
-// resolveLiveQueryValue by this file's claim-lifecycle histories.
 declareOracle({
-  owns: [
-    `src/client.ts#DbClient.dehydrate`,
-    `src/live-query-options.ts#resolveLiveQueryValue`,
-  ],
   check: [
     checkLifecycleAdmission,
     checkCacheOptionRows,
@@ -523,6 +517,12 @@ oracleProperty<CacheLifecycleCase, Verdict>({
     authority: `The maintainer cache-conflict decision and db-client-preload-identity lifecycle documented above.`,
     limits: `The unchanged finite declaration, claimant, phase, and transport schedule matrix; no arbitrary serializer, hydrateRoot, or schema transform.`,
   },
+  // What this oracle owns: the gap report judges DbClient.dehydrate and
+  // resolveLiveQueryValue by this file's claim-lifecycle histories.
+  owns: [
+    `src/client.ts#DbClient.dehydrate`,
+    `src/live-query-options.ts#resolveLiveQueryValue`,
+  ],
   histories: cacheLifecycleHistories,
   model: recordedAssertionJudgment,
   driver: (scenario, observe) => {

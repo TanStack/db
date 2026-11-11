@@ -137,11 +137,6 @@ function expectedRowsAfterQueuedBatches(batches: number): Array<Row> {
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/transactions.ts#createTransaction',
-  ],
   check: [checkFlushHistory],
   model: [expectedRowsAfterQueuedBatches, modelFlushHistory],
 })
@@ -261,6 +256,11 @@ const flushOptions = {
 oracleProperty({
   ...flushOptions,
   id: `derived-publication.membership-work-fixed`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   histories: {
     arbitrary: flushHistory,
     runs: 40,
@@ -273,6 +273,11 @@ oracleProperty({
 oracleProperty({
   ...flushOptions,
   id: `derived-publication.membership-work`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   histories: {
     arbitrary: flushHistory,
     runs: 60,

@@ -259,6 +259,7 @@ const runtimeLaw = {
 oracleProperty({
   id: `svelte.ssr-runtime-errors.cases`,
   law: runtimeLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrRuntimeErrorExamples,
   model: expectedSsrRuntimeErrorViews,
   driver: recordRuntimeHistory,
@@ -267,6 +268,7 @@ oracleProperty({
 oracleProperty({
   id: `svelte.ssr-runtime-errors`,
   law: runtimeLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrRuntimeErrorHistoryArbitrary,
     runs: 64,
@@ -353,7 +355,6 @@ oracleProperty({
   timeout: 30_000,
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrRuntimeErrorViews],
   check: [checkRuntimeTrace],
   grammar: [ssrRuntimeErrorHistoryArbitrary],

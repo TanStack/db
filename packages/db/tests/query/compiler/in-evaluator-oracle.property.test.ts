@@ -391,7 +391,6 @@ function checkIn(
 }
 
 declareOracle({
-  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
   model: [referenceIn, modelIn],
   grammar: [inCase],
   check: [checkIn],
@@ -404,6 +403,7 @@ oracleProperty({
     authority: `The IN and equality contracts in evaluators.ts, stated at the start of this owner.`,
     limits: `The original finite value pool and retained fixed values, arrays of zero to six items, constant or row-field lists. No non-array-list, WHERE publication, index, or subset-loading claim.`,
   },
+  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
   histories: {
     arbitrary: inCase,
     runs: 2000,

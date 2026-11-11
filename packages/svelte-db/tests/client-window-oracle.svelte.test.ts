@@ -472,6 +472,7 @@ describe(`Svelte client page identity`, () => {
           authority: `packages/db/tests/conformance/window-history-oracle.ts outer window contract and docs/guides/ssr.md transported page contract`,
           limits: `Existing keyed/derived Svelte client-page grammar and native flushSync cuts; no client scope switch or hydrate() claim.`,
         },
+        owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
         histories: {
           arbitrary: clientWindowArbitrary,
           runs: 6,
@@ -498,7 +499,6 @@ describe(`Svelte client page identity`, () => {
     )
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [modelClientWindow],
   check: [checkClientWindowHistory],
 })
@@ -755,6 +755,7 @@ oracleProperty({
     authority: `packages/db/tests/conformance/contract.ts query identity law and packages/db/tests/conformance/window-history-oracle.ts`,
     limits: `Existing four body/dependency and same/changed-key recovery members per generated tuple at native Svelte flush/settlement cuts.`,
   },
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: recoveryArbitrary,
     runs: 24,

@@ -235,10 +235,7 @@ const assertRepeatedCursor = (
   )
 }
 
-// What this oracle owns: the gap report judges buildCursor and its static
-// reference tree by this file's tests.
 declareOracle({
-  owns: [`src/utils/cursor.ts#buildCursor`],
   check: [expectCursorDenotation, expectLocalTupleOrder, assertRepeatedCursor],
   model: [compareValue, compareTuple],
 })
@@ -275,6 +272,9 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    // What this oracle owns: the gap report judges buildCursor and its static
+    // reference tree by this file's tests.
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: scalarCursorArbitrary,
       runs: 400,
@@ -389,6 +389,7 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 300,
@@ -410,6 +411,7 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 300,
@@ -431,6 +433,7 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: partialCursorArbitrary,
       runs: 200,
@@ -452,6 +455,7 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: partialCursorArbitrary,
       runs: 200,
@@ -473,6 +477,7 @@ describe(`buildCursor properties`, () => {
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 100,

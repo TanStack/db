@@ -263,11 +263,7 @@ function writeThroughAccessPath(
   return row
 }
 
-// What this oracle owns: the gap report judges the draft's array callback
-// methods and the stored-function and defineProperty behavior of drafts in
-// proxy.ts by this file's tests.
 declareOracle({
-  owns: [`src/proxy.ts`],
   check: [judgeCallbacks],
   model: [runArrayCallback, writeThroughAccessPath, modelArrayCallbacks],
 })
@@ -330,6 +326,10 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
     authority: `packages/db/src/proxy.ts; the maintainer decision (2026-10-29) that -0 and 0 are distinct row values; the native array methods as the authority for callback results.`,
     limits: `One row of up to six numeric items, two callback steps, and the eight array callback methods; the Collection write path, virtual fields, Map and Set drafts, and detachment belong to their own oracles.`,
   },
+  // What this oracle owns: the gap report judges the draft's array callback
+  // methods and the stored-function and defineProperty behavior of drafts in
+  // proxy.ts by this file's tests.
+  owns: [`src/proxy.ts`],
   histories: {
     arbitrary: callbackHistory,
     states: [`zero-sign-write`],

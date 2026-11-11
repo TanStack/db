@@ -31,7 +31,6 @@ import {
   storedDataRow,
   storedRow,
 } from './proxy-detachment-fixture.js'
-import { declareOracle } from './oracle-declaration.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -39,10 +38,6 @@ import {
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
 import type { CycleRow } from './proxy-detachment-fixture.js'
-
-// What this oracle owns: the gap report judges the draft-to-stored-row copy in
-// proxy.ts by this file's tests. The fixture helpers declare the checks.
-declareOracle({ owns: [`src/proxy.ts`] })
 
 function runOrdinaryFieldCopies(count: number): void {
   const row = Object.fromEntries(
@@ -114,6 +109,9 @@ describe(`Mutation result detachment`, () => {
       authority: `src/proxy.ts draft-to-detached-row contract stated above`,
       limits: `The existing generated count of 1 through 40 ordinary numeric fields and one field0 assignment.`,
     },
+    // What this oracle owns: the gap report judges the draft-to-stored-row copy in
+    // proxy.ts by this file's tests. The fixture helpers declare the checks.
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: fc.integer({ min: 1, max: 40 }),
       runs: 40,
@@ -246,6 +244,7 @@ describe(`Mutation result detachment`, () => {
       authority: `src/proxy.ts draft-to-stored-row value boundary contract stated above`,
       limits: `The existing four-key, integer-value and nested-or-direct JSON grammar; native cycles and binary containers remain fixed shared-check histories.`,
     },
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: fc.tuple(
         fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),

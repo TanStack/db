@@ -44,10 +44,6 @@ import type { UseLiveQueryConfig } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   grammar: [localOptionPairs],
   check: [checkLocalOutputOwnership],
 })
@@ -334,6 +330,10 @@ oracleProperty({
     authority: `packages/db/tests/live-query-cache-options-oracle.ts maintainer independent-caller law and existing React pending receiving histories.`,
     limits: `The unchanged finite option/reference/identity matrix and focused pending callback/scalar histories in unscoped and DbClient scopes; no server render, hydration or abandoned-render claim.`,
   },
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   histories,
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,

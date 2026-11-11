@@ -627,11 +627,7 @@ function expectDurationFieldPublication(
   expect(fields(mirror.get(1))).toEqual(expectedFields)
 }
 
-// What this oracle owns: the gap report judges the change-message publication
-// in collection/changes.ts, and the direct writes of a local-only Collection in
-// local-only.ts, by this file's tests.
 declareOracle({
-  owns: [`src/collection/changes.ts`, `src/local-only.ts`],
   check: [
     assertFinalAgreement,
     assertIndexAgreement,
@@ -932,6 +928,10 @@ describe(`change-event history oracle`, () => {
       authority: `Collection change-message and eager-index contracts stated above`,
       limits: `BasicIndex and BTreeIndex with the existing bounded key/operation grammar and stable indexed fields across key reuse; no callback-time index agreement.`,
     },
+    // What this oracle owns: the gap report judges the change-message publication
+    // in collection/changes.ts, and the direct writes of a local-only Collection in
+    // local-only.ts, by this file's tests.
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
     histories: { arbitrary: indexedHistory, runs: 35, fixedSeeds: [1912] },
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
@@ -975,6 +975,7 @@ describe(`change-event history oracle`, () => {
       authority: `Collection change-message contract and the maintainer reload and cross-key ordering decisions stated above`,
       limits: `Existing local-only bounded grammar in batched and sequential modes; no failed persistence, cancellation, general batch shape or publications without messages.`,
     },
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
     histories: { arbitrary: generatedHistory, runs: 100, fixedSeeds: [1902] },
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,

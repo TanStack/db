@@ -175,11 +175,6 @@ function checkRender(
 }
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkRender],
   grammar: [histories],
 })
@@ -286,6 +281,11 @@ for (const runtime of runtimes) {
         authority: `docs/guides/ssr.md prepared SSR promises; React >=18 support and #2229; shared ssr-snapshot-admission-oracle.ts judgment.`,
         limits: `Real React18 and installed React server renderers, provider/explicit-client ordinary/Suspense paths and standalone/supplied diagnostic paths; no hydration equality or client commit timing.`,
       },
+      owns: [
+        `src/DbProvider.tsx#DbProvider`,
+        `src/useLiveQuery.ts#useLiveQuery`,
+        `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+      ],
       histories: {
         arbitrary: grammar,
         runs: 24,
@@ -363,6 +363,11 @@ for (const runtime of runtimes) {
       authority: `React >=18 support and prepared SSR guide; the same SSR diagnostic judgment.`,
       limits: `The unchanged disabled SSR history in React18 and the installed React runtime.`,
     },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: [
       {
         preparation: `none`,

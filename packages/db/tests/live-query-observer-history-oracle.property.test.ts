@@ -78,6 +78,10 @@ oracleProperty({
     authority: `The established SSR first-view and ordinary runtime-error contracts described above.`,
     limits: `Controlled empty source, portable hydration statuses, both observer modes, and defined or undefined provider causes; framework scheduling has its own receiving witness.`,
   },
+  // What this oracle owns: the gap report judges every function in
+  // src/live-query-observer.ts by this file's generated and fixed histories of
+  // subscribe, publish, markError, and dispose.
+  owns: [`src/live-query-observer.ts`],
   histories: {
     arbitrary: errorTimingHistory,
     runs: 64,
@@ -262,6 +266,7 @@ oracleProperty<ReleaseHistory, ReturnType<typeof releaseModel>, ReleasePlan>({
     authority: `The established observer handle ownership contract described above.`,
     limits: `A controlled collaborator throws after retiring a real Collection handle; both modes, undefined causes, and one to three releases are retained.`,
   },
+  owns: [`src/live-query-observer.ts`],
   histories: {
     arbitrary: releaseHistory,
     runs: 40,
@@ -454,6 +459,7 @@ oracleProperty<
     authority: `The observer subscribe/dispose handle ownership contract described above.`,
     limits: `Controlled health-registration or sync failure, both observer modes, optional reentrant peer, and one or two failures.`,
   },
+  owns: [`src/live-query-observer.ts`],
   histories: {
     arbitrary: partialAttachHistory,
     runs: 60,
@@ -1247,11 +1253,7 @@ function reactionHistory(reaction: Reaction): Array<Command> {
   ]
 }
 
-// What this oracle owns: the gap report judges every function in
-// src/live-query-observer.ts by this file's generated and fixed histories of
-// subscribe, publish, markError, and dispose.
 declareOracle({
-  owns: [`src/live-query-observer.ts`],
   check: [runHistory, assertHistory],
   model: [subscribeModel, unsubscribeModel, publishModel, disposeModel],
   grammar: [command, listener],
@@ -1278,6 +1280,7 @@ for (const [mode, id] of [
       authority: `The existing independent eligibility ledger and contract table in this file.`,
       limits: `One row, keys and versions in the existing command grammar, at most one nested publication per command; the focused owners retain hydration, multi-row layout, and framework boundaries.`,
     },
+    owns: [`src/live-query-observer.ts`],
     histories: {
       arbitrary: fc.array(command, { minLength: 1, maxLength: 30 }),
       runs: 75,

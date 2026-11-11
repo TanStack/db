@@ -303,6 +303,7 @@ describe(`window changes at React commit`, () => {
                   authority: `packages/db/tests/conformance/contract.ts query identity and committed window laws; window-history-oracle.ts independent recomputation.`,
                   limits: `The unchanged ordinary/Suspense, eager/on-demand, keyed/derived, offset/limit/both paths across none/provider/explicit/descriptor scopes in React jsdom.`,
                 },
+                owns: [`src/useLiveQuery.ts#useLiveQuery`],
                 histories: {
                   arbitrary: renderHistoryArbitrary,
                   runs: 6,
@@ -343,7 +344,6 @@ describe(`window changes at React commit`, () => {
             })
 })
 declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   check: [checkRenderHistory],
 })
@@ -680,6 +680,7 @@ for (const client of [false, true])
               authority: `packages/db/tests/conformance/contract.ts exclusive output and retained window laws; maintainer independent Suspense-output decision 2026-11-03.`,
               limits: `The unchanged client/unscoped, keyed/derived, co-ready/borrower-first and compiler-first/peer-first/post-hook finite React receiving schedules.`,
             },
+            owns: [`src/useLiveQuery.ts#useLiveQuery`],
             histories: {
               arbitrary: renderHistoryArbitrary,
               runs: 6,
@@ -718,7 +719,6 @@ for (const client of [false, true])
           })
         })
 declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   check: [checkRetryOwnershipHistory],
 })

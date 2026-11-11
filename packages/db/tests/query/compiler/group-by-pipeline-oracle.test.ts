@@ -258,7 +258,6 @@ function checkGroupHistory(
 }
 
 declareOracle({
-  owns: [`src/query/compiler/group-by.ts#processGroupBy`],
   model: [expectedGroupRows, modelGroupHistory],
   check: [compareGroupRows, checkGroupHistory],
   grammar: [cases, snapshots],
@@ -271,6 +270,7 @@ oracleProperty({
     authority: `The aggregate and group laws in live/ARCHITECTURE.md and the boundary-only metadata decision of 2026-11-05, stated above.`,
     limits: `The original thirty finite grouping, selection and HAVING combinations over five replacement snapshots; no Collection, correlated-route, metadata-attribution or group-ordering claim.`,
   },
+  owns: [`src/query/compiler/group-by.ts#processGroupBy`],
   histories: cases,
   label: ({ grouped, selection, having }) =>
     `grouped=${grouped}, select=${selection}, having=${having}`,

@@ -256,6 +256,7 @@ oracleProperty({
     authority: `packages/db/tests/live-query-bound-options-oracle.ts; maintainer inline-option decision and shared framework query-identity contract.`,
     limits: `Six bounded option/identity cases, three normal rerenders, one scalar-row source update and one identity change; no DbClient admission boundary.`,
   },
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   histories,
   label: ({ option, identity }) => `${option}/${identity}`,
   model: modelBoundOptions,
@@ -287,7 +288,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   check: [checkBoundOptionHistory],
   grammar: [histories],
   model: [modelBoundOptions],

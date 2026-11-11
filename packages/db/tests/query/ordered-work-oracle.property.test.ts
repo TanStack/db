@@ -3497,6 +3497,16 @@ describe(`ordered source work oracle`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
     histories: { arbitrary: scenarioArbitrary, runs: 20, fixedSeeds: [17801] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -7735,6 +7745,16 @@ describe(`eager indexed ordered windows`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
     histories: { arbitrary: eagerCase, runs: 40, fixedSeeds: [2044] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -7799,6 +7819,16 @@ describe(`eager indexed ordered windows`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
     histories: {
       arbitrary: eagerFullJoinCase,
       runs: 40,
@@ -7840,6 +7870,16 @@ describe(`eager indexed ordered windows`, () => {
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/local-only.ts#localOnlyCollectionOptions',
+        'src/query/compiler/index.ts#compileQuery',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+        'src/query/subset-dedupe.ts',
+      ],
       histories: {
         arbitrary: eagerProvenReportCase,
         runs: 40,
@@ -7900,6 +7940,16 @@ describe(`eager indexed ordered windows`, () => {
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/local-only.ts#localOnlyCollectionOptions',
+        'src/query/compiler/index.ts#compileQuery',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+        'src/query/subset-dedupe.ts',
+      ],
       // Keep the existing seed and five-history minima, without changing the grammar.
       histories: {
         arbitrary: eagerUnindexedRefetchCase,
@@ -7973,6 +8023,16 @@ describe(`eager indexed ordered windows`, () => {
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/local-only.ts#localOnlyCollectionOptions',
+        'src/query/compiler/index.ts#compileQuery',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+        'src/query/subset-dedupe.ts',
+      ],
       histories: {
         arbitrary: eagerHeldCase,
         runs: 40,
@@ -8037,6 +8097,16 @@ describe(`eager indexed ordered windows`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
     histories: { arbitrary: eagerJoinedGapCase, runs: 40, fixedSeeds: [2063] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -8055,6 +8125,16 @@ describe(`eager indexed ordered windows`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
     histories: { arbitrary: eagerJoinedCase, runs: 40, fixedSeeds: [2059] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -8108,16 +8188,6 @@ function expectedInstalledWindow(
 // are the generators of legal histories: the exhaustive small domain and the
 // full-join case that the null-group calibration samples.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/local-only.ts#localOnlyCollectionOptions',
-    'src/query/compiler/index.ts#compileQuery',
-    'src/query/effect.ts#createEffect',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/ordered-source-loader.ts',
-    'src/query/subset-dedupe.ts',
-  ],
   check: [expectEagerWindow, optimisticWindowViolations, assertConsumerParity],
   model: [
     eagerWindow,

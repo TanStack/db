@@ -752,14 +752,6 @@ const replays: ReadonlyArray<
 // CollectionSubscription.setReadyIfIdle, and cancelAcquisition. No Collection
 // subscription owner subscribes with the option.
 
-declareOracle({
-  owns: [
-    `src/live-query-observer.ts`,
-    `src/client.ts#DbClient.hydrate`,
-    `src/collection/subscription.ts#CollectionSubscription.handleCollectionCleanup`,
-  ],
-})
-
 // Requirements name the builder's promise, not whether production entered it.
 // Populate this weak map on every invocation, including generated and shrunk
 // constructions. Replaying the builder repopulates it for the new history.
@@ -772,6 +764,11 @@ oracleProperty({
     authority: `packages/db/src/query/live/ARCHITECTURE.md law 16; glossary "crash" and "cleanup"; the coverage-map decision that cleanup under a seed keeps the seed`,
     limits: `A plain controlled Collection, not a live-query Collection; keys a..c, versions 0..3, up to ${MAX_EVENTS} steps; rows compared as sets; handoff timing, on-demand predicates and pending subset loads, streamed errors, and consumption belong to the focused tests in live-query-observer.test.ts.`,
   },
+  owns: [
+    `src/live-query-observer.ts`,
+    `src/client.ts#DbClient.hydrate`,
+    `src/collection/subscription.ts#CollectionSubscription.handleCollectionCleanup`,
+  ],
   histories: {
     arbitrary: history,
     states: reachStates,
@@ -1192,6 +1189,11 @@ for (const [mode, id] of [
       authority: `The hydration handoff law above; SSR guide; retained-page receiving premise in the Svelte transported-page receiver.`,
       limits: `Plain controlled on-demand Collection; one held subset; seed 1..3 rows and local 0..3 rows; both modes have separate 8-run campaigns. No arbitrary provider scheduling.`,
     },
+    owns: [
+      `src/live-query-observer.ts`,
+      `src/client.ts#DbClient.hydrate`,
+      `src/collection/subscription.ts#CollectionSubscription.handleCollectionCleanup`,
+    ],
     histories: {
       arbitrary: subsetHandoffArbitrary,
       runs: 8,
@@ -1256,7 +1258,6 @@ for (const [mode, id] of [
   })
 
 declareOracle({
-  owns: [`src/live-query-observer.ts`, `src/client.ts#DbClient.hydrate`],
   grammar: [subsetHandoffArbitrary],
   model: [subsetHandoffModel],
   check: [checkSubsetHandoff],

@@ -1841,10 +1841,6 @@ const aggregateLaw = {
 // `modelGroup` and `modelError`. Generated histories, structural examples, and
 // existing model replays use this same check.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [runHistory],
   model: [modelGroup, modelError],
   grammar: [history, requiredHistories],
@@ -1856,6 +1852,10 @@ describe(`aggregate select shapes`, () => {
   oracleProperty({
     id: `aggregate.select-structural`,
     law: aggregateLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: [structuralHistories],
     resolve: (entries) => ({ entries, required: reachStates }),
     model: recordedAssertionJudgment,
@@ -1871,6 +1871,10 @@ describe(`aggregate select shapes`, () => {
   oracleProperty({
     id: `aggregate.select-required`,
     law: aggregateLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: requiredInputs,
       runs: 1,
@@ -1895,6 +1899,10 @@ describe(`aggregate select shapes`, () => {
   oracleProperty({
     id: PROPERTY,
     law: aggregateLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: history,
       runs: 160,

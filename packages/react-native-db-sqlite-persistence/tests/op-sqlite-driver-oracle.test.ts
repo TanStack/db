@@ -364,6 +364,7 @@ const calibrations: Array<Calibration<Aliases, Aliases>> = [
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.write-marker-aliases`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: writeResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -442,6 +443,7 @@ function equivalentResults(aliases: Aliases): ReadonlyArray<{
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.result-carrier-equivalence`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: statementResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -502,6 +504,7 @@ oracleProperty<Aliases, Expected>({
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.columnar-sql-aliases`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: statementResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -569,7 +572,6 @@ oracleProperty<Aliases, Expected>({
 })
 
 declareOracle({
-  owns: [`src/op-sqlite-driver.ts`],
   model: [aliasQueryCase],
   grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
 })

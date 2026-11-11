@@ -278,11 +278,6 @@ import type {
 // health tree, its request errors, and the demand that loads its rows, by this
 // file's tests.
 declareOracle({
-  owns: [
-    `src/collection/health-tree.ts`,
-    `src/collection/lifecycle.ts`,
-    `src/collection/subscription.ts`,
-  ],
   check: [expectIdentity, expectRequestErrors, expectHeldDemandCovered],
   model: [
     applyModel,
@@ -3507,6 +3502,11 @@ describe(`source failure and health oracle`, () => {
       authority: `The source-health laws and independent source and query models stated above.`,
       limits: `The unchanged six shapes, optional reach prefixes, twelve-step suffix and direct-subscriber choices.`,
     },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 60,
@@ -3555,6 +3555,11 @@ describe(`source failure and health oracle`, () => {
         authority: `The source-health model and existing structural reach prefixes above.`,
         limits: `The unchanged join contexts, nested inner-ready prefix, direct subscribers and twelve-step suffix.`,
       },
+      owns: [
+        `src/collection/health-tree.ts`,
+        `src/collection/lifecycle.ts`,
+        `src/collection/subscription.ts`,
+      ],
       histories: {
         arbitrary: fc.array(stepArb, { maxLength: 12 }),
         runs: 6,
@@ -5518,6 +5523,11 @@ describe(`on-demand demand grammar`, () => {
       authority: `The demand and window laws and source model stated above.`,
       limits: `The unchanged reach prefixes, ten-step suffix, direct-subscriber choices and adapter-abort contract.`,
     },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
     histories: {
       arbitrary: demandArbitrary,
       runs: 60,
@@ -7640,6 +7650,11 @@ describe(`lazy join demand grammar`, () => {
       authority: `The source-health and lazy-demand laws and independent models stated above.`,
       limits: `The unchanged prefixes, ten-step suffix, controlled driver options and final cleanup observation cuts.`,
     },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
     histories: {
       arbitrary: lazyArbitrary,
       runs: 100,
@@ -7780,6 +7795,11 @@ describe(`request error bookkeeping`, () => {
       authority: `The maintainer decisions and independent open-failure list model stated above.`,
       limits: `The unchanged three issuers, twelve-step histories and five report/settlement actions.`,
     },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
     histories: {
       arbitrary: fc.array(step, { maxLength: 12 }),
       runs: 100,

@@ -490,7 +490,6 @@ describe('reserved commits across real-adapter hydrations', () => {
     )
   }
   declareOracle({
-    owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
     check: [runAdapterHistory],
     model: [expectedAdapterOutcome],
     grammar: [adapterHistories],
@@ -502,6 +501,7 @@ describe('reserved commits across real-adapter hydrations', () => {
       authority: `The existing contract and authority stated beside this oracle's model.`,
       limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
     histories: adapterHistories,
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,

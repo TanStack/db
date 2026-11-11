@@ -6,17 +6,10 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { contentsOf } from './multiset-support.js'
 import type { Observation } from '../../db/tests/oracle-property.js'
 import type { Data } from './multiset-support.js'
 import type { MultiSetArray } from '../src/multiset.js'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/multiset.ts#MultiSet.consolidate`],
-})
 
 /**
  * # Which records does `MultiSet.consolidate()` merge?
@@ -824,6 +817,9 @@ oracleProperty({
     authority: `the contract comment on MultiSet.consolidate() in packages/db-ivm/src/multiset.ts (b5d92ceb)`,
     limits: `Output order is not part of the law. The keyed grammar includes the type, reference, and delimiter collisions of #1948 and non-finite numeric keys; MultiSet directly, not the query shapes that produce these records. Structural identity uses a 32-bit hash; the small domain makes a collision unlikely, not impossible. Key order only for one collation tie.`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [`src/multiset.ts#MultiSet.consolidate`],
   histories: {
     arbitrary: historyArb,
     states: [

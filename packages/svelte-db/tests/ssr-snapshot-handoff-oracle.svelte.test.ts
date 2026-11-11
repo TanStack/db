@@ -574,6 +574,7 @@ const handoffLaw = {
 oracleProperty({
   id: `svelte.ssr-handoff.cases`,
   law: handoffLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrSnapshotExamples,
   model: expectedSsrSnapshot,
   driver: recordHandoff,
@@ -644,6 +645,7 @@ const handoffConstructions = [
 oracleProperty({
   id: `svelte.ssr-handoff`,
   law: handoffLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrSnapshotHistoryArbitrary,
     runs: 120,
@@ -737,6 +739,7 @@ const receivingConstructions: Array<{
 oracleProperty({
   id: `svelte.ssr-receiving-reader.cases`,
   law: receivingLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrReceivingExamples,
   model: expectedSsrReceivingViews,
   driver: recordReceivingHistory,
@@ -745,6 +748,7 @@ oracleProperty({
 oracleProperty({
   id: `svelte.ssr-receiving-reader`,
   law: receivingLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrReceivingHistoryArbitrary,
     runs: 120,
@@ -762,7 +766,6 @@ oracleProperty({
   timeout: 30_000,
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrSnapshot, expectedSsrReceivingViews],
   check: [checkHandoff, checkReceivingHistory],
   grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],

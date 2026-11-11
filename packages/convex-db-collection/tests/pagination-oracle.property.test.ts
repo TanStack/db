@@ -156,7 +156,6 @@ function expectRevisionTrace(
 declareOracle({
   check: [expectRevisionTrace],
   grammar: [history, snapshot],
-  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
 })
 
 // Calibrate both recorders' shared trace relation without imposing one callback
@@ -330,6 +329,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_pagination_rowsHistory,
     runs: 60,
@@ -429,6 +429,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_pagination_workHistory,
     runs: 60,
@@ -573,6 +574,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_pagination_boundHistory,
     runs: 60,

@@ -182,6 +182,7 @@ const law = {
 oracleProperty({
   id: `svelte.ssr-snapshot.cases`,
   law,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrSnapshotExamples,
   model: expectedSsrSnapshot,
   driver: recordHistory,
@@ -190,6 +191,7 @@ oracleProperty({
 oracleProperty({
   id: `svelte.ssr-snapshot`,
   law,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrSnapshotHistoryArbitrary,
     runs: 120,
@@ -270,7 +272,6 @@ oracleProperty({
   check: checkHistory,
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrSnapshot],
   grammar: [ssrSnapshotHistoryArbitrary],
   check: [checkHistory],

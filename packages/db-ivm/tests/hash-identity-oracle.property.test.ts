@@ -887,11 +887,6 @@ function expectCyclicPair(plan: CyclicPair): void {
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/hashing/hash.ts#hash`,
-    `src/hashing/hash.ts#equalHashValues`,
-    `src/hashing/hash.ts#registerOpaqueHash`,
-  ],
   check: [expectPair, expectCyclicPair, checkPair, checkCyclicPair],
   model: [identity, canon, expectedPair, expectedCyclicPair],
   grammar: [pairArb, cyclicArb],
@@ -915,6 +910,11 @@ describe(`hash identity oracle`, () => {
       authority: `The existing nine value-identity rules documented above.`,
       limits: `The original bounded recursive value-spec grammar, mutations and realization seeds; collision freedom is not promised.`,
     },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
     histories: {
       arbitrary: fc.tuple(pairArb, fc.nat(), fc.nat()),
       runs: 300,
@@ -935,6 +935,11 @@ describe(`hash identity oracle`, () => {
       authority: `The existing cyclic value-identity contract documented above.`,
       limits: `The original array/Map/Set/object cyclic spec and leaf-replacement grammar; no arbitrary graph-shape claim is added.`,
     },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
     histories: { arbitrary: cyclicArb, runs: 300, fixedSeeds: [2026930] },
     model: expectedCyclicPair,
     driver: driveCyclicPair,

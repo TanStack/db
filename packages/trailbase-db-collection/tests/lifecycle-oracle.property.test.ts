@@ -505,6 +505,9 @@ oracleProperty({
     authority: `The lifecycle contract in this file's opening prose and tests/ORACLE.md, enacted by checkLifecycle's independent keyed relation.`,
     limits: `The unchanged controlled RecordApi/native ReadableStream grammar; SDK fetch/SSE decoding, filtered subsets, mutation acknowledgements, and service reconnects remain outside this owner.`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   histories: {
     arbitrary: scenarioArb,
     runs: 50,
@@ -1521,6 +1524,7 @@ oracleProperty({
     authority: `The page/event law in tests/ORACLE.md and checkPageHistory's independent service-row model.`,
     limits: `The unchanged two-page and at-most-two-load controlled grammar; offset paging varies updates only, and no live service, larger page count, or reconnect claim is added.`,
   },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   histories: {
     arbitrary: pageHistoryArb,
     runs: 40,
@@ -1595,10 +1599,7 @@ it(`loads a row in a fresh run that an earlier run's event touched`, () => {
   return checkFreshRunAfterEvent()
 })
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   check: [
     checkLifecycle,
     checkEarlyDemand,

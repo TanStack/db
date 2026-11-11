@@ -1254,10 +1254,7 @@ async function withDeadline<T>(work: Promise<T>): Promise<T> {
 }
 
 const property = `query-db.refetch-ordered-prefix`
-// What this oracle owns: the on-demand Query collection's refetch and the ordered
-// prefix it serves (queryCollectionOptions and the loader it builds).
 declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
   check: [checkCase],
   model: [expectedWindow, expectedCoverage],
   grammar: [caseArbitrary, heldCaseArbitrary, sameKeyEndCaseArbitrary],
@@ -2204,6 +2201,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         authority: `LoadSubset contract and query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
         limits: `The existing controlled Query provider, bounded histories, and public window/source-prefix checkpoints; no new generator dimensions.`,
       },
+      // What this oracle owns: the on-demand Query collection's refetch and the ordered
+      // prefix it serves (queryCollectionOptions and the loader it builds).
+      owns: [`src/query.ts#queryCollectionOptions`],
       histories: {
         arbitrary: sameKeyEndCaseArbitrary,
         runs: 24,
@@ -2340,6 +2340,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         authority: `LoadSubset contract and query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
         limits: `The existing controlled Query provider, bounded histories, and public window/source-prefix checkpoints; no new generator dimensions.`,
       },
+      owns: [`src/query.ts#queryCollectionOptions`],
       histories: {
         arbitrary: heldCaseArbitrary,
         runs: 40,
@@ -2389,6 +2390,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         authority: `LoadSubset contract and query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
         limits: `The existing controlled Query provider, bounded histories, and public window/source-prefix checkpoints; no new generator dimensions.`,
       },
+      owns: [`src/query.ts#queryCollectionOptions`],
       histories: { arbitrary: caseArbitrary, runs: 80, fixedSeeds: [20261013] },
       model: (history, observations) =>
         recordedComparison(history, observations),

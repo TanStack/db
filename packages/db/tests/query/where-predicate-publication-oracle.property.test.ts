@@ -803,11 +803,6 @@ async function runHistory(history: History): Promise<void> {
 // properties reach them; the witness tests in where-predicate-publication.test.ts
 // do not.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [runHistory],
   model: [expectedTruth, expectedVisible],
 })
@@ -909,6 +904,11 @@ describe(`WHERE predicate publication oracle`, () => {
       authority: `The SQL three-valued filtering and subscription contract stated at the start of this owner.`,
       limits: `The unchanged bounded predicate and source-transaction grammar, on scan and BasicIndex paths; cleanup and restart remain outside generated histories.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/basic-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 80,

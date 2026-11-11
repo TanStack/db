@@ -206,11 +206,6 @@ function storedCalls(count: number, payload: string) {
   }))
 }
 declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts#startOfflineExecutor`,
-    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
-    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
-  ],
   check: [checkLeadershipTrace],
   model: [foldReplayLedger],
 })
@@ -224,6 +219,11 @@ describe.each([`construction`, `leadership`, `outbox read`, `retry hook`])(
         ...leadershipLaw,
         statement: `A disposed executor cannot revive during construction, election, replay read or retry hook; its durable rows remain unchanged.`,
       },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
       histories: {
         arbitrary: fc.integer({ min: 1, max: 4 }),
         runs: 10,
@@ -369,6 +369,11 @@ describe.each(
       ...leadershipLaw,
       statement: `Leadership loss or disposal permits only the issued call to settle; retained serial work resumes once under its next owner.`,
     },
+    owns: [
+      `src/OfflineExecutor.ts#startOfflineExecutor`,
+      `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+      `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+    ],
     histories: {
       arbitrary: fc.tuple(
         fc.integer({ min: 2, max: 5 }),
@@ -593,6 +598,11 @@ describe.each([`provider`, `acknowledgment`])(
         ...leadershipLaw,
         statement: `Repeated leadership reports and reacquisition cannot replay an issued or durably removed ID twice.`,
       },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
       histories: {
         arbitrary: reportArbitrary,
         runs: 40,
@@ -813,6 +823,11 @@ oracleProperty({
     ...leadershipLaw,
     statement: `A stale captured outbox read cannot re-admit IDs that were durably removed before delivery.`,
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: fc.record({
       count: fc.integer({ min: 2, max: 6 }),
@@ -965,6 +980,11 @@ oracleProperty({
     ...leadershipLaw,
     statement: `Delayed replay scans admit every unfinished peer exactly once and never restore already acknowledged work.`,
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: delayedReadArbitrary,
     runs: 30,
@@ -1134,6 +1154,11 @@ describe.each([`keys`, `get`])(
         ...leadershipLaw,
         statement: `An outbox read failure rejects initialization with the same error without running or losing stored work.`,
       },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
       histories: {
         arbitrary: fc.integer({ min: 1, max: 3 }),
         runs: 10,

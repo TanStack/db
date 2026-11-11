@@ -47,7 +47,6 @@ import type {
 } from './sqlite-core-adapter-support'
 
 declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],
   check: [expectResetResumeLaw, violation],
   model: [expectedResetResumeMetadata, expectedBindingRows],
 })
@@ -613,6 +612,7 @@ export function runSQLiteResetResumeOracleTests(
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
       limits: `The unchanged bounded reopen grammar and supplied host harness at the after-persistence-transition-reopen checkpoint.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: { arbitrary: historyArbitrary, runs: 24, fixedSeeds: [1659] },
     driver: (history: ResetResumeHistory, observeFact) =>
       recordAssertionJudgment(
@@ -633,6 +633,7 @@ export function runSQLiteResetResumeOracleTests(
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
       limits: `The unchanged finite reset/resume control and comparison.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: [
       {
         name: `leaves externally inconsistent metadata reachable for consumer validation`,
@@ -698,6 +699,7 @@ export function runSQLiteResetResumeOracleTests(
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
       limits: `The unchanged finite reset/resume control and comparison.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: [
       {
         name: `requires complete metadata reset while preserving non-reset metadata`,
@@ -940,6 +942,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: [
         {
           name: `returns exact rows at single-list, statement-total, and typed boundaries`,
@@ -978,6 +981,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: [
         { name: `honors total capacity through transactionWithDriver` },
       ],
@@ -1019,6 +1023,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: [
         {
           name: `honors the root connection limit when a distinct transaction driver omits it`,
@@ -1078,6 +1083,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: [
         {
           name: `never submits an over-capacity statement with many scalar predicates`,
@@ -1132,6 +1138,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
         limits: `The unchanged generated typed/list-length/connective grammar, native prepared statements and cleanup observations.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: {
         arbitrary: generated,
         runs: BINDING_RUNS,

@@ -441,6 +441,7 @@ oracleProperty({
     authority: `The independent tag-set law and persisted recovery contract stated above runTagHistory.`,
     limits: `Controlled ShapeStream boundary, unmanaged full-source recovery, and the existing bounded tag/edit histories.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: { arbitrary: tagHistory, runs: 10, fixedSeeds: [42712] },
   ...existingElectricComparison(
     `electric.persisted-tag-history`,
@@ -619,6 +620,7 @@ oracleProperty({
     authority: `The descriptor ownership contract and independent expected-row array in runOwnerHistory.`,
     limits: `The existing original, spread, and materialized descriptor forms over the controlled SDK callback boundary.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: { arbitrary: ownerHistory, runs: 20, fixedSeeds: [42711] },
   ...existingElectricComparison(
     `electric.bound-descriptor-history`,
@@ -636,5 +638,4 @@ oracleProperty({
 
 declareOracle({
   check: [runTagHistory, runOwnerHistory],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })

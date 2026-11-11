@@ -49,7 +49,6 @@ const policy = {
 }
 
 declareOracle({
-  owns: [`src/operators/distinct.ts#distinct`],
   check: [assertUnaryIncrementalization, checkDistinctSnapshot],
 })
 
@@ -156,6 +155,7 @@ oracleProperty({
   ...cell0,
   check: checkDistinctCampaign,
   id: `ivm.distinct-collisions`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell0.histories, runs: 100, fixedSeeds: [2306] },
 })
 
@@ -164,6 +164,7 @@ oracleProperty({
   ...cell1,
   check: checkDistinctCampaign,
   id: `ivm.distinct-collisions-tuple`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell1.histories, runs: 100, fixedSeeds: [2306] },
 })
 

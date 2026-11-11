@@ -1137,6 +1137,11 @@ describe(`ordered lifecycle product`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: { arbitrary, runs: 20, fixedSeeds: [93471] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -2565,6 +2570,11 @@ describe(`nullable multi-term lifecycle product`, () => {
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: { arbitrary, runs: 20, fixedSeeds: [93472] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -2623,11 +2633,6 @@ describe(`synchronous initial full-source settlement refinement`, () => {
 // the driver. compareNullable is the nullable-order model; the palette table is
 // its authority, and expectNullableOrderMatchesPalette anchors the model to it.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [
     observeHistory,
     assertInitialSettlementObservation,

@@ -155,7 +155,6 @@ declareOracle({
     expectedRetryObservation,
     expectedResumeCheckpoint,
   ],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
@@ -715,6 +714,7 @@ oracleProperty({
     authority: `The snapshot-delivery contract and independent source/health judgments stated beside checkSnapshots.`,
     limits: `The unchanged finite HTTP, overlap, retry, and outage grammar over the installed SDK; no live Electric-service or native-host claim.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: {
     arbitrary: snapshotHistoryArbitrary,
     runs: 40,
@@ -992,6 +992,7 @@ oracleProperty({
     authority: `The independent tag-group membership contract and checkMembership comparison stated above.`,
     limits: `The unchanged disjoint two-group, one-to-three-cycle HTTP grammar; arbitrary provider frames and unmatched move-ins remain outside this owner.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: {
     arbitrary: membershipHistoryArbitrary,
     runs: 12,
@@ -1632,6 +1633,7 @@ oracleProperty({
     authority: `The Electric resource-retirement and persisted-cache rotation contracts stated beside checkManagedRotation.`,
     limits: `The unchanged one-to-three sequential rotations through installed-SDK HTTP delivery and a Map-backed persistence adapter; no overlapping rotations or native-host claim.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: {
     arbitrary: fc.array(
       fc.constantFrom<RetiredSnapshotCut>(
@@ -1962,6 +1964,7 @@ oracleProperty({
     authority: `The resource-ownership law and EventTarget-calibrated listener comparison stated beside checkSourceRelease.`,
     limits: `The unchanged one-to-three-run browser-SDK grammar in jsdom; React Native AppState and arbitrary provider schedules remain separate.`,
   },
+  owns: [`src/electric.ts#electricCollectionOptions`],
   histories: {
     arbitrary: releaseHistoryArbitrary,
     runs: 40,
@@ -2345,6 +2348,7 @@ for (const tagged of [false, true])
             authority: `The independent authored-HTTP-position model and persisted-resume contract stated beside checkResumeCheckpoint.`,
             limits: `The unchanged bounded two-demand, restart, cursor and durable-settlement receiving lane; no additional provider schedules or native-host claim.`,
           },
+          owns: [`src/electric.ts#electricCollectionOptions`],
           histories: {
             arbitrary: fc.record({
               base: fc.integer({ min: 1, max: 30 }),

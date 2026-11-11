@@ -93,13 +93,7 @@ afterAll(() => {
       ),
     )
 })
-// What this oracle owns: the gap report judges prepareLiveQueryValue and
-// resolveLiveQueryValue by this file's admission histories.
 declareOracle({
-  owns: [
-    `src/live-query-options.ts#prepareLiveQueryValue`,
-    `src/live-query-options.ts#resolveLiveQueryValue`,
-  ],
   check: [
     checkCacheOptionAdmission,
     checkCacheOptionPromise,
@@ -441,6 +435,12 @@ oracleProperty<CacheOptionsCase, Verdict>({
     authority: `The maintainer same-identity conflict decision and shared cache-option declaration model.`,
     limits: `The unchanged finite reference/presence, key, held-delivery, claimant, and admission-path matrix; no schema transformation or arbitrary transport schedules.`,
   },
+  // What this oracle owns: the gap report judges prepareLiveQueryValue and
+  // resolveLiveQueryValue by this file's admission histories.
+  owns: [
+    `src/live-query-options.ts#prepareLiveQueryValue`,
+    `src/live-query-options.ts#resolveLiveQueryValue`,
+  ],
   histories: cacheOptionsHistories,
   model: recordedAssertionJudgment,
   driver: (scenario, observe) => {

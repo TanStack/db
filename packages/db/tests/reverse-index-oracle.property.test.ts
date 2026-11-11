@@ -282,10 +282,7 @@ const readCase: fc.Arbitrary<ReadCase> = fc.record({
   rejected: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 6 }),
 })
 
-// What this oracle owns: the gap report judges every function in
-// reverse-index.ts by this file's tests.
 declareOracle({
-  owns: [`src/indexes/reverse-index.ts`],
   check: [checkRead],
   model: [modelOrder, after, expectedRead, modelRead],
   grammar: [readCase],
@@ -300,6 +297,9 @@ oracleProperty({
     authority: `The IndexReader.take/takeFromStart and query-aware null-placement contract stated above.`,
     limits: `Four finite histories: ascending physical index, both null placements, 10,000 rows with 5,000 nullish keys, n=50, from the start or cursor 5001.`,
   },
+  // What this oracle owns: the gap report judges every function in
+  // reverse-index.ts by this file's tests.
+  owns: [`src/indexes/reverse-index.ts`],
   histories: ([`first`, `last`] as const).flatMap((nulls) =>
     [undefined, { from: 5001 }].map((cursor): ReadCase => ({
       options: { direction: `asc`, nulls },
@@ -345,6 +345,7 @@ oracleProperty({
     authority: `IndexReader.take/takeFromStart and findIndexForField's query-aware null placement; the ordered-acquisition coverage owner.`,
     limits: `Generated keys 0..15, values null/undefined/0..4, 0..12 rows, n=0..6; large fixed replays use a separate bounded domain. The query-aware reader, not legacy reversal or a custom index's capability admission.`,
   },
+  owns: [`src/indexes/reverse-index.ts`],
   histories: {
     arbitrary: readCase,
     runs: 200,

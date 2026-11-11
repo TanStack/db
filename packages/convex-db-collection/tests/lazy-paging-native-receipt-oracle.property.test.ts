@@ -23,7 +23,6 @@ import {
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
@@ -35,10 +34,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-declareOracle({
-  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
-})
 
 const turns = async () => {
   for (let i = 0; i < 25; i++) await Promise.resolve()
@@ -345,6 +340,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
   },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
   histories: {
     arbitrary: convex_lazy_native_receiptHistory,
     runs: 45,

@@ -83,7 +83,6 @@ const it = oracleReplayTest(vitestIt)
 // What this oracle owns: the gap report judges the built-in array and typed
 // array method behavior of drafts in proxy.ts by this file's tests.
 declareOracle({
-  owns: [`src/proxy.ts`],
   check: [expectArrayCall, expectTypedCall],
 })
 
@@ -129,6 +128,7 @@ describe(`array methods behave like native arrays`, () => {
       authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
       limits: `Bounded recipe arrays; fixed read-only callbacks; inserted objects have no original-row identity promise; no-op mutators may report equal changes.`,
     },
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: fc.tuple(
         arraySpecArb,
@@ -209,6 +209,7 @@ describe(`typed-array methods behave like native typed arrays`, () => {
       authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
       limits: `Float64Array recipes with fixed callbacks and bounded indices; no-op mutators may report equal changes.`,
     },
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: fc.tuple(
         typedSpecArb,

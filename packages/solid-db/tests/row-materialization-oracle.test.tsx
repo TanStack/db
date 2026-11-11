@@ -526,6 +526,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing callback/config/Collection finite grammar at settled Solid host cuts; no changed-element identity, native-source-only value liveness, cycles or elapsed-time claim.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...histories()],
   driver: (history: Parameters<typeof runHistory>[0], observe) =>
     recordAssertionJudgment(`solid.row-materialization`, history, observe, () =>
@@ -542,6 +546,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing same-parent and parent-transition cases at one or two array levels through three public inputs.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...nativeParentHistories()],
   driver: (history: Parameters<typeof runHistory>[0], observe) =>
     recordAssertionJudgment(
@@ -696,6 +704,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite helper-only visibility grammar; no public descriptor admission, accessors, symbols or in-place source edits.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...visibilityHistories()],
   driver: (history: Parameters<typeof runVisibilityHistory>[0], observe) =>
     recordAssertionJudgment(
@@ -934,6 +946,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite object/scalar, early/later and stable/fresh getter grammar through three public inputs at settled host cuts.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...getterHistories()],
   driver: (history: Parameters<typeof runGetterHistory>[0], observe) =>
     recordAssertionJudgment(`solid.live-getters`, history, observe, () =>
@@ -1068,6 +1084,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing three crossed-depth calibration inputs and unchanged graph comparison; no new mutation campaign.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...graphHistories()].filter((history) => history.crossed),
   driver: (history: Parameters<typeof runGraphCalibration>[0], observe) =>
     recordAssertionJudgment(
@@ -1256,6 +1276,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite graph grammar and unchanged 32 enumerations per distinct admitted container; no public SLO, alias topology or cyclic support claim.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...graphHistories()],
   driver: (history: Parameters<typeof runGraphHistory>[0], observe) =>
     recordAssertionJudgment(`solid.shared-graphs`, history, observe, () =>
@@ -1641,6 +1665,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite callable grammar through three public inputs; no arbitrary function/getter bodies, mutable-source writes, cycles or browser rendering.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...callableHistories()],
   driver: (history: Parameters<typeof runCallableHistory>[0], observe) =>
     recordAssertionJudgment(`solid.callable-fields`, history, observe, () =>
@@ -1945,6 +1973,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite ordinary/reserved-name, initial-ownness and scalar/signed-zero/object/array grammar through three public inputs.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...reservedFieldHistories()],
   driver: (history: Parameters<typeof runReservedFieldHistory>[0], observe) =>
     recordAssertionJudgment(`solid.reserved-fields`, history, observe, () =>
@@ -2166,6 +2198,10 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite array/subclass and user-shadow grammar through three public inputs; no arbitrary class instances or prototype edits.`,
   },
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   histories: [...methodHistories()],
   driver: (history: Parameters<typeof runMethodHistory>[0], observe) =>
     recordAssertionJudgment(`solid.array-methods`, history, observe, () =>
@@ -2175,10 +2211,6 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 declareOracle({
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
   model: [expectedMethods],
   grammar: [methodHistories],
   check: [compareMethods],

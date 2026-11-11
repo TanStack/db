@@ -277,7 +277,6 @@ function evaluate(value: Predicate, row: Row): Truth {
 
 declareOracle({
   model: [evaluate],
-  owns: [`src/sql-compiler.ts#compileSQL`],
 })
 
 describe(`Electric predicate compiler semantics`, () => {
@@ -418,6 +417,7 @@ describe(`Electric predicate compiler semantics`, () => {
       authority: `The compiler contract inventory above, PostgreSQL three-valued semantics, and this owner's separately specified finite evaluator.`,
       limits: `The unchanged finite numeric, Boolean, text-equality and null domain, received through real PostgreSQL; stable wire text, name mapping and unsupported expressions keep their focused owners.`,
     },
+    owns: [`src/sql-compiler.ts#compileSQL`],
     histories: {
       arbitrary: fc.tuple(rows, predicate(3)),
       runs: 50,

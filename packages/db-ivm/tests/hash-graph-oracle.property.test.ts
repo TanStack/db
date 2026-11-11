@@ -151,7 +151,6 @@ function checkCampaign(
 }
 
 declareOracle({
-  owns: [`src/hashing/hash.ts#hash`],
   model: [isAcyclic, expectedGraph, expectedCampaign],
   check: [checkGraph, checkCampaign],
   grammar: [graphArbitrary, historyArbitrary],
@@ -164,6 +163,7 @@ oracleProperty({
     authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives.`,
     limits: `Plain numeric-labeled object nodes with array edges, one to six nodes and at most three edges per node. No collision-freedom or work-bound claim, and no other cycle carriers.`,
   },
+  owns: [`src/hashing/hash.ts#hash`],
   histories: {
     arbitrary: historyArbitrary,
     runs: 300,

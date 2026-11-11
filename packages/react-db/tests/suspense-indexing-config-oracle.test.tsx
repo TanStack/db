@@ -64,10 +64,6 @@ import type { IndexSettings } from '../../db/tests/conformance/indexing-config-o
 import type { Row } from '../../db/tests/conformance/contract'
 
 declareOracle({
-  owns: [
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-    `src/DbProvider.tsx#DbProvider`,
-  ],
   grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
   model: [expectedIndexing],
   check: [
@@ -435,6 +431,10 @@ oracleProperty({
     authority: `packages/db/tests/conformance/indexing-config-oracle.ts explicit-output law; maintainer independent-output decision 2026-11-03 and first-options rule.`,
     limits: `The unchanged finite built-in, same-name constructor, presence, identity and two-cache-scope matrix plus focused pending delivery; no hydration, abandoned render, pending rejection or server render claim.`,
   },
+  owns: [
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    `src/DbProvider.tsx#DbProvider`,
+  ],
   histories: histories.map((_, index) => ({ index })),
   resolve: ({ index }) => ({ history: histories[index]! }),
   model: recordedAssertionJudgment,

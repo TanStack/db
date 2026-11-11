@@ -220,7 +220,6 @@ function checkLike(
 }
 
 declareOracle({
-  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
   model: [referenceLike, modelLike],
   grammar: [likeCase],
   check: [checkLike],
@@ -233,6 +232,7 @@ oracleProperty({
     authority: `The LIKE/ILIKE contract in evaluators.ts and the Structural values and ordered primitives coverage owner.`,
     limits: `The existing bounded alphabet and fixed string witnesses; boolean matching only. No nullish three-valued logic, general Unicode collation, or work-bound claim.`,
   },
+  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
   histories: {
     arbitrary: likeCase,
     runs: 10_000,

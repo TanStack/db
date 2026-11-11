@@ -11,19 +11,9 @@ import {
   useOracleClock,
   violation,
 } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter } from './harness'
 import type { Observation } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.executeAll`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.clear`,
-  ],
-})
 
 /**
  * # Why does a ready transaction wait, and what stops the queue?
@@ -481,6 +471,12 @@ oracleProperty({
     authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement; the eligibility boundary from KeyScheduler-oracle.property.test.ts; the idle law is the maintainer's decision of 2026-11-06 (an idle spin is a bad bug)`,
     limits: `An online executor with one mutation function, no retry hooks, and jitter off; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths are not judged, and timer counts and polling strategy only once nothing is left to run; at most 1000 retry timers after the deadline; liveness on a controlled clock, not wall-clock latency.`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.executeAll`,
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.clear`,
+  ],
   histories: {
     arbitrary: fifoHistory,
     states: [

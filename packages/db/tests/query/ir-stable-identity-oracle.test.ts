@@ -343,16 +343,6 @@ const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
 })
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts',
-    'src/live-query-options.ts#getPreparedLiveQueryIdentity',
-    'src/query/compiler/evaluators.ts#compileExpression',
-    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
-    'src/query/ir-stable-identity.ts#getQueryIdentity',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/includes-runtime.ts',
-    'src/query/pooled-live-query.ts',
-  ],
   check: [
     expectIdentitySharingMatchesOutcome,
     checkIdentityRelations,
@@ -444,6 +434,16 @@ describe(`semantic expression identity`, () => {
       authority: `The semantic expression identity law stated at the start of this owner: inverse comparisons, commutative equality/membership and associative/idempotent boolean forms.`,
       limits: `The unchanged finite expression constructors and integer/boolean sample rows; no arbitrary expression language or SQL-null grammar.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: fc.tuple(
         equivalentExpressionPairArbitrary,
@@ -480,6 +480,16 @@ describe(`semantic expression identity`, () => {
       authority: `The reference-value identity contract stated above; separately allocated arrays, records, Maps, Sets and binary values are distinct captures.`,
       limits: `The unchanged five reference-pair constructors; no arbitrary object graph or cross-runtime identity claim.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: referenceSemanticPairArbitrary,
       runs: 100,
@@ -528,6 +538,16 @@ describe(`semantic expression identity`, () => {
       authority: `The existing IN-set identity law; each candidate matches, an independently fresh string does not, and nullish operands stay UNKNOWN.`,
       limits: `The unchanged one-to-eight unique finite primitive candidate grammar; no object or non-array membership claim.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: membershipHistories,
       runs: 100,
@@ -594,6 +614,16 @@ describe(`stable QueryIR identity smoke test`, () => {
       authority: `ARCHITECTURE.md's alpha-renaming law and the existing lexical-alias identity contract.`,
       limits: `The unchanged four-unique-alias grammar and three query constructors; no implicit output-shape or captured-shadowing claim.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/), {
         minLength: 4,
@@ -644,6 +674,16 @@ describe(`stable QueryIR identity smoke test`, () => {
       authority: `The output-preservation identity law stated above.`,
       limits: `The unchanged integer, string-concat, binary-concat and signed-zero expression-pair grammar; no converse identity promise.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: outputExpressionPairArbitrary,
       runs: 100,
@@ -699,6 +739,16 @@ describe(`stable QueryIR identity smoke test`, () => {
       authority: `The existing interpretOutputProgram denotation and output-sensitive identity law stated above.`,
       limits: `The unchanged literal-pair and one-to-three wrapper grammar; reference leaves are compared by Object.is and no arbitrary JavaScript evaluator claim follows.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: outputProgramArbitrary,
       runs: 200,
@@ -756,6 +806,16 @@ describe(`stable QueryIR identity smoke test`, () => {
       authority: `The existing union-output identity law stated above and ARCHITECTURE.md's union result scope.`,
       limits: `The unchanged filtered alias grammar and four union-derived query constructors.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: fc
         .stringMatching(/^[a-z][a-z0-9]{0,8}$/)
@@ -806,6 +866,16 @@ describe(`stable QueryIR identity smoke test`, () => {
       authority: `The existing captured-reference query identity law stated above.`,
       limits: `The unchanged reference-pair grammar and profile-equality query constructor.`,
     },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
     histories: {
       arbitrary: referenceSemanticPairArbitrary,
       runs: 100,

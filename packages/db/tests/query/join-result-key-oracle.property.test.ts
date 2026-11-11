@@ -280,10 +280,6 @@ async function runHistory(history: History): Promise<void> {
 }
 
 declareOracle({
-  owns: [
-    `src/query/compiler/joins.ts#processJoins`,
-    `src/query/live-query-collection.ts#createLiveQueryCollection`,
-  ],
   check: [runHistory],
   model: [expectedPairs],
 })
@@ -312,6 +308,10 @@ describe(`joined result key oracle`, () => {
       authority: `docs/guides/live-queries.md, Joins and getKey, and the established key contract above.`,
       limits: `The unchanged bounded two-source inner, left and full join grammar with up to three synced group changes.`,
     },
+    owns: [
+      `src/query/compiler/joins.ts#processJoins`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 80,
@@ -843,6 +843,10 @@ const driveSelectionHistory = (
 oracleProperty({
   id: `join-result-key.whole-source-matrix`,
   law: selectionLaw,
+  owns: [
+    `src/query/compiler/joins.ts#processJoins`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+  ],
   histories: selectionExamples,
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -853,6 +857,10 @@ oracleProperty({
 oracleProperty({
   id: selectionProperty,
   law: selectionLaw,
+  owns: [
+    `src/query/compiler/joins.ts#processJoins`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+  ],
   histories: {
     arbitrary: selectionHistoryArbitrary,
     runs: 80,

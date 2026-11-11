@@ -431,13 +431,7 @@ function expectAgreement(
     )
 }
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/hashing/hash.ts#structuralIdentity`,
-    `src/hashing/hash.ts#equalHashValues`,
-  ],
   check: [expectAgreement, checkAgreement],
   model: [normal, expectedAgreement],
   grammar: [specArbitrary, equalSpecPairArbitrary],
@@ -492,6 +486,12 @@ describe(`structuralIdentity`, () => {
       authority: `The existing structural-identity law documented above.`,
       limits: `The original equal-spec grammar and sixty-four representation decisions; no additional value domain or mutation cut is introduced.`,
     },
+    // What this oracle owns: the gap report judges these entries, and their
+    // reference trees within the package, by this file's tests.
+    owns: [
+      `src/hashing/hash.ts#structuralIdentity`,
+      `src/hashing/hash.ts#equalHashValues`,
+    ],
     histories: {
       arbitrary: fc.tuple(
         equalSpecPairArbitrary,
@@ -658,6 +658,10 @@ describe(`structuralIdentity`, () => {
       authority: `The existing structural-identity law documented above.`,
       limits: `The original independent-spec grammar with plain representations; no additional value domain or mutation cut is introduced.`,
     },
+    owns: [
+      `src/hashing/hash.ts#structuralIdentity`,
+      `src/hashing/hash.ts#equalHashValues`,
+    ],
     histories: {
       arbitrary: fc.tuple(specArbitrary, specArbitrary),
       runs: 2000,

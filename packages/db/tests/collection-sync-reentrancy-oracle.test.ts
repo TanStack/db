@@ -298,10 +298,7 @@ async function runListenerScenario(
   }
 }
 
-// What this oracle owns: the gap report judges every function in
-// collection/sync.ts by this file's publication histories.
 declareOracle({
-  owns: [`src/collection/sync.ts`],
   check: [runListenerScenario],
   grammar: [listenerScenarioArbitrary, exhaustiveListenerScenarios],
 })
@@ -580,6 +577,9 @@ describe(`sync publication reentrancy`, () => {
       authority: `Collection sync publication and aborted commit contracts stated above`,
       limits: `Up to two listener commit or abort actions on either side of one optional open transaction; fixed layout, truncate, error and subset cases remain supplemental.`,
     },
+    // What this oracle owns: the gap report judges every function in
+    // collection/sync.ts by this file's publication histories.
+    owns: [`src/collection/sync.ts`],
     histories: {
       arbitrary: listenerScenarioArbitrary,
       runs: 30,

@@ -356,7 +356,6 @@ function checkOrderedMutationObservation(
 }
 
 declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
   check: [checkOrderedMutationTrace, checkOrderedMutationObservation],
   model: [expectedPublicWindow],
   grammar: [orderedMutationHistories],
@@ -488,6 +487,7 @@ oracleProperty({
     authority: `queryCollectionOptions mutation and ordered-refetch contracts; oracle-coverage.md, Query DB ordered refetch`,
     limits: `Finite controlled QueryClient histories, one bounded inbox window and handler-refetch path; no HTTP or framework host claim.`,
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: orderedMutationHistories,
   model: modelOrderedMutation,
   driver: driveOptimisticOrderedRefetch,

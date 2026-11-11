@@ -547,6 +547,9 @@ oracleProperty({
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
   },
+  // What this oracle owns: the gap report judges reconcileChangesForD2 and its
+  // static reference tree by this file's tests.
+  owns: [`src/query/live/utils.ts#reconcileChangesForD2`],
   histories: {
     arbitrary: fc.tuple(sourceRowArbitrary, sourceKeyArbitrary),
     runs: 100,
@@ -623,6 +626,7 @@ oracleProperty({
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
   },
+  owns: [`src/query/live/utils.ts#reconcileChangesForD2`],
   histories: {
     arbitrary: reconciliationHistoryArbitrary,
     runs: 200,
@@ -661,6 +665,7 @@ oracleProperty({
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
   },
+  owns: [`src/query/live/utils.ts#reconcileChangesForD2`],
   histories: {
     arbitrary: disjointHistoriesArbitrary,
     runs: 100,
@@ -678,10 +683,7 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 
-// What this oracle owns: the gap report judges reconcileChangesForD2 and its
-// static reference tree by this file's tests.
 declareOracle({
-  owns: [`src/query/live/utils.ts#reconcileChangesForD2`],
   check: [
     applyReconciliationStep,
     expectTrackerMatchesSource,

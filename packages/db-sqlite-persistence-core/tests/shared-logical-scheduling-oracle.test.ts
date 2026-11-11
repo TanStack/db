@@ -136,7 +136,6 @@ function check(
 }
 
 declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],
   model: [expected],
   grammar: [historyArbitrary],
   check: [check],
@@ -149,6 +148,7 @@ oracleProperty({
     authority: `RFC #1659 shared-driver identity and scheduling protocol.`,
     limits: `One promise-branded driver identity; bounded metadata queries. No K=1 fairness, SQL correctness, or cross-process claim.`,
   },
+  owns: [`src/sqlite-core-adapter.ts`],
   histories: { arbitrary: historyArbitrary, runs: 12, fixedSeeds: [1868] },
   model: expected,
   driver: drive,

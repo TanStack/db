@@ -62,6 +62,7 @@ oracleProperty({
     authority: `packages/db/tests/live-query-bound-options-oracle.ts; schema guide TInput/TOutput contract, optimistic-history contract and maintainer inline-option decision.`,
     limits: `72 finite synchronous-schema/key/identity cases with settled updates before replacement; controlled sources, no typed-schema, SSR, provider or concurrent-render claim.`,
   },
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   histories,
   label: boundSchemaGrammar,
   model: modelBoundSchemaReceiver,
@@ -140,7 +141,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [histories],
   model: [modelBoundSchemaReceiver],
   check: [checkBoundSchemaReceiver],

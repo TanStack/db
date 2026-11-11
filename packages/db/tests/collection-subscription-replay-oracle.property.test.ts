@@ -1672,10 +1672,7 @@ function predictFilteredReplay(
   return { nextOrdered, replacement }
 }
 
-// What this oracle owns: the gap report judges every function in
-// collection/subscription.ts by this file's replay histories.
 declareOracle({
-  owns: [`src/collection/subscription.ts`],
   check: [
     runReplayScenario,
     runSequentialReplayScenario,
@@ -2287,6 +2284,9 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  // What this oracle owns: the gap report judges every function in
+  // collection/subscription.ts by this file's replay histories.
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: replayScenarioArbitrary,
     runs: 30,
@@ -2312,6 +2312,7 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: sequentialReplayScenarioArbitrary,
     runs: 30,
@@ -2337,6 +2338,7 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: cleanupRestartScenarioArbitrary,
     runs: 30,
@@ -2362,6 +2364,7 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: { arbitrary: fc.scheduler(), runs: 30, fixedSeeds: [1760] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -2386,6 +2389,7 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: sharedSubscriptionScenarioArbitrary,
     runs: 30,
@@ -2411,6 +2415,7 @@ oracleProperty({
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: optimisticReplayScenarioArbitrary,
     runs: 30,

@@ -110,6 +110,7 @@ oracleProperty({
     authority: `docs/guides/ssr.md descriptor cleanup contract and packages/db/tests/descriptor-start-release-oracle.ts`,
     limits: `The existing 85 finite synchronous factory/start histories at Svelte setup, demand and cleanup cuts; no provider shutdown or concurrent scheduling claim.`,
   },
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: descriptorStartHistories,
   model: modelHistory,
   driver: recordHistory,
@@ -117,7 +118,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   check: [checkHistory],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],

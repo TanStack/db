@@ -1459,6 +1459,11 @@ function registerExistingPersistenceProperty<Value>(
       authority: `RFC #1659, the public persistence and sync contracts, and the individual laws stated beside the retained model helpers.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
     },
+    owns: [
+      `src/persisted.ts`,
+      `src/sqlite-core-adapter.ts`,
+      `src/remote-subset-owner.ts`,
+    ],
     histories: { arbitrary, runs, fixedSeeds },
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
@@ -1493,11 +1498,6 @@ function registerGeneratedPersistenceProperty<Value>(options: {
 // authored inputs; the check drivers compare production observations with
 // them, and the grammar reaches the generated histories.
 declareOracle({
-  owns: [
-    `src/persisted.ts`,
-    `src/sqlite-core-adapter.ts`,
-    `src/remote-subset-owner.ts`,
-  ],
   check: [
     runGeneratedSourceFifoOrderingHistory,
     runGeneratedAbortGraphHistory,
@@ -3709,6 +3709,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
     },
+    owns: [
+      `src/persisted.ts`,
+      `src/sqlite-core-adapter.ts`,
+      `src/remote-subset-owner.ts`,
+    ],
     histories: {
       arbitrary: retainedDemandHistory,
       runs: 50,
@@ -4896,6 +4901,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
     },
+    owns: [
+      `src/persisted.ts`,
+      `src/sqlite-core-adapter.ts`,
+      `src/remote-subset-owner.ts`,
+    ],
     histories: {
       arbitrary: followerRemoteDemandHistory,
       runs: 12,
@@ -7789,6 +7799,11 @@ describe(`persistedCollectionOptions`, () => {
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
     },
+    owns: [
+      `src/persisted.ts`,
+      `src/sqlite-core-adapter.ts`,
+      `src/remote-subset-owner.ts`,
+    ],
     histories: {
       arbitrary: generationNoticeHistory,
       runs: 24,

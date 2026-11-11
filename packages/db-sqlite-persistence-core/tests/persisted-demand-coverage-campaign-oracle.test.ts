@@ -1175,6 +1175,7 @@ const coverageLaw = {
 oracleProperty({
   id: REQUIRED_PROPERTY,
   law: coverageLaw,
+  owns: [`src/persisted.ts`],
   histories: {
     arbitrary: requiredHistoriesArb,
     runs: REQUIRED_RUNS,
@@ -1216,6 +1217,7 @@ oracleProperty({
 oracleProperty({
   id: PROPERTY,
   law: coverageLaw,
+  owns: [`src/persisted.ts`],
   histories: {
     arbitrary: historyArb,
     runs: RUNS,
@@ -1247,7 +1249,6 @@ function checkRelease(
 }
 
 declareOracle({
-  owns: [`src/persisted.ts`],
   check: [coverageViolations, checkFault, checkRelease],
   grammar: [historyArb, requiredHistoriesArb],
 })

@@ -331,6 +331,7 @@ oracleProperty({
     authority: `Maintainer decisions F19 and F18/F6 and the persisted wrapper forwarding contract.`,
     limits: `Eager Collections and a controlled in-memory persistence adapter; no on-demand replay or cross-tab delivery.`,
   },
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
   histories,
   label: (history) => `${history.phase}: ${steps(history).join(` > `)}`,
   model: expected,
@@ -339,7 +340,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
   model: [expected],
   check: [check],
   grammar: [histories],

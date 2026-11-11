@@ -20,13 +20,8 @@ import { fc } from '@fast-check/vitest'
 import { expect } from 'vitest'
 import { oracleProperty, pass } from '../../db/tests/oracle-property'
 import { convexCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, query, withTestCleanup } from './helpers'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
-
-declareOracle({
-  owns: [`src/index.ts#convexCollectionOptions`],
-})
 
 const forms = [`direct`, `shallow`, `fresh`, `descriptor`] as const
 const checkpoints = [`idle`, `ready`, `cleaned-up`] as const
@@ -105,6 +100,7 @@ oracleProperty({
     authority: `docs/collections/convex-collection.md; established concrete options ownership contract in oracle-coverage.md.`,
     limits: `The existing controlled provider and finite identity/checkpoint matrix; no arbitrary lifecycle or real SDK transport timing.`,
   },
+  owns: [`src/index.ts#convexCollectionOptions`],
   histories: {
     arbitrary: ownershipHistory,
     runs: 60,

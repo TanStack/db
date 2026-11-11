@@ -27,7 +27,6 @@ import {
   recordedAssertionJudgment,
   rejectAt,
 } from '../oracle-assertion-adapter'
-import { declareOracle } from '../oracle-declaration'
 import { campaignFailure, createCampaignRecorder } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
 import {
@@ -38,14 +37,6 @@ import {
   assertStatuses,
 } from './cross-tab-oracle'
 import type { TransportStep } from './cross-tab-driver'
-
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-  ],
-})
 
 const kinds = [
   'write',
@@ -115,6 +106,11 @@ oracleProperty({
     limits:
       'The unchanged bounded controlled Channel and fake-indexeddb histories; native scheduling, arbitrary optimistic overlap and same-key conflict policy remain outside this owner.',
   },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
   histories: { arbitrary: history, runs, fixedSeeds: [11792026] },
   resolve: (steps) => ({ history: steps }),
   model: recordedAssertionJudgment,

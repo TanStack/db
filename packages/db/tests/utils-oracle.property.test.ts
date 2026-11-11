@@ -31,10 +31,6 @@ import {
 } from './sparse-array-value-oracle.js'
 import type { Verdict } from './oracle-property.js'
 
-// What this oracle owns: the gap report judges the deepEquals relation in
-// utils.ts by this file's tests.
-declareOracle({ owns: [`src/utils.ts`] })
-
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
  * established examples in `utils.test.ts`, promises generic value equality.
@@ -96,6 +92,9 @@ function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
         authority: `The existing utility equality laws and authorities documented in this file.`,
         limits: `The original bounded inputs and unchanged independent assertion callback for ${label}.`,
       },
+      // What this oracle owns: the gap report judges the deepEquals relation in
+      // utils.ts by this file's tests.
+      owns: [`src/utils.ts`],
       histories: {
         arbitrary: argumentsArbitrary,
         runs,

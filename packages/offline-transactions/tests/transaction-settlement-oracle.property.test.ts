@@ -1049,6 +1049,15 @@ oracleProperty({
     statement:
       'Each independently admitted transaction settles from its own durable history while FIFO and public rows follow the completed prefix.',
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: settlementHistory,
     runs: 40,
@@ -1753,6 +1762,15 @@ oracleProperty({
     statement:
       'An optional retry decision preserves the durable FIFO head or terminates only that transaction.',
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: retryDecisionHistory,
     runs: 12,
@@ -2361,6 +2379,15 @@ oracleProperty({
     statement:
       'A failed retry-record write keeps independently admitted transactions pending and preserves them for recovery.',
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: retryRecordHistory,
     runs: 20,
@@ -2506,6 +2533,15 @@ oracleProperty({
     statement:
       'A failed durable admission rejects only its own transaction and preserves admitted peers.',
   },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: admissionHistory,
     runs: 10,
@@ -2537,15 +2573,6 @@ oracleProperty({
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts#startOfflineExecutor`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
-    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
-    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
-  ],
   check: [
     checkSettlement,
     checkRetryDecision,

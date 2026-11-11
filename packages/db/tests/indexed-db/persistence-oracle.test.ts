@@ -322,6 +322,12 @@ describe('settled histories', () => {
       authority: `IndexedDB CRUD/persistence, store isolation, clear/import/export and cross-tab APIs; Collection optimistic settlement and cleanup`,
       limits: `Controlled BroadcastChannel and fake IndexedDB, bounded scalar rows and sequential settled actions; no browser scheduling, crash durability or overlapping writers.`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexed-db.ts#createIndexedDB',
+      'src/indexed-db.ts#indexedDBCollectionOptions',
+      'src/transactions.ts#createTransaction',
+    ],
     histories: { arbitrary: history, runs: 30, fixedSeeds: [1179001] },
     resolve: (steps) => ({ steps }),
     model: recordedAssertionJudgment,
@@ -354,12 +360,6 @@ function acceptOwnerInModel(
 // peer and version rows with the authored model that it keeps for the history.
 // acceptOwnerInModel is the model of the manual-acceptance test below.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-    'src/transactions.ts#createTransaction',
-  ],
   check: [runHistory],
   model: [acceptOwnerInModel],
 })

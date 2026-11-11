@@ -304,11 +304,6 @@ function checkRuntimeTrace(
 }
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-  ],
   model: [expectedSsrRuntimeErrorViews],
   check: [checkRuntimeTrace],
   grammar: [ssrRuntimeErrorHistoryArbitrary],
@@ -331,6 +326,11 @@ for (const hook of [`ordinary`, `infinite`] as const) {
         ? `react.ssr-runtime-ordinary.cases`
         : `react.ssr-runtime-infinite.cases`,
     law,
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
     histories: ssrRuntimeErrorExamples,
     model: expectedSsrRuntimeErrorViews,
     driver,
@@ -339,6 +339,11 @@ for (const hook of [`ordinary`, `infinite`] as const) {
   oracleProperty({
     id: runtimeProperties[hook],
     law,
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
     histories: {
       arbitrary: ssrRuntimeErrorHistoryArbitrary,
       runs: 64,

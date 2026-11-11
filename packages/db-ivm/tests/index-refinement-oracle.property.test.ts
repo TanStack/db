@@ -308,12 +308,6 @@ function expectRefinement(
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/indexes.ts#Index.addValue`,
-    `src/indexes.ts#Index.get`,
-    `src/indexes.ts#Index.has`,
-    `src/indexes.ts#Index.getIterator`,
-  ],
   check: [expectRefinement, checkIndex],
   model: [expectedIndex, indexExpectations],
   grammar: [historyArbitrary],
@@ -343,6 +337,12 @@ describe(`Index refinement oracle`, () => {
       authority: `Existing Index multiset and prefixIdentity contract documented above.`,
       limits: `At most twelve signed additions to two keys over the original primitive/prefixed domain; joins, compaction and richer structural payloads remain outside this owner.`,
     },
+    owns: [
+      `src/indexes.ts#Index.addValue`,
+      `src/indexes.ts#Index.get`,
+      `src/indexes.ts#Index.has`,
+      `src/indexes.ts#Index.getIterator`,
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 300,

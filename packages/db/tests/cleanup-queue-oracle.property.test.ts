@@ -125,10 +125,7 @@ function expectQueueState(
   ).toEqual([...model.errors].sort())
 }
 
-// What this oracle owns: the gap report judges every function in
-// cleanup-queue.ts by this file's tests.
 declareOracle({
-  owns: [`src/collection/cleanup-queue.ts`],
   check: [expectQueueState],
   model: [stepModel],
 })
@@ -392,6 +389,9 @@ oracleProperty({
     authority: `CleanupQueue.schedule/cancel batching contract; docs/contributing/oracle-reviews/issue-1796-gc-clock.md`,
     limits: `Bounded non-reentrant callbacks, finite delays, and controlled elapsed and wall clocks; no suspend/resume or timer-provider replacement.`,
   },
+  // What this oracle owns: the gap report judges every function in
+  // cleanup-queue.ts by this file's tests.
+  owns: [`src/collection/cleanup-queue.ts`],
   histories: {
     arbitrary: fc.array(actionArbitrary, { maxLength: 50 }),
     runs: 100,

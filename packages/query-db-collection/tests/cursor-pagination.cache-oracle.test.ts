@@ -56,11 +56,7 @@ async function checkWindow(
   ).toEqual(expectedRows(source, scope, { offset: 0, limit: width }))
 }
 
-// What this oracle owns: cache reuse, expiry, invalidation and cancellation of
-// the pager's Query pages (createCursorPager). Window values are judged by
-// checkWindow against the full-relation model.
 declareOracle({
-  owns: [`src/cursor-pagination.ts#createCursorPager`],
   check: [checkWindow],
   model: [expectedRows],
 })
@@ -112,6 +108,10 @@ describe(`cursor cache lifecycle`, () => {
         ...cacheLaw,
         statement: `Inherited maxPages and select defaults cannot truncate a pager's requested window or move its offset origin.`,
       },
+      // What this oracle owns: cache reuse, expiry, invalidation and cancellation of
+      // the pager's Query pages (createCursorPager). Window values are judged by
+      // checkWindow against the full-relation model.
+      owns: [`src/cursor-pagination.ts#createCursorPager`],
       histories: {
         arbitrary: fc.tuple(
           fc.integer({ min: 1, max: 4 }),
@@ -197,6 +197,7 @@ describe(`cursor cache lifecycle`, () => {
           ...cacheLaw,
           statement: `Cancellation rejects held readers and fences late delivery while preserving cached rows and later recovery.`,
         },
+        owns: [`src/cursor-pagination.ts#createCursorPager`],
         histories: {
           arbitrary: fc.tuple(
             fc.integer({ min: 1, max: 4 }),
@@ -490,6 +491,7 @@ describe(`cursor cache lifecycle`, () => {
       ...cacheLaw,
       statement: `Immutable pages are reused until invalidation, removal or freshness expiry; returned windows follow the permitted source snapshot.`,
     },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
     histories: {
       arbitrary: fc.tuple(
         fc.integer({ min: 1, max: 12 }),

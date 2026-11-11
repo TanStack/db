@@ -28,7 +28,6 @@ import {
   sessionCollectionKeys,
   sessionHistoryArbitrary,
 } from './sync-metadata-session-oracle.js'
-import { declareOracle } from './oracle-declaration.js'
 import type { Verdict } from './oracle-property.js'
 import type {
   ReceiptState,
@@ -38,11 +37,6 @@ import type {
   SessionModel,
 } from './sync-metadata-session-oracle.js'
 import type { SyncConfig } from '../src/types.js'
-
-// What this oracle owns: the gap report judges the DbClient Collection's sync
-// path, which applies sources, seeds, holds, and commits, by this file's tests.
-// The contract, model, and grammar live in sync-metadata-session-oracle.ts.
-declareOracle({ owns: [`src/client.ts`, `src/collection/sync.ts`] })
 
 /**
  * Core driver for the sync metadata session oracle. The contract, model,
@@ -920,6 +914,10 @@ describe(`sync metadata session hold invariance`, () => {
         authority: `The independent session laws and runHoldInvariance relation in sync-metadata-session-oracle.ts.`,
         limits: `The existing bounded ${grammar.name} action grammar and core DbClient driver.`,
       },
+      // What this oracle owns: the gap report judges the DbClient Collection's sync
+      // path, which applies sources, seeds, holds, and commits, by this file's tests.
+      // The contract, model, and grammar live in sync-metadata-session-oracle.ts.
+      owns: [`src/client.ts`, `src/collection/sync.ts`],
       histories: {
         arbitrary: sessionHistoryArbitrary(grammar),
         runs: 50,
@@ -976,6 +974,7 @@ describe(`sync metadata session paired formulations`, () => {
           authority: `The independent key-independence and seed-order relations in sync-metadata-session-oracle.ts.`,
           limits: `The unchanged ${grammar.name} action grammar and receiving core path.`,
         },
+        owns: [`src/client.ts`, `src/collection/sync.ts`],
         histories: {
           arbitrary: sessionHistoryArbitrary(grammar),
           runs: 50,
@@ -1029,6 +1028,7 @@ describe(`sync metadata session campaigns`, () => {
           authority: `The borrowed consistency laws, maintainer decisions and independent model in sync-metadata-session-oracle.ts.`,
           limits: `The unchanged ${grammar.name} grammar, core hold and DbClient hydration boundary.`,
         },
+        owns: [`src/client.ts`, `src/collection/sync.ts`],
         histories,
         model: recordedAssertionJudgment,
         driver: (history, observe) =>

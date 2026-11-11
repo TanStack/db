@@ -960,7 +960,6 @@ async function assertGeneratedHistory(
 // committed work. The generated histories and independent-key cases come from
 // the grammars, and the work bound is the write-count law at each checkpoint.
 declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],
   check: [assertGeneratedHistory, assertIndependentWork],
   model: [modelAfter],
   grammar: [generatedHistoryArbitrary, independentWorkArbitrary],
@@ -1160,6 +1159,7 @@ export function runOrdinaryTransactionWorkOracle(): void {
         authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
         limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: {
         arbitrary: independentWorkArbitrary,
         runs: 24,
@@ -1183,6 +1183,7 @@ export function runOrdinaryTransactionWorkOracle(): void {
         authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
         limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
       },
+      owns: [`src/sqlite-core-adapter.ts`],
       histories: {
         arbitrary: generatedHistoryArbitrary,
         runs: 24,

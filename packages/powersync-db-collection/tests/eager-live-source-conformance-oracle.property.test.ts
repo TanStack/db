@@ -38,6 +38,7 @@ describe(`eager live-source conformance: powersync`, () => {
 
   oracleProperty({
     id: property,
+    owns: [`src/powersync.ts#powerSyncCollectionOptions`],
     ...eagerLiveSourceOracle(driver),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -49,7 +50,6 @@ describe(`eager live-source conformance: powersync`, () => {
   })
 
   declareOracle({
-    owns: [`src/powersync.ts#powerSyncCollectionOptions`],
     check: [checkEagerLiveSourceHistory],
     model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
     grammar: [historyArb],

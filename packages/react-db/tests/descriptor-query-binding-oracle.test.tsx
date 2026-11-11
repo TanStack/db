@@ -183,12 +183,6 @@ function applyModelWrite(model: Map<string, Row>, next: Row): void {
   model.set(next.id, { ...next })
 }
 declareOracle({
-  owns: [
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkStreamCut],
   model: [expectedRows, applyModelWrite],
 })
@@ -731,6 +725,12 @@ describe(`descriptor error handoff at React commit`, () => {
             authority: `Shared conformance readable ordinary errors contract and expectedStartHandoff from collection-subscription-lifecycle-grammar-oracle.ts.`,
             limits: `The unchanged ordinary/infinite, error-surface/ownership, before/during commit and defined/absent cause histories.`,
           },
+          owns: [
+            `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+            `src/DbProvider.tsx#DbProvider`,
+            `src/useLiveQuery.ts#useLiveQuery`,
+            `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+          ],
           histories: {
             arbitrary: handoffArbitrary,
             runs: 30,
@@ -1098,6 +1098,12 @@ describe(`SSR snapshot admission`, () => {
         authority: `expectedSsrSnapshot from ssr-snapshot-admission-oracle.ts, maintainer server-only snapshot rejection decision and SSR guide rendered-view law.`,
         limits: `The unchanged ordinary/infinite server render and hydrateRoot admission paths with finite eager source histories and declared browser/server writes.`,
       },
+      owns: [
+        `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+        `src/DbProvider.tsx#DbProvider`,
+        `src/useLiveQuery.ts#useLiveQuery`,
+        `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+      ],
       histories: {
         arbitrary: ssrSnapshotHistoryArbitrary,
         runs: 120,
@@ -1709,6 +1715,12 @@ describe(`stream render snapshot cut`, () => {
       authority: `SSR guide per-reader hydration promise and ssrStreamHydrationMismatches independent metamorphic comparison.`,
       limits: `The unchanged bounded ordinary-first/last/Suspense-only, held/synchronous readiness, source failure, source publication and Router browser-handoff histories.`,
     },
+    owns: [
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: {
       arbitrary: streamArbitrary,
       runs: 40,

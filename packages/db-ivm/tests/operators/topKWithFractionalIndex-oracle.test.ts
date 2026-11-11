@@ -26,10 +26,6 @@ import {
  * owner. The ordinary examples live in topKWithFractionalIndex-examples.test.ts.
  */
 declareOracle({
-  owns: [
-    `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
-    `src/operators/join.ts#join`,
-  ],
   check: [TopKRelation, checkTopKComparisons],
   model: [topKReferences],
 })
@@ -143,6 +139,10 @@ describe.each([
         authority: `The existing fractional-window contract and independent recomputation documented above.`,
         limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
       },
+      owns: [
+        `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+        `src/operators/join.ts#join`,
+      ],
       histories: {
         arbitrary: fc.tuple(
           fc.boolean(),
@@ -249,6 +249,10 @@ describe.each([
         authority: `The existing fractional-window contract and independent recomputation documented above.`,
         limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
       },
+      owns: [
+        `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+        `src/operators/join.ts#join`,
+      ],
       histories: {
         arbitrary: fc.tuple(
           fc.integer({ min: 0, max: 4 }),
@@ -333,6 +337,10 @@ describe.each([
             authority: `The existing fractional-window contract and independent recomputation documented above.`,
             limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
           },
+          owns: [
+            `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+            `src/operators/join.ts#join`,
+          ],
           histories: {
             arbitrary: fc.record({
               limit: fc.integer({ min: 0, max: 6 }),

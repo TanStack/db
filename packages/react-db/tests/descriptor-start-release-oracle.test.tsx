@@ -140,6 +140,11 @@ for (const hook of hooks) {
       authority: `docs/guides/ssr.md descriptor cleanup contract; packages/db/tests/descriptor-start-release-oracle.ts`,
       limits: `The unchanged finite zero-through-three-source factory and sync-failure grammar, received through real React live, infinite and Suspense hooks; no provider shutdown or concurrent scheduler claim.`,
     },
+    owns: [
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: descriptorStartHistories,
     model: (history) =>
       cuts.map((cut) => expectedDescriptorStart(history, cut)),
@@ -166,11 +171,6 @@ it.each([
 })
 
 declareOracle({
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkDescriptorStart, checkRecordedHistory],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],

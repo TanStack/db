@@ -55,10 +55,7 @@ function preloadIndexHistories() {
     ),
   )
 }
-// What this oracle owns: the gap report judges DbClient.preloadLiveQuery,
-// the explicit preload admission path, by this file's finite declaration grammar.
 declareOracle({
-  owns: [`src/client.ts#DbClient.preloadLiveQuery`],
   grammar: [preloadIndexHistories],
   model: [expectedIndexing],
   check: [expectIndexingAdmission],
@@ -173,6 +170,9 @@ oracleProperty({
     authority: `The maintainer preload-admission decision from 2026-10-30 and the shared indexing model above.`,
     limits: `The unchanged nine declarations, cold/valid-prior pending/settled states and derived/same/different keys; no hydrated cache or SSR.`,
   },
+  // What this oracle owns: the gap report judges DbClient.preloadLiveQuery,
+  // the explicit preload admission path, by this file's finite declaration grammar.
+  owns: [`src/client.ts#DbClient.preloadLiveQuery`],
   histories: preloadIndexCases.map((scenario, index) => ({
     index,
     first: scenario.first

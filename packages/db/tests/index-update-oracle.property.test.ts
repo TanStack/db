@@ -330,6 +330,9 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
     },
+    // What this oracle owns: the gap report judges every function in basic-index.ts and
+    // btree-index.ts by this file's tests.
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
       runs: 100,
@@ -757,10 +760,7 @@ function applyNullishAction(
   expectNullishMembership(index, rows)
 }
 
-// What this oracle owns: the gap report judges every function in basic-index.ts and
-// btree-index.ts by this file's tests.
 declareOracle({
-  owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
   check: [
     expectIndexMatchesModel,
     expectCustomGroups,
@@ -984,6 +984,7 @@ describe.each(indexTypes)(
         authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
         limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
       },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
       histories: {
         arbitrary: fc.array(arbitraryNullishAction, {
           minLength: 1,
@@ -1944,6 +1945,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
     },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
         minLength: 2,
@@ -2074,6 +2076,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
     },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
         minLength: 2,
