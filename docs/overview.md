@@ -225,6 +225,8 @@ TanStack DB provides several built-in collection types for different data source
 
 - **[TrailBaseCollection](./collections/trailbase-collection.md)** — Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
+- **[SupabaseCollection](./collections/supabase-collection.md)** — Sync data into collections from Supabase tables using PostgREST queries and Realtime subscriptions, respecting Row Level Security.
+
 - **[RxDBCollection](./collections/rxdb-collection.md)** — Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
 - **[PowerSyncCollection](./collections/powersync-collection.md)** — Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
@@ -291,7 +293,7 @@ The collection will use the schema for its type inference. If you provide a sche
 
 You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection), [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) and [`../packages/powersync-db-collection`](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection), [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection), [`../packages/supabase-db-collection`](https://github.com/TanStack/db/tree/main/packages/supabase-db-collection) and [`../packages/powersync-db-collection`](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 

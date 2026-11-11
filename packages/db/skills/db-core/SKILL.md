@@ -3,7 +3,8 @@ name: db-core
 description: >
   TanStack DB core concepts: createCollection with queryCollectionOptions,
   electricCollectionOptions, powerSyncCollectionOptions, rxdbCollectionOptions,
-  trailBaseCollectionOptions, localOnlyCollectionOptions. Live queries via
+  trailBaseCollectionOptions, supabaseCollectionOptions,
+  localOnlyCollectionOptions. Live queries via
   query builder (from, where, join, select, groupBy, orderBy, limit). Optimistic
   mutations with draft proxy (collection.insert, collection.update,
   collection.delete). createOptimisticAction, createTransaction,

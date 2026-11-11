@@ -129,6 +129,16 @@ npm install @tanstack/trailbase-db-collection
 
 Use `trailBaseCollectionOptions` to sync records from TrailBase's Record APIs with built-in subscription support.
 
+#### Supabase Collection
+
+For syncing with [Supabase](https://supabase.com) tables through PostgREST and Realtime:
+
+```sh
+npm install @tanstack/supabase-db-collection @tanstack/query-core @supabase/supabase-js
+```
+
+Use `supabaseCollectionOptions` to load rows from Supabase tables, apply optimistic mutations, and receive changes from other clients through Realtime. Row Level Security is respected.
+
 #### PowerSync Collection
 
 For offline-first sync with [PowerSync](https://powersync.com):

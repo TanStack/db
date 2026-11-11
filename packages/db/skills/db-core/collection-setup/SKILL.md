@@ -5,8 +5,8 @@ description: >
   queryCollectionOptions (REST/TanStack Query), electricCollectionOptions
   (ElectricSQL real-time sync), powerSyncCollectionOptions (PowerSync SQLite),
   rxdbCollectionOptions (RxDB), trailBaseCollectionOptions (TrailBase),
-  localOnlyCollectionOptions, localStorageCollectionOptions,
-  indexedDBCollectionOptions. CollectionConfig
+  supabaseCollectionOptions (Supabase), localOnlyCollectionOptions,
+  localStorageCollectionOptions, indexedDBCollectionOptions. CollectionConfig
   options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
   syncMode (eager/on-demand, plus progressive for Electric). StandardSchema validation
   with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
@@ -25,6 +25,7 @@ sources:
   - 'TanStack/db:docs/collections/rxdb-collection.md'
   - 'TanStack/db:docs/collections/trailbase-collection.md'
   - 'TanStack/db:docs/collections/indexed-db-collection.md'
+  - 'TanStack/db:docs/collections/supabase-collection.md'
   - 'TanStack/db:packages/db/src/collection/index.ts'
 ---
 
@@ -87,6 +88,7 @@ const todoCollection = createCollection(
 | PowerSync (SQLite offline)       | `powerSyncCollectionOptions`    | `@tanstack/powersync-db-collection` |
 | RxDB (reactive database)         | `rxdbCollectionOptions`         | `@tanstack/rxdb-db-collection`      |
 | TrailBase (event streaming)      | `trailBaseCollectionOptions`    | `@tanstack/trailbase-db-collection` |
+| Supabase (Postgres + Realtime)   | `supabaseCollectionOptions`     | `@tanstack/supabase-db-collection`  |
 | No backend (UI state)            | `localOnlyCollectionOptions`    | `@tanstack/db`                      |
 | Browser localStorage             | `localStorageCollectionOptions` | `@tanstack/db`                      |
 | Browser IndexedDB                | `indexedDBCollectionOptions`    | `@tanstack/db`                      |
@@ -464,6 +466,7 @@ Source: docs/collections/query-collection.md
 - [PowerSync adapter](references/powersync-adapter.md)
 - [RxDB adapter](references/rxdb-adapter.md)
 - [TrailBase adapter](references/trailbase-adapter.md)
+- [Supabase adapter](references/supabase-adapter.md)
 - [Local adapters (local-only, localStorage)](references/local-adapters.md)
 - [Schema validation patterns](references/schema-patterns.md)
 

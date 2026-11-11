@@ -88,6 +88,10 @@
           "to": "collections/trailbase-collection"
         },
         {
+          "label": "Supabase Collection",
+          "to": "collections/supabase-collection"
+        },
+        {
           "label": "RxDB Collection",
           "to": "collections/rxdb-collection"
         },
@@ -217,6 +221,18 @@
         {
           "label": "indexedDBCollectionOptions",
           "to": "reference/functions/indexedDBCollectionOptions"
+        },
+        {
+          "label": "Supabase DB Collection",
+          "to": "reference/supabase-db-collection/index"
+        },
+        {
+          "label": "supabaseCollectionOptions",
+          "to": "reference/supabase-db-collection/functions/supabaseCollectionOptions"
+        },
+        {
+          "label": "experimental_queryOnce",
+          "to": "reference/supabase-db-collection/functions/experimental_queryOnce"
         }
       ],
       "frameworks": [

@@ -134,6 +134,18 @@ await generateReferenceDocs({
       exclude: [`packages/db/**/*`],
     },
     {
+      name: `supabase-db-collection`,
+      entryPoints: [
+        resolve(__dirname, `../packages/supabase-db-collection/src/index.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/supabase-db-collection/tsconfig.docs.json`,
+      ),
+      outputDir: resolve(__dirname, `../docs/reference/supabase-db-collection`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
       name: `vue-db`,
       entryPoints: [resolve(__dirname, `../packages/vue-db/src/index.ts`)],
       tsconfig: resolve(__dirname, `../packages/vue-db/tsconfig.docs.json`),

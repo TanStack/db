@@ -35,7 +35,8 @@ skills:
     description: >
       Creating typed collections with createCollection, queryCollectionOptions,
       electricCollectionOptions, powerSyncCollectionOptions, rxdbCollectionOptions,
-      trailbaseCollectionOptions, localOnlyCollectionOptions, localStorageCollectionOptions.
+      trailbaseCollectionOptions, supabaseCollectionOptions, localOnlyCollectionOptions,
+      localStorageCollectionOptions.
       CollectionConfig (getKey, schema, sync, gcTime, autoIndex, syncMode).
       StandardSchema validation with Zod/Valibot/ArkType. Collection lifecycle
       (idle/loading/ready/error/cleaned-up). Adapter-specific sync patterns.
@@ -49,6 +50,7 @@ skills:
       - 'TanStack/db:docs/collections/powersync-collection.md'
       - 'TanStack/db:docs/collections/rxdb-collection.md'
       - 'TanStack/db:docs/collections/trailbase-collection.md'
+      - 'TanStack/db:docs/collections/supabase-collection.md'
       - 'TanStack/db:docs/collections/local-only-collection.md'
       - 'TanStack/db:docs/collections/local-storage-collection.md'
       - 'TanStack/db:packages/db/src/collection/index.ts'
@@ -58,6 +60,7 @@ skills:
       - 'PowerSync adapter'
       - 'RxDB adapter'
       - 'TrailBase adapter'
+      - 'Supabase adapter'
       - 'Local-only'
       - 'localStorage'
     references:
@@ -66,6 +69,7 @@ skills:
       - 'references/powersync-adapter.md'
       - 'references/rxdb-adapter.md'
       - 'references/trailbase-adapter.md'
+      - 'references/supabase-adapter.md'
       - 'references/local-adapters.md'
       - 'references/schema-patterns.md'
 
