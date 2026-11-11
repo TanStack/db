@@ -334,7 +334,6 @@ oracleProperty({
       'CONTRIBUTING.md: Changesets and Releases; maintainer policy decision 2026-10-29.',
     limits:
       'The unchanged finite histories and real-tool receiving boundary described above.',
-    owner: 'Release tooling',
   },
   histories: releaseHistories,
   label: (history) => 'release version history ' + JSON.stringify(history),
@@ -361,7 +360,6 @@ oracleProperty({
       'CONTRIBUTING.md: Changesets and Releases; maintainer policy decision 2026-10-29.',
     limits:
       'The unchanged finite histories and real-tool receiving boundary described above.',
-    owner: 'Release tooling',
   },
   histories: seedFailureHistories,
   label: (history) =>

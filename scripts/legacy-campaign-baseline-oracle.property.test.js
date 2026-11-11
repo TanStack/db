@@ -224,7 +224,6 @@ oracleProperty({
     statement: `After adoption, the legacy campaign baseline only shrinks by exact file identity.`,
     authority: `AGENTS.md: The oracle migration and gap ratchet; maintainer decision 2026-11-10 (handoff).`,
     limits: `Four file names, including a shared stem and cross-package names; valid unique entries; no reason changes or lint classification.`,
-    owner: `Small structures and test mechanics`,
   },
   histories: {
     arbitrary: historyArbitrary,

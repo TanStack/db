@@ -1225,7 +1225,6 @@ oracleProperty({
     statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule.`,
     authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10.`,
     limits: `The unchanged bounded import, checkout, hook, and lockfile language described above.`,
-    owner: `Small structures and test mechanics`,
   },
   histories: {
     arbitrary: new SkeletonWithProductionPrefix(),
