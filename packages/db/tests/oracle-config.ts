@@ -535,6 +535,8 @@ const staticOracleProperties = [
   `query.persisted-rejected-write-cutoff.chromium-opfs`,
   `query.scope-omission-reacquisition`,
   `query.scope-omission-reacquisition.chromium-opfs`,
+  `documented-mutations.query`,
+  `documented-mutations.electric`,
   `query-db.ownership.reacquisition`,
   `query-db.ownership.published-owners`,
   `query-db.ownership.direct-lifetime`,

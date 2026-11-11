@@ -19,6 +19,7 @@ export default defineConfig({
         `tests/ownership-bottom.oracle.test.ts`,
         `tests/ownership-upper.oracle.test.ts`,
         `tests/ownership-confirmation.oracle.test.ts`,
+        `tests/documented-mutations-oracle.test.ts`,
       ],
     },
   },

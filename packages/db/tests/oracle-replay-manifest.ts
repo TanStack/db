@@ -15,6 +15,18 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `query-db-collection/tests/documented-mutations-oracle.test.ts`,
+    `documented-mutations`,
+    `query`,
+    `db/tests/documented-mutations-oracle.ts`,
+  ],
+  [
+    `electric-db-collection/tests/documented-mutations-oracle.test.ts`,
+    `documented-mutations`,
+    `electric`,
+    `db/tests/documented-mutations-oracle.ts`,
+  ],
+  [
     `query-db-collection/tests/scope-omission-reacquisition-oracle.test.ts`,
     `query`,
     `scope-omission-reacquisition`,
@@ -1880,6 +1892,8 @@ const enumeratedProperties = new Set([
     ),
   ),
   `trailbase.lifecycle.boundaries`,
+  `documented-mutations.query`,
+  `documented-mutations.electric`,
   `query-db.ownership.reacquisition`,
   `query-db.ownership.published-owners`,
   `query-db.ownership.direct-lifetime`,
