@@ -796,42 +796,37 @@ function expectedThreeGenerationSettlement(
  * physical acquisition and its lease exist only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
-  const runRequiredAsyncRestartRegimes = async () => {
-    const reach = new Set<string>()
-    for (const scenario of asyncRestartCoverageScenarios) {
-      for (const label of await runAsyncRestartScenario(scenario)) {
-        reach.add(label)
-      }
-    }
-    const required = [
-      `demands:1`,
-      `demands:2`,
-      `sync-run-generations:2`,
-      `sync-run-generations:3`,
-      `sync-run-generations:4`,
-      `current:resolve`,
-      `current:reject`,
-      `mixed-current:true`,
-      `obsolete-reject:true`,
-      `order:obsolete-first`,
-      `order:current-first`,
-      `order:interleaved`,
-      `real-interleaving:true`,
-    ]
-    oracleAssertion('existing comparison at 818', () =>
-      expect(required.filter((label) => !reach.has(label))).toEqual([]),
-    )
-  }
+  // The regimes that the async restart coverage scenarios must reach
+  // together. Each is a declared state of the enumerated source.
+  const requiredAsyncRestartRegimes = [
+    `demands:1`,
+    `demands:2`,
+    `sync-run-generations:2`,
+    `sync-run-generations:3`,
+    `sync-run-generations:4`,
+    `current:resolve`,
+    `current:reject`,
+    `mixed-current:true`,
+    `obsolete-reject:true`,
+    `order:obsolete-first`,
+    `order:current-first`,
+    `order:interleaved`,
+    `real-interleaving:true`,
+  ]
   oracleProperty({
     id: `subscription-lifecycle.async-restart-regimes`,
     law: {
       statement: `Demand settlements are fenced by the sync run that owns their physical acquisition, and the async restart coverage scenarios together execute every required regime.`,
       authority: `Collection cleanup/restart and logical demand ownership in the glossary; the lifecycle grammar's existing model`,
-      limits: `The four async restart coverage scenarios, replayed in order through the shared driver.`,
+      limits: `The four async restart coverage scenarios, each replayed through the shared driver; a required regime is a declared state of the enumerated source.`,
     },
     owns: [`src/collection/subscription.ts`],
-    histories: [`executes every required async restart regime`] as const,
-    label: (name) => name,
+    histories: {
+      enumerated: asyncRestartCoverageScenarios,
+      states: requiredAsyncRestartRegimes,
+    },
+    label: (scenario) =>
+      `async restart scenario ${asyncRestartCoverageScenarios.indexOf(scenario) + 1}`,
     resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
@@ -839,8 +834,18 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         `subscription-lifecycle.async-restart-regimes`,
         plan,
         observe,
-        runRequiredAsyncRestartRegimes,
+        async () => {
+          const labels = await runAsyncRestartScenario(plan.history)
+          observe(
+            `required regimes reached`,
+            requiredAsyncRestartRegimes.filter((label) => labels.has(label)),
+          )
+        },
       ),
+    // The required regimes that the scenario's driver observed.
+    reached: (_plan, trace) =>
+      (trace.find(({ checkpoint }) => checkpoint === `required regimes reached`)
+        ?.value as ReadonlyArray<string> | undefined) ?? [],
     check: forwardAssertionJudgment,
   })
 

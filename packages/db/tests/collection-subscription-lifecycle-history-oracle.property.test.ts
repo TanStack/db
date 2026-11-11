@@ -32,6 +32,7 @@ import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
+  recordedAssertionJudgment,
   rejectAt,
 } from './oracle-assertion-adapter.js'
 import {
@@ -1853,57 +1854,60 @@ async function runReturnedResultsCase(
   )
 }
 
-async function runRequiredCoverage(): Promise<void> {
-  const reach = new Set<string>()
-  for (const history of [
-    ...greenLifecycleHistories,
-    ...compoundLifecycleCoverageHistories,
-  ]) {
-    for (const label of await runHistory(history)) reach.add(label)
-  }
-  const commands = [
-    `request`,
-    `abort`,
-    `release`,
-    `settle`,
-    `truncate`,
-    `cleanup`,
-    `restart`,
-    `unsubscribe`,
-  ]
-  const required = new Set([
-    ...commands.map((type) => `command:${type}`),
-    ...commands.map((type) => `effective:${type}`),
-    ...commands.map((type) => `noop:${type}`),
-    `settle-scope:current`,
-    `settle-scope:obsolete`,
-    `settle-age:oldest`,
-    `settle-age:newest`,
-    `settle-outcome:resolve`,
-    `settle-outcome:reject`,
-    ...([`current`, `obsolete`] as const).flatMap((scope) =>
-      ([`oldest`, `newest`] as const).flatMap((age) =>
-        ([`resolve`, `reject`] as const).map(
-          (outcome) => `settle:${scope}:${age}:${outcome}`,
-        ),
+// The commands and cross-phase transitions that the canonical green and
+// compound histories must reach together (ORC-015). Each is a declared state of
+// the required-coverage property, so its enumerated reach test requires it.
+const coverageCommands = [
+  `request`,
+  `abort`,
+  `release`,
+  `settle`,
+  `truncate`,
+  `cleanup`,
+  `restart`,
+  `unsubscribe`,
+]
+const requiredCoverage = new Set([
+  ...coverageCommands.map((type) => `command:${type}`),
+  ...coverageCommands.map((type) => `effective:${type}`),
+  ...coverageCommands.map((type) => `noop:${type}`),
+  `settle-scope:current`,
+  `settle-scope:obsolete`,
+  `settle-age:oldest`,
+  `settle-age:newest`,
+  `settle-outcome:resolve`,
+  `settle-outcome:reject`,
+  ...([`current`, `obsolete`] as const).flatMap((scope) =>
+    ([`oldest`, `newest`] as const).flatMap((age) =>
+      ([`resolve`, `reject`] as const).map(
+        (outcome) => `settle:${scope}:${age}:${outcome}`,
       ),
     ),
-    `attempt-sync-run:initial`,
-    `attempt-sync-run:restarted`,
-    `attempt-replay:initial`,
-    `attempt-replay:replayed`,
-    `attempt-location:initial:initial`,
-    `attempt-location:initial:replayed`,
-    `attempt-location:restarted:initial`,
-    `attempt-location:restarted:replayed`,
-    `duplicate-owner`,
-    `request-while-cleaned`,
-    `partial-generation-supersession`,
-  ])
-  oracleAssertion(`lifecycle history comparison at 1365`, () =>
-    expect([...required].filter((label) => !reach.has(label))).toEqual([]),
-  )
-}
+  ),
+  `attempt-sync-run:initial`,
+  `attempt-sync-run:restarted`,
+  `attempt-replay:initial`,
+  `attempt-replay:replayed`,
+  `attempt-location:initial:initial`,
+  `attempt-location:initial:replayed`,
+  `attempt-location:restarted:initial`,
+  `attempt-location:restarted:replayed`,
+  `duplicate-owner`,
+  `request-while-cleaned`,
+  `partial-generation-supersession`,
+])
+
+// The canonical histories, each named for its replay.
+const requiredCoverageHistories = [
+  ...greenLifecycleHistories.map((commands, index) => ({
+    name: `green lifecycle history ${index + 1}`,
+    commands,
+  })),
+  ...compoundLifecycleCoverageHistories.map((commands, index) => ({
+    name: `compound lifecycle history ${index + 1}`,
+    commands,
+  })),
+]
 
 async function runChangeRetirementCase(): Promise<void> {
   const reached = await runHistory(changeRetiresReplacementHistory)
@@ -2032,17 +2036,34 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     law: {
       statement: `The canonical green and compound lifecycle histories refine the independent model and together reach every required command and cross-phase transition.`,
       authority: `The shared lifecycle grammar and this file's contract prose.`,
-      limits: `The canonical green and compound coverage histories, replayed in order through the shared driver.`,
+      limits: `The canonical green and compound coverage histories, each replayed through the shared driver; a required label is a declared state of the enumerated source.`,
     },
     owns: [`src/collection/subscription.ts`],
-    histories: [
-      `covers every required command and cross-phase transition`,
-    ] as const,
-    label: (name) => name,
-    ...subscriptionComparison<string>(
-      `subscription-lifecycle.required-coverage`,
-      runRequiredCoverage,
-    ),
+    histories: {
+      enumerated: requiredCoverageHistories,
+      states: [...requiredCoverage],
+    },
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-lifecycle.required-coverage`,
+        plan,
+        observe,
+        async () => {
+          const labels = await runHistory(plan.history.commands)
+          observe(
+            `required coverage reached`,
+            [...labels].filter((label) => requiredCoverage.has(label)).sort(),
+          )
+        },
+      ),
+    // The required labels that the history's driver observed.
+    reached: (_plan, trace) =>
+      (trace.find(
+        ({ checkpoint }) => checkpoint === `required coverage reached`,
+      )?.value as ReadonlyArray<string> | undefined) ?? [],
     check: forwardAssertionJudgment,
   })
 
