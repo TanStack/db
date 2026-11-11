@@ -188,30 +188,12 @@ function aggToSelectPart(alias: string, expr: Expression): string | null {
       return `${alias}:${column}.${name}()`
     }
     if (name === 'count') {
-      return `${alias}:count`
+      return `${alias}:count()`
     }
     return null
   }
 
   return null
-}
-
-/**
- * Whether every select entry is an aggregate PostgREST can compute, so the
- * response is exactly one row. A plain column beside an aggregate would make
- * PostgREST group by it, and any other expression falls back to `select=*`.
- */
-export function isAggregateOnlySelect(
-  select: SerializedSelect | undefined,
-): boolean {
-  if (!select) return false
-  const entries = Object.entries(select)
-  return (
-    entries.length > 0 &&
-    entries.every(
-      ([alias, value]) => aggToSelectPart(alias, value as Expression) !== null,
-    )
-  )
 }
 
 /**

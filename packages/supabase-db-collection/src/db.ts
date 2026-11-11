@@ -121,17 +121,22 @@ const registerTable = (
 
 /**
  * Options key marking a collection created by this package, so queryOnce can
- * tell a collection backed by a Supabase table from any other collection.
+ * tell a collection backed by a Supabase table from any other collection. Its
+ * value is the collection's `parse` conversions.
  */
 const supabaseCollection = Symbol(`supabaseCollection`)
 
-/** Whether this package created `collection`, so it reads a Supabase table */
-export function isSupabaseCollection(collection: CollectionImpl): boolean {
-  return (
-    (collection.config as { [supabaseCollection]?: boolean })[
-      supabaseCollection
-    ] === true
-  )
+/**
+ * The columns a collection created by this package reads through `parse`, or
+ * `null` for any other collection, which has no Supabase table behind it.
+ */
+export function parsedColumns(collection: CollectionImpl): Set<string> | null {
+  const parse = (
+    collection.config as {
+      [supabaseCollection]?: ColumnConversions[`parse`]
+    }
+  )[supabaseCollection]
+  return parse ? new Set(Object.keys(parse)) : null
 }
 
 const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
@@ -208,7 +213,7 @@ const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
 
   return {
     ...config,
-    [supabaseCollection]: true,
+    [supabaseCollection]: conversions.parse ?? {},
     sync: {
       // Keeps the hooks query-db-collection attaches to its sync config, such
       // as the factory that lets a direct write start an idle collection.

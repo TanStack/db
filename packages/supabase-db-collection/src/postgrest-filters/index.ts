@@ -1,3 +1,4 @@
+export { isPushable } from './common'
 export { keyColumnsToSearch } from './key-columns-to-search'
 export {
   cursorCurrentToSearch,
@@ -10,4 +11,4 @@ export {
   splitLoadSubsetOptions,
 } from './split-load-subset-options'
 export { subsetParamsToSearch } from './subset-params-to-search'
-export { isAggregateOnlySelect, queryIrToSearch } from './query-ir-to-search'
+export { queryIrToSearch } from './query-ir-to-search'

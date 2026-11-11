@@ -44,6 +44,7 @@ import {
   getRequestHeaders,
   normalizeFetchUrl,
 } from './test.utils'
+import type { InitialQueryBuilder } from '@tanstack/db'
 
 describe('queryOnce PostgREST query generation', () => {
   let mockFetch: ReturnType<typeof createMockFetch>
@@ -391,7 +392,7 @@ describe('queryOnce PostgREST query generation', () => {
     })
   })
 
-  describe('Aggregate functions (pushed to PostgREST)', () => {
+  describe('Aggregate functions', () => {
     test('count(id)', async () => {
       await experimental_queryOnce(
         (q) =>
@@ -401,7 +402,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()',
       ])
     })
 
@@ -413,7 +414,9 @@ describe('queryOnce PostgREST query generation', () => {
             .select(({ user }) => ({ sumId: sum(user.id) })),
         supabase,
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=sumId:id.sum()'])
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?select=rows:count(),sumId:id.sum()',
+      ])
     })
 
     test('avg(id)', async () => {
@@ -424,10 +427,14 @@ describe('queryOnce PostgREST query generation', () => {
             .select(({ user }) => ({ avgId: avg(user.id) })),
         supabase,
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=avgId:id.avg()'])
+      // TanStack DB averages over every matching row, nulls included, so the
+      // average is computed from the sum and the row count.
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?select=rows:count(),avgId:id.sum()',
+      ])
     })
 
-    test('min(id)', async () => {
+    test('min(id) runs through TanStack DB', async () => {
       await experimental_queryOnce(
         (q) =>
           q
@@ -435,10 +442,12 @@ describe('queryOnce PostgREST query generation', () => {
             .select(({ user }) => ({ minId: min(user.id) })),
         supabase,
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=minId:id.min()'])
+      // TanStack DB orders a null as 0 and text by code unit, which no
+      // PostgREST aggregate reproduces, so min and max run through it.
+      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*'])
     })
 
-    test('max(id)', async () => {
+    test('max(id) runs through TanStack DB', async () => {
       await experimental_queryOnce(
         (q) =>
           q
@@ -446,10 +455,10 @@ describe('queryOnce PostgREST query generation', () => {
             .select(({ user }) => ({ maxId: max(user.id) })),
         supabase,
       )
-      expectFetchUrls(mockFetch, ['/rest/v1/users?select=maxId:id.max()'])
+      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*'])
     })
 
-    test('multiple aggregates', async () => {
+    test('an aggregate beside min or max runs through TanStack DB', async () => {
       await experimental_queryOnce(
         (q) =>
           q.from({ user: usersCollection }).select(({ user }) => ({
@@ -458,9 +467,7 @@ describe('queryOnce PostgREST query generation', () => {
           })),
         supabase,
       )
-      expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count(),maxId:id.max()',
-      ])
+      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*'])
     })
 
     test('aggregate with where', async () => {
@@ -473,7 +480,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&active=eq.true',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&active=eq.true',
       ])
     })
 
@@ -490,7 +497,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&name=like.%25Ali%25&email=ilike.%25ali%25',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&name=like.%25Ali%25&email=ilike.%25ali%25',
       ])
     })
 
@@ -506,7 +513,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&or=(name.ilike.%25ali%25,email.ilike.%25ali%25)',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&or=(name.ilike.%25ali%25,email.ilike.%25ali%25)',
       ])
     })
 
@@ -525,7 +532,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&active=eq.true&or=(name.ilike.%25ali%25,email.ilike.%25ali%25)',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&active=eq.true&or=(name.ilike.%25ali%25,email.ilike.%25ali%25)',
       ])
     })
 
@@ -541,7 +548,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&or=(id.in.(1,2,3),active.eq.true)',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&or=(id.in.(1,2,3),active.eq.true)',
       ])
     })
 
@@ -557,7 +564,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&or=(name.ilike."%25a,b%25",email.eq."x,y")',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&or=(name.ilike."%25a,b%25",email.eq."x,y")',
       ])
     })
 
@@ -573,24 +580,36 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&or=(active.not.eq.true,name.not.ilike.%25ali%25)',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&or=(active.not.eq.true,name.not.ilike.%25ali%25)',
       ])
     })
 
-    test('aggregate rejects unsupported filters before making a request', async () => {
-      await expect(
-        experimental_queryOnce(
-          (q) =>
-            q
-              .from({ user: usersCollection })
-              .where(({ user }) =>
-                or(eq(user.active, true), eq(upper(user.name), 'ALICE')),
-              )
-              .select(({ user }) => ({ totalUsers: count(user.id) })),
-          supabase,
-        ),
-      ).rejects.toThrow('fully pushable filters')
-      expect(mockFetch).not.toHaveBeenCalled()
+    test('aggregate with a filter PostgREST cannot apply runs through TanStack DB', async () => {
+      await experimental_queryOnce(
+        (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) =>
+              or(eq(user.active, true), eq(upper(user.name), 'ALICE')),
+            )
+            .select(({ user }) => ({ totalUsers: count(user.id) })),
+        supabase,
+      )
+      expectFetchUrls(mockFetch, ['/rest/v1/users?select=*'])
+    })
+
+    test('an aggregate beside ORDER BY runs through TanStack DB', async () => {
+      await experimental_queryOnce(
+        (q) =>
+          q
+            .from({ user: usersCollection })
+            .orderBy(({ user }) => user.name)
+            .select(({ user }) => ({ totalUsers: count(user.id) })),
+        supabase,
+      )
+      expectFetchUrls(mockFetch, [
+        '/rest/v1/users?order=name.asc.nullsfirst&select=*',
+      ])
     })
 
     test('aggregate with NOT(name LIKE …)', async () => {
@@ -603,7 +622,7 @@ describe('queryOnce PostgREST query generation', () => {
         supabase,
       )
       expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count()&name=not.like.%25Ali%25',
+        '/rest/v1/users?select=rows:count(),totalUsers:id.count()&name=not.like.%25Ali%25',
       ])
     })
   })
@@ -919,22 +938,24 @@ describe('queryOnce PostgREST query generation', () => {
       ])
     })
 
-    test('aggregates + WHERE + LIMIT', async () => {
-      await experimental_queryOnce(
-        (q) =>
-          q
-            .from({ user: usersCollection })
-            .where(({ user }) => eq(user.active, true))
-            .select(({ user }) => ({
-              totalUsers: count(user.id),
-              avgId: avg(user.id),
-            }))
-            .limit(1),
-        supabase,
-      )
-      expectFetchUrls(mockFetch, [
-        '/rest/v1/users?select=totalUsers:id.count(),avgId:id.avg()&active=eq.true&limit=1',
-      ])
+    test('aggregates + WHERE + LIMIT runs through TanStack DB', async () => {
+      // TanStack DB rejects LIMIT without ORDER BY, so the server must not
+      // answer this query either.
+      await expect(
+        experimental_queryOnce(
+          (q) =>
+            q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.active, true))
+              .select(({ user }) => ({
+                totalUsers: count(user.id),
+                avgId: avg(user.id),
+              }))
+              .limit(1),
+          supabase,
+        ),
+      ).rejects.toThrow('ORDER BY')
+      expect(mockFetch).not.toHaveBeenCalled()
     })
   })
 
@@ -1449,14 +1470,16 @@ describe('queryOnce server aggregate routing', () => {
 
 describe('queryOnce server aggregate path', () => {
   // Answers every request the way PostgREST answers an aggregate-only select.
+  let response: Array<Record<string, number | null>>
   let mockFetch: ReturnType<typeof createMockFetch>
   let users: ReturnType<typeof createMockedUsersCollection>
   let supabase: ReturnType<typeof createClient>
 
   beforeEach(() => {
+    response = [{ rows: 5, total: 5 }]
     mockFetch = vi.fn<typeof fetch>().mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify([{ total: 5 }]), {
+        new Response(JSON.stringify(response), {
           headers: { 'content-type': 'application/json' },
         }),
       ),
@@ -1481,24 +1504,54 @@ describe('queryOnce server aggregate path', () => {
       supabase,
     )
 
-    expectFetchUrls(mockFetch, ['/rest/v1/users?select=total:id.count()'])
+    expectFetchUrls(mockFetch, [
+      '/rest/v1/users?select=rows:count(),total:id.count()',
+    ])
     expect(result).toEqual({ total: 5 })
   })
 
-  test('does not push ORDER BY beside an aggregate', async () => {
-    // Postgres rejects ORDER BY on a column outside the aggregates, and a
-    // single row has nothing to order.
+  test('no matching rows give no aggregate row, as in TanStack DB', async () => {
+    response = [{ rows: 0, total: null }]
+    const select = (q: InitialQueryBuilder) =>
+      q.from({ user: users }).select(({ user }) => ({ total: sum(user.id) }))
+
+    expect(await experimental_queryOnce(select, supabase)).toEqual([])
+    expect(
+      await experimental_queryOnce((q) => select(q).findOne(), supabase),
+    ).toBeUndefined()
+  })
+
+  test('a sum of nulls is 0 and an average counts every row, as in TanStack DB', async () => {
+    response = [{ rows: 4, total: null, mean: 6 }]
+    const rows = await experimental_queryOnce(
+      (q) =>
+        q.from({ user: users }).select(({ user }) => ({
+          total: sum(user.id),
+          mean: avg(user.id),
+        })),
+      supabase,
+    )
+
+    expectFetchUrls(mockFetch, [
+      '/rest/v1/users?select=rows:count(),total:id.sum(),mean:id.sum()',
+    ])
+    expect(rows).toEqual([{ total: 0, mean: 1.5 }])
+  })
+
+  test('the row count alias avoids a selected alias', async () => {
+    response = [{ _rows: 5, rows: 5 }]
     const rows = await experimental_queryOnce(
       (q) =>
         q
           .from({ user: users })
-          .orderBy(({ user }) => user.name)
-          .select(({ user }) => ({ total: count(user.id) })),
+          .select(({ user }) => ({ rows: count(user.id) })),
       supabase,
     )
 
-    expectFetchUrls(mockFetch, ['/rest/v1/users?select=total:id.count()'])
-    expect(rows).toEqual([{ total: 5 }])
+    expectFetchUrls(mockFetch, [
+      '/rest/v1/users?select=_rows:count(),rows:id.count()',
+    ])
+    expect(rows).toEqual([{ rows: 5 }])
   })
 
   test('pushes the filters of a filter-only subquery source', async () => {
@@ -1512,7 +1565,7 @@ describe('queryOnce server aggregate path', () => {
     }, supabase)
 
     expectFetchUrls(mockFetch, [
-      '/rest/v1/users?select=total:id.count()&id=gt.2',
+      '/rest/v1/users?select=rows:count(),total:id.count()&id=gt.2',
     ])
     expect(rows).toEqual([{ total: 5 }])
   })

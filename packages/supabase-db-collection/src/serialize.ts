@@ -168,20 +168,20 @@ function serializeExpression(
 ): SerializedExpression {
   switch (expr.type) {
     case `ref`:
-      return { type: `ref`, path: [...(expr).path] }
+      return { type: `ref`, path: [...expr.path] }
     case `val`:
-      return { type: `val`, value: serializeValue((expr).value) }
+      return { type: `val`, value: serializeValue(expr.value) }
     case `func`:
       return {
         type: `func`,
-        name: (expr).name,
-        args: (expr).args.map(serializeExpression),
+        name: expr.name,
+        args: expr.args.map(serializeExpression),
       }
     case `agg`:
       return {
         type: `agg`,
-        name: (expr).name,
-        args: (expr).args.map(serializeExpression),
+        name: expr.name,
+        args: expr.args.map(serializeExpression),
       }
     case `includesSubquery`:
       return serializeIncludesSubquery(expr)

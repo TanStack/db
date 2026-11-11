@@ -8,15 +8,18 @@ alter role authenticator set pgrst.db_aggregates_enabled = 'true';
 notify pgrst, 'reload config';
 
 -- Every column is nullable, so a generated history can aggregate an empty or
--- all-null column. "big_count" stores a bigint as text, which the collection
--- reads with `parse` (the way the shared suites store "largeViewCount"), so
--- Postgres orders it as text while the collection orders it as a bigint.
+-- all-null column. Two columns store numbers as text, which the collection
+-- reads with `parse` (the way the shared suites store "largeViewCount"):
+-- "big_count" holds a bigint, which Postgres orders as text while the
+-- collection orders it as a bigint, and "amount" holds a decimal, which the
+-- collection can sum while Postgres cannot sum text.
 create table public.query_once_rows (
   id bigint primary key,
   score integer,
   label text,
   recorded_at timestamptz,
-  big_count text
+  big_count text,
+  amount text
 );
 
 alter table public.query_once_rows enable row level security;

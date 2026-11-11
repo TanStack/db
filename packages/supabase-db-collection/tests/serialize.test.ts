@@ -1,4 +1,4 @@
-import {  Query } from '@tanstack/db'
+import { Query } from '@tanstack/db'
 import { describe, expect, test } from 'vitest'
 import { serializeQueryIR } from '../src/serialize'
 import {
@@ -6,7 +6,7 @@ import {
   createMockedTodosCollection,
   createMockedUsersCollection,
 } from './test.utils'
-import type {BaseQueryBuilder} from '@tanstack/db';
+import type { BaseQueryBuilder } from '@tanstack/db'
 
 describe('serializeQueryIR FROM variants', () => {
   const mockFetch = createMockFetch()

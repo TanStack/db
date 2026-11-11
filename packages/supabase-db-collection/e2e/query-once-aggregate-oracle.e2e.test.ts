@@ -15,15 +15,21 @@
  *
  * - empty and all-null inputs, where SQL aggregates return `null` or `0`;
  * - columns the collection reads through `parse`, which PostgREST never sees;
- * - text ordering for `min`/`max`, which Postgres decides by collation;
+ * - `min`/`max`, which TanStack DB computes with JavaScript comparisons;
  * - `limit`, `offset`, and `findOne` on the single aggregate row;
+ * - a filter PostgREST cannot express, such as `eq(upper(label), 'A')`;
  * - a filter-only subquery source, whose `where` is pushed down too.
  *
- * Limits: one local Supabase stack (PostgREST with `db_aggregates_enabled`),
- * one table, and the aggregates `count`, `sum`, `avg`, `min`, and `max`.
- * Grouped, joined, and computed queries take TanStack DB's path on both sides;
- * this oracle generates none of them, so it says nothing about them. The
- * comparison is exact: it does not round averages.
+ * Limits:
+ *
+ * - one local Supabase stack (PostgREST with `db_aggregates_enabled`) and one
+ *   table;
+ * - the aggregates `count`, `sum`, `avg`, `min`, and `max`, with `min` and
+ *   `max` only over columns that hold no text (see ORDERABLE_COLUMNS);
+ * - small integers and decimals that doubles represent exactly, so the
+ *   comparison is exact and does not round averages;
+ * - no grouped, joined, or computed queries. Those take TanStack DB's path on
+ *   both sides, so this oracle says nothing about them.
  */
 import { createClient } from '@supabase/supabase-js'
 import {
@@ -41,6 +47,7 @@ import {
   or,
   queryOnce,
   sum,
+  upper,
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
@@ -64,16 +71,34 @@ import type { InitialQueryBuilder } from '@tanstack/db'
 //   differently;
 // - `recorded_at` is a timestamptz, read into a `Date` with `parse`;
 // - `big_count` is a bigint stored as text and read with `parse`, so `10`
-//   orders after `9` in the collection but before it in Postgres.
+//   orders after `9` in the collection but before it in Postgres;
+// - `amount` is a decimal stored as text and read with `parse`, so the
+//   collection can sum it while Postgres cannot sum text.
 //
 // Only aggregate-only selects over the `query_once_rows` table are generated,
 // so every query is one the server path accepts. Illegal histories (a
 // duplicate id, `sum` over text) are not generated.
 
-const COLUMNS = [`id`, `score`, `label`, `recorded_at`, `big_count`] as const
+const COLUMNS = [
+  `id`,
+  `score`,
+  `label`,
+  `recorded_at`,
+  `big_count`,
+  `amount`,
+] as const
 type Column = (typeof COLUMNS)[number]
-const NUMERIC_COLUMNS = [`id`, `score`] as const
-const CONVERTED_COLUMNS: ReadonlyArray<Column> = [`recorded_at`, `big_count`]
+// TanStack DB orders a null as 0 in `min` and `max`, and JavaScript compares
+// text with 0 inconsistently (`'a' < 0` and `0 < 'a'` are both false), so its
+// result over a text column with nulls depends on row order. That is a
+// @tanstack/db defect recorded in docs/contributing/oracle-coverage.md, so
+// `min` and `max` are generated only over columns that hold no text.
+const ORDERABLE_COLUMNS = COLUMNS.filter((column) => column !== `label`)
+const CONVERTED_COLUMNS: ReadonlyArray<Column> = [
+  `recorded_at`,
+  `big_count`,
+  `amount`,
+]
 
 interface SeedRow {
   id: number
@@ -81,15 +106,17 @@ interface SeedRow {
   label: string | null
   recorded_at: string | null
   big_count: string | null
+  amount: string | null
 }
 
 type Aggregate =
   | { fn: `count` | `min` | `max`; column: Column }
-  | { fn: `sum` | `avg`; column: (typeof NUMERIC_COLUMNS)[number] }
+  | { fn: `sum` | `avg`; column: `id` | `score` | `amount` }
 
 type Filter =
   | { kind: `gt`; value: number }
   | { kind: `eq`; value: string }
+  | { kind: `upper`; value: string }
   | { kind: `isNull`; column: Column }
   | { kind: `in`; ids: Array<number> }
   | { kind: `not`; inner: Filter }
@@ -106,14 +133,16 @@ interface AggregateQuery {
 }
 
 const seedRows = fc
-  .uniqueArray(fc.integer({ min: 1, max: 12 }), { maxLength: 6 })
+  .uniqueArray(fc.integer({ min: 1, max: 12 }), { maxLength: 8 })
   .chain((ids) =>
     fc.tuple(
       ...ids.map((id) =>
         fc.record({
           id: fc.constant(id),
-          score: fc.option(fc.integer({ min: -3, max: 3 })),
-          label: fc.option(fc.constantFrom(`a`, `A`, `b`, `B`, ``, `a b`)),
+          score: fc.option(fc.integer({ min: -3, max: 3 }), { freq: 2 }),
+          label: fc.option(fc.constantFrom(`a`, `A`, `b`, `B`, ``, `a b`), {
+            freq: 2,
+          }),
           recorded_at: fc.option(
             fc.constantFrom(
               `2026-01-01T00:00:00+00:00`,
@@ -124,61 +153,125 @@ const seedRows = fc
           big_count: fc.option(
             fc.constantFrom(`9`, `10`, `-1`, `9007199254740993`),
           ),
+          amount: fc.option(fc.constantFrom(`1.5`, `2`, `-0.25`)),
         }),
       ),
     ),
   )
 
+// Weights keep most queries on the server path (count, sum, and avg with
+// pushable filters and no paging), while every other branch still appears in
+// each campaign. Reach below counts both.
 const aggregate: fc.Arbitrary<Aggregate> = fc.oneof(
-  fc.record({
-    fn: fc.constantFrom(`count` as const, `min` as const, `max` as const),
-    column: fc.constantFrom(...COLUMNS),
-  }),
-  fc.record({
-    fn: fc.constantFrom(`sum` as const, `avg` as const),
-    column: fc.constantFrom(...NUMERIC_COLUMNS),
-  }),
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      fn: fc.constant(`count` as const),
+      column: fc.constantFrom(...COLUMNS),
+    }),
+  },
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      fn: fc.constantFrom(`sum` as const, `avg` as const),
+      // `score` is the nullable plain column, so it carries the null rules.
+      column: fc.oneof(
+        { weight: 2, arbitrary: fc.constant(`score` as const) },
+        {
+          weight: 1,
+          arbitrary: fc.constantFrom(`id` as const, `amount` as const),
+        },
+      ),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      fn: fc.constantFrom(`min` as const, `max` as const),
+      column: fc.constantFrom(...ORDERABLE_COLUMNS),
+    }),
+  },
 )
 
 const filter: fc.Arbitrary<Filter> = fc.letrec<{ filter: Filter }>((tie) => ({
   filter: fc.oneof(
     { depthSize: `small`, withCrossShrink: true },
-    fc.record({
-      kind: fc.constant(`gt` as const),
-      value: fc.integer({ min: -3, max: 3 }),
-    }),
-    fc.record({
-      kind: fc.constant(`eq` as const),
-      value: fc.constantFrom(`a`, `B`, ``),
-    }),
-    fc.record({
-      kind: fc.constant(`isNull` as const),
-      column: fc.constantFrom(...COLUMNS),
-    }),
-    fc.record({
-      kind: fc.constant(`in` as const),
-      ids: fc.uniqueArray(fc.integer({ min: 1, max: 12 }), { maxLength: 3 }),
-    }),
-    fc.record({ kind: fc.constant(`not` as const), inner: tie(`filter`) }),
-    fc.record({
-      kind: fc.constantFrom(`and` as const, `or` as const),
-      left: tie(`filter`),
-      right: tie(`filter`),
-    }),
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant(`gt` as const),
+        value: fc.integer({ min: -3, max: 3 }),
+      }),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant(`eq` as const),
+        value: fc.constantFrom(`a`, `B`, ``),
+      }),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant(`isNull` as const),
+        column: fc.constantFrom(...COLUMNS),
+      }),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant(`in` as const),
+        ids: fc.uniqueArray(fc.integer({ min: 1, max: 12 }), { maxLength: 3 }),
+      }),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant(`not` as const),
+        inner: tie(`filter`),
+      }),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constantFrom(`and` as const, `or` as const),
+        left: tie(`filter`),
+        right: tie(`filter`),
+      }),
+    },
+    {
+      // Rarer than the pushable leaves: one unpushable leaf anywhere in a
+      // query sends it to TanStack DB.
+      weight: 1,
+      arbitrary: fc.record({
+        kind: fc.constant(`upper` as const),
+        value: fc.constantFrom(`A`, `B`),
+      }),
+    },
   ),
 })).filter
 
-const aggregateQuery: fc.Arbitrary<AggregateQuery> = fc.record(
-  {
+/** `undefined` in three of four cases */
+const rarely = <T>(arbitrary: fc.Arbitrary<T>) =>
+  fc.oneof(
+    { weight: 3, arbitrary: fc.constant(undefined) },
+    { weight: 1, arbitrary },
+  )
+
+const aggregateQuery: fc.Arbitrary<AggregateQuery> = fc
+  .record({
     aggregates: fc.array(aggregate, { minLength: 1, maxLength: 3 }),
-    where: filter,
-    sourceWhere: filter,
-    limit: fc.constantFrom(0, 1, 5),
-    offset: fc.constantFrom(0, 1),
+    where: fc.option(filter, { nil: undefined, freq: 1 }),
+    sourceWhere: fc.option(filter, { nil: undefined, freq: 1 }),
+    paging: rarely(
+      fc.record(
+        { limit: fc.constantFrom(0, 1, 5), offset: fc.constantFrom(0, 1) },
+        { requiredKeys: [] },
+      ),
+    ),
     findOne: fc.boolean(),
-  },
-  { requiredKeys: [`aggregates`, `findOne`] },
-)
+  })
+  .map(({ paging, ...query }) => ({ ...query, ...paging }))
 
 type History = typeof history extends fc.Arbitrary<infer T> ? T : never
 
@@ -206,16 +299,19 @@ const rowSchema = z.object({
   label: z.string().nullable(),
   recorded_at: z.date().nullable(),
   big_count: z.bigint().nullable(),
+  amount: z.number().nullable(),
 })
 
 const conversions = {
   parse: {
     recorded_at: (value: unknown) => new Date(value as string),
     big_count: (value: unknown) => BigInt(value as string),
+    amount: (value: unknown) => Number(value),
   },
   serialize: {
     recorded_at: (value: Date) => value.toISOString(),
     big_count: (value: bigint) => value.toString(),
+    amount: (value: number) => value.toString(),
   },
 }
 
@@ -260,6 +356,8 @@ function where(row: RowRef, spec: Filter): ReturnType<typeof eq> {
       return gt(row.score, spec.value)
     case `eq`:
       return eq(row.label, spec.value)
+    case `upper`:
+      return eq(upper(row.label), spec.value)
     case `isNull`:
       return isNull(row[spec.column])
     case `in`:
@@ -383,26 +481,53 @@ declareOracle({ check: [expectSameOutcome], grammar: [history] })
 
 // ── Reach ───────────────────────────────────────────────────────────
 //
-// Each state is credited from an observation, not from the generated intent:
+// Each state is credited after the comparison passed, from an observation
+// rather than from the generated intent. The server-route states are the
+// ones where SQL and TanStack DB aggregates differ, so the server path must
+// translate:
 //
 // - `server-route`: production sent an aggregate select to PostgREST;
-// - `empty-match`: the reference matched no rows;
-// - `null-only-column`: an aggregated column is null in every matched row;
+// - `server-empty-match`: that query matched no rows, where SQL still
+//   returns one aggregate row;
+// - `server-null-value`: an aggregated column held a null in a matched row,
+//   which SQL skips and TanStack DB counts as 0;
+// - `server-find-one`: that query used `findOne`;
+// - `server-subquery-source`: that query read a filter-only subquery, whose
+//   filter PostgREST applies too.
+//
+// The other states witness queries the server path must leave to TanStack DB:
+//
+// - `client-route`: production sent no aggregate select;
 // - `converted-column`: an aggregate reads a parsed column with values;
 // - `limit-or-offset`: the query set `limit` or `offset`;
-// - `find-one`: the query used `findOne`;
-// - `subquery-source`: the query read a filter-only subquery.
+// - `unpushable-filter`: a filter used `upper`, which PostgREST cannot apply.
 
 const REACH_STATES = [
   `server-route`,
-  `empty-match`,
-  `null-only-column`,
+  `server-empty-match`,
+  `server-null-value`,
+  `server-find-one`,
+  `server-subquery-source`,
+  `client-route`,
   `converted-column`,
   `limit-or-offset`,
-  `find-one`,
-  `subquery-source`,
+  `unpushable-filter`,
 ] as const
 type ReachState = (typeof REACH_STATES)[number]
+
+const usesUpper = (spec: Filter | undefined): boolean => {
+  switch (spec?.kind) {
+    case `upper`:
+      return true
+    case `not`:
+      return usesUpper(spec.inner)
+    case `and`:
+    case `or`:
+      return usesUpper(spec.left) || usesUpper(spec.right)
+    default:
+      return false
+  }
+}
 
 const isAggregateSelect = (url: URL) =>
   /\.(count|sum|avg|min|max)\(\)/.test(url.searchParams.get(`select`) ?? ``)
@@ -465,25 +590,34 @@ async function runHistory(
         )
         expectSameOutcome(actual, expected, spec.aggregates.map(aliasOf), label)
 
-        if (production.requests.some(isAggregateSelect)) reached(`server-route`)
         const matched: Array<Record<Column, unknown>> = await queryOnce((q) =>
           filteredRows(q, reference.collection, spec),
         )
-        if (matched.length === 0) reached(`empty-match`)
-        for (const { column } of spec.aggregates) {
-          const values = matched.map((row) => row[column])
-          if (values.length > 0 && values.every((value) => value === null))
-            reached(`null-only-column`)
-          if (
-            CONVERTED_COLUMNS.includes(column) &&
-            values.some((value) => value !== null)
-          )
-            reached(`converted-column`)
+        const aggregated = spec.aggregates.map(({ column }) =>
+          matched.map((row) => row[column]),
+        )
+        if (production.requests.some(isAggregateSelect)) {
+          reached(`server-route`)
+          if (matched.length === 0) reached(`server-empty-match`)
+          if (aggregated.some((values) => values.includes(null)))
+            reached(`server-null-value`)
+          if (spec.findOne) reached(`server-find-one`)
+          if (spec.sourceWhere !== undefined) reached(`server-subquery-source`)
+        } else {
+          reached(`client-route`)
         }
+        if (
+          spec.aggregates.some(
+            ({ column }, position) =>
+              CONVERTED_COLUMNS.includes(column) &&
+              aggregated[position]!.some((value) => value !== null),
+          )
+        )
+          reached(`converted-column`)
         if (spec.limit !== undefined || spec.offset !== undefined)
           reached(`limit-or-offset`)
-        if (spec.findOne) reached(`find-one`)
-        if (spec.sourceWhere !== undefined) reached(`subquery-source`)
+        if ([spec.where, spec.sourceWhere].some(usesUpper))
+          reached(`unpushable-filter`)
       }
     },
     () => production.collection.cleanup(),
@@ -501,7 +635,7 @@ it(`experimental_queryOnce matches TanStack DB's queryOnce for generated aggrega
           reach.beginHistory()
           await runHistory(generated, (state) => reach.reach(state))
         }),
-        { numRuns: oracleRuns(25), ...parameters },
+        { numRuns: oracleRuns(40), ...parameters },
       )
     },
   )

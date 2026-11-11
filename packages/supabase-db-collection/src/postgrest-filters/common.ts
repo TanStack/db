@@ -204,6 +204,36 @@ export function mergeInFilters(filters: Array<Expression>): Array<Expression> {
   return merged
 }
 
+/** One top-level conjunct as a PostgREST param, or `null` if it cannot be pushed */
+function toParam(
+  filter: Expression,
+  options: FilterOptions,
+): PostgrestParam | null {
+  const comparison = renderComparison(
+    filter,
+    options.quoteScalars ?? false,
+    options,
+  )
+  if (comparison) return { kind: 'column', ...comparison }
+  const embedded = toFilterString(filter, options)
+  if (embedded === null) return null
+  return {
+    kind: 'group',
+    filter: embedded.startsWith('or(') ? embedded.slice(3, -1) : embedded,
+  }
+}
+
+/**
+ * Whether PostgREST applies every conjunct of `expr` exactly, so a result it
+ * computes from the matching rows needs no client-side filtering.
+ */
+export function isPushable(
+  expr: Expression,
+  options: FilterOptions = {},
+): boolean {
+  return flattenAnd(expr).every((filter) => toParam(filter, options) !== null)
+}
+
 export function toPostgrestParams(
   expr: Expression | undefined | null,
   options: FilterOptions = {},
@@ -212,21 +242,8 @@ export function toPostgrestParams(
   const conjuncts = flattenAnd(expr)
   const filters = options.mergeIn ? mergeInFilters(conjuncts) : conjuncts
   return filters.flatMap((filter): Array<PostgrestParam> => {
-    const comparison = renderComparison(
-      filter,
-      options.quoteScalars ?? false,
-      options,
-    )
-    if (comparison) return [{ kind: 'column', ...comparison }]
-    const embedded = toFilterString(filter, options)
-    if (embedded !== null) {
-      return [
-        {
-          kind: 'group',
-          filter: embedded.startsWith('or(') ? embedded.slice(3, -1) : embedded,
-        },
-      ]
-    }
+    const param = toParam(filter, options)
+    if (param) return [param]
     if (options.strict) {
       throw new Error(
         'Cannot push WHERE expression to PostgREST; server aggregates require fully pushable filters',
