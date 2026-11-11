@@ -1,6 +1,11 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   atOracleCheckpoint,
@@ -55,116 +60,142 @@ afterEach(() => {
   releaseClock?.()
 })
 
-it.each([`visibilitychange`, `explicit retry`] as const)(
-  `replays a committed outbox write on %s in a visible tab with a false online hint`,
-  async (signal) => {
-    oracleRoute(`case`)
-    const visibilityListeners = new Set<() => void>()
-    vi.stubGlobal(`navigator`, { ...navigator, onLine: false })
-    vi.stubGlobal(`document`, {
-      visibilityState: `hidden`,
-      addEventListener: (name: string, listener: () => void) => {
-        if (name === `visibilitychange`) visibilityListeners.add(listener)
-      },
-      removeEventListener: (name: string, listener: () => void) => {
-        if (name === `visibilitychange`) visibilityListeners.delete(listener)
-      },
+const signals = [`visibilitychange`, `explicit retry`] as const
+type Signal = (typeof signals)[number]
+
+// One history: a committed write under a false online hint in a hidden tab,
+// then visibility by `signal`. The driver compares the provider calls, outbox
+// and caller settlement with expectedAt at the hidden and visible cuts.
+async function runVisibleReplay(signal: Signal): Promise<void> {
+  const visibilityListeners = new Set<() => void>()
+  vi.stubGlobal(`navigator`, { ...navigator, onLine: false })
+  vi.stubGlobal(`document`, {
+    visibilityState: `hidden`,
+    addEventListener: (name: string, listener: () => void) => {
+      if (name === `visibilitychange`) visibilityListeners.add(listener)
+    },
+    removeEventListener: (name: string, listener: () => void) => {
+      if (name === `visibilitychange`) visibilityListeners.delete(listener)
+    },
+  })
+
+  let persisted!: () => void
+  const persistedPromise = new Promise<void>((resolve) => {
+    persisted = resolve
+  })
+  class Storage extends FakeStorageAdapter {
+    override async set(key: string, value: string): Promise<void> {
+      await super.set(key, value)
+      persisted()
+    }
+  }
+  const env = createTestOfflineEnvironment({ storage: new Storage() })
+  const settlement: { state: `pending` | `fulfilled` | `rejected` } = {
+    state: `pending`,
+  }
+  let commitObserved: Promise<void> | undefined
+  let transactionId = ``
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const transaction = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
     })
-
-    let persisted!: () => void
-    const persistedPromise = new Promise<void>((resolve) => {
-      persisted = resolve
+    transactionId = transaction.id
+    transaction.mutate(() => {
+      env.collection.insert({
+        id: `saved`,
+        value: `local`,
+        completed: false,
+        updatedAt: new Date(0),
+      })
     })
-    class Storage extends FakeStorageAdapter {
-      override async set(key: string, value: string): Promise<void> {
-        await super.set(key, value)
-        persisted()
-      }
-    }
-    const env = createTestOfflineEnvironment({ storage: new Storage() })
-    const settlement: { state: `pending` | `fulfilled` | `rejected` } = {
-      state: `pending`,
-    }
-    let commitObserved: Promise<void> | undefined
-    let transactionId = ``
-    let hasPrimaryFailure = false
-    try {
-      await env.waitForLeader()
-      const transaction = env.executor.createOfflineTransaction({
-        mutationFnName: env.mutationFnName,
-        autoCommit: false,
-      })
-      transactionId = transaction.id
-      transaction.mutate(() => {
-        env.collection.insert({
-          id: `saved`,
-          value: `local`,
-          completed: false,
-          updatedAt: new Date(0),
-        })
-      })
-      commitObserved = transaction.commit().then(
-        () => {
-          settlement.state = `fulfilled`
-        },
-        () => {
-          settlement.state = `rejected`
-        },
-      )
+    commitObserved = transaction.commit().then(
+      () => {
+        settlement.state = `fulfilled`
+      },
+      () => {
+        settlement.state = `rejected`
+      },
+    )
 
-      await atOracleCheckpoint(persistedPromise, `outbox write persisted`)
-      const outboxBefore = await env.executor.peekOutbox()
-      expect(outboxBefore.map(({ id }) => id)).toEqual([transactionId])
-      // Reach the queued-work boundary before judging hidden eligibility.
-      expect(env.executor.getPendingCount()).toBe(1)
-      expect({
-        providerCalls: env.mutationCalls.length,
-        outboxEntries: outboxBefore.length,
-        callerState: settlement.state,
-      }).toEqual(expectedAt(`hidden`))
+    await atOracleCheckpoint(persistedPromise, `outbox write persisted`)
+    const outboxBefore = await env.executor.peekOutbox()
+    expect(outboxBefore.map(({ id }) => id)).toEqual([transactionId])
+    // Reach the queued-work boundary before judging hidden eligibility.
+    expect(env.executor.getPendingCount()).toBe(1)
+    expect({
+      providerCalls: env.mutationCalls.length,
+      outboxEntries: outboxBefore.length,
+      callerState: settlement.state,
+    }).toEqual(expectedAt(`hidden`))
 
-      Object.defineProperty(document, `visibilityState`, { value: `visible` })
-      if (signal === `visibilitychange`) {
-        expect(visibilityListeners.size).toBe(1)
-        for (const listener of visibilityListeners) listener()
-      } else {
-        env.executor.getOnlineDetector().notifyOnline()
-      }
-
-      // One microtask boundary lets the event-driven executor reach its
-      // provider, without waiting for a retry timer or network timeout.
-      await Promise.resolve()
-      expect(env.mutationCalls).toHaveLength(
-        expectedAt(`visible`).providerCalls,
-      )
-      expect(
-        env.mutationCalls.map(({ idempotencyKey }) => idempotencyKey),
-      ).toEqual([outboxBefore[0]!.idempotencyKey])
-      await atOracleCheckpoint(commitObserved, `visible replay committed`)
-      const outboxAfter = await env.executor.peekOutbox()
-      expect({
-        providerCalls: env.mutationCalls.length,
-        outboxEntries: outboxAfter.length,
-        callerState: settlement.state,
-      }).toEqual(expectedAt(`visible`))
-    } catch (error) {
-      hasPrimaryFailure = true
-      throw error
-    } finally {
-      if (settlement.state === `pending` && transactionId)
-        env.executor.rejectTransaction(
-          transactionId,
-          new NonRetriableError(`oracle cleanup`),
-        )
-      await cleanupOfflineOracle(
-        [
-          () => commitObserved,
-          () => env.executor.dispose(),
-          () => env.collection.cleanup(),
-          () => vi.unstubAllGlobals(),
-        ],
-        hasPrimaryFailure,
-      )
+    Object.defineProperty(document, `visibilityState`, { value: `visible` })
+    if (signal === `visibilitychange`) {
+      expect(visibilityListeners.size).toBe(1)
+      for (const listener of visibilityListeners) listener()
+    } else {
+      env.executor.getOnlineDetector().notifyOnline()
     }
+
+    // One microtask boundary lets the event-driven executor reach its
+    // provider, without waiting for a retry timer or network timeout.
+    await Promise.resolve()
+    expect(env.mutationCalls).toHaveLength(expectedAt(`visible`).providerCalls)
+    expect(
+      env.mutationCalls.map(({ idempotencyKey }) => idempotencyKey),
+    ).toEqual([outboxBefore[0]!.idempotencyKey])
+    await atOracleCheckpoint(commitObserved, `visible replay committed`)
+    const outboxAfter = await env.executor.peekOutbox()
+    expect({
+      providerCalls: env.mutationCalls.length,
+      outboxEntries: outboxAfter.length,
+      callerState: settlement.state,
+    }).toEqual(expectedAt(`visible`))
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (settlement.state === `pending` && transactionId)
+      env.executor.rejectTransaction(
+        transactionId,
+        new NonRetriableError(`oracle cleanup`),
+      )
+    await cleanupOfflineOracle(
+      [
+        () => commitObserved,
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => vi.unstubAllGlobals(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+oracleProperty({
+  id: `offline.connectivity-replay`,
+  law: {
+    statement: `An elected web executor attempts persisted work once its tab is visible, even under a false browser online hint; a hidden tab with the same hint does not attempt it, and provider success removes the durable row and settles the caller.`,
+    authority: `The contract stated at the top of this file, recorded for web connectivity replay in docs/contributing/oracle-coverage.md and oracle-reviews/pr-1879-visible-replay.md.`,
+    limits: `One elected executor, one write, controlled browser globals and fake storage; no actual browser network detection, offline retry timing, multi-tab leadership transfer or React Native behavior. Exactly-once network execution is not promised.`,
   },
-)
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [
+    `src/OfflineExecutor.ts#OfflineExecutor.getOnlineDetector`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+  ],
+  histories: signals,
+  label: (signal) =>
+    `replays a committed outbox write on ${signal} in a visible tab with a false online hint`,
+  resolve: (signal) => ({ signal }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`visible replay`, plan, observe, () =>
+      runVisibleReplay(plan.signal),
+    ),
+  check: forwardAssertionJudgment,
+})

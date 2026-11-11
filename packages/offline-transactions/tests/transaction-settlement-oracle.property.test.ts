@@ -1,17 +1,8 @@
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
-import { oracleRoute } from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -31,7 +22,19 @@ import {
   cleanupOfflineOracle,
   useControlledClock,
 } from './oracle-lifecycle'
+import {
+  checkRestoredState,
+  expectLocalRows,
+  expectedRestoredState,
+  localRows,
+  restoredRows,
+} from './transaction-settlement-restored-model-oracle'
 import type { TestItem } from './harness'
+import type {
+  RestoredHistory,
+  RestoredObservation,
+  RestoredSnapshot,
+} from './transaction-settlement-restored-model-oracle'
 import type { Transaction } from '@tanstack/db'
 import type { OfflineConfig } from '../src/types'
 
@@ -193,224 +196,6 @@ const settlementLaw = {
   limits: `Controlled provider, fake storage, one executor and bounded existing transaction grammar; no native durability or multi-owner claim.`,
 }
 type ArbitraryValue<T> = T extends fc.Arbitrary<infer TInput> ? TInput : never
-
-const localRows = (rows: Iterable<TestItem>) =>
-  [...rows]
-    .map(({ id, value, completed, updatedAt }) => ({
-      id,
-      value,
-      completed,
-      updatedAt,
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-
-function expectLocalRows(
-  actual: Iterable<TestItem>,
-  expected: Iterable<TestItem>,
-) {
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(localRows(actual)).toEqual(localRows(expected)),
-  )
-}
-
-/** Restored snapshots have a different lifetime from durable outbox work.
- * A core rollback cancels conflicting pending snapshots, but their independently
- * admitted outbox entries still execute and settle from their own providers.
- * A cancelled snapshot stays failed even if its outbox entry later succeeds.
- * Authority: core rollback/admission and the README's per-ID durable settlement.
- * This stateless prefix fold uses authored keys, whole rows and provider results;
- * it does not consult executor queues, restoration maps or actual Collection rows.
- */
-type RestoredHistory = {
-  layout: `shared` | `disjoint` | `chain`
-  width: number
-  succeeds: ReadonlyArray<boolean>
-}
-function restoredRows(history: RestoredHistory): Array<Array<TestItem>> {
-  // Alternating field edits preserve the old insert/value-edit/flag-edit
-  // history. In particular, the flag-only snapshot carries the prior value.
-  // Its later success must still send that whole snapshot after sibling failure.
-  const authored = new Map<string, TestItem>()
-  return history.succeeds.map((_success, index) =>
-    Array.from({ length: history.width }, (_unused, slot) => {
-      const id =
-        history.layout === `shared`
-          ? `key-${slot}`
-          : history.layout === `chain`
-            ? `key-${index + slot}`
-            : `key-${index}-${slot}`
-      const before = authored.get(id)
-      const row = {
-        id,
-        value: before
-          ? index % 2 === 1
-            ? `edited-${index}-${id}`
-            : before.value
-          : `initial-${id}`,
-        completed: before ? (index % 2 === 0 ? true : before.completed) : false,
-        updatedAt: new Date(1700000000000),
-      }
-      authored.set(id, row)
-      return row
-    }),
-  )
-}
-
-type RestoredSnapshot = { rows: Array<TestItem>; pending: Array<string> }
-function restoredSnapshot(
-  rows: ReadonlyArray<ReadonlyArray<TestItem>>,
-  server: ReadonlyMap<string, TestItem>,
-  cancelled: ReadonlySet<number>,
-  completed: number,
-): RestoredSnapshot {
-  const local = new Map(server)
-  const pending = new Set<string>()
-  for (let index = completed + 1; index < rows.length; index++)
-    if (!cancelled.has(index))
-      for (const row of rows[index]!) {
-        local.set(row.id, row)
-        pending.add(row.id)
-      }
-  return { rows: [...local.values()], pending: [...pending].sort() }
-}
-type RestoredObservation = RestoredSnapshot & {
-  waiters: Array<RestoredSnapshot | undefined>
-  server: Map<string, TestItem>
-  outcomes: Array<unknown>
-  states: Array<Transaction[`state`]>
-  calls: Array<{ id: string; rows: Array<object> }>
-  outbox: Array<string>
-  errors: Array<ReadonlyArray<unknown>>
-  warnings: Array<ReadonlyArray<unknown>>
-  unhandled: Array<unknown>
-}
-function expectedRestoredState(
-  history: RestoredHistory,
-  failures: ReadonlyArray<Error>,
-  completed: number,
-): RestoredObservation {
-  const rows = restoredRows(history)
-  const server = new Map<string, TestItem>()
-  const cancelled = new Set<number>()
-  const waiters: RestoredObservation[`waiters`] = rows.map(() => undefined)
-  for (let index = 0; index <= completed; index++) {
-    if (history.succeeds[index]) {
-      for (const row of rows[index]!) server.set(row.id, row)
-    } else if (!cancelled.has(index)) {
-      cancelled.add(index)
-      const keys = new Set(rows[index]!.map((row) => row.id))
-      for (let peer = index + 1; peer < rows.length; peer++)
-        if (rows[peer]!.some((row) => keys.has(row.id))) cancelled.add(peer)
-    }
-    waiters[index] = restoredSnapshot(rows, server, cancelled, index)
-  }
-  return {
-    ...restoredSnapshot(rows, server, cancelled, completed),
-    waiters,
-    server,
-    outcomes: history.succeeds.map((success, index) =>
-      index > completed ? `pending` : success ? `fulfilled` : failures[index],
-    ),
-    states: history.succeeds.map((_success, index) =>
-      cancelled.has(index)
-        ? `failed`
-        : index <= completed
-          ? `completed`
-          : `pending`,
-    ),
-    calls: rows
-      .slice(0, Math.min(completed + 2, rows.length))
-      .map((batch, index) => ({ id: `restored-${index}`, rows: batch })),
-    outbox: rows
-      .slice(completed + 1)
-      .map((_row, offset) => `restored-${completed + 1 + offset}`),
-    errors: [],
-    warnings: [],
-    unhandled: [],
-  }
-}
-function checkRestoredState(
-  actual: RestoredObservation,
-  expected: RestoredObservation,
-): void {
-  expectLocalRows(actual.rows, expected.rows)
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(
-      actual.pending,
-      `restored snapshot pending-write contribution`,
-    ).toEqual(expected.pending),
-  )
-  for (const [index, snapshot] of expected.waiters.entries()) {
-    oracleAssertion(`independent settlement checkpoint`, () =>
-      expect(
-        Boolean(actual.waiters[index]),
-        `waiter snapshot presence ${index}`,
-      ).toBe(Boolean(snapshot)),
-    )
-    if (snapshot) {
-      expectLocalRows(actual.waiters[index]!.rows, snapshot.rows)
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(
-          actual.waiters[index]!.pending,
-          `pending writes at waiter ${index}`,
-        ).toEqual(snapshot.pending),
-      )
-    }
-  }
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.server).toEqual(expected.server),
-  )
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.outcomes).toEqual(expected.outcomes),
-  )
-  for (const [index, outcome] of expected.outcomes.entries())
-    if (outcome instanceof Error)
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(actual.outcomes[index]).toBe(outcome),
-      )
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.states).toEqual(expected.states),
-  )
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.calls).toEqual(expected.calls),
-  )
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.outbox).toEqual(expected.outbox),
-  )
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(
-      actual.errors,
-      `restoration must not log an executor/cleanup failure`,
-    ).toEqual(expected.errors),
-  )
-  // An intentional permanent provider rejection may be reported as a warning.
-  // Its exact authored Error is allowed; a new cleanup/executor exception is
-  // not. Check reasons, without prescribing log text or duplicate-report policy.
-  const allowed = expected.outcomes.filter(
-    (outcome) => outcome instanceof Error,
-  )
-  for (const warning of actual.warnings) {
-    const reasons = warning.filter((value) => value instanceof Error)
-    oracleAssertion(`independent settlement checkpoint`, () =>
-      expect(
-        reasons.length,
-        `warning must identify a known provider failure`,
-      ).toBeGreaterThan(0),
-    )
-    for (const reason of reasons)
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(
-          allowed.some((failure) => failure === reason),
-          `unexpected restoration warning: ${String(reason)}`,
-        ).toBe(true),
-      )
-  }
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(actual.unhandled, `restoration unhandled rejections`).toEqual(
-      expected.unhandled,
-    ),
-  )
-}
 
 /**
  * How a generated transaction commits: by `commit()`, by auto-commit with the
@@ -1110,6 +895,192 @@ const restoredHistories: Array<RestoredHistory> = [2, 3].flatMap((count) =>
 )
 const restoredHistoryId = (history: RestoredHistory) =>
   `${history.layout}/${history.width}/${history.succeeds.map(Number).join(``)}`
+// One enumerated restored history through production, compared with the
+// prefix fold at every provider completion. Each reached checkpoint is added
+// to `restoredReached`, which the describe block below checks after all runs.
+async function runRestoredHistory(
+  history: RestoredHistory,
+  restoredReached: Set<string>,
+): Promise<void> {
+  const rows = restoredRows(history)
+  const storage = new FakeStorageAdapter()
+  const seed = createCollection<TestItem, string>({
+    id: `test-items`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (ops) => {
+        ops.markReady()
+      },
+    },
+  })
+  const outbox = new OutboxManager(storage, { [seed.id]: seed })
+  const rollbackSeeds: Array<() => void> = []
+  let seedFailed = false
+  try {
+    for (const [index, batch] of rows.entries()) {
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: () => Promise.resolve(),
+      })
+      rollbackSeeds.push(() => {
+        tx.rollback({ isSecondaryRollback: true })
+      })
+      void tx.when(`settled`).catch(() => {})
+      tx.mutate(() => {
+        for (const row of batch)
+          if (seed.has(row.id))
+            seed.update(row.id, (draft) => {
+              Object.assign(draft, row)
+            })
+          else seed.insert(row)
+      })
+      await outbox.add({
+        id: `restored-${index}`,
+        mutationFnName: `syncData`,
+        mutations: tx.mutations,
+        keys: tx.mutations.map(({ globalKey }) => globalKey),
+        idempotencyKey: `restore-${index}`,
+        createdAt: new Date(1700000000000 + index),
+        retryCount: 0,
+        nextAttemptAt: 0,
+        version: 1,
+      })
+    }
+  } catch (error) {
+    seedFailed = true
+    throw error
+  } finally {
+    await cleanupOfflineOracle(
+      [...rollbackSeeds, () => seed.cleanup()],
+      seedFailed,
+    )
+  }
+  const entered = rows.map(() => gate())
+  const released = rows.map(() => gate())
+  const failures = rows.map(
+    (_row, index) =>
+      new NonRetriableError(`restored permanent failure ${index}`),
+  )
+  const outcomes: Array<unknown> = rows.map(() => `pending`)
+  const waits: Array<Promise<void>> = []
+  const calls: RestoredObservation[`calls`] = []
+  const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  const { rejections: unhandled, cleanup: cleanupUnhandled } =
+    captureUnhandledRejections()
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: async (params) => {
+      const index = calls.length
+      const mutations = params.transaction.mutations
+      calls.push({
+        id: params.transaction.id,
+        rows: mutations.map((mutation) => structuredClone(mutation.modified)),
+      })
+      if (!entered[index]) throw new NonRetriableError(`unexpected replay`)
+      entered[index].resolve()
+      await released[index]!.promise
+      if (!history.succeeds[index]) throw failures[index]
+      env.applyMutations(mutations)
+    },
+  })
+  const registrations = vi.spyOn(env.executor, `registerRestorationTransaction`)
+  const waiterSnapshots: RestoredObservation[`waiters`] = rows.map(
+    () => undefined,
+  )
+  const readSnapshot = (): RestoredSnapshot => {
+    const current = env.collection.toArray
+    return {
+      rows: localRows(current),
+      pending: current
+        .filter((row) => row.$hasPendingWrites)
+        .map((row) => row.id)
+        .sort(),
+    }
+  }
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(registrations.mock.calls.map(([id]) => id)).toEqual(
+        rows.map((_row, index) => `restored-${index}`),
+      ),
+    )
+    const restored = new Map(registrations.mock.calls)
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect([...restored.keys()]).toEqual(
+        rows.map((_row, index) => `restored-${index}`),
+      ),
+    )
+    restoredReached.add(`${restoredHistoryId(history)}/registered`)
+    for (const index of rows.keys())
+      waits.push(
+        env.executor.waitForTransactionCompletion(`restored-${index}`).then(
+          () => {
+            outcomes[index] = `fulfilled`
+            waiterSnapshots[index] = readSnapshot()
+          },
+          (error: unknown) => {
+            outcomes[index] = error
+            waiterSnapshots[index] = readSnapshot()
+          },
+        ),
+      )
+    const check = async (completed: number) =>
+      checkRestoredState(
+        {
+          ...readSnapshot(),
+          waiters: [...waiterSnapshots],
+          server: env.serverState,
+          outcomes: [...outcomes],
+          states: rows.map(
+            (_row, index) => restored.get(`restored-${index}`)!.state,
+          ),
+          calls: structuredClone(calls),
+          outbox: (await env.executor.peekOutbox()).map(({ id }) => id),
+          errors: [...logged.mock.calls],
+          warnings: [...warning.mock.calls],
+          unhandled: [...unhandled],
+        },
+        expectedRestoredState(history, failures, completed),
+      )
+    await atOracleCheckpoint(entered[0]!.promise, `restored provider entered`)
+    await check(-1)
+    for (const index of rows.keys()) {
+      released[index]!.resolve()
+      await atOracleCheckpoint(waits[index]!, `restored ${index} settled`)
+      if (index < rows.length - 1)
+        await atOracleCheckpoint(
+          entered[index + 1]!.promise,
+          `restored sibling still held`,
+        )
+      await turn()
+      restoredReached.add(`${restoredHistoryId(history)}/settled-${index}`)
+      await check(index)
+    }
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    released.forEach((item) => item.resolve())
+    registrations.mockRestore()
+    logged.mockRestore()
+    warning.mockRestore()
+    try {
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all(waits),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    } finally {
+      cleanupUnhandled()
+    }
+  }
+}
 describe(`restored snapshots and independent outbox settlement`, () => {
   const restoredRequired = restoredHistories.flatMap((history) => [
     `${restoredHistoryId(history)}/registered`,
@@ -1123,246 +1094,36 @@ describe(`restored snapshots and independent outbox settlement`, () => {
       expect([...restoredReached].sort()).toEqual([...restoredRequired].sort()),
     )
   })
-  it.each(restoredHistories)(
-    `restores whole snapshots through independent outcomes: %j`,
-    async (history) => {
-      // An enumerated history: a reproducible route for the gap report.
-      oracleRoute(`case`)
-      const rows = restoredRows(history)
-      const storage = new FakeStorageAdapter()
-      const seed = createCollection<TestItem, string>({
-        id: `test-items`,
-        getKey: (row) => row.id,
-        startSync: true,
-        sync: {
-          sync: (ops) => {
-            ops.markReady()
-          },
-        },
-      })
-      const outbox = new OutboxManager(storage, { [seed.id]: seed })
-      const rollbackSeeds: Array<() => void> = []
-      let seedFailed = false
-      try {
-        for (const [index, batch] of rows.entries()) {
-          const tx = createTransaction({
-            autoCommit: false,
-            mutationFn: () => Promise.resolve(),
-          })
-          rollbackSeeds.push(() => {
-            tx.rollback({ isSecondaryRollback: true })
-          })
-          void tx.when(`settled`).catch(() => {})
-          tx.mutate(() => {
-            for (const row of batch)
-              if (seed.has(row.id))
-                seed.update(row.id, (draft) => {
-                  Object.assign(draft, row)
-                })
-              else seed.insert(row)
-          })
-          await outbox.add({
-            id: `restored-${index}`,
-            mutationFnName: `syncData`,
-            mutations: tx.mutations,
-            keys: tx.mutations.map(({ globalKey }) => globalKey),
-            idempotencyKey: `restore-${index}`,
-            createdAt: new Date(1700000000000 + index),
-            retryCount: 0,
-            nextAttemptAt: 0,
-            version: 1,
-          })
-        }
-      } catch (error) {
-        seedFailed = true
-        throw error
-      } finally {
-        await cleanupOfflineOracle(
-          [...rollbackSeeds, () => seed.cleanup()],
-          seedFailed,
-        )
-      }
-      const entered = rows.map(() => gate())
-      const released = rows.map(() => gate())
-      const failures = rows.map(
-        (_row, index) =>
-          new NonRetriableError(`restored permanent failure ${index}`),
-      )
-      const outcomes: Array<unknown> = rows.map(() => `pending`)
-      const waits: Array<Promise<void>> = []
-      const calls: RestoredObservation[`calls`] = []
-      const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const { rejections: unhandled, cleanup: cleanupUnhandled } =
-        captureUnhandledRejections()
-      const env = createTestOfflineEnvironment({
-        storage,
-        mutationFn: async (params) => {
-          const index = calls.length
-          const mutations = params.transaction.mutations
-          calls.push({
-            id: params.transaction.id,
-            rows: mutations.map((mutation) =>
-              structuredClone(mutation.modified),
-            ),
-          })
-          if (!entered[index]) throw new NonRetriableError(`unexpected replay`)
-          entered[index].resolve()
-          await released[index]!.promise
-          if (!history.succeeds[index]) throw failures[index]
-          env.applyMutations(mutations)
-        },
-      })
-      const registrations = vi.spyOn(
-        env.executor,
-        `registerRestorationTransaction`,
-      )
-      const waiterSnapshots: RestoredObservation[`waiters`] = rows.map(
-        () => undefined,
-      )
-      const readSnapshot = (): RestoredSnapshot => {
-        const current = env.collection.toArray
-        return {
-          rows: localRows(current),
-          pending: current
-            .filter((row) => row.$hasPendingWrites)
-            .map((row) => row.id)
-            .sort(),
-        }
-      }
-      let hasPrimaryFailure = false
-      try {
-        await env.waitForLeader()
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(registrations.mock.calls.map(([id]) => id)).toEqual(
-            rows.map((_row, index) => `restored-${index}`),
-          ),
-        )
-        const restored = new Map(registrations.mock.calls)
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect([...restored.keys()]).toEqual(
-            rows.map((_row, index) => `restored-${index}`),
-          ),
-        )
-        restoredReached.add(`${restoredHistoryId(history)}/registered`)
-        for (const index of rows.keys())
-          waits.push(
-            env.executor.waitForTransactionCompletion(`restored-${index}`).then(
-              () => {
-                outcomes[index] = `fulfilled`
-                waiterSnapshots[index] = readSnapshot()
-              },
-              (error: unknown) => {
-                outcomes[index] = error
-                waiterSnapshots[index] = readSnapshot()
-              },
-            ),
-          )
-        const check = async (completed: number) =>
-          checkRestoredState(
-            {
-              ...readSnapshot(),
-              waiters: [...waiterSnapshots],
-              server: env.serverState,
-              outcomes: [...outcomes],
-              states: rows.map(
-                (_row, index) => restored.get(`restored-${index}`)!.state,
-              ),
-              calls: structuredClone(calls),
-              outbox: (await env.executor.peekOutbox()).map(({ id }) => id),
-              errors: [...logged.mock.calls],
-              warnings: [...warning.mock.calls],
-              unhandled: [...unhandled],
-            },
-            expectedRestoredState(history, failures, completed),
-          )
-        await atOracleCheckpoint(
-          entered[0]!.promise,
-          `restored provider entered`,
-        )
-        await check(-1)
-        for (const index of rows.keys()) {
-          released[index]!.resolve()
-          await atOracleCheckpoint(waits[index]!, `restored ${index} settled`)
-          if (index < rows.length - 1)
-            await atOracleCheckpoint(
-              entered[index + 1]!.promise,
-              `restored sibling still held`,
-            )
-          await turn()
-          restoredReached.add(`${restoredHistoryId(history)}/settled-${index}`)
-          await check(index)
-        }
-      } catch (error) {
-        hasPrimaryFailure = true
-        throw error
-      } finally {
-        released.forEach((item) => item.resolve())
-        registrations.mockRestore()
-        logged.mockRestore()
-        warning.mockRestore()
-        try {
-          await cleanupOfflineOracle(
-            [
-              () => Promise.all(waits),
-              () => env.executor.dispose(),
-              () => env.collection.cleanup(),
-            ],
-            hasPrimaryFailure,
-          )
-        } finally {
-          cleanupUnhandled()
-        }
-      }
+  oracleProperty({
+    id: `offline.settlement.restored`,
+    law: {
+      ...settlementLaw,
+      statement: `Restored snapshots settle through their own independent outbox outcomes: a cancelled snapshot stays failed, and every waiter sees the completed prefix.`,
+      limits: `The finite restored histories above, through the same production driver and prefix-fold comparison; controlled storage and provider behavior does not establish native durability.`,
     },
-  )
-})
-
-// These are checker inputs, not alternate production histories. All expected
-// answers come from the same prefix fold as the real restoration receiver.
-it.each([
-  `extra-error`,
-  `extra-warning`,
-  `leaked-pending`,
-  `stale-waiter`,
-  `resurrect-failed`,
-  `early-peer`,
-  `missing-row`,
-] as const)(`rejects a wrong restored observation: %s`, (fault) => {
-  oracleRoute(`calibration`)
-  const history: RestoredHistory = {
-    layout: `shared`,
-    width: 2,
-    succeeds: [false, true, true],
-  }
-  const failures = history.succeeds.map(() => new Error(`provider failure`))
-  const expected = expectedRestoredState(history, failures, 1)
-  const actual = {
-    ...expected,
-    rows: [...expected.rows],
-    states: [...expected.states],
-    outcomes: [...expected.outcomes],
-  }
-  checkRestoredState(actual, expected)
-  if (fault === `extra-error`) actual.errors = [[new Error(`cleanup failed`)]]
-  if (fault === `extra-warning`)
-    actual.warnings = [
-      [`executor failed`, failures[0], new Error(`cleanup failed`)],
-    ]
-  if (fault === `leaked-pending`)
-    actual.pending = actual.rows.map((row) => row.id)
-  if (fault === `stale-waiter`)
-    actual.waiters = actual.waiters.map((snapshot) =>
-      snapshot
-        ? { ...snapshot, pending: snapshot.rows.map((row) => row.id) }
-        : snapshot,
-    )
-  if (fault === `resurrect-failed`) actual.states[1] = `completed`
-  if (fault === `early-peer`) actual.outcomes[2] = `fulfilled`
-  if (fault === `missing-row`) actual.rows.pop()
-  oracleAssertion(`independent settlement checkpoint`, () =>
-    expect(() => checkRestoredState(actual, expected)).toThrow(),
-  )
+    owns: [
+      `src/OfflineExecutor.ts#startOfflineExecutor`,
+      `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+      `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+      `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+      `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+      `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+      `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+    ],
+    histories: restoredHistories,
+    label: (history) =>
+      `restores whole snapshots through independent outcomes: ${JSON.stringify(history)}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `independent settlement checkpoint`,
+        plan,
+        observe,
+        () => runRestoredHistory(plan.history, restoredReached),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 const retryErrorKinds = [
@@ -1830,7 +1591,7 @@ function expectedStartedPeer(
 // The driver compares both public promises, Collection rows, exact outbox IDs,
 // and provider calls before and after the two acknowledgements. A successful
 // peer must finish in this executor; this is not a fresh-executor replay law.
-it.each([
+const startedPeerCases = [
   [`throw`, `durable-before`],
   [`throw`, `late-during-marker`],
   [`throw`, `visible-before-ack`],
@@ -1843,392 +1604,417 @@ it.each([
   [`invalid`, `visible-across-cleanup`],
   [`invalid`, `late-after-cleanup`],
   [`invalid`, `failure-before-store`],
-] as const)(
-  `settles a started peer across %s hook failure and %s write`,
-  async (failureKind, peerWriteCase) => {
-    oracleRoute(`case`)
-    const providerError = new Error(`HTTP 401 Unauthorized`)
-    const hookError = new Error(`retry decision failed`)
-    const storageError = new Error(`peer outbox write failed`)
-    const providerEntered = gate()
-    const releaseProvider = gate()
-    const peerWriteEntered = gate()
-    const peerRowStored = gate()
-    const releasePeerWrite = gate()
-    const peerWriteSettled = gate()
-    const hookEntered = gate()
-    const terminalMarkerEntered = gate()
-    const releaseTerminalMarker = gate()
-    const peerProviderEntered = gate()
-    const releasePeerProvider = gate()
-    const providerCalls: Array<string> = []
-    let headId = ``
-    let peerId = ``
-    let holdPeerWrite = peerWriteCase !== `durable-before`
+] as const
+type StartedPeerCase = (typeof startedPeerCases)[number]
+async function runStartedPeerCase([
+  failureKind,
+  peerWriteCase,
+]: StartedPeerCase): Promise<void> {
+  const providerError = new Error(`HTTP 401 Unauthorized`)
+  const hookError = new Error(`retry decision failed`)
+  const storageError = new Error(`peer outbox write failed`)
+  const providerEntered = gate()
+  const releaseProvider = gate()
+  const peerWriteEntered = gate()
+  const peerRowStored = gate()
+  const releasePeerWrite = gate()
+  const peerWriteSettled = gate()
+  const hookEntered = gate()
+  const terminalMarkerEntered = gate()
+  const releaseTerminalMarker = gate()
+  const peerProviderEntered = gate()
+  const releasePeerProvider = gate()
+  const providerCalls: Array<string> = []
+  let headId = ``
+  let peerId = ``
+  let holdPeerWrite = peerWriteCase !== `durable-before`
 
-    class ControlledStorage extends FakeStorageAdapter {
-      override async set(key: string, value: string): Promise<void> {
-        if (
-          key === `tx:${headId}` &&
-          (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
-            `rejection-pending`
-        ) {
-          terminalMarkerEntered.resolve()
-          await releaseTerminalMarker.promise
-        }
-        if (key === `tx:${peerId}`) {
-          peerWriteEntered.resolve()
-          if (
-            (peerWriteCase === `visible-before-ack` ||
-              peerWriteCase === `visible-across-cleanup`) &&
-            holdPeerWrite
-          ) {
-            await super.set(key, value)
-            peerRowStored.resolve()
-            await releasePeerWrite.promise
-            holdPeerWrite = false
-            peerWriteSettled.resolve()
-            return
-          }
-          if (holdPeerWrite) {
-            await releasePeerWrite.promise
-            holdPeerWrite = false
-            if (peerWriteCase === `failure-before-store`) {
-              peerWriteSettled.resolve()
-              throw storageError
-            }
-          }
-        }
-        await super.set(key, value)
-        if (key === `tx:${peerId}`) {
-          peerRowStored.resolve()
-          peerWriteSettled.resolve()
-        }
-      }
-    }
-
-    const storage = new ControlledStorage()
-    const env = createTestOfflineEnvironment({
-      storage,
-      config: {
-        shouldRetry: (): boolean | undefined => {
-          hookEntered.resolve()
-          if (failureKind === `throw`) throw hookError
-          return null as unknown as boolean | undefined
-        },
-      },
-      mutationFn: async ({ transaction }) => {
-        providerCalls.push(transaction.id)
-        if (transaction.id === headId) {
-          providerEntered.resolve()
-          await releaseProvider.promise
-          throw providerError
-        }
-        peerProviderEntered.resolve()
-        await releasePeerProvider.promise
-        env.applyMutations(transaction.mutations)
-      },
-    })
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const errorLog = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const observed: Array<Promise<void>> = []
-    const outcomes = new Map<string, { commit: unknown; persisted: unknown }>()
-    let hasPrimaryFailure = false
-
-    function createObservedTransaction(rowId: string, updatedAt: number) {
-      const tx = env.executor.createOfflineTransaction({
-        mutationFnName: env.mutationFnName,
-        autoCommit: false,
-      })
-      const transaction = tx.mutate(() =>
-        env.collection.insert({
-          id: rowId,
-          value: rowId,
-          completed: false,
-          updatedAt: new Date(updatedAt),
-        }),
-      )
-      const outcome = {
-        commit: `pending` as unknown,
-        persisted: `pending` as unknown,
-      }
-      outcomes.set(tx.id, outcome)
-      const commit = tx.commit().then(
-        () => {
-          outcome.commit = `fulfilled`
-        },
-        (error: unknown) => {
-          outcome.commit = error
-        },
-      )
-      const persisted = transaction.when(`settled`).then(
-        () => {
-          outcome.persisted = `fulfilled`
-        },
-        (error: unknown) => {
-          outcome.persisted = error
-        },
-      )
-      observed.push(commit, persisted)
-      return { id: tx.id, commit, persisted, outcome }
-    }
-
-    try {
-      await env.waitForLeader()
-      const head = createObservedTransaction(`head`, 0)
-      headId = head.id
-      await atOracleCheckpoint(providerEntered.promise, `head provider entered`)
-
-      const peer = createObservedTransaction(`peer`, 1)
-      peerId = peer.id
-      await atOracleCheckpoint(peerWriteEntered.promise, `peer write started`)
-      if (peerWriteCase === `durable-before`)
-        await atOracleCheckpoint(
-          peerWriteSettled.promise,
-          `peer durable before fault`,
-        )
+  class ControlledStorage extends FakeStorageAdapter {
+    override async set(key: string, value: string): Promise<void> {
       if (
-        peerWriteCase === `visible-before-ack` ||
-        peerWriteCase === `visible-across-cleanup`
-      )
-        await atOracleCheckpoint(
-          peerRowStored.promise,
-          `peer visible before ack`,
-        )
+        key === `tx:${headId}` &&
+        (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
+          `rejection-pending`
+      ) {
+        terminalMarkerEntered.resolve()
+        await releaseTerminalMarker.promise
+      }
+      if (key === `tx:${peerId}`) {
+        peerWriteEntered.resolve()
+        if (
+          (peerWriteCase === `visible-before-ack` ||
+            peerWriteCase === `visible-across-cleanup`) &&
+          holdPeerWrite
+        ) {
+          await super.set(key, value)
+          peerRowStored.resolve()
+          await releasePeerWrite.promise
+          holdPeerWrite = false
+          peerWriteSettled.resolve()
+          return
+        }
+        if (holdPeerWrite) {
+          await releasePeerWrite.promise
+          holdPeerWrite = false
+          if (peerWriteCase === `failure-before-store`) {
+            peerWriteSettled.resolve()
+            throw storageError
+          }
+        }
+      }
+      await super.set(key, value)
+      if (key === `tx:${peerId}`) {
+        peerRowStored.resolve()
+        peerWriteSettled.resolve()
+      }
+    }
+  }
 
-      releaseProvider.resolve()
-      await atOracleCheckpoint(hookEntered.promise, `retry hook failed`)
+  const storage = new ControlledStorage()
+  const env = createTestOfflineEnvironment({
+    storage,
+    config: {
+      shouldRetry: (): boolean | undefined => {
+        hookEntered.resolve()
+        if (failureKind === `throw`) throw hookError
+        return null as unknown as boolean | undefined
+      },
+    },
+    mutationFn: async ({ transaction }) => {
+      providerCalls.push(transaction.id)
+      if (transaction.id === headId) {
+        providerEntered.resolve()
+        await releaseProvider.promise
+        throw providerError
+      }
+      peerProviderEntered.resolve()
+      await releasePeerProvider.promise
+      env.applyMutations(transaction.mutations)
+    },
+  })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  const errorLog = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const observed: Array<Promise<void>> = []
+  const outcomes = new Map<string, { commit: unknown; persisted: unknown }>()
+  let hasPrimaryFailure = false
+
+  function createObservedTransaction(rowId: string, updatedAt: number) {
+    const tx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    const transaction = tx.mutate(() =>
+      env.collection.insert({
+        id: rowId,
+        value: rowId,
+        completed: false,
+        updatedAt: new Date(updatedAt),
+      }),
+    )
+    const outcome = {
+      commit: `pending` as unknown,
+      persisted: `pending` as unknown,
+    }
+    outcomes.set(tx.id, outcome)
+    const commit = tx.commit().then(
+      () => {
+        outcome.commit = `fulfilled`
+      },
+      (error: unknown) => {
+        outcome.commit = error
+      },
+    )
+    const persisted = transaction.when(`settled`).then(
+      () => {
+        outcome.persisted = `fulfilled`
+      },
+      (error: unknown) => {
+        outcome.persisted = error
+      },
+    )
+    observed.push(commit, persisted)
+    return { id: tx.id, commit, persisted, outcome }
+  }
+
+  try {
+    await env.waitForLeader()
+    const head = createObservedTransaction(`head`, 0)
+    headId = head.id
+    await atOracleCheckpoint(providerEntered.promise, `head provider entered`)
+
+    const peer = createObservedTransaction(`peer`, 1)
+    peerId = peer.id
+    await atOracleCheckpoint(peerWriteEntered.promise, `peer write started`)
+    if (peerWriteCase === `durable-before`)
       await atOracleCheckpoint(
-        terminalMarkerEntered.promise,
-        `terminal marker held`,
+        peerWriteSettled.promise,
+        `peer durable before fault`,
       )
-      const atFault = expectedStartedPeer(
-        peerWriteCase === `durable-before`
-          ? { stored: true, acknowledgement: `fulfilled` }
-          : peerWriteCase === `visible-before-ack` ||
-              peerWriteCase === `visible-across-cleanup`
-            ? { stored: true, acknowledgement: `held` }
-            : { stored: false, acknowledgement: `held` },
-        false,
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(head.outcome.commit).toBe(`pending`),
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(peer.outcome.commit).toBe(atFault.caller),
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(peer.outcome.persisted).toBe(atFault.caller),
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(providerCalls).toEqual([head.id]),
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(atFault.providerEligible).toBe(false),
-      )
-      {
-        const oracleAwaitedValue6 = await env.executor.peekOutbox()
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(oracleAwaitedValue6.map(({ id }) => id)).toEqual(
-            atFault.visible ? [head.id, peer.id] : [head.id],
-          ),
-        )
-      }
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(env.collection.toArray.map(({ id }) => id)).toEqual([
-          `head`,
-          `peer`,
-        ]),
-      )
+    if (
+      peerWriteCase === `visible-before-ack` ||
+      peerWriteCase === `visible-across-cleanup`
+    )
+      await atOracleCheckpoint(peerRowStored.promise, `peer visible before ack`)
 
-      const writeAfterCleanup =
-        peerWriteCase === `late-after-cleanup` ||
-        peerWriteCase === `visible-across-cleanup`
-      if (!writeAfterCleanup) {
-        releasePeerWrite.resolve()
-        await atOracleCheckpoint(peerWriteSettled.promise, `peer write settled`)
-      }
-      const afterWrite = expectedStartedPeer(
-        peerWriteCase === `failure-before-store`
-          ? { stored: false, acknowledgement: `rejected` }
-          : writeAfterCleanup
-            ? peerWriteCase === `visible-across-cleanup`
-              ? { stored: true, acknowledgement: `held` }
-              : { stored: false, acknowledgement: `held` }
-            : { stored: true, acknowledgement: `fulfilled` },
-        false,
-      )
-      if (peerWriteCase === `failure-before-store`) {
-        await atOracleCheckpoint(peer.commit, `failed peer commit settled`)
-        await atOracleCheckpoint(
-          peer.persisted,
-          `failed peer persistence settled`,
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.commit).toBe(storageError),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.persisted).toBe(storageError),
-        )
-      } else {
-        await turn()
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.commit).toBe(afterWrite.caller),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.persisted).toBe(afterWrite.caller),
-        )
-      }
+    releaseProvider.resolve()
+    await atOracleCheckpoint(hookEntered.promise, `retry hook failed`)
+    await atOracleCheckpoint(
+      terminalMarkerEntered.promise,
+      `terminal marker held`,
+    )
+    const atFault = expectedStartedPeer(
+      peerWriteCase === `durable-before`
+        ? { stored: true, acknowledgement: `fulfilled` }
+        : peerWriteCase === `visible-before-ack` ||
+            peerWriteCase === `visible-across-cleanup`
+          ? { stored: true, acknowledgement: `held` }
+          : { stored: false, acknowledgement: `held` },
+      false,
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(head.outcome.commit).toBe(`pending`),
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(peer.outcome.commit).toBe(atFault.caller),
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(peer.outcome.persisted).toBe(atFault.caller),
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(providerCalls).toEqual([head.id]),
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(atFault.providerEligible).toBe(false),
+    )
+    {
+      const oracleAwaitedValue6 = await env.executor.peekOutbox()
       oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(afterWrite.providerEligible).toBe(false),
-      )
-      oracleAssertion(`independent settlement checkpoint`, () =>
-        expect(providerCalls).toEqual([head.id]),
-      )
-      {
-        const oracleAwaitedValue7 = await env.executor.peekOutbox()
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(oracleAwaitedValue7.map(({ id }) => id)).toEqual(
-            afterWrite.visible ? [head.id, peer.id] : [head.id],
-          ),
-        )
-      }
-
-      releaseTerminalMarker.resolve()
-      await atOracleCheckpoint(head.commit, `failed head settled`)
-      await atOracleCheckpoint(
-        head.persisted,
-        `failed head persistence settled`,
-      )
-      if (failureKind === `throw`) {
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(head.outcome.commit).toBe(hookError),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(head.outcome.persisted).toBe(hookError),
-        )
-      } else {
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(head.outcome.commit).toBeInstanceOf(TypeError),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(head.outcome.persisted).toBeInstanceOf(TypeError),
-        )
-      }
-
-      if (writeAfterCleanup) {
-        // A visible row without write acknowledgement cannot run even after
-        // the failed head is removed.
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(providerCalls).toEqual([head.id]),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.commit).toBe(`pending`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.persisted).toBe(`pending`),
-        )
-        {
-          const oracleAwaitedValue8 = await env.executor.peekOutbox()
-          oracleAssertion(`independent settlement checkpoint`, () =>
-            expect(oracleAwaitedValue8.map(({ id }) => id)).toEqual(
-              peerWriteCase === `visible-across-cleanup` ? [peer.id] : [],
-            ),
-          )
-        }
-        releasePeerWrite.resolve()
-        await atOracleCheckpoint(
-          peerWriteSettled.promise,
-          `late peer write settled`,
-        )
-      }
-
-      if (peerWriteCase === `failure-before-store`) {
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(providerCalls).toEqual([head.id]),
-        )
-        {
-          const oracleAwaitedValue9 = await env.executor.peekOutbox()
-          oracleAssertion(`independent settlement checkpoint`, () =>
-            expect(oracleAwaitedValue9).toEqual([]),
-          )
-        }
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(env.collection.toArray).toEqual([]),
-        )
-      } else {
-        const firstPeerEvent = await atOracleCheckpoint(
-          Promise.race([
-            peerProviderEntered.promise.then(() => `provider` as const),
-            peer.commit.then(() => `settled` as const),
-          ]),
-          `peer provider or early settlement`,
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(firstPeerEvent).toBe(`provider`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.commit).toBe(`pending`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.persisted).toBe(`pending`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(providerCalls).toEqual([head.id, peer.id]),
-        )
-        {
-          const oracleAwaitedValue10 = await env.executor.peekOutbox()
-          oracleAssertion(`independent settlement checkpoint`, () =>
-            expect(oracleAwaitedValue10.map(({ id }) => id)).toEqual([peer.id]),
-          )
-        }
-        releasePeerProvider.resolve()
-        await atOracleCheckpoint(peer.commit, `peer commit settled`)
-        await atOracleCheckpoint(peer.persisted, `peer persistence settled`)
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.commit).toBe(`fulfilled`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(peer.outcome.persisted).toBe(`fulfilled`),
-        )
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(providerCalls).toEqual([head.id, peer.id]),
-        )
-        {
-          const oracleAwaitedValue11 = await env.executor.peekOutbox()
-          oracleAssertion(`independent settlement checkpoint`, () =>
-            expect(oracleAwaitedValue11).toEqual([]),
-          )
-        }
-        oracleAssertion(`independent settlement checkpoint`, () =>
-          expect(env.collection.toArray.map(({ id }) => id)).toEqual([`peer`]),
-        )
-      }
-    } catch (error) {
-      hasPrimaryFailure = true
-      throw error
-    } finally {
-      releaseProvider.resolve()
-      releasePeerWrite.resolve()
-      releaseTerminalMarker.resolve()
-      releasePeerProvider.resolve()
-      const cleanupError = new Error(`started-peer oracle cleanup`)
-      for (const [id, outcome] of outcomes)
-        if (outcome.commit === `pending` || outcome.persisted === `pending`)
-          env.executor.rejectTransaction(id, cleanupError)
-      await cleanupOfflineOracle(
-        [
-          () => Promise.all(observed),
-          () => env.executor.dispose(),
-          () => env.collection.cleanup(),
-          () => warning.mockRestore(),
-          () => errorLog.mockRestore(),
-        ],
-        hasPrimaryFailure,
+        expect(oracleAwaitedValue6.map(({ id }) => id)).toEqual(
+          atFault.visible ? [head.id, peer.id] : [head.id],
+        ),
       )
     }
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(env.collection.toArray.map(({ id }) => id)).toEqual([
+        `head`,
+        `peer`,
+      ]),
+    )
+
+    const writeAfterCleanup =
+      peerWriteCase === `late-after-cleanup` ||
+      peerWriteCase === `visible-across-cleanup`
+    if (!writeAfterCleanup) {
+      releasePeerWrite.resolve()
+      await atOracleCheckpoint(peerWriteSettled.promise, `peer write settled`)
+    }
+    const afterWrite = expectedStartedPeer(
+      peerWriteCase === `failure-before-store`
+        ? { stored: false, acknowledgement: `rejected` }
+        : writeAfterCleanup
+          ? peerWriteCase === `visible-across-cleanup`
+            ? { stored: true, acknowledgement: `held` }
+            : { stored: false, acknowledgement: `held` }
+          : { stored: true, acknowledgement: `fulfilled` },
+      false,
+    )
+    if (peerWriteCase === `failure-before-store`) {
+      await atOracleCheckpoint(peer.commit, `failed peer commit settled`)
+      await atOracleCheckpoint(
+        peer.persisted,
+        `failed peer persistence settled`,
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.commit).toBe(storageError),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.persisted).toBe(storageError),
+      )
+    } else {
+      await turn()
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.commit).toBe(afterWrite.caller),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.persisted).toBe(afterWrite.caller),
+      )
+    }
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(afterWrite.providerEligible).toBe(false),
+    )
+    oracleAssertion(`independent settlement checkpoint`, () =>
+      expect(providerCalls).toEqual([head.id]),
+    )
+    {
+      const oracleAwaitedValue7 = await env.executor.peekOutbox()
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(oracleAwaitedValue7.map(({ id }) => id)).toEqual(
+          afterWrite.visible ? [head.id, peer.id] : [head.id],
+        ),
+      )
+    }
+
+    releaseTerminalMarker.resolve()
+    await atOracleCheckpoint(head.commit, `failed head settled`)
+    await atOracleCheckpoint(head.persisted, `failed head persistence settled`)
+    if (failureKind === `throw`) {
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(head.outcome.commit).toBe(hookError),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(head.outcome.persisted).toBe(hookError),
+      )
+    } else {
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(head.outcome.commit).toBeInstanceOf(TypeError),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(head.outcome.persisted).toBeInstanceOf(TypeError),
+      )
+    }
+
+    if (writeAfterCleanup) {
+      // A visible row without write acknowledgement cannot run even after
+      // the failed head is removed.
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(providerCalls).toEqual([head.id]),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.commit).toBe(`pending`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.persisted).toBe(`pending`),
+      )
+      {
+        const oracleAwaitedValue8 = await env.executor.peekOutbox()
+        oracleAssertion(`independent settlement checkpoint`, () =>
+          expect(oracleAwaitedValue8.map(({ id }) => id)).toEqual(
+            peerWriteCase === `visible-across-cleanup` ? [peer.id] : [],
+          ),
+        )
+      }
+      releasePeerWrite.resolve()
+      await atOracleCheckpoint(
+        peerWriteSettled.promise,
+        `late peer write settled`,
+      )
+    }
+
+    if (peerWriteCase === `failure-before-store`) {
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(providerCalls).toEqual([head.id]),
+      )
+      {
+        const oracleAwaitedValue9 = await env.executor.peekOutbox()
+        oracleAssertion(`independent settlement checkpoint`, () =>
+          expect(oracleAwaitedValue9).toEqual([]),
+        )
+      }
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(env.collection.toArray).toEqual([]),
+      )
+    } else {
+      const firstPeerEvent = await atOracleCheckpoint(
+        Promise.race([
+          peerProviderEntered.promise.then(() => `provider` as const),
+          peer.commit.then(() => `settled` as const),
+        ]),
+        `peer provider or early settlement`,
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(firstPeerEvent).toBe(`provider`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.commit).toBe(`pending`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.persisted).toBe(`pending`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(providerCalls).toEqual([head.id, peer.id]),
+      )
+      {
+        const oracleAwaitedValue10 = await env.executor.peekOutbox()
+        oracleAssertion(`independent settlement checkpoint`, () =>
+          expect(oracleAwaitedValue10.map(({ id }) => id)).toEqual([peer.id]),
+        )
+      }
+      releasePeerProvider.resolve()
+      await atOracleCheckpoint(peer.commit, `peer commit settled`)
+      await atOracleCheckpoint(peer.persisted, `peer persistence settled`)
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.commit).toBe(`fulfilled`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(peer.outcome.persisted).toBe(`fulfilled`),
+      )
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(providerCalls).toEqual([head.id, peer.id]),
+      )
+      {
+        const oracleAwaitedValue11 = await env.executor.peekOutbox()
+        oracleAssertion(`independent settlement checkpoint`, () =>
+          expect(oracleAwaitedValue11).toEqual([]),
+        )
+      }
+      oracleAssertion(`independent settlement checkpoint`, () =>
+        expect(env.collection.toArray.map(({ id }) => id)).toEqual([`peer`]),
+      )
+    }
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseProvider.resolve()
+    releasePeerWrite.resolve()
+    releaseTerminalMarker.resolve()
+    releasePeerProvider.resolve()
+    const cleanupError = new Error(`started-peer oracle cleanup`)
+    for (const [id, outcome] of outcomes)
+      if (outcome.commit === `pending` || outcome.persisted === `pending`)
+        env.executor.rejectTransaction(id, cleanupError)
+    await cleanupOfflineOracle(
+      [
+        () => Promise.all(observed),
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => warning.mockRestore(),
+        () => errorLog.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+oracleProperty({
+  id: `offline.settlement.started-peer`,
+  law: {
+    ...settlementLaw,
+    statement: `A started peer's commit, persistence promise, provider eligibility and outbox row follow its own write acknowledgement and the failed head's deletion, across a throwing or invalid retry hook.`,
+    limits: `The twelve hook-failure and peer-write cases above, through the same production driver and the expectedStartedPeer model; this is not a fresh-executor replay law.`,
   },
-)
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
+  histories: startedPeerCases,
+  label: ([failureKind, peerWriteCase]) =>
+    `settles a started peer across ${failureKind} hook failure and ${peerWriteCase} write`,
+  resolve: (startedPeer) => ({ startedPeer }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `independent settlement checkpoint`,
+      plan,
+      observe,
+      () => runStartedPeerCase(plan.startedPeer),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 // A first-provider retry-record write fails after 2–5 transactions have been
 // admitted. Two is the marginal held-head/peer history; five checks that every
