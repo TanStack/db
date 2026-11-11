@@ -55,11 +55,10 @@ function tieValue(options: RequestOptions): unknown {
  * - **Held:** a successful bounded repair holds the acquisitions it read:
  *   its prefix, its ties, and its refills. Only a later read that covers
  *   them may retire them: a newer repair, a full-source read, or a truncate
- *   replay that covers the source. A prefix read issued after one of the
- *   chain's prefixes that reaches every one of its rows still inside the
- *   window may also retire that prefix, but no tie or cursor page
- *   (ARCHITECTURE.md: a larger prefix does not retire ties or cursor
- *   suffixes). That prefix counts once it succeeds or once a successful
+ *   replay that covers the source. A prefix read at least as long, issued
+ *   after one of the chain's prefixes, may also retire that prefix, but no
+ *   tie or cursor page (ARCHITECTURE.md: a successful larger prefix retires
+ *   settled smaller prefixes, not ties or cursor suffixes). That prefix counts once it succeeds or once a successful
  *   replay reacquires its demand while it is still in flight. A request
  *   issued before the invalidation proves no current coverage, so it never
  *   retires them.
@@ -76,7 +75,14 @@ function tieValue(options: RequestOptions): unknown {
  *   oracle records any `OrderedLoaderInvariantError` the loader throws, so
  *   the generated histories also fuzz that table.
  * - **No stale step:** a repair chain whose ordering epoch moved is replaced
- *   before it issues another tie or refill.
+ *   before it issues another tie or refill. That includes a step that a
+ *   continuation the chain staged, or a window move that joined work
+ *   blocked, resumes after the move: the request it issues must start the
+ *   replacement, so its settlement cannot start the replacement again.
+ * - **One start per epoch:** a chain step does not read the chain's start
+ *   demand again unless an optimistic departure, a head insert, or a source
+ *   delete gave the window new source input since the start. Reading it
+ *   again restarts the repair without new debt.
  * - **Error identity:** a request that fails reports its own error through
  *   its participant. Neither a release's cleanup error nor a read the loader
  *   starts while handling it can replace that error. A dead request's failure
@@ -155,7 +161,16 @@ function tieValue(options: RequestOptions): unknown {
  *   release pass is a stale finite request that settles after its repair
  *   finished and is released at once; the ledger sees it as the request
  *   being settled, issued before the current epoch, in this truncate
- *   generation, with no full-source lease, and its graph pass is ordinary;
+ *   generation, with no full-source lease. That its graph pass is ordinary
+ *   is a stated assumption: ARCHITECTURE.md says only that such a request
+ *   is released at once, not whether refinement is blocked meanwhile. If
+ *   production later blocks it, the driver may misclassify the next request
+ *   and report a false failure;
+ * - a request is resumed after an epoch move when it is authoritative and
+ *   finite, a continuation was owed, no request was settling, and the
+ *   ordering epoch moved since the latest start. That premise
+ *   over-approximates a pending continuation, so the no-stale-step law
+ *   judges such a request by what its own settlement issues;
  * - a truncate replay that settles while the subscription holds a
  *   full-source lease, even a failed one, covers the source and counts as a
  *   successful start after every earlier request; the leases it reacquired
@@ -257,7 +272,10 @@ function tieValue(options: RequestOptions): unknown {
  * is not required then, the leak law does not judge the unfinished chain,
  * and the strand law accepts recovery that is owed behind it. A failed replay stays pending until the drain
  * settles it. The fake releases an acquisition when the loader calls its
- * release; it does not model an adapter that removes rows later.
+ * release; it does not model an adapter that removes rows later. The
+ * no-stale-step law sees an obsolete step only when it succeeds and its
+ * settlement then starts the replacement; a hung or failed obsolete step
+ * is not judged by it.
  */
 type LedgerRequest = {
   index: number
@@ -294,6 +312,8 @@ type LedgerRequest = {
   // The repair chain the request belongs to: the ledger index of that chain's
   // start. A full-source read and an ordinary page belong to none.
   chain: number | undefined
+  // A pending continuation issued the request after its chain's epoch moved.
+  resumedAfterEpochMove: boolean
 }
 
 type AuthorityCommand =
@@ -558,6 +578,7 @@ type AuthorityObservation = {
   // Graph passes in the stale self-release, which runs outside a release
   // pass, while a continuation was owed.
   unblockedReleasePasses: number
+  epochMovesWithContinuation: number
   retirementSuccessorChains: number
   replayContinuationHandoffs: number
   // Current failed requests whose participant reason reached the identity cut.
@@ -1057,6 +1078,8 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let obsoleteStepViolation: string | undefined
+  let restartViolation: string | undefined
   let unexpressibleTieViolation: string | undefined
   let resetViolation: string | undefined
   // A disposed loader owns nothing: it issues no request and releases no
@@ -1083,6 +1106,12 @@ async function checkAuthorityCase(
   // The repair chain of the latest start, the request being settled, and a
   // blocked release pass that ran while a continuation was owed.
   let currentChain: number | undefined
+  // The ledger length at the last command that delivered new source input
+  // to the window: an optimistic departure, a head insert, or a source
+  // delete.
+  let lastSourceInputAt = -1
+  // Epoch moves while a repair continuation was owed.
+  let epochMovesWithContinuation = 0
   let settlingRequest: LedgerRequest | undefined
   let deferredByReleasePass:
     { epochMoves: number; truncates: number } | undefined
@@ -1166,6 +1195,18 @@ async function checkAuthorityCase(
       method,
       issuedEpochMoves: epochMoves,
       chain: undefined,
+      // A continuation that the chain staged, or that joined work blocked,
+      // issues this request from a later graph pass after the chain's epoch
+      // moved. The chain must be replaced first (ARCHITECTURE.md, ordered
+      // repair), so this request must start the replacement.
+      resumedAfterEpochMove:
+        authoritative &&
+        !fullSource &&
+        continuationOwed &&
+        !settlingChainMember &&
+        settlingRequest === undefined &&
+        epochMovesAtLastStart >= 0 &&
+        epochMoves !== epochMovesAtLastStart,
     }
     ledger.push(request)
     // No cursor expresses a NaN or infinite rank, so the loader reads the
@@ -1211,6 +1252,38 @@ async function checkAuthorityCase(
     }
     if (startsAuthority(request) || request.chainStep)
       request.chain = currentChain
+    // No obsolete step: a request that a pending continuation issued after
+    // its chain's epoch moved must start the replacement. If its own
+    // successful settlement starts a repair of the same epoch, the request
+    // was a step of the obsolete chain. Its shape alone cannot tell: an
+    // unindexed step and a replacement start read the same prefix.
+    const resumed = settlingRequest
+    if (
+      resumed?.resumedAfterEpochMove &&
+      resumed.outcome === `ok` &&
+      resumed.issuedTruncates === truncates &&
+      resumed.issuedEpochMoves === epochMoves &&
+      authoritative &&
+      (fullSource ||
+        (options.orderBy !== undefined &&
+          options.where === undefined &&
+          options.minValues === undefined))
+    ) {
+      obsoleteStepViolation ??= `request ${resumed.index} resumed a repair continuation after its chain's epoch moved, and its settlement started the replacement (request ${request.index}): it was a step of the obsolete chain`
+    }
+    // One start per epoch: a chain step that reads its chain's start demand
+    // again restarts the repair without new debt. Only new source input
+    // since the start, an optimistic departure, a head insert, or a source
+    // delete, can make that read return more (ARCHITECTURE.md, ordered
+    // repair: a prefix, then a tie and refill per new boundary).
+    if (
+      request.chainStep &&
+      request.chain !== undefined &&
+      sameDemand(ledger[request.chain]!, request) &&
+      lastSourceInputAt <= request.chain
+    ) {
+      restartViolation ??= `request ${request.index}, a step of repair chain ${request.chain}, read the chain's start demand again with no new source input since`
+    }
     // A blocked release pass deferred a pending refill, and a later graph pass
     // resumed it: a refetch step of the same chain, in the same epoch, that
     // reads a demand the chain has not read. Only a staged or blocked
@@ -1482,6 +1555,8 @@ async function checkAuthorityCase(
   )
   const invalidateSourceOrdering = loader.invalidateSourceOrdering.bind(loader)
   loader.invalidateSourceOrdering = () => {
+    if (continuationOwed && currentChain !== undefined)
+      epochMovesWithContinuation++
     epochMoves++
     invalidateSourceOrdering()
   }
@@ -1759,6 +1834,18 @@ async function checkAuthorityCase(
         ),
       )
     }
+    if (obsoleteStepViolation) {
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:obsolete-step`,
+        new Error(`no obsolete step ${checkpoint}: ${obsoleteStepViolation}`),
+      )
+    }
+    if (restartViolation) {
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:restart`,
+        new Error(`one start per epoch ${checkpoint}: ${restartViolation}`),
+      )
+    }
     if (concurrencyViolation) {
       rejectAt(
         `ordered-source-loader-state-oracle.test.ts:1599`,
@@ -1800,10 +1887,10 @@ async function checkAuthorityCase(
         !member.released
       )
         continue
-      const windowRows = Math.min(
-        member.options.limit ?? 0,
-        info.offset + info.limit,
-      )
+      // Only a prefix at least as long retires a prefix member: a smaller
+      // later prefix that still reaches the window does not hold the
+      // member's other rows (ARCHITECTURE.md: a successful larger prefix
+      // retires settled smaller prefix acquisitions).
       const coveredByLaterPrefix =
         isPrefix(member) &&
         ledger.some(
@@ -1811,7 +1898,7 @@ async function checkAuthorityCase(
             request.index > member.index &&
             (request.outcome === `ok` || request.replayed) &&
             isPrefix(request) &&
-            (request.options.limit ?? 0) >= windowRows,
+            (request.options.limit ?? 0) >= (member.options.limit ?? 0),
         )
       if (coveredByLaterPrefix) continue
       rejectAt(
@@ -2097,6 +2184,7 @@ async function checkAuthorityCase(
         }
         // A refetch delivered a row that sorts before every installed row.
         case `headInsert`: {
+          lastSourceInputAt = ledger.length
           // One `-Infinity` row at most: a second would tie with it, which
           // the fake's subtraction order cannot compare.
           const unexpressible =
@@ -2189,6 +2277,7 @@ async function checkAuthorityCase(
         // An optimistic overlay hides the window's row, so the loader must
         // refill it from the source.
         case `optimisticDeparture`:
+          lastSourceInputAt = ledger.length
           optimisticDepartures++
           loader.onSourceChanges(
             [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
@@ -2199,6 +2288,7 @@ async function checkAuthorityCase(
           await flush()
           break
         case `sourceDelete`:
+          lastSourceInputAt = ledger.length
           repairOwed = true
           sourceDeletes++
           loader.onSourceChanges(
@@ -2547,6 +2637,7 @@ async function checkAuthorityCase(
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
     unblockedReleasePasses,
+    epochMovesWithContinuation,
     retirementSuccessorChains: ledger.filter(
       (request) =>
         startsAuthority(request) &&
@@ -3158,6 +3249,28 @@ describe(`Ordered source request authority`, () => {
         ],
       },
     },
+    // A continuation of a repair chain resumed after its epoch moved and
+    // issued one more step of the obsolete chain; that step's settlement then
+    // started the replacement. Fixed seed 20261016 of the request-authority
+    // campaign found it once the no-stale-step law judged resumed requests.
+    {
+      name: `a staged repair step resumed after its epoch moved`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: true,
+        ...ordinaryScenario,
+        releaseInvalidates: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `sourceDelete`, react: true },
+          { type: `invalidateThenFailOldest` },
+          { type: `settle`, pick: 0, ok: true },
+        ],
+      },
+    },
     {
       // Without the settled check, a report before the first page settled
       // forced a full-source read.
@@ -3384,7 +3497,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass, or restarts the repair from it, fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3830,6 +3943,9 @@ describe(`Ordered source request authority`, () => {
       `retirement-with-retry-timer`,
       `retirement-with-later-chains`,
       `retirement-with-full-source-plan`,
+      // The ordering epoch moved while a repair continuation was owed: the
+      // premise of the no-obsolete-step law.
+      `continuation-before-epoch-move`,
     ] as const
     type State = (typeof states)[number]
     let counts = new Map<State, number>()
@@ -3991,6 +4107,8 @@ describe(`Ordered source request authority`, () => {
             if (observation.retirementSuccessorChains > 1)
               enter(`retirement-with-later-chains`)
           }
+          if (observation.epochMovesWithContinuation > 0)
+            enter(`continuation-before-epoch-move`)
           if (observation.requestErrorChecks > 0) {
             enter(`current-request-error`)
             if (observation.releaseFaults > 0)
