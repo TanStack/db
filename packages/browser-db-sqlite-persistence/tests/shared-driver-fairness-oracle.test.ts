@@ -12,6 +12,9 @@
  * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those campaigns with one checked
  * seed+shrink-path replay. An axis-removal calibration proves that removing
  * tail-order variation loses hydrate-before-later-persist histories.
+ * Those grammar controls and the synthetic checker calibration run no
+ * production, so they live in `shared-driver-fairness-grammar.test.ts`; the
+ * Node driver, check, and grammar live in `shared-driver-fairness-node-oracle.ts`.
  * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`
  * calls queue. This file supplies BetterSQLite; the receiving witness in
  * `../e2e/shared-driver-fairness-witness.opfs.spec.ts` uses the same fixture with a
@@ -20,63 +23,42 @@
  * violated laws and checkpoints; the report says whether shrinking retained
  * that violation. The full logical persist completion order checks lane FIFO.
  */
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
+  forwardAssertionJudgment,
   oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
   rejectAt,
 } from '../../db/tests/oracle-assertion-adapter'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   browserReplayAlias,
   registerBrowserProperty,
 } from './browser-property-registration-oracle'
 import {
-  SHARED_DRIVER_FAIRNESS_BOUND,
-  createPersistFirstFaultObservation,
   findSharedDriverFairnessLawViolations,
   findSharedDriverFairnessViolation,
-  observeSharedDriverFairness,
 } from './shared-driver-fairness-oracle'
-import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
+import {
+  FairnessOracleFailure,
+  GENERATED_RUNS,
+  createScenario,
+  expectFairObservation,
+  expectObservationReach,
+  generatedHistoryArbitrary,
+  withNodeScenario,
+} from './shared-driver-fairness-node-oracle'
 import {
   FIXED_SEED,
   readFairnessCalibration,
   readFairnessReplayConfig,
 } from './shared-driver-fairness-config'
+import type { GeneratedFairnessHistory } from './shared-driver-fairness-node-oracle'
 import type {
-  SharedDriverFairnessObservation,
-  SharedDriverFairnessOptions,
   SharedDriverFairnessScenario,
   SharedDriverFairnessWork,
 } from './shared-driver-fairness-oracle'
-
-const GENERATED_RUNS = 12
-const HYDRATE_COUNT_RANGE = { min: 2, max: 7 } as const
-const PERSIST_COUNT_RANGE = { min: 3, max: 7 } as const
-const MUTATIONS_PER_PERSIST_RANGE = { min: 1, max: 3 } as const
-
-class FairnessOracleFailure extends Error {
-  constructor(
-    readonly law: string,
-    readonly checkpoint: string,
-    cause: unknown,
-  ) {
-    super(cause instanceof Error ? cause.message : String(cause), { cause })
-  }
-}
-
-function checkAt(law: string, checkpoint: string, assertion: () => void): void {
-  try {
-    assertion()
-  } catch (error) {
-    throw new FairnessOracleFailure(law, checkpoint, error)
-  }
-}
 
 const fairnessReplay = readFairnessReplayConfig()
 browserReplayAlias(
@@ -87,217 +69,6 @@ browserReplayAlias(
 )
 const fairnessCalibration = readFairnessCalibration()
 
-type WorkKind = SharedDriverFairnessWork[`kind`]
-
-type GeneratedFairnessHistory = {
-  hydrateCount: number
-  persistCount: number
-  mutationsPerPersist: number
-  orderedKinds: ReadonlyArray<WorkKind>
-  replayHistory: string
-}
-
-type GeneratedTailEntry = {
-  kind: WorkKind
-  token: string
-}
-
-function createScenario(
-  id: string,
-  orderedKinds: ReadonlyArray<WorkKind>,
-  mutationsPerPersist = 1,
-): SharedDriverFairnessScenario {
-  let hydrateIndex = 0
-  let persistIndex = 0
-  return {
-    id,
-    work: orderedKinds.map((kind) => {
-      if (kind === `persist`) {
-        const index = persistIndex++
-        return {
-          kind,
-          id: `persist-${index}`,
-          mutationsPerPersist,
-        }
-      }
-      const index = hydrateIndex++
-      return {
-        kind,
-        id: `hydrate-${index}`,
-        seededRows: [
-          { id: `row-${index}-0`, value: index * 10 },
-          { id: `row-${index}-1`, value: index * 10 + 1 },
-        ],
-      }
-    }),
-  }
-}
-
-async function withNodeScenario(
-  scenario: SharedDriverFairnessScenario,
-  assertion: (
-    observation: SharedDriverFairnessObservation,
-  ) => void | Promise<void>,
-  options: SharedDriverFairnessOptions = {},
-): Promise<void> {
-  const directory = mkdtempSync(join(tmpdir(), `db-driver-fairness-`))
-  let primaryFailure: unknown
-  try {
-    const observation = await observeSharedDriverFairness(
-      () =>
-        createWASQLiteTestDatabase({
-          filename: join(directory, `state.sqlite`),
-        }),
-      scenario,
-      options,
-    )
-    await assertion(observation)
-  } catch (error) {
-    primaryFailure = error
-  }
-
-  let nodeCleanupFailure: unknown
-  try {
-    rmSync(directory, { recursive: true, force: true })
-  } catch (error) {
-    nodeCleanupFailure = error
-  }
-
-  if (primaryFailure !== undefined) {
-    if (nodeCleanupFailure !== undefined) {
-      throw new AggregateError(
-        [primaryFailure, nodeCleanupFailure],
-        `primary: ${String(primaryFailure)}; node cleanup diagnostics: ${String(nodeCleanupFailure)}`,
-        { cause: primaryFailure },
-      )
-    }
-    throw primaryFailure
-  }
-  if (nodeCleanupFailure !== undefined) throw nodeCleanupFailure
-}
-
-const REACH_LAWS = new Set([
-  `hydrate admission IDs`,
-  `hydrate completion count`,
-  `hydrated public rows`,
-])
-
-// The shared comparison owns every law. This driver turns its first violation
-// into a FairnessOracleFailure that names the law and checkpoint.
-function throwFirstViolation(
-  observation: SharedDriverFairnessObservation,
-  laws: (law: string) => boolean,
-): void {
-  const violation = findSharedDriverFairnessLawViolations(
-    observation,
-    SHARED_DRIVER_FAIRNESS_BOUND,
-  ).find(({ law }) => laws(law))
-  if (!violation) return
-  rejectAt(
-    violation.checkpoint,
-    new FairnessOracleFailure(
-      violation.law,
-      violation.checkpoint,
-      new Error(
-        `shared-driver fairness mismatch: expected ${JSON.stringify(violation.expected)}, ` +
-          `got ${JSON.stringify(violation.actual)}; ` +
-          `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
-      ),
-    ),
-  )
-}
-
-function expectObservationReach(
-  observation: SharedDriverFairnessObservation,
-): void {
-  throwFirstViolation(observation, (law) => REACH_LAWS.has(law))
-}
-
-function expectFairObservation(
-  observation: SharedDriverFairnessObservation,
-): void {
-  throwFirstViolation(observation, () => true)
-  checkAt(`driver cleanup`, `after observation`, () =>
-    oracleAssertion('expectFairObservation', () =>
-      expect(observation.cleanupFailures).toEqual([]),
-    ),
-  )
-}
-
-function buildGeneratedHistory(
-  hydrateCount: number,
-  persistCount: number,
-  mutationsPerPersist: number,
-  generatedTail: ReadonlyArray<GeneratedTailEntry>,
-): GeneratedFairnessHistory {
-  return {
-    hydrateCount,
-    persistCount,
-    mutationsPerPersist,
-    orderedKinds: [
-      `persist` as const,
-      ...generatedTail.map(({ kind }) => kind),
-    ],
-    replayHistory: `p0,${generatedTail.map(({ token }) => token).join(`,`)}`,
-  }
-}
-
-function createGeneratedHistoryArbitrary(
-  tailOrderAxis: `varied` | `removed`,
-): fc.Arbitrary<GeneratedFairnessHistory> {
-  return fc
-    .record({
-      hydrateCount: fc.integer(HYDRATE_COUNT_RANGE),
-      persistCount: fc.integer(PERSIST_COUNT_RANGE),
-      mutationsPerPersist: fc.integer(MUTATIONS_PER_PERSIST_RANGE),
-    })
-    .chain(({ hydrateCount, persistCount, mutationsPerPersist }) => {
-      const tail = [
-        ...Array.from({ length: persistCount - 1 }, (_, index) => ({
-          kind: `persist` as const,
-          token: `p${index + 1}`,
-        })),
-        ...Array.from({ length: hydrateCount }, (_, index) => ({
-          kind: `hydrate` as const,
-          token: `h${index}`,
-        })),
-      ]
-      const orderedTail =
-        tailOrderAxis === `varied`
-          ? fc.shuffledSubarray(tail, {
-              minLength: tail.length,
-              maxLength: tail.length,
-            })
-          : fc.constant(tail)
-      return orderedTail.map((generatedTail) =>
-        buildGeneratedHistory(
-          hydrateCount,
-          persistCount,
-          mutationsPerPersist,
-          generatedTail,
-        ),
-      )
-    })
-}
-
-function reachesHydrateBeforeLaterPersist(
-  history: GeneratedFairnessHistory,
-): boolean {
-  let hydrateSeen = false
-  for (const kind of history.orderedKinds.slice(1)) {
-    if (kind === `hydrate`) hydrateSeen = true
-    if (kind === `persist` && hydrateSeen) return true
-  }
-  return false
-}
-
-const generatedHistoryArbitrary = createGeneratedHistoryArbitrary(`varied`)
-const tailOrderAblatedArbitrary = createGeneratedHistoryArbitrary(`removed`)
-
-declareOracle({
-  owns: [`src/wa-sqlite-driver.ts`],
-  grammar: [generatedHistoryArbitrary, tailOrderAblatedArbitrary],
-})
 let generatedPropertyExecutions = 0
 type GeneratedFailureRecord = {
   law: string
@@ -346,193 +117,225 @@ const runGeneratedFairnessHistory = async ({
   }
 }
 
-describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
-  it(`reconstructs the known persist-first witness, covers range marginals, and rejects a nearby invalid storm`, async () => {
-    oracleRoute(`calibration`)
-    const knownWitness = buildGeneratedHistory(2, 4, 1, [
-      { kind: `persist`, token: `p1` },
-      { kind: `persist`, token: `p2` },
-      { kind: `persist`, token: `p3` },
-      { kind: `hydrate`, token: `h0` },
-      { kind: `hydrate`, token: `h1` },
-    ])
-    expect(knownWitness).toEqual({
-      hydrateCount: 2,
-      persistCount: 4,
-      mutationsPerPersist: 1,
-      orderedKinds: [
-        `persist`,
-        `persist`,
-        `persist`,
-        `persist`,
-        `hydrate`,
-        `hydrate`,
+// Each fixed history below runs through withNodeScenario and the shared
+// comparison, expectFairObservation; the adapter transports that judgment.
+const fairnessLaw = `shared-driver K=1 fairness`
+const fairnessLawText = {
+  statement: `Under a persist storm, the already-running persist completes before the first cold hydrate, at most one more persist completes between consecutive hydrate completions, FIFO order holds inside each lane, and hydrated public rows equal their independently seeded rows.`,
+  authority: `RFC #1659's K=1 complete-logical-cold-hydrate scheduling, as shared-driver-fairness-oracle.ts states it.`,
+}
+
+async function runNeutralReach(): Promise<void> {
+  await withNodeScenario(
+    createScenario(`neutral-reach`, [`hydrate`, `hydrate`, `hydrate`]),
+    (observation) => {
+      expectFairObservation(observation)
+      expect(
+        observation.rawDequeues.some((entry) =>
+          entry.sql.startsWith(`SELECT key, value, metadata, row_version FROM`),
+        ),
+      ).toBe(true)
+    },
+  )
+}
+
+async function runFixedPersistStorm(): Promise<void> {
+  const scenario = createScenario(
+    `fixed-persist-storm`,
+    [`persist`, `persist`, `persist`, `hydrate`, `hydrate`],
+    2,
+  )
+  await withNodeScenario(scenario, (observation) => {
+    expectFairObservation(observation)
+
+    // A K=2 scheduler could finish the third persist before the second
+    // hydrate. K=1 must leave it pending at that logical checkpoint.
+    const secondHydrate = observation.hydrationCompletions[1]!
+    expect(secondHydrate.pendingPersistCount).toBeGreaterThan(0)
+    const completedPersistIds = scenario.work
+      .filter((work) => work.kind === `persist`)
+      .map((work) => `${scenario.id}-${work.id}`)
+    expect(observation.hydrationCompletions[0]?.completedPersistIds).toEqual(
+      completedPersistIds.slice(0, 1),
+    )
+    const k2WrongAnswer = {
+      ...observation,
+      logicalCompletionOrder: [
+        `persist:${completedPersistIds[0]}`,
+        `hydrate:${observation.hydrationCompletions[0]!.collectionId}`,
+        `persist:${completedPersistIds[1]}`,
+        `persist:${completedPersistIds[2]}`,
+        `hydrate:${secondHydrate.collectionId}`,
       ],
-      replayHistory: `p0,p1,p2,p3,h0,h1`,
+      hydrationCompletions: [
+        observation.hydrationCompletions[0]!,
+        {
+          ...secondHydrate,
+          completionOrdinal: 4,
+          completedPersistIds,
+          pendingPersistCount: 0,
+        },
+      ],
+    }
+    expect(findSharedDriverFairnessViolation(k2WrongAnswer)).toMatchObject({
+      checkpoint: k2WrongAnswer.hydrationCompletions[1],
+      expectedMaximumCompletedPersists: 2,
+      expectedMinimumPendingPersists: 1,
     })
+    expect(findSharedDriverFairnessViolation(k2WrongAnswer, 2)).toBeUndefined()
 
-    // Fixing hydrate count at two loses later completion checkpoints. Fixing
-    // persist count at three loses larger backlogs. Fixing mutation width at
-    // one loses multi-row work inside one logical persist.
-    const marginalHistories = [
-      buildGeneratedHistory(2, 3, 1, [
-        { kind: `persist`, token: `p1` },
-        { kind: `persist`, token: `p2` },
-        { kind: `hydrate`, token: `h0` },
-        { kind: `hydrate`, token: `h1` },
-      ]),
-      buildGeneratedHistory(7, 7, 3, [
-        ...Array.from({ length: 6 }, (_, index) => ({
-          kind: `persist` as const,
-          token: `p${index + 1}`,
-        })),
-        ...Array.from({ length: 7 }, (_, index) => ({
-          kind: `hydrate` as const,
-          token: `h${index}`,
-        })),
-      ]),
-    ]
+    // A hydrate that preempts the running persist stays under every K=1
+    // ceiling. Only the non-preemptible law rejects it.
+    const firstHydrate = observation.hydrationCompletions[0]!
+    const preemptedWrongAnswer = {
+      ...observation,
+      hydrationCompletions: [
+        {
+          ...firstHydrate,
+          completedPersistIds: [],
+          pendingPersistCount: firstHydrate.pendingPersistCount + 1,
+        },
+        ...observation.hydrationCompletions.slice(1),
+      ],
+    }
     expect(
-      marginalHistories.map((history) => [
-        history.hydrateCount,
-        history.persistCount,
-        history.mutationsPerPersist,
-      ]),
+      findSharedDriverFairnessViolation(preemptedWrongAnswer),
+    ).toBeUndefined()
+    expect(
+      findSharedDriverFairnessLawViolations(preemptedWrongAnswer).map(
+        ({ law, checkpoint }) => ({ law, checkpoint }),
+      ),
     ).toEqual([
-      [2, 3, 1],
-      [7, 7, 3],
+      {
+        law: `non-preemptible running persist`,
+        checkpoint: `hydrate completion 0`,
+      },
     ])
 
-    await expect(
-      withNodeScenario(
-        createScenario(`invalid-storm-boundary`, [
-          `hydrate`,
-          `persist`,
-          `hydrate`,
-        ]),
-        expectFairObservation,
-      ),
-    ).rejects.toThrow(`must begin with its already-running persist`)
-  })
-
-  it(`reaches cold hydration and preserves independently seeded public rows without queued persists`, async () => {
-    oracleRoute(`fixed history`)
-    await withNodeScenario(
-      createScenario(`neutral-reach`, [`hydrate`, `hydrate`, `hydrate`]),
-      (observation) => {
-        expectFairObservation(observation)
-        expect(
-          observation.rawDequeues.some((entry) =>
-            entry.sql.startsWith(
-              `SELECT key, value, metadata, row_version FROM`,
-            ),
-          ),
-        ).toBe(true)
+    const swappedPersistOrder = observation.logicalCompletionOrder.map(
+      (entry) => {
+        if (entry === `persist:${completedPersistIds[1]}`) {
+          return `persist:${completedPersistIds[2]}`
+        }
+        if (entry === `persist:${completedPersistIds[2]}`) {
+          return `persist:${completedPersistIds[1]}`
+        }
+        return entry
       },
     )
+    let orderFailure: unknown
+    try {
+      expectFairObservation({
+        ...observation,
+        logicalCompletionOrder: swappedPersistOrder,
+      })
+    } catch (error) {
+      orderFailure = error
+    }
+    expect(orderFailure).toMatchObject({
+      law: `persist FIFO completion order`,
+      checkpoint: `after all work settled`,
+    })
+  })
+}
+
+const fixedFairnessHistories = new Map<string, () => Promise<void>>([
+  [
+    `reaches cold hydration and preserves independently seeded public rows without queued persists`,
+    runNeutralReach,
+  ],
+  [
+    `completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`,
+    runFixedPersistStorm,
+  ],
+])
+
+// The named persist-first storm: four persists, then two hydrates. The real
+// scheduler must pass it; the persist-first FIFO scheduling mutant must fail
+// the checker on it.
+const persistFirstScenario = () =>
+  createScenario(
+    `persist-first-fixture-fault`,
+    [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
+    1,
+  )
+
+async function rejectPersistFirstFifo(): Promise<void> {
+  let rejected: ReturnType<typeof findSharedDriverFairnessViolation>
+  await withNodeScenario(
+    createScenario(
+      `persist-first-fixture-fault`,
+      [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
+      1,
+    ),
+    (observation) => {
+      expectObservationReach(observation)
+      const violation = findSharedDriverFairnessViolation(observation)
+      if (!violation) {
+        throw new Error(
+          `persist-first scheduling mutant escaped the fairness checker; ` +
+            `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+        )
+      }
+      expect(violation.checkpoint.completedPersistIds).toHaveLength(4)
+      expect(violation.checkpoint.pendingPersistCount).toBe(0)
+      expect(observation.cleanupFailures).toEqual([])
+      rejected = violation
+    },
+    { schedulingFault: `persist-first-fifo` },
+  )
+  // The checker found the mutant's violation at the asserted checkpoint.
+  if (rejected)
+    rejectAt(
+      `calibration persist-first-fifo`,
+      new Error(
+        `persist-first scheduling mutant rejected: ${JSON.stringify(rejected.checkpoint)}`,
+      ),
+    )
+}
+
+describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
+  oracleProperty({
+    id: `browser.shared-driver-fairness.fixed`,
+    law: {
+      ...fairnessLawText,
+      limits: `The neutral hydrate-only history and the fixed persist storm, with the storm's checker calibrations of a K=2 answer, a preempted running persist, and swapped persist order.`,
+    },
+    owns: [`src/wa-sqlite-driver.ts`],
+    histories: [...fixedFairnessHistories.keys()],
+    label: (name) => name,
+    resolve: (name) => ({ run: fixedFairnessHistories.get(name)! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(fairnessLaw, plan, observe, () => plan.run()),
+    check: forwardAssertionJudgment,
   })
 
-  it(`completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`, async () => {
-    oracleRoute(`fixed history`)
-    const scenario = createScenario(
-      `fixed-persist-storm`,
-      [`persist`, `persist`, `persist`, `hydrate`, `hydrate`],
-      2,
-    )
-    await withNodeScenario(scenario, (observation) => {
-      expectFairObservation(observation)
-
-      // A K=2 scheduler could finish the third persist before the second
-      // hydrate. K=1 must leave it pending at that logical checkpoint.
-      const secondHydrate = observation.hydrationCompletions[1]!
-      expect(secondHydrate.pendingPersistCount).toBeGreaterThan(0)
-      const completedPersistIds = scenario.work
-        .filter((work) => work.kind === `persist`)
-        .map((work) => `${scenario.id}-${work.id}`)
-      expect(observation.hydrationCompletions[0]?.completedPersistIds).toEqual(
-        completedPersistIds.slice(0, 1),
-      )
-      const k2WrongAnswer = {
-        ...observation,
-        logicalCompletionOrder: [
-          `persist:${completedPersistIds[0]}`,
-          `hydrate:${observation.hydrationCompletions[0]!.collectionId}`,
-          `persist:${completedPersistIds[1]}`,
-          `persist:${completedPersistIds[2]}`,
-          `hydrate:${secondHydrate.collectionId}`,
-        ],
-        hydrationCompletions: [
-          observation.hydrationCompletions[0]!,
-          {
-            ...secondHydrate,
-            completionOrdinal: 4,
-            completedPersistIds,
-            pendingPersistCount: 0,
-          },
-        ],
-      }
-      expect(findSharedDriverFairnessViolation(k2WrongAnswer)).toMatchObject({
-        checkpoint: k2WrongAnswer.hydrationCompletions[1],
-        expectedMaximumCompletedPersists: 2,
-        expectedMinimumPendingPersists: 1,
-      })
-      expect(
-        findSharedDriverFairnessViolation(k2WrongAnswer, 2),
-      ).toBeUndefined()
-
-      // A hydrate that preempts the running persist stays under every K=1
-      // ceiling. Only the non-preemptible law rejects it.
-      const firstHydrate = observation.hydrationCompletions[0]!
-      const preemptedWrongAnswer = {
-        ...observation,
-        hydrationCompletions: [
-          {
-            ...firstHydrate,
-            completedPersistIds: [],
-            pendingPersistCount: firstHydrate.pendingPersistCount + 1,
-          },
-          ...observation.hydrationCompletions.slice(1),
-        ],
-      }
-      expect(
-        findSharedDriverFairnessViolation(preemptedWrongAnswer),
-      ).toBeUndefined()
-      expect(
-        findSharedDriverFairnessLawViolations(preemptedWrongAnswer).map(
-          ({ law, checkpoint }) => ({ law, checkpoint }),
-        ),
-      ).toEqual([
-        {
-          law: `non-preemptible running persist`,
-          checkpoint: `hydrate completion 0`,
-        },
-      ])
-
-      const swappedPersistOrder = observation.logicalCompletionOrder.map(
-        (entry) => {
-          if (entry === `persist:${completedPersistIds[1]}`) {
-            return `persist:${completedPersistIds[2]}`
-          }
-          if (entry === `persist:${completedPersistIds[2]}`) {
-            return `persist:${completedPersistIds[1]}`
-          }
-          return entry
-        },
-      )
-      let orderFailure: unknown
-      try {
-        expectFairObservation({
-          ...observation,
-          logicalCompletionOrder: swappedPersistOrder,
-        })
-      } catch (error) {
-        orderFailure = error
-      }
-      expect(orderFailure).toMatchObject({
-        law: `persist FIFO completion order`,
-        checkpoint: `after all work settled`,
-      })
-    })
+  oracleProperty({
+    id: `browser.shared-driver-fairness.persist-first`,
+    law: {
+      ...fairnessLawText,
+      limits: `The named persist-first storm through the real package path; its calibration runs the persist-first FIFO scheduling mutant.`,
+    },
+    owns: [`src/wa-sqlite-driver.ts`],
+    histories: [{ name: `persist-first-fixture` }],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+        withNodeScenario(persistFirstScenario(), expectFairObservation),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects the named persist-first FIFO wrong answer through the real package path`,
+        law: fairnessLaw,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+            rejectPersistFirstFifo(),
+          ),
+      },
+    ],
   })
 
   {
@@ -541,6 +344,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       generatedHistoryArbitrary,
       {
         id: 'browser.shared-driver-fairness',
+        owns: [`src/wa-sqlite-driver.ts`],
         runs: GENERATED_RUNS,
         fixedSeed: FIXED_SEED,
         beforeCampaign: () => {
@@ -612,8 +416,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       work: withBarrier.work.filter((work) => work.kind !== `barrier`),
     }
 
-    it(`keeps the K=1 interleaving and waits only for the hydrate queued before it`, async () => {
-      oracleRoute(`fixed history`)
+    async function runBarrierHistory(): Promise<void> {
       let baseline: ReadonlyArray<string> | undefined
       await withNodeScenario(withoutBarrier, (observation) => {
         expectFairObservation(observation)
@@ -628,10 +431,9 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         expect(settled).toBeGreaterThan(trace.indexOf(`hydrate-scope-end:1`))
         expect(settled).toBeLessThan(trace.indexOf(`hydrate-scope-end:2`))
       })
-    })
+    }
 
-    it(`rejects an empty regular task used as the barrier`, async () => {
-      oracleRoute(`calibration`)
+    async function rejectEmptyRegularBarrier(): Promise<void> {
       let baseline: ReadonlyArray<string> | undefined
       await withNodeScenario(withoutBarrier, (observation) => {
         baseline = observation.logicalCompletionOrder
@@ -650,14 +452,24 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         },
         { barrierFault: `empty-regular` },
       )
-      expect({
+      const outcome = {
         sameInterleaving: JSON.stringify(observed) === JSON.stringify(baseline),
         checkerFailed: checkerFailure !== undefined,
-      }).not.toEqual({ sameInterleaving: true, checkerFailed: false })
-    })
+      }
+      // Exactly the old matcher, which required this outcome not to equal
+      // { sameInterleaving: true, checkerFailed: false }: the mutant counts as
+      // rejected when it changed the interleaving or failed the checker.
+      if (!outcome.sameInterleaving || outcome.checkerFailed)
+        rejectAt(
+          `calibration empty-regular`,
+          new Error(
+            `empty regular barrier rejected: ${JSON.stringify(outcome)}`,
+            { cause: checkerFailure },
+          ),
+        )
+    }
 
-    it(`rejects an empty hydrate scope used as the barrier`, async () => {
-      oracleRoute(`calibration`)
+    async function rejectEmptyHydrateBarrier(): Promise<void> {
       let failure: unknown
       await withNodeScenario(
         withBarrier,
@@ -670,69 +482,62 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         },
         { barrierFault: `empty-hydrate` },
       )
-      expect(failure).toMatchObject({
-        law: `K=1 completed-persist bound; K=1 pending-persist backlog; completed persist outside permitted prefix`,
-        checkpoint: `hydrate completion 1`,
-      })
-    })
-  })
-
-  it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
-    oracleRoute(`calibration`)
-    const sampleOptions = {
-      seed: FIXED_SEED,
-      numRuns: oracleRuns(GENERATED_RUNS),
+      // Exactly the old matcher: only a failure that names this law and
+      // checkpoint counts as the check rejecting the empty hydrate scope.
+      const matched =
+        typeof failure === `object` &&
+        failure !== null &&
+        `law` in failure &&
+        failure.law ===
+          `K=1 completed-persist bound; K=1 pending-persist backlog; completed persist outside permitted prefix` &&
+        `checkpoint` in failure &&
+        failure.checkpoint === `hydrate completion 1`
+      if (matched)
+        rejectAt(
+          `calibration empty-hydrate`,
+          failure instanceof Error
+            ? failure
+            : new Error(`empty hydrate barrier rejected`, { cause: failure }),
+        )
     }
-    const completeGrammar = fc.sample(generatedHistoryArbitrary, sampleOptions)
-    const tailOrderAblatedGrammar = fc.sample(
-      tailOrderAblatedArbitrary,
-      sampleOptions,
-    )
 
-    expect(completeGrammar.some(reachesHydrateBeforeLaterPersist)).toBe(true)
-    expect(tailOrderAblatedGrammar.some(reachesHydrateBeforeLaterPersist)).toBe(
-      false,
-    )
-  })
-
-  it(`rejects the named persist-first FIFO wrong answer through the real package path`, async () => {
-    oracleRoute(`calibration`)
-    await withNodeScenario(
-      createScenario(
-        `persist-first-fixture-fault`,
-        [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
-        1,
-      ),
-      (observation) => {
-        expectObservationReach(observation)
-        const violation = findSharedDriverFairnessViolation(observation)
-        if (!violation) {
-          throw new Error(
-            `persist-first scheduling mutant escaped the fairness checker; ` +
-              `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
-          )
-        }
-        expect(violation.checkpoint.completedPersistIds).toHaveLength(4)
-        expect(violation.checkpoint.pendingPersistCount).toBe(0)
-        expect(observation.cleanupFailures).toEqual([])
+    oracleProperty({
+      id: `browser.shared-driver-fairness.barrier`,
+      law: {
+        ...fairnessLawText,
+        limits: `One election barrier between two queued hydrates, compared with the same history without it; its calibrations run an empty regular task and an empty hydrate scope as the barrier.`,
       },
-      { schedulingFault: `persist-first-fifo` },
-    )
-  })
-
-  it(`calibrates the checker against a synthetic persist-first observation`, () => {
-    oracleRoute(`calibration`)
-    const scenario = createScenario(
-      `persist-first-checker-calibration`,
-      [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
-      1,
-    )
-    const fault = createPersistFirstFaultObservation(scenario)
-
-    expect(findSharedDriverFairnessViolation(fault)).toMatchObject({
-      checkpoint: fault.hydrationCompletions[0],
-      expectedMaximumCompletedPersists: 1,
-      expectedMinimumPendingPersists: 3,
+      owns: [`src/wa-sqlite-driver.ts`],
+      histories: [
+        {
+          name: `keeps the K=1 interleaving and waits only for the hydrate queued before it`,
+        },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+          runBarrierHistory(),
+        ),
+      check: forwardAssertionJudgment,
+      calibrations: [
+        {
+          name: `rejects an empty regular task used as the barrier`,
+          law: fairnessLaw,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+              rejectEmptyRegularBarrier(),
+            ),
+        },
+        {
+          name: `rejects an empty hydrate scope used as the barrier`,
+          law: fairnessLaw,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+              rejectEmptyHydrateBarrier(),
+            ),
+        },
+      ],
     })
   })
 })

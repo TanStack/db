@@ -10,6 +10,8 @@ import type { GeneratedHistories } from '../../db/tests/oracle-config'
 
 type BrowserCampaign<THistory> = {
   id: string
+  // The caller's owns list, forwarded unchanged to oracleProperty.
+  owns?: ReadonlyArray<string>
   runs: number
   fixedSeed: number
   examples?: ReadonlyArray<THistory>
@@ -54,6 +56,7 @@ export function registerBrowserProperty<THistory>(
     for (const histories of sources)
       oracleProperty({
         id: campaign.id,
+        owns: campaign.owns,
         law: {
           statement,
           authority: `The calling owner's existing RFC #1659 and persistence contract citations.`,
