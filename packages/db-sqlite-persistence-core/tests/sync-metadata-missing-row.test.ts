@@ -1,25 +1,23 @@
 // @vitest-environment node
-import { fc } from '@fast-check/vitest'
-import { it } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  describeMismatch,
+  missingRowMetadataBatch,
   missingRowMetadataCases,
-  missingRowMetadataHistoriesArbitrary,
+  missingRowMetadataRepeatsArbitrary,
   persistedPeerFullGrammar,
   persistedPeerGrammar,
   persistedPeerOnDemandGrammar,
   runSessionHistory,
 } from '../../db/tests/sync-metadata-session-oracle'
-import {
-  oraclePropertyOptions,
-  oracleRuns,
-  readOracleRunConfig,
-  recordOracleReplay,
-} from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
-import { requireExecutedHistory } from './sync-metadata-campaign-result'
 import { createPersistedDriver } from './sync-metadata-session-persisted-driver'
 import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
+import {
+  checkSessionRuns,
+  completedSessionRuns,
+  observeSessionRun,
+  sessionRunCalibrations,
+} from './sync-metadata-session-runs'
+import type { OwedSessionRun } from './sync-metadata-session-runs'
 
 /**
  * Both receivers use the session oracle's D16/D9/D18 model and comparison.
@@ -28,85 +26,89 @@ import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
  * and durable metadata are compared at each completed commit, then after a
  * named peer notice. Core holds vary application without delaying durability.
  * This is one sync run; restart and intermediate SQL statements are outside it.
+ *
+ * History: the number of times the missing row's metadata is written. Its
+ * plan is the constructive batch of `missingRowMetadataCases`, which holds
+ * every case, so every generated history is the construction that enters
+ * every declared state: each case on each production path, completed without
+ * a mismatch and with every authored action run.
  */
 const productionPaths = [
   persistedPeerGrammar,
   persistedPeerFullGrammar,
   persistedPeerOnDemandGrammar,
 ]
-const requested = readOracleRunConfig().replayProperty
+const state = (productionPathName: string, name: string) =>
+  `${productionPathName}: ${name}`
+const states = productionPaths.flatMap((productionPath) =>
+  missingRowMetadataCases.map(({ name }) => state(productionPath.name, name)),
+)
+type Batch = ReturnType<typeof missingRowMetadataBatch>
+const owedRuns = (batch: Batch): Array<OwedSessionRun> =>
+  productionPaths.flatMap((productionPath) =>
+    batch.map(({ name, history }) => ({
+      path: productionPath.name,
+      name,
+      actions: history.length,
+    })),
+  )
+
 for (const [host, property] of [
   [`persisted`, `sync-metadata-session.persisted-missing-row-metadata`],
   [`sqlite`, `sync-metadata-session.sqlite-missing-row-metadata`],
 ] as const) {
-  for (const campaign of [`fixed`, `random`] as const) {
-    if (
-      requested !== undefined &&
-      (requested !== property || campaign === `fixed`)
-    )
-      continue
-    it(`keeps missing-row metadata local unless explicitly written (${host}, ${campaign})`, async () => {
-      const state = (productionPathName: string, name: string) =>
-        `${productionPathName}: ${name}`
-      const reach = createOracleReach(
-        property,
-        productionPaths.flatMap((productionPath) =>
-          missingRowMetadataCases.map(({ name }) =>
-            state(productionPath.name, name),
-          ),
-        ),
-      )
-      const result = await fc.check(
-        fc.asyncProperty(
-          missingRowMetadataHistoriesArbitrary,
-          async (batch) => {
-            const failures: Array<string> = []
-            for (const productionPath of productionPaths) {
-              for (const { name, history } of batch) {
-                reach.beginHistory()
-                const historyResult = await runSessionHistory(
-                  productionPath,
-                  history,
-                  () =>
-                    host === `sqlite`
-                      ? createSQLiteDriver(productionPath)
-                      : createPersistedDriver(
-                          true,
-                          true,
-                          false,
-                          true,
-                          productionPath.fullRows,
-                          productionPath.onDemand,
-                        ),
-                )
-                if (historyResult.mismatch) {
-                  failures.push(
-                    `${state(productionPath.name, name)}\n${describeMismatch(history, historyResult.mismatch)}`,
-                  )
-                } else if (historyResult.steps !== history.length)
-                  throw new Error(
-                    `constructive history skipped an authored action`,
-                  )
-                else reach.reach(state(productionPath.name, name))
-              }
-            }
-            if (failures.length) throw new Error(failures.join(`\n\n`))
-          },
-        ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(8), seed: 2220037 }
-          : oraclePropertyOptions(8, property),
-      )
-      recordOracleReplay(property, result)
-      requireExecutedHistory(property, result)
-      console.info(
-        `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
-      )
-      if (result.failed)
-        throw new Error(
-          `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
-        )
-      reach.assertReached()
-    }, 240_000)
-  }
+  oracleProperty<number, Array<OwedSessionRun>, Batch>({
+    id: property,
+    law: {
+      statement: `Metadata written while a row is missing in this run stays local unless explicitly written: an enclosing update that recreates the row after an inner delete commits first keeps it without storing it, named writes replace it, unknown writes follow D15, and source deletes and truncates clear it. Source reads and durable metadata agree with the session model at every checkpoint (${host} receiver).`,
+      authority: `Sync metadata session oracle decisions D9, D11, D15, D16 and D18 (packages/db/tests/sync-metadata-session-oracle.ts).`,
+      limits: `One sync run per history over the three peer production paths; restart and intermediate SQL statements are outside it.`,
+    },
+    owns:
+      host === `sqlite`
+        ? [`src/persisted.ts`, `src/sqlite-core-adapter.ts`]
+        : [`src/persisted.ts`],
+    histories: {
+      arbitrary: missingRowMetadataRepeatsArbitrary,
+      runs: 8,
+      fixedSeeds: [2220037],
+      states,
+      constructed: [
+        {
+          name: `every missing-row case on every production path`,
+          enters: states,
+          build: (repeats) => repeats,
+        },
+      ],
+    },
+    resolve: missingRowMetadataBatch,
+    model: owedRuns,
+    driver: async (batch, observe) => {
+      for (const productionPath of productionPaths)
+        for (const { name, history } of batch)
+          await observeSessionRun(
+            observe,
+            { path: productionPath.name, name, actions: history.length },
+            history,
+            () =>
+              runSessionHistory(productionPath, history, () =>
+                host === `sqlite`
+                  ? createSQLiteDriver(productionPath)
+                  : createPersistedDriver(
+                      true,
+                      true,
+                      false,
+                      true,
+                      productionPath.fullRows,
+                      productionPath.onDemand,
+                    ),
+              ),
+          )
+    },
+    check: (_batch, observations, owed) => checkSessionRuns(observations, owed),
+    reached: (_batch, trace) =>
+      completedSessionRuns(trace).map((run) => state(run.path, run.name)),
+    calibrations: sessionRunCalibrations(),
+    timeout: 240_000,
+  })
 }

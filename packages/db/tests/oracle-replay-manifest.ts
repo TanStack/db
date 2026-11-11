@@ -15,6 +15,31 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `query-db-collection/tests/documented-mutations-oracle.test.ts`,
+    `documented-mutations`,
+    `query`,
+  ],
+  [
+    `electric-db-collection/tests/documented-mutations-oracle.test.ts`,
+    `documented-mutations`,
+    `electric`,
+  ],
+  [
+    `query-db-collection/tests/reload-housekeeping-oracle.test.ts`,
+    `query-db`,
+    `reload-housekeeping`,
+  ],
+  [
+    `query-db-collection/tests/failing-queries-oracle.test.ts`,
+    `query-db`,
+    `failing-queries`,
+  ],
+  [
+    `electric-db-collection/e2e/collection-gc.e2e.test.ts`,
+    `collection-lifecycle.gc-retention-boundaries`,
+    `electric-postgres`,
+  ],
+  [
     `query-db-collection/tests/scope-omission-reacquisition-oracle.test.ts`,
     `query`,
     `scope-omission-reacquisition`,
@@ -305,11 +330,6 @@ const ownerGroups: ReadonlyArray<
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
-  ],
-  [
-    `db/tests/declared-reach-oracle.property.test.ts`,
-    `oracle`,
-    `declared-reach declared-reach-examples`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -1676,7 +1696,6 @@ const replayTestNames = new Map([
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
-  [`oracle.declared-reach`, `oracle\\.declared-reach > random seed`],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1880,6 +1899,11 @@ const enumeratedProperties = new Set([
     ),
   ),
   `trailbase.lifecycle.boundaries`,
+  `documented-mutations.query`,
+  `documented-mutations.electric`,
+  `query-db.reload-housekeeping`,
+  `query-db.failing-queries`,
+  `collection-lifecycle.gc-retention-boundaries.electric-postgres`,
   `query-db.ownership.reacquisition`,
   `query-db.ownership.published-owners`,
   `query-db.ownership.direct-lifetime`,
@@ -1934,7 +1958,6 @@ const enumeratedProperties = new Set([
   `svelte.cache-options`,
   `svelte.descriptor-start-release`,
   `query.ordered-mutation-outcome`,
-  `oracle.declared-reach-examples`,
   `sorted-map.regressions`,
   `sorted-map.reach-calibration`,
   `scripts.release-version`,
@@ -1988,7 +2011,34 @@ const nativeReactProperties = new Set([
   `react.ssr-runtime-infinite`,
 ])
 
+// The SQLite package's converted sync metadata session properties. Their
+// random campaigns carry the framework's native name.
+const nativeSyncMetadataProperties = new Set(
+  [
+    `persisted-missing-row-metadata`,
+    `sqlite-missing-row-metadata`,
+    `sqlite-recovery-schedules`,
+    `sqlite-seed-reinsert-reload`,
+    `sqlite-kept-metadata-durability`,
+    `persisted-seed-reinsert-reload`,
+    `persisted-kept-metadata-durability`,
+    `persisted-queued-metadata-repair`,
+    `persisted-nested`,
+    `persisted-seeds`,
+    `persisted-cached`,
+    `persisted-conflicts`,
+    `persisted-reads`,
+    `persisted-reads-seeds`,
+    `persisted-peers`,
+    `persisted-peers-full`,
+    `persisted-peers-on-demand`,
+    `persisted-nested-seeds`,
+  ].map((suffix) => `sync-metadata-session.${suffix}`),
+)
+
 function directReplayTestName(property: string): string | undefined {
+  if (nativeSyncMetadataProperties.has(property))
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
     return `${property.replaceAll(`.`, `\\.`)}.*random seed`
   if (
@@ -2141,6 +2191,10 @@ const ownerReplayConfigs = new Map([
   ],
   [
     `packages/electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/electric-db-collection/e2e/collection-gc.e2e.test.ts`,
     `vitest.e2e.config.ts`,
   ],
   [

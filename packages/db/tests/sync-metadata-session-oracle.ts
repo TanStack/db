@@ -431,6 +431,51 @@ export function createSessionModel(grammar: SessionGrammar): SessionModel {
 const collectionKeyArbitrary = fc.constantFrom(...sessionCollectionKeys)
 
 /**
+ * An action arbitrary that recognizes its own actions. `read` recovers the
+ * generating input from an action, and the action must be exactly the one
+ * that input builds, field for field. So a history built outside fast-check,
+ * such as a constructed history that splices a regime's prefix into a
+ * generated one, is a member of the grammar's language
+ * (`canShrinkWithoutContext`) and shrinks like a generated history. The
+ * unmapper is not used to generate: every seed draws the same histories as
+ * the plain `map` did.
+ */
+function actionOf<TInput>(
+  source: fc.Arbitrary<TInput>,
+  build: (input: TInput) => SessionAction,
+  read: (action: Readonly<Record<string, unknown>>) => TInput,
+): fc.Arbitrary<SessionAction> {
+  return source.map(build, (value) => {
+    if (typeof value !== `object` || value === null)
+      throw new Error(`not a session action`)
+    const input = read(value as Readonly<Record<string, unknown>>)
+    if (!sameAction(build(input), value))
+      throw new Error(`not an action this arbitrary builds`)
+    return input
+  })
+}
+
+/** Whether two actions have the same fields and values, in any key order. */
+function sameAction(left: object, right: object): boolean {
+  const fields = (action: object) =>
+    JSON.stringify(
+      Object.entries(action).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    )
+  return fields(left) === fields(right)
+}
+
+/** An action without fields, such as `begin`. */
+function bareAction(
+  type: `begin` | `commit` | `cancel` | `truncate` | `release` | `abandon`,
+): fc.Arbitrary<SessionAction> {
+  return actionOf(
+    fc.constant(type),
+    () => ({ type }),
+    () => type,
+  )
+}
+
+/**
  * Weights favour transaction boundaries and holds, because the laws concern
  * what happens across commits: most generated writes then land inside an open
  * transaction, and most histories commit more than once during a hold.
@@ -453,110 +498,142 @@ export function sessionActionArbitrary(
     grammar.keepsMetadata === true
       ? fc.constantFrom(false, false, false, false, false, false, false, true)
       : fc.boolean()
+  const keyed = (type: `rowSet` | `rowDelete` | `remove`) =>
+    actionOf(
+      rowKeyArbitrary,
+      (key) => ({ type, key }),
+      (action) => action.key as SessionRowKey,
+    )
+  const keyedWithMetadata = (
+    type: `upsert` | `reinsert` | `insertOverSeed` | `conflictingInsert`,
+    metadata: fc.Arbitrary<boolean>,
+  ) =>
+    actionOf(
+      fc.tuple(rowKeyArbitrary, metadata),
+      ([key, value]) => ({ type, key, metadata: value }),
+      (action) =>
+        [action.key as SessionRowKey, action.metadata as boolean] as [
+          SessionRowKey,
+          boolean,
+        ],
+    )
   const actions: Array<fc.WeightedArbitrary<SessionAction>> = [
-    weighted(4, fc.constant({ type: `begin` as const })),
-    weighted(4, fc.constant({ type: `commit` as const })),
-    weighted(1, fc.constant({ type: `cancel` as const })),
-    weighted(
-      grammar.keepsMetadata === true ? 1 : 2,
-      rowKeyArbitrary.map((key) => ({ type: `rowSet` as const, key })),
-    ),
-    weighted(
-      1,
-      rowKeyArbitrary.map((key) => ({ type: `rowDelete` as const, key })),
-    ),
+    weighted(4, bareAction(`begin`)),
+    weighted(4, bareAction(`commit`)),
+    weighted(1, bareAction(`cancel`)),
+    weighted(grammar.keepsMetadata === true ? 1 : 2, keyed(`rowSet`)),
+    weighted(1, keyed(`rowDelete`)),
     weighted(
       grammar.keepsMetadata === true ? 4 * rows : 2 * rows,
-      fc
-        .tuple(rowKeyArbitrary, metadataArbitrary)
-        .map(([key, metadata]) => ({ type: `upsert` as const, key, metadata })),
+      keyedWithMetadata(`upsert`, metadataArbitrary),
     ),
-    weighted(
-      rows,
-      fc.tuple(rowKeyArbitrary, metadataArbitrary).map(([key, metadata]) => ({
-        type: `reinsert` as const,
-        key,
-        metadata,
-      })),
-    ),
-    weighted(
-      grammar.keepsMetadata === true ? 1 : rows,
-      rowKeyArbitrary.map((key) => ({ type: `remove` as const, key })),
-    ),
-    weighted(1, fc.constant({ type: `truncate` as const })),
+    weighted(rows, keyedWithMetadata(`reinsert`, metadataArbitrary)),
+    weighted(grammar.keepsMetadata === true ? 1 : rows, keyed(`remove`)),
+    weighted(1, bareAction(`truncate`)),
     // The conflict grammar leaves collection metadata to the other grammars.
     ...(grammar.conflicts === true
       ? []
       : [
           weighted(
             2,
-            fc
-              .tuple(collectionKeyArbitrary, fc.integer({ min: 0, max: 5 }))
-              .map(([key, roll]) => ({
+            actionOf(
+              fc.tuple(collectionKeyArbitrary, fc.integer({ min: 0, max: 5 })),
+              ([key, roll]) => ({
                 type: `collectionSet` as const,
                 key,
                 ...(grammar.undefinedValues && roll === 0
                   ? { undefinedValue: true }
                   : {}),
-              })),
+              }),
+              (action) =>
+                [
+                  action.key as SessionCollectionKey,
+                  action.undefinedValue === true ? 0 : 1,
+                ] as [SessionCollectionKey, number],
+            ),
           ),
           weighted(
             1,
-            collectionKeyArbitrary.map((key) => ({
-              type: `collectionDelete` as const,
-              key,
-            })),
+            actionOf(
+              collectionKeyArbitrary,
+              (key) => ({ type: `collectionDelete` as const, key }),
+              (action) => action.key as SessionCollectionKey,
+            ),
           ),
         ]),
     weighted(
       3,
       grammar.readHold === true
-        ? fc.constantFrom(`core`, `store`, `read`).map((kind) => ({
-            type: `hold` as const,
-            store: kind === `store`,
-            read: kind === `read`,
-          }))
+        ? actionOf(
+            fc.constantFrom(`core`, `store`, `read`),
+            (kind) => ({
+              type: `hold` as const,
+              store: kind === `store`,
+              read: kind === `read`,
+            }),
+            (action) =>
+              action.read === true
+                ? `read`
+                : action.store === true
+                  ? `store`
+                  : `core`,
+          )
         : grammar.storeHold
-          ? fc.boolean().map((store) => ({ type: `hold` as const, store }))
-          : fc.constant({ type: `hold` as const }),
+          ? actionOf(
+              fc.boolean(),
+              (store) => ({ type: `hold` as const, store }),
+              (action) => action.store as boolean,
+            )
+          : actionOf(
+              fc.constant(`hold` as const),
+              (type) => ({ type }),
+              () => `hold` as const,
+            ),
     ),
-    weighted(1, fc.constant({ type: `release` as const })),
+    weighted(1, bareAction(`release`)),
     ...(grammar.readHold === true
       ? // Legal only just after a commit during a read, so it weighs more.
-        [weighted(8, fc.constant({ type: `abandon` as const }))]
+        [weighted(8, bareAction(`abandon`))]
       : []),
   ]
   if (grammar.seeds || grammar.cached === true)
     actions.push(
       weighted(
         grammar.keepsMetadata === true ? 1 : 2,
-        fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
-          type: `insertOverSeed` as const,
-          key,
-          metadata,
-        })),
+        keyedWithMetadata(`insertOverSeed`, fc.boolean()),
       ),
     )
   if (grammar.seeds)
     actions.push(
       weighted(
         4,
-        fc
-          .tuple(rowKeyArbitrary, fc.boolean(), fc.integer({ min: 0, max: 3 }))
-          .map(([key, narrow, roll]) => ({
+        actionOf(
+          fc.tuple(
+            rowKeyArbitrary,
+            fc.boolean(),
+            fc.integer({ min: 0, max: 3 }),
+          ),
+          ([key, narrow, roll]) => ({
             type: `seed` as const,
             key,
             narrow,
             ...(roll === 0 ? { bare: true } : {}),
-          })),
+          }),
+          (action) =>
+            [
+              action.key as SessionRowKey,
+              action.narrow as boolean,
+              action.bare === true ? 0 : 1,
+            ] as [SessionRowKey, boolean, number],
+        ),
       ),
     )
   if (grammar.peers === true)
     actions.push(
       weighted(
         4,
-        fc
-          .tuple(
+        actionOf(
+          fc.tuple(
             rowKeyArbitrary,
             fc.constantFrom<PeerNotice>(
               `row`,
@@ -566,28 +643,28 @@ export function sessionActionArbitrary(
               `reset`,
             ),
             fc.integer({ min: 0, max: 2 }),
-          )
-          .map(([key, notice, roll]) => ({
+          ),
+          ([key, notice, roll]) => ({
             type: `peer` as const,
             key,
             notice,
             ...(notice === `row` && roll === 0 ? { keepsValue: true } : {}),
             ...(notice === `reset` && roll === 0 ? { rewrites: true } : {}),
-          })),
+          }),
+          (action) =>
+            [
+              action.key as SessionRowKey,
+              action.notice as PeerNotice,
+              action.keepsValue === true || action.rewrites === true ? 0 : 1,
+            ] as [SessionRowKey, PeerNotice, number],
+        ),
       ),
     )
   // A fresh insert over a row the source wrote names a different row. Core
   // rejects it as a duplicate whatever holds or seeds there are; where
   // inserts replace, it replaces that row.
   actions.push(
-    weighted(
-      1,
-      fc.tuple(rowKeyArbitrary, metadataArbitrary).map(([key, metadata]) => ({
-        type: `conflictingInsert` as const,
-        key,
-        metadata,
-      })),
-    ),
+    weighted(1, keyedWithMetadata(`conflictingInsert`, metadataArbitrary)),
   )
   return fc.oneof(...actions)
 }
@@ -615,47 +692,57 @@ export function sessionHistoryArbitrary(
  * and read holds are excluded because their pending work blocks peer notices.
  * The general session grammar continues to cover their independent laws.
  */
+export const seedReinsertReloadInputArbitrary = fc.record({
+  key: fc.constantFrom(...sessionRowKeys),
+  bare: fc.boolean(),
+  narrow: fc.boolean(),
+  seedInside: fc.boolean(),
+  outerMetadata: fc.boolean(),
+  innerMetadata: fc.boolean(),
+  repeats: fc.integer({ min: 1, max: 3 }),
+  hold: fc.boolean(),
+  ending: fc.constantFrom(`open`, `commit`, `cancel`),
+  notice: fc.constantFrom(`row` as const, `reload` as const),
+})
+/** The choices one seed/re-insert/reload history is built from. */
+export type SeedReinsertReloadInput =
+  typeof seedReinsertReloadInputArbitrary extends fc.Arbitrary<infer T>
+    ? T
+    : never
+
+/** The actions of one seed/re-insert/reload history, from its choices. */
+export function seedReinsertReloadHistory(
+  input: SeedReinsertReloadInput,
+): Array<SessionAction> {
+  const seed: SessionAction = {
+    type: `seed`,
+    key: input.key,
+    bare: input.bare,
+    narrow: input.narrow,
+  }
+  return [
+    ...(input.hold ? [{ type: `hold` as const }] : []),
+    ...(input.seedInside
+      ? [{ type: `begin` as const }, seed]
+      : [seed, { type: `begin` as const }]),
+    { type: `insertOverSeed`, key: input.key, metadata: input.outerMetadata },
+    { type: `begin` },
+    ...Array.from({ length: input.repeats }, (): SessionAction => ({
+      type: `reinsert`,
+      key: input.key,
+      metadata: input.innerMetadata,
+    })),
+    { type: `commit` },
+    ...(input.ending === `open`
+      ? []
+      : [{ type: input.ending } as SessionAction]),
+    { type: `peer`, key: input.key === 1 ? 2 : 1, notice: input.notice },
+  ]
+}
+
 export const seedReinsertReloadHistoryArbitrary: fc.Arbitrary<
   Array<SessionAction>
-> = fc
-  .record({
-    key: fc.constantFrom(...sessionRowKeys),
-    bare: fc.boolean(),
-    narrow: fc.boolean(),
-    seedInside: fc.boolean(),
-    outerMetadata: fc.boolean(),
-    innerMetadata: fc.boolean(),
-    repeats: fc.integer({ min: 1, max: 3 }),
-    hold: fc.boolean(),
-    ending: fc.constantFrom(`open`, `commit`, `cancel`),
-    notice: fc.constantFrom(`row` as const, `reload` as const),
-  })
-  .map((input): Array<SessionAction> => {
-    const seed: SessionAction = {
-      type: `seed`,
-      key: input.key,
-      bare: input.bare,
-      narrow: input.narrow,
-    }
-    return [
-      ...(input.hold ? [{ type: `hold` as const }] : []),
-      ...(input.seedInside
-        ? [{ type: `begin` as const }, seed]
-        : [seed, { type: `begin` as const }]),
-      { type: `insertOverSeed`, key: input.key, metadata: input.outerMetadata },
-      { type: `begin` },
-      ...Array.from({ length: input.repeats }, (): SessionAction => ({
-        type: `reinsert`,
-        key: input.key,
-        metadata: input.innerMetadata,
-      })),
-      { type: `commit` },
-      ...(input.ending === `open`
-        ? []
-        : [{ type: input.ending } as SessionAction]),
-      { type: `peer`, key: input.key === 1 ? 2 : 1, notice: input.notice },
-    ]
-  })
+> = seedReinsertReloadInputArbitrary.map(seedReinsertReloadHistory)
 
 /** The source report is input to the same model and comparison as generation. */
 export const seedReinsertReloadReplay: Array<SessionAction> = [
@@ -678,48 +765,55 @@ export const seedReinsertReloadReplay: Array<SessionAction> = [
  * notice, a named notice and a full reload for each write/seed/metadata case,
  * so a random campaign cannot omit the unknown-author observation cut.
  */
-export const keptMetadataDurabilityHistoriesArbitrary = fc
-  .record({
-    narrow: fc.boolean(),
-    seedInside: fc.boolean(),
-    repeats: fc.integer({ min: 1, max: 3 }),
-  })
-  .map((input) =>
-    ([`update`, `reinsert`, `inner-reinsert`] as const).flatMap((write) =>
-      [false, true].flatMap((bare) =>
-        [false, true].flatMap((metadata) =>
-          ([`none`, `row`, `reload`] as const).map((notice) => {
-            const seed: SessionAction = {
-              type: `seed`,
+export const keptMetadataDurabilityInputArbitrary = fc.record({
+  narrow: fc.boolean(),
+  seedInside: fc.boolean(),
+  repeats: fc.integer({ min: 1, max: 3 }),
+})
+
+/** Every write/seed/metadata/notice case of one batch, from its choices. */
+export function keptMetadataDurabilityBatch(input: {
+  narrow: boolean
+  seedInside: boolean
+  repeats: number
+}) {
+  return ([`update`, `reinsert`, `inner-reinsert`] as const).flatMap((write) =>
+    [false, true].flatMap((bare) =>
+      [false, true].flatMap((metadata) =>
+        ([`none`, `row`, `reload`] as const).map((notice) => {
+          const seed: SessionAction = {
+            type: `seed`,
+            key: 1,
+            bare,
+            narrow: input.narrow,
+          }
+          const history: Array<SessionAction> = [
+            ...(input.seedInside
+              ? [{ type: `begin` as const }, seed]
+              : [seed, { type: `begin` as const }]),
+            {
+              type: write === `inner-reinsert` ? `insertOverSeed` : `upsert`,
               key: 1,
-              bare,
-              narrow: input.narrow,
-            }
-            const history: Array<SessionAction> = [
-              ...(input.seedInside
-                ? [{ type: `begin` as const }, seed]
-                : [seed, { type: `begin` as const }]),
-              {
-                type: write === `inner-reinsert` ? `insertOverSeed` : `upsert`,
-                key: 1,
-                metadata: false,
-              },
-            ]
-            if (write !== `update`) {
-              if (write === `reinsert`) history.push({ type: `commit` })
-              history.push({ type: `begin` })
-              for (let index = 0; index < input.repeats; index++)
-                history.push({ type: `reinsert`, key: 1, metadata })
-            } else if (metadata) history.push({ type: `rowSet`, key: 1 })
-            history.push({ type: `commit` })
-            if (notice !== `none`)
-              history.push({ type: `peer`, key: 2, notice })
-            return { write, bare, metadata, notice, history }
-          }),
-        ),
+              metadata: false,
+            },
+          ]
+          if (write !== `update`) {
+            if (write === `reinsert`) history.push({ type: `commit` })
+            history.push({ type: `begin` })
+            for (let index = 0; index < input.repeats; index++)
+              history.push({ type: `reinsert`, key: 1, metadata })
+          } else if (metadata) history.push({ type: `rowSet`, key: 1 })
+          history.push({ type: `commit` })
+          if (notice !== `none`) history.push({ type: `peer`, key: 2, notice })
+          return { write, bare, metadata, notice, history }
+        }),
       ),
     ),
   )
+}
+
+export const keptMetadataDurabilityHistoriesArbitrary =
+  keptMetadataDurabilityInputArbitrary.map(keptMetadataDurabilityBatch)
 
 /**
  * A later explicit write can repair a wrong implicit durable keep. Cross both
@@ -728,35 +822,45 @@ export const keptMetadataDurabilityHistoriesArbitrary = fc
  * cut, so the controlled driver records each completed durable transaction.
  * All histories run through the same model and comparison, without fixed answers.
  */
-export const queuedMetadataRepairHistoriesArbitrary = fc
-  .record({
-    narrow: fc.boolean(),
-    repeats: fc.integer({ min: 1, max: 3 }),
-  })
-  .map(({ narrow, repeats }) =>
-    [false, true].flatMap((bare) =>
-      [false, true].map((held) => {
-        const history: Array<SessionAction> = [
-          { type: `seed`, key: 1, bare, narrow },
-          ...(held ? [{ type: `hold` as const, store: true }] : []),
-          { type: `begin` },
-          { type: `insertOverSeed`, key: 1, metadata: false },
-          { type: `begin` },
-          ...Array.from({ length: repeats }, (): SessionAction => ({
-            type: `reinsert`,
-            key: 1,
-            metadata: false,
-          })),
-          { type: `commit` },
-          { type: `begin` },
-          { type: `rowSet`, key: 1 },
-          { type: `commit` },
-          ...(held ? [{ type: `release` as const }] : []),
-        ]
-        return { bare, held, history }
-      }),
-    ),
+export const queuedMetadataRepairInputArbitrary = fc.record({
+  narrow: fc.boolean(),
+  repeats: fc.integer({ min: 1, max: 3 }),
+})
+
+/** The four seed-metadata and hold cases of one batch, from its choices. */
+export function queuedMetadataRepairBatch({
+  narrow,
+  repeats,
+}: {
+  narrow: boolean
+  repeats: number
+}) {
+  return [false, true].flatMap((bare) =>
+    [false, true].map((held) => {
+      const history: Array<SessionAction> = [
+        { type: `seed`, key: 1, bare, narrow },
+        ...(held ? [{ type: `hold` as const, store: true }] : []),
+        { type: `begin` },
+        { type: `insertOverSeed`, key: 1, metadata: false },
+        { type: `begin` },
+        ...Array.from({ length: repeats }, (): SessionAction => ({
+          type: `reinsert`,
+          key: 1,
+          metadata: false,
+        })),
+        { type: `commit` },
+        { type: `begin` },
+        { type: `rowSet`, key: 1 },
+        { type: `commit` },
+        ...(held ? [{ type: `release` as const }] : []),
+      ]
+      return { bare, held, history }
+    }),
   )
+}
+
+export const queuedMetadataRepairHistoriesArbitrary =
+  queuedMetadataRepairInputArbitrary.map(queuedMetadataRepairBatch)
 
 /**
  * D16 keeps metadata written while a row is missing in this run, without
@@ -825,40 +929,45 @@ export const missingRowMetadataCases: ReadonlyArray<{
   },
 ]
 
-export const missingRowMetadataHistoriesArbitrary = fc
-  .integer({ min: 1, max: 3 })
-  .map((repeats) =>
-    missingRowMetadataCases.map(
-      ({ name, held, metadata, priorTruncate, tail }) => {
-        const history: Array<SessionAction> = [
-          ...(priorTruncate
-            ? [
-                { type: `begin` as const },
-                { type: `truncate` as const },
-                { type: `commit` as const },
-                { type: `begin` as const },
-                { type: `upsert` as const, key: 1 as const, metadata: false },
-                { type: `commit` as const },
-              ]
-            : []),
-          ...(held ? [{ type: `hold` as const }] : []),
-          { type: `begin` },
-          { type: `upsert`, key: 1, metadata: metadata === true },
-          { type: `begin` },
-          { type: `remove`, key: 1 },
-          ...Array.from({ length: repeats }, (): SessionAction => ({
-            type: `rowSet`,
-            key: 1,
-          })),
-          { type: `commit` },
-          { type: `commit` },
-          ...(held ? [{ type: `release` as const }] : []),
-          ...tail,
-        ]
-        return { name, history }
-      },
-    ),
+/** How many times the missing row's metadata is written in each case. */
+export const missingRowMetadataRepeatsArbitrary = fc.integer({ min: 1, max: 3 })
+
+/** Every missing-row case of one batch, from its repeat count. */
+export function missingRowMetadataBatch(repeats: number) {
+  return missingRowMetadataCases.map(
+    ({ name, held, metadata, priorTruncate, tail }) => {
+      const history: Array<SessionAction> = [
+        ...(priorTruncate
+          ? [
+              { type: `begin` as const },
+              { type: `truncate` as const },
+              { type: `commit` as const },
+              { type: `begin` as const },
+              { type: `upsert` as const, key: 1 as const, metadata: false },
+              { type: `commit` as const },
+            ]
+          : []),
+        ...(held ? [{ type: `hold` as const }] : []),
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: metadata === true },
+        { type: `begin` },
+        { type: `remove`, key: 1 },
+        ...Array.from({ length: repeats }, (): SessionAction => ({
+          type: `rowSet`,
+          key: 1,
+        })),
+        { type: `commit` },
+        { type: `commit` },
+        ...(held ? [{ type: `release` as const }] : []),
+        ...tail,
+      ]
+      return { name, history }
+    },
   )
+}
+
+export const missingRowMetadataHistoriesArbitrary =
+  missingRowMetadataRepeatsArbitrary.map(missingRowMetadataBatch)
 
 /**
  * This classifier records a completed implicit re-insert across a full reload
@@ -1038,6 +1147,178 @@ export function historyRegimes(
       regimes.add(action.store === true ? `store hold` : `core hold`)
   }
   return regimes
+}
+
+/**
+ * Regime constructions: for each regime that a persisted production path's
+ * property requires, a short prefix of legal actions that enters it from a
+ * fresh session. A constructed history is that prefix spliced in front of a
+ * generated history and trimmed to the grammar's length bounds, so the rest
+ * of the history stays random and the history shrinks like a generated one.
+ * `historyRegimes` decides whether a built history entered its regime, so a
+ * prefix that stops entering it fails its construction, not silently.
+ *
+ * Each prefix uses only actions the grammar generates; `hold` takes the
+ * grammar's own shape (core, store, or read hold).
+ */
+const sessionHold = (
+  grammar: SessionGrammar,
+  kind: `core` | `store` | `read`,
+): SessionAction =>
+  grammar.readHold === true
+    ? { type: `hold`, store: kind === `store`, read: kind === `read` }
+    : grammar.storeHold === true
+      ? { type: `hold`, store: kind === `store` }
+      : { type: `hold` }
+const begin: SessionAction = { type: `begin` }
+const commit: SessionAction = { type: `commit` }
+const release: SessionAction = { type: `release` }
+const upsert = (key: SessionRowKey, metadata: boolean): SessionAction => ({
+  type: `upsert`,
+  key,
+  metadata,
+})
+const seedOf = (key: SessionRowKey): SessionAction => ({
+  type: `seed`,
+  key,
+  narrow: false,
+})
+const peerOf = (key: SessionRowKey, notice: PeerNotice): SessionAction => ({
+  type: `peer`,
+  key,
+  notice,
+})
+export const regimeConstructions = {
+  'store hold': (grammar) => [sessionHold(grammar, `store`)],
+  seed: () => [seedOf(1)],
+  'nested commit': () => [begin, begin, commit, commit],
+  'nested commit during a hold': (grammar) => [
+    sessionHold(grammar, `core`),
+    begin,
+    begin,
+    commit,
+    commit,
+    release,
+  ],
+  'source insert over a seeded row': () => [
+    begin,
+    { type: `insertOverSeed`, key: 1, metadata: false },
+    commit,
+  ],
+  'source update over a seeded row': () => [begin, upsert(1, false), commit],
+  'inner write to an enclosing row': () => [
+    begin,
+    upsert(1, false),
+    begin,
+    upsert(1, false),
+    commit,
+    commit,
+  ],
+  // Row 2, which no grammar caches: the outer write is an insert, and the
+  // inner write to the same row that commits first makes it land on a
+  // different row.
+  'insert replaces a different row': () => [
+    begin,
+    upsert(2, false),
+    begin,
+    upsert(2, false),
+    commit,
+    commit,
+  ],
+  'duplicate source insert': () => [
+    begin,
+    upsert(1, false),
+    commit,
+    begin,
+    { type: `conflictingInsert`, key: 1, metadata: false },
+    commit,
+  ],
+  'write during a storage read': (grammar) => [
+    sessionHold(grammar, `read`),
+    begin,
+    { type: `rowSet`, key: 1 },
+    commit,
+    release,
+  ],
+  'storage read of a stored row': (grammar) => [
+    begin,
+    upsert(1, true),
+    commit,
+    sessionHold(grammar, `read`),
+    release,
+  ],
+  'abort after commit': (grammar) => [
+    sessionHold(grammar, `read`),
+    begin,
+    upsert(2, false),
+    commit,
+    { type: `abandon` },
+    release,
+  ],
+  'peer row notice': () => [peerOf(2, `row`)],
+  'peer metadata notice': () => [
+    begin,
+    upsert(2, true),
+    commit,
+    peerOf(2, `metadata`),
+  ],
+  'peer delete notice': () => [
+    begin,
+    upsert(2, true),
+    commit,
+    peerOf(2, `delete`),
+  ],
+  'peer reload notice': () => [peerOf(2, `reload`)],
+  'peer reset notice': () => [peerOf(1, `reset`)],
+  'named peer write over a held seed': () => [seedOf(2), peerOf(2, `row`)],
+  'full reload over a held seed': () => [seedOf(2), peerOf(2, `reload`)],
+  'peer write during an open insert': () => [
+    begin,
+    upsert(2, false),
+    peerOf(2, `row`),
+    commit,
+  ],
+  'peer write during a hold': (grammar) => [
+    sessionHold(grammar, `core`),
+    peerOf(2, `row`),
+    release,
+  ],
+  'reset over a held seed': () => [seedOf(2), peerOf(1, `reset`)],
+  'reset that rewrites its rows': () => [
+    { type: `peer`, key: 1, notice: `reset`, rewrites: true },
+  ],
+  'accepted update drops a field': () => [
+    begin,
+    upsert(1, true),
+    commit,
+    begin,
+    upsert(1, false),
+    commit,
+  ],
+  'seed under a kept re-insert': () => [
+    begin,
+    upsert(1, false),
+    { type: `reinsert`, key: 1, metadata: false },
+    commit,
+    seedOf(1),
+  ],
+} satisfies Record<
+  string,
+  (grammar: SessionGrammar) => ReadonlyArray<SessionAction>
+>
+/** A regime that a persisted production path's property requires. */
+export type ConstructedRegime = keyof typeof regimeConstructions
+
+/**
+ * A generated history with the regime's prefix in front, trimmed to the
+ * session grammar's 12 to 48 actions.
+ */
+export function constructRegime(
+  grammar: SessionGrammar,
+  regime: ConstructedRegime,
+  generated: ReadonlyArray<SessionAction>,
+): Array<SessionAction> {
+  return [...regimeConstructions[regime](grammar), ...generated].slice(0, 48)
 }
 
 /** Whether an action writes through the open transaction. */
@@ -2997,10 +3278,19 @@ declareOracle({
     sessionActionArbitrary,
     sessionHistoryArbitrary,
     historyRegimes,
+    constructRegime,
+    seedReinsertReloadInputArbitrary,
+    seedReinsertReloadHistory,
     seedReinsertReloadHistoryArbitrary,
     completedSeedReinsertReloadRegime,
+    keptMetadataDurabilityInputArbitrary,
+    keptMetadataDurabilityBatch,
     keptMetadataDurabilityHistoriesArbitrary,
+    queuedMetadataRepairInputArbitrary,
+    queuedMetadataRepairBatch,
     queuedMetadataRepairHistoriesArbitrary,
+    missingRowMetadataRepeatsArbitrary,
+    missingRowMetadataBatch,
     missingRowMetadataHistoriesArbitrary,
   ],
 })

@@ -322,8 +322,8 @@ presence of a preferred heading, class, comment template, or helper.
   random hits alone do not enforce either obligation.
   Literal fixed histories do not count toward required reach. A passing run
   count does not satisfy this requirement.
-  Existing files on the shrinking `legacyCampaigns` list retain their legacy
-  reach checks until conversion; new or converted campaigns use `oracleProperty`.
+  The `legacyCampaigns` list is empty: every campaign uses `oracleProperty`,
+  and the vendored legacy reach helpers are deleted.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.

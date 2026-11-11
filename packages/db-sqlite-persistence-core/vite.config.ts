@@ -28,6 +28,8 @@ const config = defineConfig({
         `tests/persisted-sync-problem-oracle.test.ts`,
         `tests/sqlite-resume-snapshot-oracle.test.ts`,
         `tests/persisted-optimistic-history-oracle.property.test.ts`,
+        `tests/sync-metadata-missing-row.test.ts`,
+        `tests/sync-metadata-recovery.test.ts`,
       ],
     },
   },

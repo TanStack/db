@@ -52,13 +52,9 @@ for (const file of new Set(paths)) {
   )
   files.push({
     file,
-    shape: imports.some((message) =>
-      message.message.includes(`runOracleCampaign`),
-    )
-      ? `campaign helper`
-      : imports.some((message) => message.message.includes(`createOracleReach`))
-        ? `manual reach`
-        : `raw campaign`,
+    // A legacy import names an API that @tanstack/oracles no longer exports;
+    // the rule still reports it, so a reintroduced copy is surveyed.
+    shape: imports.length > 0 ? `legacy import` : `raw campaign`,
     rawCalls: legacy.filter(
       (message) =>
         message.messageId === `rawCampaign` ||

@@ -19,6 +19,11 @@ export default defineConfig({
         `tests/ownership-bottom.oracle.test.ts`,
         `tests/ownership-upper.oracle.test.ts`,
         `tests/ownership-confirmation.oracle.test.ts`,
+        `tests/documented-mutations-oracle.test.ts`,
+        // Registers its histories only through oracleProperty, so the static
+        // type-test collector finds no suite in it; `tsc --noEmit` and the
+        // typecheck program still check it.
+        `tests/reload-housekeeping-oracle.test.ts`,
       ],
     },
   },
