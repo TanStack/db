@@ -7,10 +7,10 @@ import { randomUUID } from 'node:crypto'
 import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
 
 import { describe, expect, it, vi } from 'vitest'
-import {
-  declareOracle,
-  oracleRoute,
-} from '../../../db/tests/oracle-declaration.js'
+// The browser-safe route entry: these suites also run inside the Capacitor
+// and Tauri WebView apps, which cannot load the framework's Node-only main
+// entry, so this witness keeps its routes without oracleProperty.
+import { oracleRoute } from '@tanstack/oracles/declaration'
 import { waitFor, waitForQueryData } from '../utils/helpers'
 import type {
   Comment,
@@ -973,4 +973,3 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
 // but no consumer declares `owns` either, so the gap report counts none of
 // this suite's kills. The coverage map records this as a follow-up under
 // "Shared e2e suites".
-declareOracle({ check: [withJoinHistory], model: [createJoinOracle] })
