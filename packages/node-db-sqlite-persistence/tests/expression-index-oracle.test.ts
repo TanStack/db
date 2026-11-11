@@ -55,9 +55,12 @@
  * That property's random campaign replays only its recorded history; the fixed
  * campaigns and the other properties stand aside. A seed alone reseeds the
  * random campaigns. A matrix that lacks an axis fails every history's grammar
- * check (assertGeneratedScenarioGrammar, run by the driver), and each axis's
- * plausible wrong SQL answer is a native calibration that the unchanged
- * comparison must reject. Seed, run and path configuration, and the shrinking
+ * check (assertGeneratedScenarioGrammar, run by the driver); a per-axis
+ * grammar calibration ablates each axis from the fixed matrix and requires
+ * that check to name it. Each axis's plausible wrong SQL answer is a native
+ * calibration that the unchanged comparison must reject at that axis: the
+ * check names the compared axis in the law (`sqlite-persistence.expression-index:
+ * <kind> axis`). Seed, run and path configuration, and the shrinking
  * and same-path replay of a failure, belong to the @tanstack/oracles
  * self-oracle, which owns those laws for every oracleProperty. The
  * retained fixed campaign reconstructs the known valid matrix. The bounds
@@ -71,9 +74,9 @@
  * unchanged; the assertion adapter passes their judgment to oracleProperty.
  * Product campaigns use the native fixed/random/replay runner, and the SQL
  * wrong answers are its calibrations. The raw fast-check controls that once
- * checked grammar ablation, SQL-fault shrinking, same-path replay and
- * seed/run/path configuration are gone: the per-history grammar check above
- * enforces ablation, and the framework's self-oracle enforces the rest.
+ * checked SQL-fault shrinking, same-path replay and seed/run/path
+ * configuration are gone: the framework's self-oracle enforces them. Grammar
+ * ablation stays as a grammar calibration without fast-check campaigns.
  */
 import fc from 'fast-check'
 import { describe, expect, vi, it as vitestIt } from 'vitest'
@@ -118,6 +121,7 @@ import {
   sqliteScalarParameter,
   withFailurePreservingCleanup,
 } from './expression-index-support'
+import type { Observation, Verdict } from '../../db/tests/oracle-config.js'
 import type { TemporalFamily } from '../../db-sqlite-persistence-core/tests/temporal-value-oracle'
 import type {
   CapturedQuery,
@@ -903,6 +907,38 @@ declareOracle({
   grammar: [generatedScenarioMatrixArbitrary],
 })
 
+// A generated-matrix comparison names its scenario's axis in its checkpoint
+// (the diagnostic JSON's `kind`). The check carries that axis into the law,
+// so a violation, and each wrong-answer calibration, names the faulted axis.
+const generatedMatrixLaw = `sqlite-persistence.expression-index`
+const generatedAxisLaw = (kind: GeneratedScenarioKind) =>
+  `${generatedMatrixLaw}: ${kind} axis`
+function comparedAxis(checkpoint: string): GeneratedScenarioKind | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(checkpoint)
+  } catch {
+    return undefined
+  }
+  const kind =
+    typeof parsed === `object` && parsed !== null && `kind` in parsed
+      ? parsed.kind
+      : undefined
+  return GENERATED_SCENARIO_KINDS.find((axis) => axis === kind)
+}
+function checkGeneratedMatrix(
+  plan: unknown,
+  trace: ReadonlyArray<Observation>,
+  judgment: Verdict,
+): Verdict {
+  const verdict = forwardAssertionJudgment(plan, trace, judgment)
+  if (verdict.kind !== `violation`) return verdict
+  const axis = comparedAxis(verdict.checkpoint)
+  return axis === undefined
+    ? verdict
+    : { ...verdict, law: generatedAxisLaw(axis) }
+}
+
 describe(`SQLite expression-index oracle`, () => {
   oracleProperty({
     id: `sqlite-persistence.expression-index.large-number`,
@@ -1194,14 +1230,14 @@ describe(`SQLite expression-index oracle`, () => {
         () => runGeneratedScenarioMatrix(plan, observe),
       ),
     model: recordedAssertionJudgment,
-    check: forwardAssertionJudgment,
+    check: checkGeneratedMatrix,
     // Each axis's plausible wrong SQL answer must fail the unchanged
-    // comparison (moved from the raw wrong-answer control; the framework's
-    // self-oracle owns the shrink-and-replay fidelity that control also
-    // checked).
+    // comparison at that axis (moved from the raw wrong-answer control, which
+    // also required the failure to name the faulted kind; the framework's
+    // self-oracle owns the shrink-and-replay fidelity that control checked).
     calibrations: GENERATED_SCENARIO_FAULTS.map(({ kind, wrongAnswer }) => ({
       name: `${kind}: ${wrongAnswer}`,
-      law: `sqlite-persistence.expression-index`,
+      law: generatedAxisLaw(kind),
       driver: (
         plan: Array<GeneratedExpressionIndexScenario>,
         observe: (checkpoint: string, value: unknown) => void,
@@ -1244,6 +1280,29 @@ describe(`SQLite expression-index oracle`, () => {
           expect(() =>
             assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
           ).toThrow(`duplicate=eq`),
+      )
+    },
+  )
+
+  // Grammar calibration: ablating any one axis from the fixed matrix fails
+  // the grammar check that every native history runs, naming that axis.
+  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
+    `rejects the generated grammar when the %s axis is ablated`,
+    (kind) => {
+      oracleRoute(`calibration`)
+      const [matrix] = fc.sample(
+        generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
+        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
+      )
+      if (!matrix) throw new Error(`fixed grammar witness was not generated`)
+      oracleAssertion(
+        `expect(() => assertGeneratedScenarioGrammar(ablated)).toThrow('missing=${kind}')`,
+        () =>
+          expect(() =>
+            assertGeneratedScenarioGrammar(
+              matrix.filter((scenario) => scenario.kind !== kind),
+            ),
+          ).toThrow(`missing=${kind}`),
       )
     },
   )
