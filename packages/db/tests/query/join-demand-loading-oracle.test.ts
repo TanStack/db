@@ -1,21 +1,13 @@
 import { fc } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
-import {
-  oracleFixedSeed,
-  oracleRandomParameters,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+import { differs, oracleProperty } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import { finishCleanup } from './load-subset-source-readiness-support.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 
 /**
  * A ready live-query Collection reports loading while current joined demand
@@ -58,27 +50,64 @@ function expectedLoading(
   return [...current].some((key) => !settled.has(key))
 }
 
-function checkLoading(
-  current: ReadonlySet<number>,
-  settled: ReadonlySet<number>,
-  actual: { loading: boolean; ready: boolean },
-): void {
-  expect(actual.loading).toBe(expectedLoading(current, settled))
-  expect(actual.ready).toBe(true)
+function loadingHistory(
+  scenario: Scenario,
+): Array<{ loading: boolean; ready: boolean }> {
+  const statuses = [{ loading: false, ready: true }]
+  const requested: Array<number> = []
+  const settled = new Set<number>()
+  let current = new Set<number>()
+  for (
+    let generation = 0;
+    generation <= Number(scenario.replace);
+    generation++
+  ) {
+    current = new Set(
+      Array.from({ length: scenario.width }, (_, i) => generation * 2 + i + 1),
+    )
+    requested.push(...current)
+    statuses.push({ loading: expectedLoading(current, settled), ready: true })
+  }
+  if (scenario.retire) {
+    current.clear()
+    statuses.push({ loading: false, ready: true })
+  }
+  for (const key of scenario.reverse ? requested.reverse() : requested) {
+    settled.add(key)
+    statuses.push({ loading: expectedLoading(current, settled), ready: true })
+  }
+  return statuses
 }
 
-declareOracle({
-  owns: ['src/query/live/collection-config-builder.ts#beginDemand'],
-  model: [expectedLoading],
-  grammar: [scenarios],
-  check: [checkLoading],
-})
+function checkLoading(
+  _scenario: Scenario,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof loadingHistory>,
+): Verdict {
+  const actual = trace.filter((entry) => entry.checkpoint === 'status')
+  for (const [i, entry] of actual.entries()) {
+    const mismatch = differs(
+      `status ${i}`,
+      'current demand loading',
+      entry.value,
+      expected[i],
+    )
+    if (mismatch) return mismatch
+  }
+  return (
+    differs(
+      'completion',
+      'complete history',
+      actual.length,
+      expected.length,
+    ) ?? { kind: 'pass' }
+  )
+}
 
 async function runHistory(
   scenario: Scenario,
-  reach: ReturnType<typeof createOracleReach>,
+  record: (checkpoint: string, value: unknown) => void,
 ): Promise<void> {
-  reach.beginHistory()
   type Root = { id: number; left: number; right: number | null }
   type Child = { id: number }
   type Request = {
@@ -151,7 +180,7 @@ async function runHistory(
   let primaryFailure: { error: unknown } | undefined
   const observe = async () => {
     await flushPromises()
-    checkLoading(current, settled, {
+    record('status', {
       loading: query.isLoadingSubset,
       ready: query.isReady(),
     })
@@ -181,17 +210,18 @@ async function runHistory(
           .flat()
           .sort(),
       )
-      reach.reach(
+      record(
+        'reach',
         scenario.width === 1 ? 'one pending join' : 'two pending joins',
       )
-      if (generation) reach.reach('replacement while pending')
+      if (generation) record('reach', 'replacement while pending')
       await observe()
     }
     if (scenario.retire) {
       current.clear()
       setRoot(undefined)
       await observe()
-      reach.reach('retired pending demand')
+      record('reach', 'retired pending demand')
     }
     const order = scenario.reverse ? [...requests].reverse() : requests
     for (const request of order) {
@@ -204,16 +234,17 @@ async function runHistory(
       settled.add(request.key)
       await observe()
       if (wasCurrent)
-        reach.reach(
+        record(
+          'reach',
           scenario.reject
             ? 'current failure'
             : scenario.rows
               ? 'current rows'
               : 'current empty result',
         )
-      else reach.reach('obsolete settlement')
+      else record('reach', 'obsolete settlement')
       if (expectedLoading(current, settled))
-        reach.reach('settlement with another pending join')
+        record('reach', 'settlement with another pending join')
     }
   } catch (error) {
     primaryFailure = { error }
@@ -231,41 +262,68 @@ async function runHistory(
   }
 }
 
-const { multiplier, ...replay } = readOracleRunConfig()
-for (const campaign of ['fixed', 'random'] as const) {
-  const register =
-    campaign === 'fixed'
-      ? oracleReplayTest(it)
-      : oracleReplayTest(it, 'query.join-demand-loading')
-  register(`reports current joined demand loading (${campaign})`, async () => {
-    const reach = createOracleReach('join-demand-loading', [
-      'one pending join',
-      'two pending joins',
-      'replacement while pending',
-      'retired pending demand',
-      'current failure',
-      'current rows',
-      'current empty result',
-      'obsolete settlement',
-      'settlement with another pending join',
-    ])
-    const parameters =
-      campaign === 'fixed'
-        ? oracleFixedSeed(291107, { numRuns: 100 * multiplier })
-        : oracleRandomParameters(
-            100 * multiplier,
-            replay,
-            'query.join-demand-loading',
-          )
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(scenarios, (scenario) => runHistory(scenario, reach)),
-      parameters,
-    )
-    reach.assertReached()
-    console.info(
-      `join-demand-loading ${campaign}`,
-      Object.fromEntries(reach.counts()),
-    )
-  })
-}
+const states = [
+  'one pending join',
+  'two pending joins',
+  'replacement while pending',
+  'retired pending demand',
+  'current failure',
+  'current rows',
+  'current empty result',
+  'obsolete settlement',
+  'settlement with another pending join',
+]
+const constructions: Array<Partial<Scenario>> = [
+  { width: 1 },
+  { width: 2 },
+  { replace: true },
+  { retire: true },
+  { retire: false, reject: true },
+  { retire: false, reject: false, rows: true },
+  { retire: false, reject: false, rows: false },
+  { retire: true },
+  { width: 2, retire: false },
+]
+
+oracleProperty({
+  id: 'query.join-demand-loading',
+  owns: [
+    'src/query/live/collection-config-builder.ts#CollectionConfigBuilder.beginDemand',
+  ],
+  law: {
+    statement:
+      'A ready live-query Collection reports loading while current joined demand is pending; settlement or retirement removes only that demand contribution and readiness remains ready.',
+    authority:
+      'Collection.isLoadingSubset public contract and live-query ARCHITECTURE source cancellation and status laws.',
+    limits:
+      'Controlled core callbacks after draining graph and promise work; one/two sibling joins. No provider/framework timing, nested includes, ordered windows, replay, or callback-time reentrancy claim.',
+  },
+  histories: {
+    arbitrary: scenarios,
+    runs: 100,
+    fixedSeeds: [291107],
+    states,
+    constructed: states.map((state, i) => ({
+      name: state,
+      enters: [state],
+      build: (generated: Scenario) => ({ ...generated, ...constructions[i] }),
+    })),
+    fixed: [
+      {
+        name: 'ready empty query acquires its first joined demand',
+        history: {
+          width: 1,
+          replace: false,
+          retire: false,
+          reverse: false,
+          rows: false,
+          reject: false,
+        },
+        enters: ['one pending join', 'current empty result'],
+      },
+    ],
+  },
+  model: loadingHistory,
+  driver: runHistory,
+  check: checkLoading,
+})

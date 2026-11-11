@@ -1,19 +1,15 @@
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   OrderedLoaderInvariantError,
   OrderedSourceLoader,
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
+  oracleReplayRequested,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -21,6 +17,12 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import {
+  compareAt,
+  observeComparison,
+  recordedComparison,
+  rejectAt,
+} from './ordered-comparison-oracle.js'
 import {
   createDeferred,
   createOrderByInfo,
@@ -550,8 +552,11 @@ function checkRetirementProgress(
     invalidationAt !== undefined &&
     !startedAt.some((at) => at > invalidationAt && at < publicationAt)
   ) {
-    throw new Error(
-      `retirement invalidation: no authoritative read followed the adapter invalidation before publication`,
+    rejectAt(
+      `ordered-source-loader-state-oracle.test.ts:550`,
+      new Error(
+        `retirement invalidation: no authoritative read followed the adapter invalidation before publication`,
+      ),
     )
   }
 }
@@ -822,8 +827,10 @@ async function checkRetirementReceiver(
   try {
     if (live) await live.preload()
     await flushPromises()
-    expect(visible(), `initial complete window`).toEqual(
-      expected(scenario.offset),
+    compareAt(`ordered-source-loader-state-oracle.test.ts:822`, () =>
+      expect(visible(), `initial complete window`).toEqual(
+        expected(scenario.offset),
+      ),
     )
     const prior = visible()
     armed = true
@@ -848,23 +855,36 @@ async function checkRetirementReceiver(
     }
     await committed
     await flushPromises()
-    expect(unloaded, `real subscription retirement was reached`).toBeDefined()
+    compareAt(`ordered-source-loader-state-oracle.test.ts:848`, () =>
+      expect(
+        unloaded,
+        `real subscription retirement was reached`,
+      ).toBeDefined(),
+    )
     if (scenario.holdReplacement && invalidation !== undefined) {
-      expect(
-        heldAnswers,
-        `replacement starts without later external graph input`,
-      ).toBeGreaterThan(0)
-      expect(
-        visible(),
-        `held replacement keeps the complete public window`,
-      ).toEqual(prior)
-      expect(
-        publications,
-        `held replacement publishes no partial window`,
-      ).toEqual([])
+      compareAt(`ordered-source-loader-state-oracle.test.ts:850`, () =>
+        expect(
+          heldAnswers,
+          `replacement starts without later external graph input`,
+        ).toBeGreaterThan(0),
+      )
+      compareAt(`ordered-source-loader-state-oracle.test.ts:854`, () =>
+        expect(
+          visible(),
+          `held replacement keeps the complete public window`,
+        ).toEqual(prior),
+      )
+      compareAt(`ordered-source-loader-state-oracle.test.ts:858`, () =>
+        expect(
+          publications,
+          `held replacement publishes no partial window`,
+        ).toEqual([]),
+      )
       if (move !== undefined) {
-        expect(move, `held replacement keeps the window move pending`).toBe(
-          `pending`,
+        compareAt(`ordered-source-loader-state-oracle.test.ts:863`, () =>
+          expect(move, `held replacement keeps the window move pending`).toBe(
+            `pending`,
+          ),
         )
       }
       reached(`held-answer`)
@@ -877,29 +897,39 @@ async function checkRetirementReceiver(
     }
     checkRetirementProgress(invalidation, starts, publications[0]?.at)
     if (invalidation === undefined) {
-      expect(
-        starts.filter((at) => at > unloaded!),
-        `an eviction during retirement keeps the repair's boundary`,
-      ).toEqual([])
+      compareAt(`ordered-source-loader-state-oracle.test.ts:877`, () =>
+        expect(
+          starts.filter((at) => at > unloaded!),
+          `an eviction during retirement keeps the repair's boundary`,
+        ).toEqual([]),
+      )
     }
-    expect(
-      visible(),
-      `settled public window after retirement invalidation`,
-    ).toEqual(expected())
+    compareAt(`ordered-source-loader-state-oracle.test.ts:882`, () =>
+      expect(
+        visible(),
+        `settled public window after retirement invalidation`,
+      ).toEqual(expected()),
+    )
     // A change subscription publishes only changed rows: an eviction can leave
     // the moved window's rows equal to the prior window's.
     const changed = JSON.stringify(expected()) !== JSON.stringify(prior)
-    expect(
-      publications.map(({ rows }) => rows),
-      `one complete replacement publication`,
-    ).toEqual(changed ? [expected()] : [])
-    if (move !== undefined) {
+    compareAt(`ordered-source-loader-state-oracle.test.ts:889`, () =>
       expect(
-        move,
-        `the window move settles with its chosen window visible`,
-      ).toEqual({ at: expect.any(Number), rows: expected() })
+        publications.map(({ rows }) => rows),
+        `one complete replacement publication`,
+      ).toEqual(changed ? [expected()] : []),
+    )
+    if (move !== undefined) {
+      compareAt(`ordered-source-loader-state-oracle.test.ts:894`, () =>
+        expect(
+          move,
+          `the window move settles with its chosen window visible`,
+        ).toEqual({ at: expect.any(Number), rows: expected() }),
+      )
     }
-    expect(effect?.disposed ?? false, `Effect remains active`).toBe(false)
+    compareAt(`ordered-source-loader-state-oracle.test.ts:899`, () =>
+      expect(effect?.disposed ?? false, `Effect remains active`).toBe(false),
+    )
   } finally {
     armed = false
     replacement.resolve()
@@ -1434,8 +1464,11 @@ async function checkAuthorityCase(
           tieValue(options) === endRank,
       )
     if (!issued) {
-      throw new Error(
-        `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1434`,
+        new Error(
+          `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+        ),
       )
     }
   }
@@ -1579,28 +1612,49 @@ async function checkAuthorityCase(
     Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
     if (identityViolation) {
-      throw new Error(`error identity ${checkpoint}: ${identityViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1579`,
+        new Error(`error identity ${checkpoint}: ${identityViolation}`),
+      )
     }
     if (disposeViolation) {
-      throw new Error(`dispose ${checkpoint}: ${disposeViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1582`,
+        new Error(`dispose ${checkpoint}: ${disposeViolation}`),
+      )
     }
     if (invariantViolation) {
-      throw new Error(`invariant ${checkpoint}: ${invariantViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1585`,
+        new Error(`invariant ${checkpoint}: ${invariantViolation}`),
+      )
     }
     if (releaseViolation) {
-      throw new Error(`release ${checkpoint}: ${releaseViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1588`,
+        new Error(`release ${checkpoint}: ${releaseViolation}`),
+      )
     }
     if (resetViolation) {
-      throw new Error(`reset ${checkpoint}: ${resetViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1591`,
+        new Error(`reset ${checkpoint}: ${resetViolation}`),
+      )
     }
     if (unexpressibleTieViolation) {
-      throw new Error(
-        `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1594`,
+        new Error(
+          `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+        ),
       )
     }
     if (concurrencyViolation) {
-      throw new Error(
-        `one request at a time ${checkpoint}: ${concurrencyViolation}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1599`,
+        new Error(
+          `one request at a time ${checkpoint}: ${concurrencyViolation}`,
+        ),
       )
     }
     // The latest successful repair prefix, if no later authoritative read
@@ -1638,8 +1692,11 @@ async function checkAuthorityCase(
     )
     if (coveredByLaterPrefix) return
     if (repair.released) {
-      throw new Error(
-        `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1638`,
+        new Error(
+          `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`,
+        ),
       )
     }
   }
@@ -1665,7 +1722,10 @@ async function checkAuthorityCase(
       )
         return
     }
-    throw new Error(`the loader did not reach a fixed point`)
+    rejectAt(
+      `ordered-source-loader-state-oracle.test.ts:1665`,
+      new Error(`the loader did not reach a fixed point`),
+    )
   }
   const ownFailureSince = (index: number) =>
     ledger.some(
@@ -1848,8 +1908,11 @@ async function checkAuthorityCase(
           // comes before the repair's prefix.
           const firstIssued = ledger[before]
           if (owesRepair && firstIssued && !firstIssued.authoritative) {
-            throw new Error(
-              `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:1848`,
+              new Error(
+                `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+              ),
             )
           }
           // A report the loader cannot prove covers nothing it could change
@@ -1876,8 +1939,11 @@ async function checkAuthorityCase(
               .slice(before)
               .find(({ authoritative }) => authoritative)
             if (issued) {
-              throw new Error(
-                `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:1876`,
+                new Error(
+                  `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
+                ),
               )
             }
             ignoredReportsBeforeSettle++
@@ -1885,8 +1951,11 @@ async function checkAuthorityCase(
             // The loader ignores the report, so it reads nothing for it.
             const issued = ledger[before]
             if (issued) {
-              throw new Error(
-                `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:1885`,
+                new Error(
+                  `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+                ),
               )
             }
             if (!coversSource) ignoredReportsInsideFirstPage++
@@ -2092,8 +2161,11 @@ async function checkAuthorityCase(
             (request.hung && request.authoritative),
         )
         if (!recovered) {
-          throw new Error(
-            `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+          rejectAt(
+            `ordered-source-loader-state-oracle.test.ts:2092`,
+            new Error(
+              `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+            ),
           )
         }
       }
@@ -2135,8 +2207,11 @@ async function checkAuthorityCase(
         !unfinishedChain &&
         leaked.length > 0
       ) {
-        throw new Error(
-          `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+        rejectAt(
+          `ordered-source-loader-state-oracle.test.ts:2135`,
+          new Error(
+            `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+          ),
         )
       }
       // A superseded request's failure owes only a full-source read; once one
@@ -2161,8 +2236,11 @@ async function checkAuthorityCase(
               ))),
       )
       if (!isDisposed() && heldFailures.length > 0) {
-        throw new Error(
-          `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+        rejectAt(
+          `ordered-source-loader-state-oracle.test.ts:2161`,
+          new Error(
+            `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+          ),
         )
       }
       // Progress: once loading is quiet, an invalidation and an ordinary pass
@@ -2199,8 +2277,11 @@ async function checkAuthorityCase(
         run(() => loader.loadMore())
         await flush()
         if (ledger.length === before) {
-          throw new Error(
-            `progress: an invalidation after the drain issued no request`,
+          rejectAt(
+            `ordered-source-loader-state-oracle.test.ts:2199`,
+            new Error(
+              `progress: an invalidation after the drain issued no request`,
+            ),
           )
         }
         // Cost: a full-source read is very expensive, so a repair avoids one
@@ -2231,8 +2312,11 @@ async function checkAuthorityCase(
           costChecks++
           const fullRead = repair.find(({ fullSource }) => fullSource)
           if (fullRead) {
-            throw new Error(
-              `cost: request ${fullRead.index} read the full source although a bounded repair was available`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:2231`,
+              new Error(
+                `cost: request ${fullRead.index} read the full source although a bounded repair was available`,
+              ),
             )
           }
           const authoritative = repair.filter(
@@ -2240,8 +2324,11 @@ async function checkAuthorityCase(
           ).length
           const chains = epochMoves - movesBefore
           if (authoritative > chains * (1 + 2 * snapshot().length)) {
-            throw new Error(
-              `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:2240`,
+              new Error(
+                `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
+              ),
             )
           }
           // Each boundary is a different read: no chain reads the same
@@ -2258,8 +2345,11 @@ async function checkAuthorityCase(
           }
           for (const [read, count] of reads) {
             if (count > chains) {
-              throw new Error(
-                `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:2258`,
+                new Error(
+                  `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+                ),
               )
             }
           }
@@ -2271,8 +2361,11 @@ async function checkAuthorityCase(
       uncaught.errors.length !== thrownReleases.length ||
       uncaught.errors.some((error, index) => error !== thrownReleases[index])
     ) {
-      throw new Error(
-        `uncaught release reports: expected each throwing release once, got ${uncaught.errors.map(String).join(`, `)}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:2271`,
+        new Error(
+          `uncaught release reports: expected each throwing release once, got ${uncaught.errors.map(String).join(`, `)}`,
+        ),
       )
     }
   } finally {
@@ -2348,26 +2441,12 @@ const ordinaryScenario = {
 } as const
 
 const authorityProperty = `ordered-loader.request-authority`
-const authorityReplay = readOracleRunConfig()
-const authorityCampaigns =
-  authorityReplay.replayPath === undefined
-    ? ([`fixed`, `random`] as const)
-    : authorityReplay.replayProperty === authorityProperty
-      ? ([`replay`] as const)
-      : ([] as const)
 
 // The authority law is checked by checkAuthorityCase: it runs one generated or
 // replayed history through the real loader and compares each observation with
 // the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
 // and the calibration witnesses below read for coverage.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/effect.ts#createEffect',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/ordered-source-loader.ts',
-  ],
   check: [checkAuthorityCase, checkRetirementProgress, checkRetirementReceiver],
   grammar: [authorityCaseArbitrary],
 })
@@ -2985,41 +3064,83 @@ describe(`Ordered source request authority`, () => {
         ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
       ],
     }))
-  const handoffCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === handoffProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(handoffCampaigns)(
-    `preserves repair continuation identity across replay bookkeeping (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        handoffProperty,
-        [`deferred-refill`, `reset-continuation`] as const,
-        { minimum: 5 },
+
+  describe(`preserves repair continuation identity across replay bookkeeping`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [`deferred-refill`, `reset-continuation`] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    // The pinned runner reads this object at execution. Keep the existing
+    // fixed/random asymmetry without adding or widening a campaign.
+    const histories = {
+      arbitrary: handoffCase,
+      runs: 400,
+      fixedSeeds: [20261029],
+    }
+    beforeEach(({ task }) => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+
+      histories.runs = task.name.startsWith(`fixed seed `) ? 200 : 400
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail`
       )
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
-          : oraclePropertyOptions(400, handoffProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(handoffCase, async (testCase) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${handoffProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(5)
+    })
+    oracleProperty({
+      id: handoffProperty,
+      law: {
+        statement: `preserves repair continuation identity across replay bookkeeping`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: histories,
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           await checkAuthorityCase(testCase, (state) => {
             if (state === `deferred-refill` || state === `reset-continuation`)
-              reach.reach(state)
+              enter(state)
           })
         }),
-        parameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${handoffProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Generated suffixes compose callback invalidation with release faults,
   // replay/reset/disposal, retry timers, offsets, full-source plans, and later
@@ -3065,49 +3186,86 @@ describe(`Ordered source request authority`, () => {
         ...suffix,
       ],
     }))
-  const retirementCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === retirementProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(retirementCampaigns)(
-    `repairs an invalidation delivered during completed repair retirement (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        retirementProperty,
-        [
-          `release-invalidation`,
-          `late-release-invalidation`,
-          `completed-repair-release`,
-        ] as const,
-        { minimum: 20 },
+
+  describe(`repairs an invalidation delivered during completed repair retirement`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `release-invalidation`,
+      `late-release-invalidation`,
+      `completed-repair-release`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail`
       )
-      const campaignParameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
-          : oraclePropertyOptions(200, retirementProperty)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(retirementCase, async (testCase) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${retirementProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: retirementProperty,
+      law: {
+        statement: `repairs an invalidation delivered during completed repair retirement`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: retirementCase,
+        runs: 200,
+        fixedSeeds: [20261029],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           await checkAuthorityCase(testCase, (state) => {
             if (
               state === `release-invalidation` ||
               state === `late-release-invalidation` ||
               state === `completed-repair-release`
             )
-              reach.reach(state)
+              enter(state)
           })
         }),
-        campaignParameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${retirementProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Real Collection and Effect consumers share the same provider grammar,
   // full-sort model, event-ordered progress relation, and publication check.
@@ -3197,58 +3355,95 @@ describe(`Ordered source request authority`, () => {
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
   const retirementReceiverProperty = `ordered-loader.retirement-receiver`
-  const retirementReceiverCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === retirementReceiverProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(retirementReceiverCampaigns)(
-    `repairs retirement invalidation through a real subscription (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        retirementReceiverProperty,
-        [
-          `collection-release`,
-          `collection-window-release`,
-          `effect-release`,
-          `collection-held-answer`,
-          `collection-window-held-answer`,
-          `effect-held-answer`,
-          `delete-release`,
-          `delete-held-answer`,
-          `delete-boundary-release`,
-          `tie-delete-boundary`,
-          `delete-tie-release`,
-          `evict-release`,
-          `evict-tie-release`,
-        ] as const,
-        { minimum: 20 },
+
+  describe(`repairs retirement invalidation through a real subscription`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `collection-release`,
+      `collection-window-release`,
+      `effect-release`,
+      `collection-held-answer`,
+      `collection-window-held-answer`,
+      `effect-held-answer`,
+      `delete-release`,
+      `delete-held-answer`,
+      `delete-boundary-release`,
+      `tie-delete-boundary`,
+      `delete-tie-release`,
+      `evict-release`,
+      `evict-tie-release`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail`
       )
-      const runParameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(600) })
-          : oraclePropertyOptions(600, retirementReceiverProperty)
-      oracleRoute(oracleRouteOf(runParameters))
-      await fc.assert(
-        fc.asyncProperty(retirementReceiverCase, async (scenario) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${retirementReceiverProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: retirementReceiverProperty,
+      law: {
+        statement: `repairs retirement invalidation through a real subscription`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: retirementReceiverCase,
+        runs: 600,
+        fixedSeeds: [20261029],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const scenario = history
+
           await checkRetirementReceiver(scenario, (cut) =>
-            reach.reach(
+            enter(
               cut === `release` || cut === `held-answer`
                 ? `${scenario.kind}-${cut}`
                 : cut,
             ),
           )
         }),
-        runParameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${retirementReceiverProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Fixed histories force a held answer in each real consumer. They use the
   // same model and comparison as the generated receiving campaign, and keep
@@ -3332,41 +3527,69 @@ describe(`Ordered source request authority`, () => {
     }
   })
 
-  it.each(authorityCampaigns)(
-    `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
-    async (campaign) => {
-      let supersededFailures = 0
-      let staleSettlementsAfterRepair = 0
-      let supersededFailuresAfterRepair = 0
-      let checkedStrandPremises = 0
-      let deferredShapes = 0
-      let releaseFaults = 0
-      let syncRepairs = 0
-      let invalidatingPages = 0
-      const identityReach = createOracleReach(
-        authorityProperty,
-        [
-          `current-request-error`,
-          `cleanup-fault-current-request-error`,
-          `retirement-invalidation`,
-          `retirement-with-release-fault`,
-          `retirement-with-truncate`,
-          `retirement-with-dispose`,
-          `retirement-with-reentrant-pass`,
-          `retirement-with-offset`,
-          `retirement-with-retry-timer`,
-          `retirement-with-later-chains`,
-        ] as const,
-        { minimum: 20 },
-      )
-      // Full-source plans are a sixth of cases and lose the callback when an
-      // answer is eager, so this overlap is rarer than the others.
-      const fullSourceReach = createOracleReach(
-        authorityProperty,
-        [`retirement-with-full-source-plan`] as const,
-        { minimum: 5 },
-      )
-      const later = {
+  describe(`holds, retires, and recovers requests under generated settlement orders`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `current-request-error`,
+      `cleanup-fault-current-request-error`,
+      `retirement-invalidation`,
+      `retirement-with-release-fault`,
+      `retirement-with-truncate`,
+      `retirement-with-dispose`,
+      `retirement-with-reentrant-pass`,
+      `retirement-with-offset`,
+      `retirement-with-retry-timer`,
+      `retirement-with-later-chains`,
+      `retirement-with-full-source-plan`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+    let supersededFailures = 0
+    let staleSettlementsAfterRepair = 0
+    let supersededFailuresAfterRepair = 0
+    let checkedStrandPremises = 0
+    let deferredShapes = 0
+    let releaseFaults = 0
+    let syncRepairs = 0
+    let invalidatingPages = 0
+    let later = {
+      unexpressibleBoundaries: 0,
+      joinedDeferrals: 0,
+      ignoredReportsBeforeSettle: 0,
+      ignoredReportsInsideFirstPage: 0,
+      repairedReportsOnOwnPage: 0,
+      truncates: 0,
+      replayFailures: 0,
+      optimisticDepartures: 0,
+      sourceDeletes: 0,
+      timerRetries: 0,
+      shrinkingMoves: 0,
+      reentrantTruncates: 0,
+      stackedTruncates: 0,
+      truncatesAfterFailedReplay: 0,
+      reentrantPasses: 0,
+      disposals: 0,
+      startThrows: 0,
+      startThrowsDuringFailure: 0,
+      costChecks: 0,
+      hungRequests: 0,
+      offsetWindows: 0,
+    }
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+      supersededFailures = 0
+      staleSettlementsAfterRepair = 0
+      supersededFailuresAfterRepair = 0
+      checkedStrandPremises = 0
+      deferredShapes = 0
+      releaseFaults = 0
+      syncRepairs = 0
+      invalidatingPages = 0
+      later = {
         unexpressibleBoundaries: 0,
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
@@ -3389,39 +3612,98 @@ describe(`Ordered source request authority`, () => {
         hungRequests: 0,
         offsetWindows: 0,
       }
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261016, { numRuns: oracleRuns(10000) })
-          : oraclePropertyOptions(10000, authorityProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
-          identityReach.beginHistory()
-          fullSourceReach.beginHistory()
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail`
+      )
+        return
+      process.stderr.write(
+        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(
+          state === `retirement-with-full-source-plan` ? 5 : 20,
+        )
+      expect(supersededFailures).toBeGreaterThan(0)
+      expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
+      expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
+      expect(checkedStrandPremises).toBeGreaterThan(0)
+      expect(deferredShapes).toBeGreaterThan(0)
+      expect(releaseFaults).toBeGreaterThan(0)
+      expect(syncRepairs).toBeGreaterThan(0)
+      expect(invalidatingPages).toBeGreaterThan(0)
+      for (const [dimension, count] of Object.entries(later)) {
+        if (
+          dimension === `startThrowsDuringFailure` ||
+          dimension === `ignoredReportsInsideFirstPage` ||
+          dimension === `repairedReportsOnOwnPage`
+        )
+          continue
+        expect(count, dimension).toBeGreaterThan(0)
+      }
+    })
+    oracleProperty({
+      id: authorityProperty,
+      law: {
+        statement: `holds, retires, and recovers requests under generated settlement orders`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: authorityCaseArbitrary,
+        runs: 10000,
+        fixedSeeds: [20261016],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           const observation = await checkAuthorityCase(testCase)
           if (observation.releaseInvalidations > 0) {
-            identityReach.reach(`retirement-invalidation`)
+            enter(`retirement-invalidation`)
             if (observation.releaseFaults > 0)
-              identityReach.reach(`retirement-with-release-fault`)
+              enter(`retirement-with-release-fault`)
             if (observation.reentrantTruncates > 0)
-              identityReach.reach(`retirement-with-truncate`)
-            if (observation.disposals > 0)
-              identityReach.reach(`retirement-with-dispose`)
+              enter(`retirement-with-truncate`)
+            if (observation.disposals > 0) enter(`retirement-with-dispose`)
             if (observation.reentrantPasses > 0)
-              identityReach.reach(`retirement-with-reentrant-pass`)
-            if (observation.offsetWindows > 0)
-              identityReach.reach(`retirement-with-offset`)
-            if (testCase.retryTimer)
-              identityReach.reach(`retirement-with-retry-timer`)
+              enter(`retirement-with-reentrant-pass`)
+            if (observation.offsetWindows > 0) enter(`retirement-with-offset`)
+            if (testCase.retryTimer) enter(`retirement-with-retry-timer`)
             if (testCase.requiresFullSource)
-              fullSourceReach.reach(`retirement-with-full-source-plan`)
+              enter(`retirement-with-full-source-plan`)
             if (observation.retirementSuccessorChains > 1)
-              identityReach.reach(`retirement-with-later-chains`)
+              enter(`retirement-with-later-chains`)
           }
           if (observation.requestErrorChecks > 0) {
-            identityReach.reach(`current-request-error`)
+            enter(`current-request-error`)
             if (observation.releaseFaults > 0)
-              identityReach.reach(`cleanup-fault-current-request-error`)
+              enter(`cleanup-fault-current-request-error`)
           }
           supersededFailures += observation.supersededFailures
           staleSettlementsAfterRepair += observation.staleSettlementsAfterRepair
@@ -3436,47 +3718,10 @@ describe(`Ordered source request authority`, () => {
             later[key] += observation[key]
           }
         }),
-        parameters,
-      )
-      // Reach witnesses: superseded requests fail, stale requests settle
-      // after a repair succeeded, the strand law is checkable, a superseded
-      // request fails after its repair finished while a newer invalidation's
-      // reaction is deferred, a release throws, a repair answers at once,
-      // and a page's own delivery invalidates ordering. Each later dimension
-      // also changes loader input at least once: an unexpressible boundary,
-      // deferred joined work, a truncate and a failed replay, an optimistic
-      // departure, a source delete, a backoff retry that issues a read, and
-      // a window that shrinks.
-      if (campaign !== `replay`) {
-        identityReach.assertReached()
-        fullSourceReach.assertReached()
-        process.stderr.write(
-          `${authorityProperty} identity ${campaign} ${JSON.stringify({ ...Object.fromEntries(identityReach.counts()), ...Object.fromEntries(fullSourceReach.counts()) })}\n`,
-        )
-        expect(supersededFailures).toBeGreaterThan(0)
-        expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
-        expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
-        expect(checkedStrandPremises).toBeGreaterThan(0)
-        expect(deferredShapes).toBeGreaterThan(0)
-        expect(releaseFaults).toBeGreaterThan(0)
-        expect(syncRepairs).toBeGreaterThan(0)
-        expect(invalidatingPages).toBeGreaterThan(0)
-        // A recovery start that throws while the loader handles a superseded
-        // failure, and a report inside the loader's first page, are too rare
-        // to require of every campaign; named replays reach them.
-        for (const [dimension, count] of Object.entries(later)) {
-          if (
-            dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage` ||
-            dimension === `repairedReportsOnOwnPage`
-          )
-            continue
-          expect(count, dimension).toBeGreaterThan(0)
-        }
-      }
-    },
-    120_000,
-  )
+      check: (_history, _observations, verdict) => verdict,
+      timeout: 120_000,
+    })
+  })
 
   // The report laws need premises that the broad grammar rarely lines up.
   // Each history here starts with one of these prefixes over random case
@@ -3600,49 +3845,88 @@ describe(`Ordered source request authority`, () => {
       releaseDisposes: false,
       history: [...prefix.history, ...rest],
     }))
-  const unprovenReportCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === unprovenReportProperty
-        ? ([`replay`] as const)
-        : ([] as const)
 
-  it.each(unprovenReportCampaigns)(
-    `answers each loaded-subset report as its coverage requires (%s campaign)`,
-    async (campaign) => {
-      // Declared reach: histories where each report law judged a report.
-      const reportStates = [
-        `repairedReportsOnOwnPage`,
-        `ignoredReportsInsideFirstPage`,
-        `ignoredReportsOverFullSource`,
-        `ignoredReportsOverFallback`,
-        `movedEndReports`,
-        `reportsPastWindow`,
-        `reportsAfterDispose`,
-        `unexpressibleEndReports`,
-        `reportsOwingRepair`,
-        `reportsDuringWork`,
-      ] as const
-      const reach = createOracleReach(unprovenReportProperty, reportStates, {
-        minimum: 20,
-      })
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261023, { numRuns: oracleRuns(1000) })
-          : oraclePropertyOptions(1000, unprovenReportProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(unprovenReportCase, async (testCase) => {
-          reach.beginHistory()
+  describe(`answers each loaded-subset report as its coverage requires`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `repairedReportsOnOwnPage`,
+      `ignoredReportsInsideFirstPage`,
+      `ignoredReportsOverFullSource`,
+      `ignoredReportsOverFallback`,
+      `movedEndReports`,
+      `reportsPastWindow`,
+      `reportsAfterDispose`,
+      `unexpressibleEndReports`,
+      `reportsOwingRepair`,
+      `reportsDuringWork`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail`
+      )
+        return
+      process.stderr.write(
+        `${unprovenReportProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: unprovenReportProperty,
+      law: {
+        statement: `answers each loaded-subset report as its coverage requires`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: unprovenReportCase,
+        runs: 1000,
+        fixedSeeds: [20261023],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           const observation = await checkAuthorityCase(testCase)
-          for (const state of reportStates) {
-            if (observation[state] > 0) reach.reach(state)
+          for (const state of states) {
+            if (observation[state] > 0) enter(state)
           }
         }),
-        parameters,
-      )
-      reach.assertReached()
-    },
-    120_000,
-  )
+      check: (_history, _observations, verdict) => verdict,
+      timeout: 120_000,
+    })
+  })
 })

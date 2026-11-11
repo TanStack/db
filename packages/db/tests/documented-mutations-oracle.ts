@@ -1,9 +1,12 @@
 import { expect } from 'vitest'
 import { declareOracle } from './oracle-declaration'
+import { pass, violation } from './oracle-config'
 import {
   checkMutationConfirmation,
   expectedMutationConfirmation,
+  mutationConfirmationRows,
 } from './mutation-confirmation-oracle'
+import type { Observation, Verdict } from './oracle-config'
 import type {
   MutationConfirmationCut,
   MutationConfirmationHistory,
@@ -477,8 +480,459 @@ export function documentedMutationInputs(
   }
 }
 
+function expectedArguments(
+  history: DocumentedMutationHistory,
+  before: DocumentedRow,
+  optimistic: DocumentedRow,
+): Array<unknown> {
+  const changes = Object.fromEntries(
+    Object.entries(optimistic).filter(
+      ([key, value]) => !Object.is(value, before[key]) && key !== `id`,
+    ),
+  )
+  // Dates are unchanged in these payloads. Compare them by value rather than
+  // inventing a change because model/driver inputs use independent copies.
+  for (const [key, value] of Object.entries(changes))
+    if (
+      value instanceof Date &&
+      before[key] instanceof Date &&
+      value.getTime() === before[key].getTime()
+    )
+      delete changes[key]
+  switch (history.handler.payload) {
+    case `modified`:
+      return [optimistic]
+    case `changes`:
+      return [changes]
+    case `id-changes`:
+      return [before.id, changes]
+    case `where-data`:
+      return [{ where: { id: before.id }, data: changes }]
+    case `key`:
+      return [before.id]
+    case `rows`:
+      return [[optimistic]]
+    case `updates`:
+      return [[{ id: before.id, changes }]]
+    case `keys`:
+      return [[before.id]]
+  }
+}
+
+// Request checking is shared with hostile collaborator calibrations. It returns
+// the actual submitted data, never the independent expected payload.
+export function checkDocumentedRequest(
+  history: DocumentedMutationHistory,
+  before: DocumentedRow,
+  optimistic: DocumentedRow,
+  raw: Array<unknown>,
+): Array<unknown> {
+  const args =
+    history.handler.api === `fetch`
+      ? [JSON.parse((raw[1] as { body: string }).body) as unknown]
+      : raw
+  expect(args, `${history.id}: actual documented request`).toStrictEqual(
+    expectedArguments(history, before, optimistic),
+  )
+  if (history.handler.api === `fetch`) {
+    expect(raw[0]).toBe(`/api/todos`)
+    expect((raw[1] as { method: string }).method).toBe(`POST`)
+  }
+  return args
+}
+
+/**
+ * The native property's parts. Each documented handler history is one
+ * enumerated `oracleProperty` history; the Query and Electric receivers supply
+ * the production driver (documented-mutations-support.ts) and name what they
+ * own. The driver records public observations at each held cut. The model
+ * below owes, from the history alone, the server ledger and the set of cuts
+ * that the history must reach; the check applies the comparisons above to
+ * every recorded cut and judges reach last.
+ *
+ * Observations must be data, so the driver encodes two things that are not:
+ * a Date becomes a marked number, and an error becomes a token that keeps
+ * its identity relation (the API's own failure, the handler's own rejection,
+ * or another value). The check decodes them into fresh values with the same
+ * relations, so `checkMutationConfirmation`'s exact-identity comparison of a
+ * rejection still rejects a wrapped or replaced error.
+ */
+const dateMarker = `$oracleDate`
+const unsupportedMarker = `$oracleUnsupported`
+
+/** A copy of a value as observation data: Dates are marked numbers. */
+export function toDocumentedData(value: unknown): unknown {
+  if (value instanceof Date) return { [dateMarker]: value.getTime() }
+  if (Array.isArray(value)) return value.map(toDocumentedData)
+  if (typeof value === `function`) return { [unsupportedMarker]: `function` }
+  if (typeof value !== `object` || value === null) return value
+  const prototype = Object.getPrototypeOf(value) as object | null
+  // A class instance is never a documented payload; its tag keeps it unequal
+  // to every authored value, as the strict comparison would.
+  if (prototype !== null && prototype !== Object.prototype)
+    return { [unsupportedMarker]: Object.prototype.toString.call(value) }
+  const copy = Object.create(prototype) as Record<string, unknown>
+  for (const [key, field] of Object.entries(value))
+    copy[key] = toDocumentedData(field)
+  return copy
+}
+
+function fromDocumentedData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(fromDocumentedData)
+  if (typeof value !== `object` || value === null) return value
+  const fields = Object.entries(value)
+  if (
+    fields.length === 1 &&
+    fields[0]![0] === dateMarker &&
+    typeof fields[0]![1] === `number`
+  )
+    return new Date(fields[0]![1])
+  const copy = Object.create(Object.getPrototypeOf(value) as object | null)
+  for (const [key, field] of fields) copy[key] = fromDocumentedData(field)
+  return copy
+}
+
+/** The error the controlled API rejects with, which settlement must keep. */
+export function documentedApiFailure(history: DocumentedMutationHistory) {
+  return new Error(`documented API ${history.apiOutcome}`)
+}
+
+export type DocumentedErrorToken =
+  | { kind: `none` }
+  | { kind: `api-failure` }
+  | { kind: `handler-rejection` }
+  | { kind: `error`; name: string; message: string }
+  | { kind: `value`; text: string }
+
+/** An error's identity relation to the API failure and handler rejection. */
+export function documentedErrorToken(
+  value: unknown,
+  failure: Error,
+  handlerError?: unknown,
+): DocumentedErrorToken {
+  if (value === undefined) return { kind: `none` }
+  if (value === failure) return { kind: `api-failure` }
+  if (handlerError !== undefined && value === handlerError)
+    return { kind: `handler-rejection` }
+  if (value instanceof Error)
+    return { kind: `error`, name: value.name, message: value.message }
+  return { kind: `value`, text: String(value) }
+}
+
+function fromErrorToken(
+  token: DocumentedErrorToken,
+  failure: Error,
+  handlerError?: unknown,
+): unknown {
+  switch (token.kind) {
+    case `none`:
+      return undefined
+    case `api-failure`:
+      return failure
+    case `handler-rejection`:
+      return handlerError
+    case `error`:
+      return Object.assign(new Error(token.message), { name: token.name })
+    case `value`:
+      return token.text
+  }
+}
+
+/** A recorded observation: rows and errors in their data encodings. */
+export type DocumentedObservationData = Omit<
+  DocumentedMutationObservation,
+  `rows` | `error` | `handlerError`
+> & {
+  rows: unknown
+  error: DocumentedErrorToken
+  handlerError: DocumentedErrorToken
+}
+
+function fromObservationData(
+  observed: DocumentedObservationData,
+  failure: Error,
+): DocumentedMutationObservation {
+  const handlerError = fromErrorToken(observed.handlerError, failure)
+  return {
+    ...observed,
+    rows: fromDocumentedData(observed.rows) as Array<DocumentedRow>,
+    handlerError,
+    error: fromErrorToken(observed.error, failure, handlerError),
+  }
+}
+
+/**
+ * The cuts a history owes, from its declared strategy and API outcome alone.
+ * Every history enters its handler, reaches the API request and the
+ * settlement waiter. A write that commits reaches `server-written`. A
+ * successful history with confirmation reaches its acceptance, and, unless
+ * the confirmation is a direct write, holds the real source first. A history
+ * that rejects after writing, or that never confirms, reaches the later
+ * explicit confirmation. A `comparison:<cut>` entry names a cut at which the
+ * mutation comparison must run.
+ */
+export function owedDocumentedCuts(
+  history: DocumentedMutationHistory,
+): Array<string> {
+  const written = history.apiOutcome !== `reject-before-write`
+  const confirmed =
+    history.apiOutcome === `success` && history.handler.confirmation !== `none`
+  const held = confirmed && history.handler.confirmation !== `write`
+  const late =
+    history.apiOutcome === `reject-after-write` ||
+    history.handler.confirmation === `none`
+  return [
+    `entered`,
+    `api-request`,
+    `settlement-waiter`,
+    ...(written ? [`server-written`] : []),
+    ...(confirmed ? [`confirmation-accepted`] : []),
+    ...(held ? [`confirmation-held`] : []),
+    ...(late ? [`late-confirmed`] : []),
+    ...[
+      `entered`,
+      `settled`,
+      ...(written ? [`server-written`] : []),
+      ...(held ? [`confirmation-requested`, `confirmation-accepted`] : []),
+      ...(late ? [`late-confirmed`] : []),
+    ].map((cut) => `comparison:${cut}`),
+  ].sort()
+}
+
+export type DocumentedMutationExpected = {
+  /** The cuts the history must reach, sorted. */
+  owed: Array<string>
+  /** The controlled server ledger after the API request. */
+  server: Array<DocumentedRow>
+}
+
+export function modelDocumentedMutation(
+  history: DocumentedMutationHistory,
+): DocumentedMutationExpected {
+  return {
+    owed: owedDocumentedCuts(history),
+    server: mutationConfirmationRows(
+      history.mutation.operation,
+      history.apiOutcome === `reject-before-write` ? `initial` : `confirmed`,
+      history.mutation.peer,
+      documentedMutationInputs(history.handler),
+    ),
+  }
+}
+
+function assertionValues(error: unknown) {
+  return typeof error === `object` &&
+    error !== null &&
+    `actual` in error &&
+    `expected` in error
+    ? { actual: error.actual, expected: error.expected }
+    : undefined
+}
+
+/**
+ * The comparison of a recorded trace. A `request` is one call the handler
+ * made to its API, judged against the documented payload. `api-request` is
+ * the cut after the call: exactly one call, and the controlled server ledger.
+ * A `comparison` is the mutation judgment at a held cut. Reach is judged last,
+ * at a checkpoint the driver never records, so a driver error that cut the
+ * trace short stays the failure.
+ */
+export function checkDocumentedMutationTrace(
+  history: DocumentedMutationHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: DocumentedMutationExpected,
+): Verdict {
+  const inputs = documentedMutationInputs(history.handler)
+  const failure = documentedApiFailure(history)
+  const reached = new Set<string>()
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) {
+      reached.add(String(value))
+      continue
+    }
+    try {
+      if (checkpoint === `request`) {
+        const { raw } = value as { raw: unknown }
+        checkDocumentedRequest(
+          history,
+          inputs.before,
+          inputs.optimistic,
+          fromDocumentedData(raw) as Array<unknown>,
+        )
+      } else if (checkpoint === `api-request`) {
+        const { calls, server } = value as { calls: number; server: unknown }
+        expect(calls, `one actual documented API request`).toBe(1)
+        expect(
+          fromDocumentedData(server),
+          `actual server ledger`,
+        ).toStrictEqual(expected.server)
+      } else if (checkpoint === `comparison`) {
+        const { cut, observation } = value as {
+          cut: MutationConfirmationCut
+          observation: DocumentedObservationData
+        }
+        reached.add(`comparison:${cut}`)
+        checkDocumentedMutation(
+          history,
+          cut,
+          fromObservationData(observation, failure),
+          failure,
+          inputs,
+        )
+      } else
+        return violation(
+          checkpoint,
+          `an undeclared checkpoint`,
+          `documented reach`,
+        )
+    } catch (error) {
+      return violation(
+        checkpoint,
+        String(error),
+        checkpoint === `comparison`
+          ? `documented mutation`
+          : checkpoint === `request`
+            ? `documented request`
+            : `documented api request`,
+        assertionValues(error),
+      )
+    }
+  }
+  const actual = [...reached].sort()
+  return actual.length === expected.owed.length &&
+    actual.every((cut, index) => cut === expected.owed[index])
+    ? pass
+    : violation(
+        `owed cuts`,
+        `the history did not reach exactly the cuts its strategy and API outcome owe`,
+        `documented reach`,
+        { actual, expected: expected.owed },
+      )
+}
+
+function replaceObservation(
+  trace: ReadonlyArray<Observation>,
+  at: number,
+  change: (observation: DocumentedObservationData) => DocumentedObservationData,
+): ReadonlyArray<Observation> {
+  return trace.map((entry, index) => {
+    if (index !== at) return entry
+    const value = entry.value as { observation: DocumentedObservationData }
+    return {
+      ...entry,
+      value: { ...value, observation: change(value.observation) },
+    }
+  })
+}
+
+/**
+ * Wrong answers the check must reject (ORC-006). Each alters a clean trace:
+ * a lost reach cut, a lost comparison cut, a cut that the history does not
+ * owe, a second API call, a wrong mutation observation, and a rejection that
+ * equals the API failure in name and message but is a different error.
+ */
+export const documentedMutationCalibrations: Array<{
+  name: string
+  law: string
+  corrupt: (
+    trace: ReadonlyArray<Observation>,
+    history: DocumentedMutationHistory,
+  ) => ReadonlyArray<Observation> | undefined
+}> = [
+  {
+    name: `a lost reach cut`,
+    law: `documented reach`,
+    corrupt: (trace) => {
+      const at = trace.findIndex(({ checkpoint }) => checkpoint === `reach`)
+      return at < 0 ? undefined : trace.filter((_, index) => index !== at)
+    },
+  },
+  {
+    name: `a lost comparison cut`,
+    law: `documented reach`,
+    corrupt: (trace) => {
+      const kept = trace.filter(
+        ({ checkpoint, value }) =>
+          checkpoint !== `comparison` ||
+          (value as { cut: string }).cut !== `entered`,
+      )
+      return kept.length === trace.length ? undefined : kept
+    },
+  },
+  {
+    name: `a cut the history does not owe`,
+    law: `documented reach`,
+    corrupt: (trace) =>
+      trace.some(
+        ({ checkpoint, value }) =>
+          checkpoint === `reach` && value === `late-confirmed`,
+      )
+        ? undefined
+        : [...trace, { checkpoint: `reach`, value: `late-confirmed` }],
+  },
+  {
+    name: `a second API call`,
+    law: `documented api request`,
+    corrupt: (trace) =>
+      trace.map((entry) =>
+        entry.checkpoint === `api-request`
+          ? {
+              ...entry,
+              value: { ...(entry.value as object), calls: 2 },
+            }
+          : entry,
+      ),
+  },
+  {
+    name: `a duplicated handler write`,
+    law: `documented mutation`,
+    corrupt: (trace) => {
+      const at = trace.findIndex(
+        ({ checkpoint }) => checkpoint === `comparison`,
+      )
+      return at < 0
+        ? undefined
+        : replaceObservation(trace, at, (observation) => ({
+            ...observation,
+            handlerWrites: observation.handlerWrites + 1,
+          }))
+    },
+  },
+  {
+    name: `a replaced rejection with the failure's name and message`,
+    law: `documented mutation`,
+    corrupt: (trace, history) => {
+      const at = trace.findIndex(
+        ({ checkpoint, value }) =>
+          checkpoint === `comparison` &&
+          (value as { observation: DocumentedObservationData }).observation
+            .error.kind === `api-failure`,
+      )
+      const failure = documentedApiFailure(history)
+      return at < 0
+        ? undefined
+        : replaceObservation(trace, at, (observation) => ({
+            ...observation,
+            error: {
+              kind: `error`,
+              name: failure.name,
+              message: failure.message,
+            },
+          }))
+    },
+  },
+]
+
 declareOracle({
-  check: [checkDocumentedMutation],
+  check: [
+    checkDocumentedMutation,
+    checkDocumentedRequest,
+    checkDocumentedMutationTrace,
+  ],
   grammar: [documentedMutationHistories, documentedHandlers],
-  model: [documentedMutationInputs],
+  model: [
+    documentedMutationInputs,
+    modelDocumentedMutation,
+    owedDocumentedCuts,
+  ],
 })

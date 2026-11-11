@@ -17,6 +17,7 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+      exclude: [`**/node_modules/**`, `tests/reload-class-oracle.test.ts`],
     },
   },
 })

@@ -22,7 +22,6 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
-import { fc } from '@fast-check/vitest'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import {
   expectedSsrSnapshot,
@@ -30,19 +29,20 @@ import {
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  OracleCheckpointFailure,
+  differs,
+  oracleProperty,
   oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  pass,
+  violation,
 } from '../../db/tests/oracle-config'
-import {
-  atOracleCheckpoint,
-  createOracleFailureFidelity,
-} from '../../db/tests/oracle-failure-fidelity'
+import { atOracleCheckpoint } from '../../db/tests/oracle-failure-fidelity'
+import type {
+  Observation as OracleObservation,
+  Verdict,
+} from '../../db/tests/oracle-config'
 import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -89,7 +89,12 @@ const serverHistory = ({
   sourceState,
   rows,
 }: SsrSnapshotHistory) => ({ preparation, sourceState, rows })
-const histories = ssrSnapshotHistoryArbitrary.map(serverHistory)
+const histories = ssrSnapshotHistoryArbitrary.map(serverHistory, (value) => ({
+  ...(value as ReturnType<typeof serverHistory>),
+  serverWrite: false,
+  browserWrite: false,
+  browserPreload: false,
+}))
 const examples = ssrSnapshotExamples.map(serverHistory)
 type Observation = {
   reactVersion: string
@@ -119,8 +124,8 @@ function checkRender(
   history: SsrSnapshotHistory,
   actual: Observation,
   path: string,
+  expected = expectedSsrSnapshot(history),
 ) {
-  const expected = expectedSsrSnapshot(history)
   try {
     atOracleCheckpoint(`SSR path reached`, path, () => {
       expect(
@@ -170,14 +175,84 @@ function checkRender(
 }
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkRender],
   grammar: [histories],
 })
+// The child process records native server facts. The same admission/diagnostic
+// judgment runs afterward, with runtime identity checked first as before.
+function checkEffects(
+  history: SsrSnapshotHistory,
+  trace: ReadonlyArray<OracleObservation>,
+  expected: ReturnType<typeof expectedSsrSnapshot>,
+  path: string,
+  version: string,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint !== `server result`) continue
+    const actual = value as Observation
+    for (const [field, target] of [
+      [`reactVersion`, version],
+      [`rendererVersion`, version],
+    ] as const) {
+      const wrong = differs(
+        `matched SSR runtime`,
+        `matched SSR runtime`,
+        actual[field],
+        target,
+      )
+      if (wrong) return wrong
+    }
+    try {
+      checkRender(history, actual, path, expected)
+    } catch (error) {
+      if (!(error instanceof OracleCheckpointFailure)) throw error
+      return violation(error.checkpoint, String(error.cause), error.law)
+    }
+  }
+  if (
+    trace.filter(({ checkpoint }) => checkpoint === `server result`).length !==
+    1
+  )
+    return violation(
+      `server result`,
+      `expected one native server result`,
+      `SSR path reached`,
+    )
+  return pass
+}
+
+function recordServerRender(
+  runtime: (typeof runtimes)[number],
+  path: string,
+  history: SsrSnapshotHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const actual: Observation = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [programs.get(runtime.name)!, JSON.stringify({ history, path })],
+      { encoding: `utf8`, timeout: 10000 },
+    ),
+  )
+  observe(`server result`, actual)
+  if (actual.calls > 0) {
+    observe(`reach`, `rendered`)
+    if (path.startsWith(`ordinary`)) {
+      const expected = expectedSsrSnapshot(history)
+      const state = expected.rejects
+        ? `rejected`
+        : history.sourceState === `idle`
+          ? `cold`
+          : expected.status === `ready`
+            ? `prepared-ready`
+            : history.preparation === `source`
+              ? `prepared-loading`
+              : undefined
+      if (state) observe(`reach`, state)
+    }
+  }
+}
+
 for (const runtime of runtimes) {
   for (const path of paths) {
     const project = (history: SsrSnapshotHistory): SsrSnapshotHistory =>
@@ -186,122 +261,125 @@ for (const runtime of runtimes) {
         : path === `standalone` || path === `supplied`
           ? { ...history, preparation: `none`, sourceState: `ready` }
           : history
-    // Disabled has one legal input. Its bounded replay shares the checker and
-    // driver; other paths generate only the axes that can affect their render.
-    const grammar = histories.map(project)
-    const inputs = examples.map((history) => [project(history)])
-    const property = `react.ssr-effects-${runtime.name}-${path}`
-    for (const campaign of [`fixed`, `random`] as const) {
-      const register =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      register(
-        `${runtime.name} ${path} renders without client layout diagnostics (${campaign})`,
-        async () => {
-          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
-          const states = path.startsWith(`ordinary`)
-            ? [
-                `rendered`,
-                `cold`,
-                `prepared-ready`,
-                `prepared-loading`,
-                `rejected`,
-              ]
-            : [`rendered`]
-          const reach = createOracleReach(
-            `ssr-effects-${runtime.name}-${path}`,
-            states,
-            { fixedHistories: inputs.length },
-          )
-          const fidelity = createOracleFailureFidelity<SsrSnapshotHistory>()
-          let index = 0
-          try {
-            const parameters =
-              campaign === `fixed`
-                ? oracleFixedSeed(2291, {
-                    numRuns: oracleRuns(24) + inputs.length,
-                    examples: inputs,
-                  })
-                : oraclePropertyOptions(24, property, { examples: inputs })
-            oracleRoute(oracleRouteOf(parameters))
-            await fidelity.assert(() =>
-              fc.assert(
-                fc.asyncProperty(grammar, (history) =>
-                  fidelity.run(history, () => {
-                    reach.beginHistory({ fixed: index++ < inputs.length })
-                    const actual: Observation = JSON.parse(
-                      execFileSync(
-                        process.execPath,
-                        [
-                          programs.get(runtime.name)!,
-                          JSON.stringify({ history, path }),
-                        ],
-                        { encoding: `utf8`, timeout: 10000 },
-                      ),
-                    )
-                    atOracleCheckpoint(`matched SSR runtime`, path, () => {
-                      expect(actual.reactVersion).toBe(runtime.version)
-                      expect(actual.rendererVersion).toBe(runtime.version)
-                      expect(actual.calls).toBeGreaterThan(0)
-                    })
-                    reach.reach(`rendered`)
-                    if (path.startsWith(`ordinary`)) {
-                      const expected = expectedSsrSnapshot(history)
-                      const state = expected.rejects
-                        ? `rejected`
-                        : history.sourceState === `idle`
-                          ? `cold`
-                          : expected.status === `ready`
-                            ? `prepared-ready`
-                            : history.preparation === `source`
-                              ? `prepared-loading`
-                              : undefined
-                      if (state) reach.reach(state)
-                    }
-                    checkRender(history, actual, path)
-                  }),
-                ),
-                parameters,
-              ),
-            )
-            reach.assertReached()
-          } finally {
-            console.info(
-              `ssr-effects ${runtime.name} ${path} ${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-        },
-        30000,
+    const grammar = histories.map(project, (value) => {
+      const history = value as SsrSnapshotHistory
+      const projected = project(history)
+      if (
+        projected.preparation !== history.preparation ||
+        projected.sourceState !== history.sourceState
       )
-    }
-  }
-}
-
-// Disabled SSR has one input. Replay it through the same diagnostic judgment,
-// without presenting repeated constant inputs as a generated history campaign.
-for (const runtime of runtimes) {
-  oracleReplayTest(it)(`${runtime.name} disabled SSR diagnostic replay`, () => {
-    oracleRoute(`fixed history`)
-    const history: SsrSnapshotHistory = {
-      preparation: `none`,
-      sourceState: `idle`,
-      rows: [],
-    }
-    const actual: Observation = JSON.parse(
-      execFileSync(
-        process.execPath,
-        [
-          programs.get(runtime.name)!,
-          JSON.stringify({ history, path: `disabled` }),
+        throw new Error(`SSR history is outside this receiving path`)
+      return serverHistory(history)
+    })
+    const states = path.startsWith(`ordinary`)
+      ? [`rendered`, `cold`, `prepared-ready`, `prepared-loading`, `rejected`]
+      : [`rendered`]
+    oracleProperty({
+      id: `react.ssr-effects-${runtime.name}-${path}`,
+      law: {
+        statement: `Supported React server renders preserve prepared SSR admission and emit no client-only layout-effect diagnostic.`,
+        authority: `docs/guides/ssr.md prepared SSR promises; React >=18 support and #2229; shared ssr-snapshot-admission-oracle.ts judgment.`,
+        limits: `Real React18 and installed React server renderers, provider/explicit-client ordinary/Suspense paths and standalone/supplied diagnostic paths; no hydration equality or client commit timing.`,
+      },
+      owns: [
+        `src/DbProvider.tsx#DbProvider`,
+        `src/useLiveQuery.ts#useLiveQuery`,
+        `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+      ],
+      histories: {
+        arbitrary: grammar,
+        runs: 24,
+        fixedSeeds: [2291],
+        states,
+        constructed: [
+          {
+            name: `native server renderer`,
+            enters: [`rendered`],
+            build: (history) => ({ ...history }),
+          },
+          ...(path.startsWith(`ordinary`)
+            ? [
+                {
+                  name: `cold server`,
+                  enters: [`cold`],
+                  build: (history: SsrSnapshotHistory): SsrSnapshotHistory => ({
+                    ...history,
+                    preparation: `none`,
+                    sourceState: `idle`,
+                    rows: [],
+                  }),
+                },
+                {
+                  name: `prepared ready`,
+                  enters: [`prepared-ready`],
+                  build: (history: SsrSnapshotHistory): SsrSnapshotHistory => ({
+                    ...history,
+                    preparation: `source`,
+                    sourceState: `ready`,
+                  }),
+                },
+                {
+                  name: `prepared loading`,
+                  enters: [`prepared-loading`],
+                  build: (history: SsrSnapshotHistory): SsrSnapshotHistory => ({
+                    ...history,
+                    preparation: `source`,
+                    sourceState: `loading`,
+                  }),
+                },
+                {
+                  name: `rejected server`,
+                  enters: [`rejected`],
+                  build: (history: SsrSnapshotHistory): SsrSnapshotHistory => ({
+                    ...history,
+                    preparation: `none`,
+                    sourceState: `ready`,
+                  }),
+                },
+              ]
+            : []),
         ],
-        { encoding: `utf8`, timeout: 10000 },
-      ),
-    )
-    expect(actual.reactVersion).toBe(runtime.version)
-    expect(actual.rendererVersion).toBe(runtime.version)
-    checkRender(history, actual, `disabled`)
+        fixed: examples.map((history, index) => ({
+          name: `server preparation ${index}`,
+          history: project(history),
+        })),
+      },
+      model: expectedSsrSnapshot,
+      driver: (history, observe) =>
+        recordServerRender(runtime, path, history, observe),
+      check: (history, trace, expected) =>
+        checkEffects(history, trace, expected, path, runtime.version),
+      timeout: 30000,
+    })
+  }
+  // Disabled SSR retains the old single input and shared diagnostic judgment.
+  oracleProperty({
+    id:
+      runtime.name === `react18`
+        ? `react.ssr-effects-react18-disabled`
+        : `react.ssr-effects-current-disabled`,
+    law: {
+      statement: `A disabled server hook returns without a client-only layout-effect diagnostic.`,
+      authority: `React >=18 support and prepared SSR guide; the same SSR diagnostic judgment.`,
+      limits: `The unchanged disabled SSR history in React18 and the installed React runtime.`,
+    },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: [
+      {
+        preparation: `none`,
+        sourceState: `idle`,
+        rows: [],
+      } satisfies SsrSnapshotHistory,
+    ],
+    model: expectedSsrSnapshot,
+    driver: (history, observe) =>
+      recordServerRender(runtime, `disabled`, history, observe),
+    check: (history, trace, expected) =>
+      checkEffects(history, trace, expected, `disabled`, runtime.version),
   })
 }
 

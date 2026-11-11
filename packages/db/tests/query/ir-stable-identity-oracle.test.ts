@@ -1,14 +1,14 @@
 // Stable query identity law: two query IRs, expression values, or demand keys
 // share an identity only when they are equivalent under the relation that the
 // checks below state. The output model, interpretOutputProgram, is a direct
-// denotation of a finite literal and wrapper grammar. assertOutputProgram
-// compares each observation's compiled output and projected identity with that
-// denotation, so the generated programs and their calibrations run through it.
+// denotation of a finite literal and wrapper grammar. The generated checker
+// and retained fixed/calibration judgments compare compiled outputs and their
+// projected identities with that same denotation.
 // The generated properties check canonical boolean forms, IN candidates as a
 // set, alias renaming, and reference-valued captures against inputs they read.
 // Fixed scenarios and literal identities live in ir-stable-identity.test.ts.
 import { describe, expect, it } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import {
   BaseQueryBuilder,
   createLiveQueryCollection,
@@ -29,7 +29,13 @@ import {
   getQueryIdentity,
 } from '../../src/query/ir-stable-identity.js'
 import { Func, IncludesSubquery, PropRef, Value } from '../../src/query/ir.js'
-import { oracleFixedSeed, oracleRoute, oracleRuns } from '../oracle-config.js'
+import {
+  oracleProperty,
+  oracleReplayTest,
+  oracleRoute,
+  pass,
+  violation,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   createAlphaRenamedIncludesQuery,
@@ -45,7 +51,43 @@ import {
   postsCollection,
   usersCollection,
 } from './ir-stable-identity-support.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
+
+const test = oracleReplayTest(it)
+
+// These metamorphic laws specify relations, rather than one literal identity.
+// Production identity strings can contain process-local reference handles, so
+// the production driver records equality of those strings. The reference
+// states which relations each authored transformation promises; the checker
+// consumes every relation at its original key-construction/evaluation cut.
+function checkIdentityRelations<TPlan>(
+  _plan: TPlan,
+  trace: ReadonlyArray<Observation>,
+  expected: Readonly<Record<string, boolean | null>>,
+): Verdict {
+  for (const [checkpoint, relation] of Object.entries(expected)) {
+    const observation = trace.find((entry) => entry.checkpoint === checkpoint)
+    if (observation === undefined)
+      return violation(
+        `relations`,
+        `the ${checkpoint} comparison is missing`,
+        `identity relations`,
+      )
+    try {
+      expect(observation.value, checkpoint).toBe(relation)
+    } catch (error) {
+      return {
+        kind: `violation`,
+        checkpoint,
+        law: `identity relations`,
+        difference: String(error),
+        cause: error,
+      }
+    }
+  }
+  return pass
+}
 
 const referenceSemanticPairArbitrary = fc.oneof(
   fc
@@ -195,6 +237,73 @@ function assertOutputProgram(
   }
 }
 
+type OutputPlan = { program: OutputProgram; literals: [unknown, unknown] }
+// Object.is determines the literal reference slot. This grammar can return
+// only a retained literal or a primitive; an unknown reference must mismatch.
+// Encoding those relations keeps exact Buffer identity and signed zero visible
+// without publishing opaque values as framework observation data.
+function encodeOutputValue(value: unknown, literals: [unknown, unknown]) {
+  const reference = literals.findIndex((literal) => Object.is(literal, value))
+  if (reference >= 0) return { kind: `literal`, reference }
+  if (
+    value !== null &&
+    (typeof value === `object` ||
+      typeof value === `function` ||
+      typeof value === `symbol`)
+  )
+    return { kind: `other reference` }
+  return { kind: `value`, value }
+}
+function modelOutputProgram(plan: OutputPlan) {
+  const values = plan.literals.map((literal) =>
+    interpretOutputProgram(literal, plan.program.wrappers),
+  )
+  return {
+    values: values.map((value) => encodeOutputValue(value, plan.literals)),
+    sameOutput: Object.is(values[0], values[1]),
+  }
+}
+function checkOutputProgram(
+  _plan: OutputPlan,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelOutputProgram>,
+): Verdict {
+  const observation = trace.find(
+    ({ checkpoint }) => checkpoint === `output denotation`,
+  )
+  if (observation === undefined)
+    return violation(
+      `output denotation`,
+      `the composed-output comparison is missing`,
+      `output denotation`,
+    )
+  const actual = observation.value as {
+    values: Array<unknown>
+    sameIdentity: boolean
+  }
+  try {
+    expect(actual.values).toHaveLength(2)
+    for (const [index, value] of actual.values.entries())
+      expect(value, `compiled output must match its own denotation`).toEqual(
+        expected.values[index],
+      )
+    if (actual.sameIdentity)
+      expect(expected.sameOutput, `equal identities must preserve output`).toBe(
+        true,
+      )
+    if (!expected.sameOutput) expect(actual.sameIdentity).toBe(false)
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint: `output denotation`,
+      law: `output denotation`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  return pass
+}
+
 const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
   literals: fc.oneof(
     fc.record({
@@ -234,18 +343,12 @@ const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
 })
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts',
-    'src/live-query-options.ts#getPreparedLiveQueryIdentity',
-    'src/query/compiler/evaluators.ts#compileExpression',
-    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
-    'src/query/ir-stable-identity.ts#getQueryIdentity',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/includes-runtime.ts',
-    'src/query/pooled-live-query.ts',
+  check: [
+    expectIdentitySharingMatchesOutcome,
+    checkIdentityRelations,
+    checkOutputProgram,
   ],
-  check: [expectIdentitySharingMatchesOutcome],
-  model: [interpretOutputProgram, modelOutcome],
+  model: [interpretOutputProgram, modelOutcome, modelOutputProgram],
 })
 
 describe(`semantic expression identity`, () => {
@@ -324,25 +427,83 @@ describe(`semantic expression identity`, () => {
     },
   )
 
-  fcTest.prop([
-    equivalentExpressionPairArbitrary,
-    fc.record({ age: fc.integer(), active: fc.boolean() }),
-  ])(`canonical expression grammar preserves semantics`, (pair, sample) => {
-    oracleRoute(`random seed`)
-    const row = { user: sample }
-
-    expect(compileExpression(pair.original)(row)).toBe(
-      compileExpression(pair.equivalent)(row),
-    )
-    expect(getProjectedExpressionIdentity(pair.original)).toBe(
-      getProjectedExpressionIdentity(pair.equivalent),
-    )
+  oracleProperty({
+    id: `ir-identity.canonical-expressions`,
+    law: {
+      statement: `The canonical expression transformations preserve both evaluation and projected identity.`,
+      authority: `The semantic expression identity law stated at the start of this owner: inverse comparisons, commutative equality/membership and associative/idempotent boolean forms.`,
+      limits: `The unchanged finite expression constructors and integer/boolean sample rows; no arbitrary expression language or SQL-null grammar.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: fc.tuple(
+        equivalentExpressionPairArbitrary,
+        fc.record({ age: fc.integer(), active: fc.boolean() }),
+      ),
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({ semantics: true, identity: true }),
+    driver: ([pair, sample], observe) => {
+      const row = { user: sample }
+      observe(
+        `semantics`,
+        Object.is(
+          compileExpression(pair.original)(row),
+          compileExpression(pair.equivalent)(row),
+        ),
+      )
+      observe(
+        `identity`,
+        getProjectedExpressionIdentity(pair.original) ===
+          getProjectedExpressionIdentity(pair.equivalent),
+      )
+    },
+    check: checkIdentityRelations,
   })
 
-  fcTest.prop([referenceSemanticPairArbitrary])(
-    `keeps reference-semantic values distinct across expression and demand identity`,
-    ([first, second]) => {
-      oracleRoute(`random seed`)
+  oracleProperty({
+    id: `ir-identity.reference-expressions`,
+    law: {
+      statement: `Distinct reference-semantic captures stay distinct in expression evaluation, projected identity and demand identity.`,
+      authority: `The reference-value identity contract stated above; separately allocated arrays, records, Maps, Sets and binary values are distinct captures.`,
+      limits: `The unchanged five reference-pair constructors; no arbitrary object graph or cross-runtime identity claim.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: referenceSemanticPairArbitrary,
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({
+      firstMatches: true,
+      secondMatches: false,
+      sameExpressionIdentity: false,
+      sameDemandIdentity: false,
+    }),
+    driver: ([first, second], observe) => {
       const value = new PropRef<unknown>([`row`, `value`])
       const firstPredicate = new Func<boolean>(`eq`, [value, new Value(first)])
       const secondPredicate = new Func<boolean>(`eq`, [
@@ -350,109 +511,207 @@ describe(`semantic expression identity`, () => {
         new Value(second),
       ])
       const row = { row: { value: first } }
-
-      expect(compileExpression(firstPredicate)(row)).toBe(true)
-      expect(compileExpression(secondPredicate)(row)).toBe(false)
-      expect(getProjectedExpressionIdentity(firstPredicate)).not.toBe(
-        getProjectedExpressionIdentity(secondPredicate),
+      observe(`firstMatches`, compileExpression(firstPredicate)(row))
+      observe(`secondMatches`, compileExpression(secondPredicate)(row))
+      observe(
+        `sameExpressionIdentity`,
+        getProjectedExpressionIdentity(firstPredicate) ===
+          getProjectedExpressionIdentity(secondPredicate),
       )
-      expect(
-        getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }),
-      ).not.toBe(getLoadSubsetDemandKey({ where: secondPredicate, limit: 1 }))
+      observe(
+        `sameDemandIdentity`,
+        getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }) ===
+          getLoadSubsetDemandKey({ where: secondPredicate, limit: 1 }),
+      )
     },
+    check: checkIdentityRelations,
+  })
+
+  const membershipHistories = fc.uniqueArray(
+    fc.oneof(fc.integer(), fc.string(), fc.boolean()),
+    { minLength: 1, maxLength: 8 },
   )
-
-  fcTest.prop([
-    fc.uniqueArray(fc.oneof(fc.integer(), fc.string(), fc.boolean()), {
-      minLength: 1,
-      maxLength: 8,
-    }),
-  ])(`treats IN candidates as a set`, (candidates) => {
-    oracleRoute(`random seed`)
-    const value = new PropRef<unknown>([`row`, `value`])
-    const ordered = new Func<boolean>(`in`, [value, new Value(candidates)])
-    const reordered = new Func<boolean>(`in`, [
-      value,
-      new Value([...candidates].reverse().concat(candidates[0]!)),
-    ])
-
-    let nonmember = `not a candidate`
-    while (candidates.includes(nonmember)) nonmember += `!`
-
-    // Mutual agreement alone would also accept two always-true evaluators.
-    // These finite, non-null candidates give us independent literal answers.
-    const cases: Array<readonly [unknown, boolean | null]> = [
-      ...candidates.map((candidate) => [candidate, true] as const),
-      [nonmember, false],
-      [null, null],
-      [undefined, null],
-    ]
-    for (const [candidate, expected] of cases) {
-      const row = { row: { value: candidate } }
-      expect(compileExpression(ordered)(row)).toBe(expected)
-      expect(compileExpression(reordered)(row)).toBe(expected)
-    }
-    expect(getProjectedExpressionIdentity(ordered)).toBe(
-      getProjectedExpressionIdentity(reordered),
-    )
-    expect(getLoadSubsetDemandKey({ where: ordered })).toBe(
-      getLoadSubsetDemandKey({ where: reordered }),
-    )
+  oracleProperty({
+    id: `ir-identity.membership-set`,
+    law: {
+      statement: `Reversing and repeating IN candidates preserves membership results, projected identity and demand identity.`,
+      authority: `The existing IN-set identity law; each candidate matches, an independently fresh string does not, and nullish operands stay UNKNOWN.`,
+      limits: `The unchanged one-to-eight unique finite primitive candidate grammar; no object or non-array membership claim.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: membershipHistories,
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    resolve: (candidates) => {
+      let nonmember = `not a candidate`
+      while (candidates.includes(nonmember)) nonmember += `!`
+      return {
+        candidates,
+        operands: [...candidates, nonmember, null, undefined],
+      }
+    },
+    model: ({ candidates }) => {
+      const expected: Record<string, boolean | null> = {}
+      for (let index = 0; index < candidates.length + 3; index++) {
+        const result =
+          index < candidates.length
+            ? true
+            : index === candidates.length
+              ? false
+              : null
+        expected[`ordered ${index}`] = result
+        expected[`reordered ${index}`] = result
+      }
+      expected.sameExpressionIdentity = true
+      expected.sameDemandIdentity = true
+      return expected
+    },
+    driver: ({ candidates, operands }, observe) => {
+      const value = new PropRef<unknown>([`row`, `value`])
+      const ordered = new Func<boolean>(`in`, [value, new Value(candidates)])
+      const reordered = new Func<boolean>(`in`, [
+        value,
+        new Value([...candidates].reverse().concat(candidates[0]!)),
+      ])
+      for (const [index, candidate] of operands.entries()) {
+        const row = { row: { value: candidate } }
+        observe(`ordered ${index}`, compileExpression(ordered)(row))
+        observe(`reordered ${index}`, compileExpression(reordered)(row))
+      }
+      observe(
+        `sameExpressionIdentity`,
+        getProjectedExpressionIdentity(ordered) ===
+          getProjectedExpressionIdentity(reordered),
+      )
+      observe(
+        `sameDemandIdentity`,
+        getLoadSubsetDemandKey({ where: ordered }) ===
+          getLoadSubsetDemandKey({ where: reordered }),
+      )
+    },
+    check: checkIdentityRelations,
   })
 })
 
 describe(`stable QueryIR identity smoke test`, () => {
-  fcTest.prop([
-    fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/), {
-      minLength: 4,
-      maxLength: 4,
-    }),
-  ])(`does not depend on lexical source aliases`, (aliases) => {
-    oracleRoute(`random seed`)
-    const [firstUser, firstPost, secondUser, secondPost] = aliases
-
-    expect(
-      getQueryIdentity(createAlphaRenamedJoinQuery(firstUser!, firstPost!)),
-    ).toBe(
-      getQueryIdentity(createAlphaRenamedJoinQuery(secondUser!, secondPost!)),
-    )
-    expect(
-      getQueryIdentity(createAlphaRenamedNestedQuery(firstUser!, firstPost!)),
-    ).toBe(
-      getQueryIdentity(createAlphaRenamedNestedQuery(secondUser!, secondPost!)),
-    )
-    expect(
-      getQueryIdentity(createAlphaRenamedIncludesQuery(firstUser!, firstPost!)),
-    ).toBe(
-      getQueryIdentity(
-        createAlphaRenamedIncludesQuery(secondUser!, secondPost!),
-      ),
-    )
+  oracleProperty({
+    id: `ir-identity.lexical-aliases`,
+    law: {
+      statement: `Alpha-renaming source aliases preserves explicit join, nested-query and include identity.`,
+      authority: `ARCHITECTURE.md's alpha-renaming law and the existing lexical-alias identity contract.`,
+      limits: `The unchanged four-unique-alias grammar and three query constructors; no implicit output-shape or captured-shadowing claim.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/), {
+        minLength: 4,
+        maxLength: 4,
+      }),
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({ join: true, nested: true, includes: true }),
+    driver: ([firstUser, firstPost, secondUser, secondPost], observe) => {
+      observe(
+        `join`,
+        getQueryIdentity(
+          createAlphaRenamedJoinQuery(firstUser!, firstPost!),
+        ) ===
+          getQueryIdentity(
+            createAlphaRenamedJoinQuery(secondUser!, secondPost!),
+          ),
+      )
+      observe(
+        `nested`,
+        getQueryIdentity(
+          createAlphaRenamedNestedQuery(firstUser!, firstPost!),
+        ) ===
+          getQueryIdentity(
+            createAlphaRenamedNestedQuery(secondUser!, secondPost!),
+          ),
+      )
+      observe(
+        `includes`,
+        getQueryIdentity(
+          createAlphaRenamedIncludesQuery(firstUser!, firstPost!),
+        ) ===
+          getQueryIdentity(
+            createAlphaRenamedIncludesQuery(secondUser!, secondPost!),
+          ),
+      )
+    },
+    check: checkIdentityRelations,
   })
 
-  fcTest.prop([outputExpressionPairArbitrary])(
-    `equal query identities imply equal projected expression results`,
-    ({ first, second }) => {
-      oracleRoute(`random seed`)
+  oracleProperty({
+    id: `ir-identity.projected-results`,
+    law: {
+      statement: `Equal query identities imply Object.is-equal projected expression results.`,
+      authority: `The output-preservation identity law stated above.`,
+      limits: `The unchanged integer, string-concat, binary-concat and signed-zero expression-pair grammar; no converse identity promise.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: outputExpressionPairArbitrary,
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({ equalIdentityPreservesOutput: true }),
+    driver: ({ first, second }, observe) => {
       const firstIdentity = getQueryIdentity(
         createProjectedExpressionQuery(first),
       )
       const secondIdentity = getQueryIdentity(
         createProjectedExpressionQuery(second),
       )
-
-      if (firstIdentity === secondIdentity) {
-        expect(
+      observe(
+        `equalIdentityPreservesOutput`,
+        firstIdentity !== secondIdentity ||
           Object.is(
             compileExpression(first)({}),
             compileExpression(second)({}),
           ),
-        ).toBe(true)
-      }
+      )
     },
-  )
+    check: checkIdentityRelations,
+  })
 
-  it(`preserves signed zero through coalesce and binary conversion through conditional output`, () => {
+  test(`preserves signed zero through coalesce and binary conversion through conditional output`, () => {
     oracleRoute(`fixed history`)
     assertOutputProgram(
       observeOutputProgram({
@@ -473,23 +732,55 @@ describe(`stable QueryIR identity smoke test`, () => {
     }
   })
 
-  const outputProgramFixedSeed = oracleFixedSeed(715031, { numRuns: 200 })
-  fcTest.prop([outputProgramArbitrary], outputProgramFixedSeed)(
-    `matches output denotation through composed contexts with a fixed seed`,
-    (program) => {
-      oracleRoute(`fixed seed`)
-      return assertOutputProgram(observeOutputProgram(program))
+  oracleProperty({
+    id: `ir-identity.output-denotation`,
+    law: {
+      statement: `Each compiled literal/wrapper program matches its independent denotation, and equal projected identities preserve its exact output.`,
+      authority: `The existing interpretOutputProgram denotation and output-sensitive identity law stated above.`,
+      limits: `The unchanged literal-pair and one-to-three wrapper grammar; reference leaves are compared by Object.is and no arbitrary JavaScript evaluator claim follows.`,
     },
-  )
-  fcTest.prop([outputProgramArbitrary], { numRuns: oracleRuns(200) })(
-    `matches output denotation through random composed contexts`,
-    (program) => {
-      oracleRoute(`random seed`)
-      return assertOutputProgram(observeOutputProgram(program))
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: outputProgramArbitrary,
+      runs: 200,
+      fixedSeeds: [715031],
+      states: [],
+      constructed: [],
     },
-  )
+    resolve: (program) => ({
+      program,
+      literals: outputLiterals(program.literals),
+    }),
+    model: modelOutputProgram,
+    driver: (plan, observe) => {
+      const observations = plan.literals.map((literal) => {
+        const expression = buildOutputProgram(literal, plan.program.wrappers)
+        return {
+          actual: encodeOutputValue(
+            compileExpression(expression)({}),
+            plan.literals,
+          ),
+          identity: getProjectedExpressionIdentity(expression),
+        }
+      })
+      observe(`output denotation`, {
+        values: observations.map(({ actual }) => actual),
+        sameIdentity: observations[0]!.identity === observations[1]!.identity,
+      })
+    },
+    check: checkOutputProgram,
+  })
 
-  it.each([`shared-wrong-output`, `constant-identity`] as const)(
+  test.each([`shared-wrong-output`, `constant-identity`] as const)(
     `rejects ${`%s`} despite mutual agreement`,
     (fault) => {
       oracleRoute(`calibration`)
@@ -508,46 +799,110 @@ describe(`stable QueryIR identity smoke test`, () => {
     },
   )
 
-  fcTest.prop([
-    fc
-      .stringMatching(/^[a-z][a-z0-9]{0,8}$/)
-      .filter(
-        (alias) =>
-          alias !== `kind` && alias !== `profile` && alias !== `userId`,
-      ),
-  ])(`does not bind union-derived output fields to outer aliases`, (alias) => {
-    oracleRoute(`random seed`)
-    expect(getQueryIdentity(createUnionDerivedNestedQuery(`kind`))).toBe(
-      getQueryIdentity(createUnionDerivedNestedQuery(alias)),
-    )
-    expect(
-      getQueryIdentity(createUnionDerivedNestedOutputQuery(`profile`)),
-    ).toBe(getQueryIdentity(createUnionDerivedNestedOutputQuery(alias)))
-    expect(getQueryIdentity(createUnionDerivedIncludesQuery(`userId`))).toBe(
-      getQueryIdentity(createUnionDerivedIncludesQuery(alias)),
-    )
-    expect(
-      getQueryIdentity(createCorrelatedUnionIncludesQuery(`profile`)),
-    ).toBe(getQueryIdentity(createCorrelatedUnionIncludesQuery(alias)))
+  oracleProperty({
+    id: `ir-identity.union-output-aliases`,
+    law: {
+      statement: `Renaming an outer alias does not bind union-derived output fields as source references.`,
+      authority: `The existing union-output identity law stated above and ARCHITECTURE.md's union result scope.`,
+      limits: `The unchanged filtered alias grammar and four union-derived query constructors.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: fc
+        .stringMatching(/^[a-z][a-z0-9]{0,8}$/)
+        .filter(
+          (alias) =>
+            alias !== `kind` && alias !== `profile` && alias !== `userId`,
+        ),
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({
+      nested: true,
+      nestedOutput: true,
+      includes: true,
+      correlated: true,
+    }),
+    driver: (alias, observe) => {
+      observe(
+        `nested`,
+        getQueryIdentity(createUnionDerivedNestedQuery(`kind`)) ===
+          getQueryIdentity(createUnionDerivedNestedQuery(alias)),
+      )
+      observe(
+        `nestedOutput`,
+        getQueryIdentity(createUnionDerivedNestedOutputQuery(`profile`)) ===
+          getQueryIdentity(createUnionDerivedNestedOutputQuery(alias)),
+      )
+      observe(
+        `includes`,
+        getQueryIdentity(createUnionDerivedIncludesQuery(`userId`)) ===
+          getQueryIdentity(createUnionDerivedIncludesQuery(alias)),
+      )
+      observe(
+        `correlated`,
+        getQueryIdentity(createCorrelatedUnionIncludesQuery(`profile`)) ===
+          getQueryIdentity(createCorrelatedUnionIncludesQuery(alias)),
+      )
+    },
+    check: checkIdentityRelations,
   })
 
-  fcTest.prop([referenceSemanticPairArbitrary])(
-    `keeps queries distinct when captured values compare by reference`,
-    ([first, second]) => {
-      oracleRoute(`random seed`)
+  oracleProperty({
+    id: `ir-identity.reference-queries`,
+    law: {
+      statement: `Queries with distinct reference-semantic captured values have distinct identity and match only their own capture.`,
+      authority: `The existing captured-reference query identity law stated above.`,
+      limits: `The unchanged reference-pair grammar and profile-equality query constructor.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: {
+      arbitrary: referenceSemanticPairArbitrary,
+      runs: 100,
+      fixedSeeds: [],
+      states: [],
+      constructed: [],
+    },
+    model: () => ({
+      firstMatches: true,
+      secondMatches: false,
+      sameIdentity: false,
+    }),
+    driver: ([first, second], observe) => {
       const firstQuery = createProfileValueQuery(first)
       const secondQuery = createProfileValueQuery(second)
       const firstPredicate = firstQuery.where![0] as BasicExpression<boolean>
       const secondPredicate = secondQuery.where![0] as BasicExpression<boolean>
       const row = { user: { profile: first } }
-
-      expect(compileExpression(firstPredicate)(row)).toBe(true)
-      expect(compileExpression(secondPredicate)(row)).toBe(false)
-      expect(getQueryIdentity(firstQuery)).not.toBe(
-        getQueryIdentity(secondQuery),
+      observe(`firstMatches`, compileExpression(firstPredicate)(row))
+      observe(`secondMatches`, compileExpression(secondPredicate)(row))
+      observe(
+        `sameIdentity`,
+        getQueryIdentity(firstQuery) === getQueryIdentity(secondQuery),
       )
     },
-  )
+    check: checkIdentityRelations,
+  })
 })
 
 type GroupBy = `none` | `bare` | `groupKeys`
@@ -662,7 +1017,7 @@ describe(`operator-code identity`, () => {
     ),
   )
 
-  it(`keeps queries whose operator code changes the compile outcome distinct`, () => {
+  test(`keeps queries whose operator code changes the compile outcome distinct`, () => {
     oracleRoute(`fixed history`)
     const results = cases.map(({ groupBy, agg, inc }) => {
       const ir = buildIR(groupBy, agg, inc)
@@ -835,7 +1190,7 @@ describe(`operator-code identity`, () => {
                   poolable,
                 })
 
-  it(`keeps every operator-code variant with a different compile outcome distinct`, () => {
+  test(`keeps every operator-code variant with a different compile outcome distinct`, () => {
     oracleRoute(`case`)
     const identities = {
       ir: (ir: QueryIR) => getQueryIdentity(ir),

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { expectRowSnapshot } from '../conformance/row-snapshot-oracle.js'
 import {
   expectedPublicField,
@@ -35,6 +34,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { oracleRoute } from '../oracle-config.js'
+import { requiredIncludesObservations } from './includes-state-observations.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   createGrammarCollection,
@@ -2284,7 +2284,10 @@ async function runPublicFieldCell(cell: PublicFieldCell): Promise<void> {
     `omission`,
     `readmission`,
   ]
-  const reach = createOracleReach(grammarCellName(cell), [...paths, ...stages])
+  const reach = requiredIncludesObservations(grammarCellName(cell), [
+    ...paths,
+    ...stages,
+  ])
   reach.beginHistory()
   const source = createControlledCollection(
     `public-field`,
@@ -2797,7 +2800,10 @@ async function runMaterializedInputCell({
   )
   if (selection === `functional`)
     states.push(`callback-group-1`, `callback-group-2`)
-  const reach = createOracleReach(`materialized-input/${name}`, states)
+  const reach = requiredIncludesObservations(
+    `materialized-input/${name}`,
+    states,
+  )
   reach.beginHistory()
   const parents = createGrammarCollection(
     `materialized-input-${name}-parents`,
@@ -3074,7 +3080,7 @@ test.each(outerJoinKeyGrammar)(
   async ({ join, mainRef, joinedRef, keys }) => {
     oracleRoute(`case`)
     const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
-    const reach = createOracleReach(
+    const reach = requiredIncludesObservations(
       `outer join independent source keys`,
       cuts.flatMap((cut) =>
         materializationForms.map((form) => `${cut}/${form}`),

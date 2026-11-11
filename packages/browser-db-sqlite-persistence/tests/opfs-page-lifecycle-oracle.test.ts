@@ -1,13 +1,12 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterEach, describe, expect, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, expect, vi } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
@@ -25,7 +24,6 @@ import type {
   TrackedResult,
 } from './opfs-page-lifecycle-harness'
 import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
-
 /**
  * # Who owns an OPFS worker when the browser page leaves?
  *
@@ -65,13 +63,11 @@ import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
  * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
  * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
-
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
 type DeliveryStage =
   | `pagehide-before-response-production`
   | `pagehide-after-response-production`
   | `response-before-pagehide`
-
 type PagehideHistory = {
   pending: RequestKind
   delivery: DeliveryStage
@@ -79,19 +75,16 @@ type PagehideHistory = {
   executeCount: number
   releaseDirection: ReleaseDirection
 }
-
 type FailureHistory = {
   stage: `init` | `close`
   code: BrowserOPFSWorkerErrorCode
 }
-
 type MixedExecuteHistory = {
   executeCount: number
   completedBeforePagehide: number
   persisted: boolean
   releaseDirection: ReleaseDirection
 }
-
 type CloseHistory = {
   executeCount: number
   answeredDuringClose: number
@@ -101,15 +94,12 @@ type CloseHistory = {
   executeDuringClose: boolean
   interruption: CloseInterruption
 }
-
 type CloseInterruption = `none` | `pagehide` | TerminalEventType
-
 type TerminalEventHistory = {
   pending: RequestKind
   eventType: TerminalEventType
   executeCount: number
 }
-
 // Authority: the public error classes exported by sqlite-persistence-core and
 // the three protocol classifications in opfs-worker-protocol.ts. Keeping the
 // table declarative makes an accidental production remapping observable.
@@ -125,24 +115,23 @@ const workerFailureContracts = {
   INTERNAL: { name: `OPFSWorkerRequestError`, messagePrefix: `` },
 } satisfies Record<
   BrowserOPFSWorkerErrorCode,
-  { name: string; messagePrefix: string }
+  {
+    name: string
+    messagePrefix: string
+  }
 >
-
 const pagehideAbort = {
   name: `AbortError`,
   message: `The page is closing its SQLite connection`,
 }
-
 const closedConnection = {
   name: `SQLiteConnectionClosedError`,
   message: `Browser OPFS worker connection is closed`,
 }
-
 const closeAbort = {
   name: `AbortError`,
   message: `The SQLite connection is closed`,
 }
-
 // Which of `count` held responses a partial release delivers.
 function isReleased(
   index: number,
@@ -152,7 +141,6 @@ function isReleased(
 ): boolean {
   return direction === `fifo` ? index < released : index >= count - released
 }
-
 // The close model: answered siblings keep their rows, the rest abort at close
 // settlement, admission after close starts is refused, and every close call
 // observes the worker's close outcome. An interruption before the close
@@ -212,7 +200,6 @@ function expectedCloseSettlements(history: CloseHistory): Array<Settlement> {
       : []),
   ]
 }
-
 const terminalEventFailures = {
   error: {
     name: `PersistenceUnavailableError`,
@@ -222,8 +209,13 @@ const terminalEventFailures = {
     name: `PersistenceUnavailableError`,
     message: `Persistence unavailable: OPFS worker message serialization failed`,
   },
-} satisfies Record<TerminalEventType, { name: string; message: string }>
-
+} satisfies Record<
+  TerminalEventType,
+  {
+    name: string
+    message: string
+  }
+>
 function canonicalSettlements(
   settlements: ReadonlyArray<Settlement>,
 ): Array<Settlement> {
@@ -231,24 +223,27 @@ function canonicalSettlements(
     left.label.localeCompare(right.label),
   )
 }
-
 function expectSettlementSet(
   actual: ReadonlyArray<Settlement>,
   expected: ReadonlyArray<Settlement>,
 ): void {
   // Keep raw arrays and compare lengths before canonicalizing: an accidental
   // duplicate cannot disappear behind request-keyed normalization.
-  expect(actual).toHaveLength(expected.length)
-  expect(canonicalSettlements(actual)).toEqual(canonicalSettlements(expected))
+  oracleAssertion('existing comparison at 235', () =>
+    expect(actual).toHaveLength(expected.length),
+  )
+  oracleAssertion('existing comparison at 236', () =>
+    expect(canonicalSettlements(actual)).toEqual(
+      canonicalSettlements(expected),
+    ),
+  )
 }
-
 async function runPagehideHistory(history: PagehideHistory): Promise<void> {
   const page = installEnvironment({ heldResponseType: history.pending })
   const settlements: Array<Settlement> = []
   const expectedFulfilled: Array<Settlement> = []
   const tracked: Array<Promise<TrackedResult<unknown>>> = []
   let database: Database | undefined
-
   try {
     if (history.pending === `init`) {
       tracked.push(
@@ -301,18 +296,22 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
         })
       }
     }
-
     const worker = ControlledWorker.instances[0]!
     const pendingCount =
       history.pending === `execute` ? history.executeCount : 1
-    expect(page.addCalls).toBe(1)
-    expect(
-      worker.requests.filter(({ type }) => type === history.pending),
-    ).toHaveLength(pendingCount)
-
+    oracleAssertion('existing comparison at 302', () =>
+      expect(page.addCalls).toBe(1),
+    )
+    oracleAssertion('existing comparison at 303', () =>
+      expect(
+        worker.requests.filter(({ type }) => type === history.pending),
+      ).toHaveLength(pendingCount),
+    )
     let completed: Array<TrackedResult<unknown>>
     if (history.delivery === `pagehide-before-response-production`) {
-      expect(worker.heldResponseCount).toBe(0)
+      oracleAssertion('existing comparison at 309', () =>
+        expect(worker.heldResponseCount).toBe(0),
+      )
       page.dispatchPageHide(history.persisted)
       // The listener must exist, reject pending requests, and dispose before
       // the worker's queued response-production microtask runs.
@@ -321,10 +320,14 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
       const terminalLedger = [...settlements]
       worker.releaseHeldResponses()
       await Promise.resolve()
-      expect(settlements).toEqual(terminalLedger)
+      oracleAssertion('existing comparison at 318', () =>
+        expect(settlements).toEqual(terminalLedger),
+      )
     } else {
       await Promise.resolve()
-      expect(worker.heldResponseCount).toBe(pendingCount)
+      oracleAssertion('existing comparison at 321', () =>
+        expect(worker.heldResponseCount).toBe(pendingCount),
+      )
       if (history.delivery === `response-before-pagehide`) {
         worker.releaseHeldResponses(undefined, history.releaseDirection)
         completed = await Promise.all(tracked)
@@ -333,8 +336,12 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
         }
         if (history.pending !== `close`) {
           // A completed request does not dispose an otherwise open connection.
-          expect(worker.terminationCalls).toBe(0)
-          expect(page.listenerCount).toBe(1)
+          oracleAssertion('existing comparison at 330', () =>
+            expect(worker.terminationCalls).toBe(0),
+          )
+          oracleAssertion('existing comparison at 331', () =>
+            expect(page.listenerCount).toBe(1),
+          )
         }
         page.dispatchPageHide(history.persisted)
       } else {
@@ -345,10 +352,11 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
         const terminalLedger = [...settlements]
         worker.releaseHeldResponses(undefined, history.releaseDirection)
         await Promise.resolve()
-        expect(settlements).toEqual(terminalLedger)
+        oracleAssertion('existing comparison at 342', () =>
+          expect(settlements).toEqual(terminalLedger),
+        )
       }
     }
-
     const expectedSettlements =
       history.delivery === `response-before-pagehide`
         ? expectedFulfilled
@@ -362,21 +370,24 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
       completed.map(({ settlement }) => settlement),
       expectedSettlements,
     )
-    expect(worker.heldResponseCount).toBe(0)
+    oracleAssertion('existing comparison at 359', () =>
+      expect(worker.heldResponseCount).toBe(0),
+    )
     expectDisposed(page, worker)
-
     if (database) {
       await expectPostDisposalNoReach(database, worker)
     }
-
     page.dispatchPageHide(!history.persisted)
-    expect(worker.terminationCalls).toBe(1)
-    expect(page.removeCalls).toBe(1)
+    oracleAssertion('existing comparison at 367', () =>
+      expect(worker.terminationCalls).toBe(1),
+    )
+    oracleAssertion('existing comparison at 368', () =>
+      expect(page.removeCalls).toBe(1),
+    )
   } finally {
     await cleanupEnvironment()
   }
 }
-
 async function expectPostDisposalNoReach(
   database: Database,
   worker: ControlledWorker,
@@ -414,16 +425,18 @@ async function expectPostDisposalNoReach(
     completed.map(({ settlement }) => settlement),
     expected,
   )
-  expect(worker.requests).toHaveLength(requestCount)
-  expect(worker.terminationCalls).toBe(1)
+  oracleAssertion('existing comparison at 411', () =>
+    expect(worker.requests).toHaveLength(requestCount),
+  )
+  oracleAssertion('existing comparison at 412', () =>
+    expect(worker.terminationCalls).toBe(1),
+  )
 }
-
 async function runMixedExecuteHistory(
   history: MixedExecuteHistory,
 ): Promise<void> {
   const page = installEnvironment({ heldResponseType: `execute` })
   const settlements: Array<Settlement> = []
-
   try {
     const database = await openBrowserWASQLiteOPFSDatabase({
       databaseName: `oracle.sqlite`,
@@ -438,24 +451,27 @@ async function runMixedExecuteHistory(
         settlements,
       )
     })
-
     await Promise.resolve()
-    expect(worker.heldResponseCount).toBe(history.executeCount)
+    oracleAssertion('existing comparison at 437', () =>
+      expect(worker.heldResponseCount).toBe(history.executeCount),
+    )
     worker.releaseHeldResponses(
       history.completedBeforePagehide,
       history.releaseDirection,
     )
     await Promise.resolve()
-    expect(settlements).toHaveLength(history.completedBeforePagehide)
-
+    oracleAssertion('existing comparison at 443', () =>
+      expect(settlements).toHaveLength(history.completedBeforePagehide),
+    )
     page.dispatchPageHide(history.persisted)
     expectDisposed(page, worker)
     const completed = await Promise.all(tracked)
     const terminalLedger = [...settlements]
     worker.releaseHeldResponses(undefined, history.releaseDirection)
     await Promise.resolve()
-    expect(settlements).toEqual(terminalLedger)
-
+    oracleAssertion('existing comparison at 451', () =>
+      expect(settlements).toEqual(terminalLedger),
+    )
     const expected = Array.from(
       { length: history.executeCount },
       (_, index): Settlement => {
@@ -487,14 +503,12 @@ async function runMixedExecuteHistory(
     await cleanupEnvironment()
   }
 }
-
 async function runCloseHistory(history: CloseHistory): Promise<void> {
   const page = installEnvironment({
     heldResponseType: `execute`,
     closeErrorCode: history.closeCode,
   })
   const settlements: Array<Settlement> = []
-
   try {
     const database = await openBrowserWASQLiteOPFSDatabase({
       databaseName: `oracle.sqlite`,
@@ -511,8 +525,9 @@ async function runCloseHistory(history: CloseHistory): Promise<void> {
         ),
     )
     await Promise.resolve()
-    expect(worker.heldResponseCount).toBe(history.executeCount)
-
+    oracleAssertion('existing comparison at 508', () =>
+      expect(worker.heldResponseCount).toBe(history.executeCount),
+    )
     const closing = track(
       `close`,
       Promise.resolve(database.close!()),
@@ -551,7 +566,6 @@ async function runCloseHistory(history: CloseHistory): Promise<void> {
     } else if (history.interruption !== `none`) {
       worker.emitTerminalEvent(history.interruption)
     }
-
     // Close settlement is the checkpoint. Awaiting every tracked promise here
     // would turn an unsettled sibling into a timeout instead of a mismatch.
     await closing
@@ -562,13 +576,17 @@ async function runCloseHistory(history: CloseHistory): Promise<void> {
       (await Promise.all(tracked)).map(({ settlement }) => settlement),
       expected,
     )
-    expect(worker.requests.map(({ type }) => type)).toEqual([
-      `init`,
-      ...Array.from({ length: history.executeCount }, () => `execute`),
-      `close`,
-    ])
-    expect(worker.heldResponseCount).toBe(
-      history.executeCount - history.answeredDuringClose,
+    oracleAssertion('existing comparison at 559', () =>
+      expect(worker.requests.map(({ type }) => type)).toEqual([
+        `init`,
+        ...Array.from({ length: history.executeCount }, () => `execute`),
+        `close`,
+      ]),
+    )
+    oracleAssertion('existing comparison at 564', () =>
+      expect(worker.heldResponseCount).toBe(
+        history.executeCount - history.answeredDuringClose,
+      ),
     )
     expectDisposed(page, worker)
     await expectPostDisposalNoReach(database, worker)
@@ -576,7 +594,6 @@ async function runCloseHistory(history: CloseHistory): Promise<void> {
     await cleanupEnvironment()
   }
 }
-
 async function runTerminalEventHistory(
   history: TerminalEventHistory,
 ): Promise<void> {
@@ -584,7 +601,6 @@ async function runTerminalEventHistory(
   const settlements: Array<Settlement> = []
   const tracked: Array<Promise<TrackedResult<unknown>>> = []
   let database: Database | undefined
-
   try {
     if (history.pending === `init`) {
       tracked.push(
@@ -621,21 +637,22 @@ async function runTerminalEventHistory(
         )
       }
     }
-
     const worker = ControlledWorker.instances[0]!
     const pendingCount =
       history.pending === `execute` ? history.executeCount : 1
     await Promise.resolve()
-    expect(worker.heldResponseCount).toBe(pendingCount)
+    oracleAssertion('existing comparison at 623', () =>
+      expect(worker.heldResponseCount).toBe(pendingCount),
+    )
     worker.emitTerminalEvent(history.eventType)
     expectDisposed(page, worker)
-
     const completed = await Promise.all(tracked)
     const terminalLedger = [...settlements]
     worker.releaseHeldResponses()
     await Promise.resolve()
-    expect(settlements).toEqual(terminalLedger)
-
+    oracleAssertion('existing comparison at 631', () =>
+      expect(settlements).toEqual(terminalLedger),
+    )
     const expected = tracked.map((_, index): Settlement => ({
       label:
         history.pending === `execute` ? `execute-${index}` : history.pending,
@@ -648,15 +665,15 @@ async function runTerminalEventHistory(
       expected,
     )
     if (database) await expectPostDisposalNoReach(database, worker)
-
     worker.emitTerminalEvent(history.eventType)
     page.dispatchPageHide(false)
-    expect(worker.terminationCalls).toBe(1)
+    oracleAssertion('existing comparison at 648', () =>
+      expect(worker.terminationCalls).toBe(1),
+    )
   } finally {
     await cleanupEnvironment()
   }
 }
-
 async function runFailureHistory(history: FailureHistory): Promise<void> {
   const page = installEnvironment(
     history.stage === `init`
@@ -664,7 +681,6 @@ async function runFailureHistory(history: FailureHistory): Promise<void> {
       : { closeErrorCode: history.code },
   )
   const settlements: Array<Settlement> = []
-
   try {
     let result: TrackedResult<unknown>
     if (history.stage === `init`) {
@@ -685,26 +701,25 @@ async function runFailureHistory(history: FailureHistory): Promise<void> {
         settlements,
       )
     }
-
-    expect(result.settlement).toEqual({
-      label: history.stage,
-      status: `rejected`,
-      observation: {
-        name: workerFailureContracts[history.code].name,
-        message: `${workerFailureContracts[history.code].messagePrefix}controlled ${history.stage} failure`,
-      },
-    })
+    oracleAssertion('existing comparison at 683', () =>
+      expect(result.settlement).toEqual({
+        label: history.stage,
+        status: `rejected`,
+        observation: {
+          name: workerFailureContracts[history.code].name,
+          message: `${workerFailureContracts[history.code].messagePrefix}controlled ${history.stage} failure`,
+        },
+      }),
+    )
     expectDisposed(page, ControlledWorker.instances[0]!)
   } finally {
     await cleanupEnvironment()
   }
 }
-
 afterEach(async () => {
   await cleanupEnvironment()
   vi.useRealTimers()
 })
-
 const pagehideHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
   delivery: fc.constantFrom<DeliveryStage>(
@@ -716,7 +731,6 @@ const pagehideHistory = fc.record({
   executeCount: fc.integer({ min: 1, max: 3 }),
   releaseDirection: fc.constantFrom<ReleaseDirection>(`fifo`, `reverse`),
 })
-
 const mixedExecuteHistory = fc
   .integer({ min: 2, max: 3 })
   .chain((executeCount) =>
@@ -730,7 +744,6 @@ const mixedExecuteHistory = fc
       releaseDirection: fc.constantFrom<ReleaseDirection>(`fifo`, `reverse`),
     }),
   )
-
 const failureHistory = fc.record({
   stage: fc.constantFrom<FailureHistory[`stage`]>(`init`, `close`),
   code: fc.constantFrom<BrowserOPFSWorkerErrorCode>(
@@ -739,21 +752,18 @@ const failureHistory = fc.record({
     `INTERNAL`,
   ),
 })
-
 const closeCodes = [
   undefined,
   `PERSISTENCE_UNAVAILABLE`,
   `INVALID_CONFIG`,
   `INTERNAL`,
 ] as const satisfies ReadonlyArray<BrowserOPFSWorkerErrorCode | undefined>
-
 const closeInterruptions = [
   `none`,
   `pagehide`,
   `error`,
   `messageerror`,
 ] as const satisfies ReadonlyArray<CloseInterruption>
-
 const closeHistory = fc.integer({ min: 0, max: 3 }).chain((executeCount) =>
   fc.record({
     executeCount: fc.constant(executeCount),
@@ -765,13 +775,11 @@ const closeHistory = fc.integer({ min: 0, max: 3 }).chain((executeCount) =>
     interruption: fc.constantFrom(...closeInterruptions),
   }),
 )
-
 const terminalEventHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
   eventType: fc.constantFrom<TerminalEventType>(`error`, `messageerror`),
   executeCount: fc.integer({ min: 1, max: 3 }),
 })
-
 const pagehideExamples: Array<[PagehideHistory]> = (
   [`init`, `execute`, `close`] as const
 ).flatMap((pending) =>
@@ -794,7 +802,6 @@ const pagehideExamples: Array<[PagehideHistory]> = (
     ),
   ),
 )
-
 const mixedExamples: Array<[MixedExecuteHistory]> = [2, 3].flatMap(
   (executeCount) =>
     Array.from({ length: executeCount - 1 }, (_, index) => index + 1).flatMap(
@@ -813,7 +820,6 @@ const mixedExamples: Array<[MixedExecuteHistory]> = [2, 3].flatMap(
         ),
     ),
 )
-
 // Direction matters only for a partial release.
 const closeExamples: Array<[CloseHistory]> = [0, 1, 2, 3].flatMap(
   (executeCount) =>
@@ -848,7 +854,6 @@ const closeExamples: Array<[CloseHistory]> = [0, 1, 2, 3].flatMap(
         ),
     ),
 )
-
 const failureExamples: Array<[FailureHistory]> = (
   [`init`, `close`] as const
 ).flatMap((stage) =>
@@ -856,7 +861,6 @@ const failureExamples: Array<[FailureHistory]> = (
     (code): [FailureHistory] => [{ stage, code }],
   ),
 )
-
 const terminalEventExamples: Array<[TerminalEventHistory]> = (
   [`init`, `execute`, `close`] as const
 ).flatMap((pending) =>
@@ -868,7 +872,6 @@ const terminalEventExamples: Array<[TerminalEventHistory]> = (
     ),
   ),
 )
-
 /*
 Law/source: the README Notes section requires pagehide to synchronously dispose
 the dedicated worker and reject pending work with AbortError. It gives opening
@@ -910,151 +913,119 @@ path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
 declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runFailureHistory],
   model: [expectedCloseSettlements],
 })
-
-describe(`OPFS page lifecycle oracle`, () => {
-  const pagehideHistoryFixedSeed = oracleFixedSeed(1844, {
-    numRuns: oracleRuns(48),
-    examples: pagehideExamples,
-    verbose: true,
+// Each named helper keeps its independent settlement model and assertions at
+// the original cuts; native registration changes only campaign mechanics.
+const lifecycleLaw = {
+  statement: `The existing settlement ledger and terminal-state model judge each original observation, error, and resource-ownership checkpoint.`,
+  authority: `The OPFS opener lifecycle and worker protocol contract stated above.`,
+  limits: `The existing bounded controlled-Worker histories; no physical OPFS, bfcache, or native handle claim.`,
+}
+function registerFixedHistory<T>(
+  id: string,
+  examples: ReadonlyArray<readonly [T]>,
+  judge: (history: T) => Promise<void>,
+) {
+  oracleProperty({
+    id,
+    law: lifecycleLaw,
+    owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+    histories: examples.map(([history], index) => ({ history, index })),
+    label: (entry) => String(entry.index),
+    resolve: (entry) => ({ history: entry.history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+        judge(plan.history),
+      ),
+    check: forwardAssertionJudgment,
   })
-  oracleReplayTest(fcTest).prop([pagehideHistory], pagehideHistoryFixedSeed)(
-    `matches the independent model across generated histories (fixed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(pagehideHistoryFixedSeed))
-      return runPagehideHistory(history)
-    },
-  )
-  const pagehideHistoryCampaign = {
-    ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
-    examples: pagehideExamples,
-    verbose: true,
-  }
-  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop(
-    [pagehideHistory],
-    pagehideHistoryCampaign,
-  )(
-    `matches the independent model across generated histories (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(pagehideHistoryCampaign))
-      return runPagehideHistory(history)
-    },
-  )
-  const mixedExecuteHistoryFixedSeed = oracleFixedSeed(1845, {
-    numRuns: oracleRuns(32),
-    examples: mixedExamples,
-    verbose: true,
-  })
-  oracleReplayTest(fcTest).prop(
-    [mixedExecuteHistory],
-    mixedExecuteHistoryFixedSeed,
-  )(
-    `preserves completed siblings while aborting pending siblings (fixed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(mixedExecuteHistoryFixedSeed))
-      return runMixedExecuteHistory(history)
-    },
-  )
-  const mixedExecuteHistoryCampaign = {
-    ...oraclePropertyOptions(32, `opfs.mixed-execute`),
-    examples: mixedExamples,
-    verbose: true,
-  }
-  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop(
-    [mixedExecuteHistory],
-    mixedExecuteHistoryCampaign,
-  )(
-    `preserves completed siblings while aborting pending siblings (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(mixedExecuteHistoryCampaign))
-      return runMixedExecuteHistory(history)
-    },
-  )
-  const terminalEventHistoryFixedSeed = oracleFixedSeed(1847, {
-    numRuns: oracleRuns(24),
-    examples: terminalEventExamples,
-    verbose: true,
-  })
-  oracleReplayTest(fcTest).prop(
-    [terminalEventHistory],
-    terminalEventHistoryFixedSeed,
-  )(
-    `rejects pending work across Worker terminal event paths (fixed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(terminalEventHistoryFixedSeed))
-      return runTerminalEventHistory(history)
-    },
-  )
-  const terminalEventHistoryCampaign = {
-    ...oraclePropertyOptions(24, `opfs.terminal-event`),
-    examples: terminalEventExamples,
-    verbose: true,
-  }
-  oracleReplayTest(fcTest, `opfs.terminal-event`).prop(
-    [terminalEventHistory],
-    terminalEventHistoryCampaign,
-  )(
-    `rejects pending work across Worker terminal event paths (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(terminalEventHistoryCampaign))
-      return runTerminalEventHistory(history)
-    },
-  )
-  const closeHistoryFixedSeed = oracleFixedSeed(1848, {
-    numRuns: oracleRuns(32),
-    examples: closeExamples,
-    verbose: true,
-  })
-  oracleReplayTest(fcTest).prop([closeHistory], closeHistoryFixedSeed)(
-    `settles pending work and refuses new work across explicit close (fixed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(closeHistoryFixedSeed))
-      return runCloseHistory(history)
-    },
-  )
-  const closeHistoryCampaign = {
-    ...oraclePropertyOptions(32, `opfs.close`),
-    examples: closeExamples,
-    verbose: true,
-  }
-  oracleReplayTest(fcTest, `opfs.close`).prop(
-    [closeHistory],
-    closeHistoryCampaign,
-  )(
-    `settles pending work and refuses new work across explicit close (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(closeHistoryCampaign))
-      return runCloseHistory(history)
-    },
-  )
-  const failureHistoryFixedSeed = oracleFixedSeed(1846, {
-    numRuns: oracleRuns(18),
-    examples: failureExamples,
-    verbose: true,
-  })
-  oracleReplayTest(fcTest).prop([failureHistory], failureHistoryFixedSeed)(
-    `matches terminal cleanup and error mapping across worker failures (fixed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(failureHistoryFixedSeed))
-      return runFailureHistory(history)
-    },
-  )
-  const failureHistoryCampaign = {
-    ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
-    examples: failureExamples,
-    verbose: true,
-  }
-  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop(
-    [failureHistory],
-    failureHistoryCampaign,
-  )(
-    `matches terminal cleanup and error mapping across worker failures (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(failureHistoryCampaign))
-      return runFailureHistory(history)
-    },
-  )
+}
+oracleProperty({
+  id: `opfs.page-lifecycle`,
+  law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: pagehideHistory, runs: 48, fixedSeeds: [1844] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runPagehideHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
+registerFixedHistory(
+  `opfs.page-lifecycle-fixed`,
+  pagehideExamples,
+  runPagehideHistory,
+)
+oracleProperty({
+  id: `opfs.mixed-execute`,
+  law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: mixedExecuteHistory, runs: 32, fixedSeeds: [1845] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runMixedExecuteHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.mixed-execute-fixed`,
+  mixedExamples,
+  runMixedExecuteHistory,
+)
+oracleProperty({
+  id: `opfs.terminal-event`,
+  law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: terminalEventHistory, runs: 24, fixedSeeds: [1847] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runTerminalEventHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.terminal-event-fixed`,
+  terminalEventExamples,
+  runTerminalEventHistory,
+)
+oracleProperty({
+  id: `opfs.close`,
+  law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: closeHistory, runs: 32, fixedSeeds: [1848] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runCloseHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(`opfs.close-fixed`, closeExamples, runCloseHistory)
+oracleProperty({
+  id: `opfs.failure-cleanup`,
+  law: lifecycleLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: failureHistory, runs: 18, fixedSeeds: [1846] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runFailureHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.failure-cleanup-fixed`,
+  failureExamples,
+  runFailureHistory,
+)

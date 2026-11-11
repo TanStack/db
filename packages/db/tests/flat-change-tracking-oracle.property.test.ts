@@ -72,7 +72,7 @@
  * instances, and symbol keys are outside this owner; the proxy oracles and
  * contracts own them, and this file checks only that they fall back.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
   withArrayChangeTracking,
@@ -80,15 +80,17 @@ import {
   withFlatChangeTracking,
 } from '../src/proxy.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   FRESH_OBJECT,
   MISSING,
@@ -570,30 +572,35 @@ function runHistory(history: History): void {
       }
       return undefined
     })
-    expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError])
-    expect(errors[1], `proxy throws the same error`).toBe(errors[0])
+    oracleAssertion(`flat rethrows`, () =>
+      expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError]),
+    )
+    oracleAssertion(`proxy throws the same error`, () =>
+      expect(errors[1], `proxy throws the same error`).toBe(errors[0]),
+    )
     for (const rows of [flatRows, proxyRows]) {
-      expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
-        originals.map(rowState),
+      oracleAssertion(`rows unchanged`, () =>
+        expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
+          originals.map(rowState),
+        ),
       )
     }
     return
   }
   const flat = track.flat()
-  expect(flat, `flat rows take the flat path`).toBeDefined()
+  oracleAssertion(`flat rows take the flat path`, () =>
+    expect(flat, `flat rows take the flat path`).toBeDefined(),
+  )
   const proxy = track.proxy()
-  expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model))
-  expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
+  oracleAssertion(`flat vs model`, () =>
+    expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model)),
+  )
+  oracleAssertion(`proxy vs model`, () =>
+    expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model)),
+  )
 }
 
-// What this oracle owns: the gap report judges the flat and proxy change trackers
-// (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
 declareOracle({
-  owns: [
-    `src/proxy.ts#withFlatChangeTracking`,
-    `src/proxy.ts#withChangeTracking`,
-    `src/proxy.ts#withArrayChangeTracking`,
-  ],
   check: [runHistory],
   model: [expectedChanges],
 })
@@ -606,25 +613,36 @@ describe(`flat change tracking oracle`, () => {
         return runHistory(history)
       })
     }
-
-    const historyFixedSeed = oracleFixedSeed(44_502_101, {
-      numRuns: oracleRuns(200),
-    })
-    fcTest.prop([historyArbitrary], historyFixedSeed)(
-      `matches the draft proxy (fixed)`,
-      (...args) => {
-        oracleRoute(oracleRouteOf(historyFixedSeed))
-        return runHistory(...args)
-      },
-    )
   }
-  // A path replay of this property runs its one recorded history here.
-  const historyCampaign = oraclePropertyOptions(200, property)
-  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
-    `matches the draft proxy (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(historyCampaign))
-      return runHistory(...args)
+
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
+      authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
+      limits: `The existing bounded flat-row grammar; nested rich containers, class instances and symbol keys belong to the other proxy owners.`,
     },
-  )
+    // What this oracle owns: the gap report judges the flat and proxy change trackers
+    // (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 200,
+      fixedSeeds: [44502101],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `flat change tracking equivalence`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

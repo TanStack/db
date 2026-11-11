@@ -6,28 +6,28 @@
  * every acquired healthy adapter resource. React's render retries do not supply
  * evidence for this Svelte setup/effect boundary.
  */
-import { expect, it } from 'vitest'
 import { flushSync } from 'svelte'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import {
-  checkDescriptorStart,
   descriptorStartHistories,
   expectedDescriptorStart,
 } from '../../db/tests/descriptor-start-release-oracle'
 import { descriptorStartFixture } from '../../db/tests/descriptor-start-release-support'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-config'
 import { withOracleCleanup } from '../../db/tests/utils'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { DescriptorStartHistory } from '../../db/tests/descriptor-start-release-oracle'
 
-async function checkHistory(history: DescriptorStartHistory) {
-  const reach = createOracleReach(`Svelte descriptor starts`, [
-    `rejected`,
-    `read`,
-    `cleaned`,
-  ])
-  reach.beginHistory()
+async function recordHistory(
+  history: DescriptorStartHistory,
+  observeFact: (checkpoint: string, value: unknown) => void,
+) {
   const fixture = descriptorStartFixture(history, `Svelte`)
   const { client, query, failure, factories, startErrors, observe } = fixture
   let dispose: (() => void) | undefined
@@ -42,44 +42,83 @@ async function checkHistory(history: DescriptorStartHistory) {
         rejection = error
       }
     })
-    expect(rejection).toBe(failure)
-    expect(fixture.failures()).toBeGreaterThan(0)
-    expect(factories).toEqual(
-      expectedDescriptorStart(history, `rejected`).factories,
-    )
+    observeFact(`factory failure identity`, rejection === failure)
+    observeFact(`factory rejected`, fixture.failures() > 0)
+    observeFact(`factories`, [...factories])
     fixture.retain()
-    checkDescriptorStart(observe(), history, `rejected`)
-    reach.reach(`rejected`)
+    observeFact(`rejected`, observe())
     for (const [index, row] of fixture.collections().entries()) {
       try {
         row.startSyncImmediate()
       } catch (error) {
-        expect(error).toBe(startErrors[index])
+        observeFact(`start failure identity`, error === startErrors[index])
       }
     }
     flushSync()
-    checkDescriptorStart(observe(), history, `read`)
-    reach.reach(`read`)
+    observeFact(`read`, observe())
     dispose()
     dispose = undefined
     await client.cleanup()
-    checkDescriptorStart(observe(), history, `cleaned`)
-    reach.reach(`cleaned`)
-    reach.assertReached()
+    observeFact(`cleaned`, observe())
   }, [() => dispose?.(), () => client.cleanup()])
 }
 
-it.each(descriptorStartHistories)(
-  `releases independent descriptor starts in Svelte: %j`,
-  (history) => {
-    oracleRoute(`case`)
-    return checkHistory(history)
+// The shared independent model predicts every original comparison cut. Identity
+// checks are recorded as relations because native failures are not portable data.
+function modelHistory(history: DescriptorStartHistory) {
+  return {
+    rejected: expectedDescriptorStart(history, `rejected`),
+    read: expectedDescriptorStart(history, `read`),
+    cleaned: expectedDescriptorStart(history, `cleaned`),
+  }
+}
+function checkHistory(
+  _history: DescriptorStartHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelHistory>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const target =
+      checkpoint === `factories`
+        ? expected.rejected.factories
+        : checkpoint in expected
+          ? expected[checkpoint as keyof typeof expected]
+          : true
+    const wrong = differs(checkpoint, `descriptor start release`, value, target)
+    if (wrong) return wrong
+  }
+  for (const checkpoint of [
+    `factory failure identity`,
+    `factory rejected`,
+    `factories`,
+    `rejected`,
+    `read`,
+    `cleaned`,
+  ])
+    if (trace.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+      return violation(
+        checkpoint,
+        `expected one observation`,
+        `descriptor start release`,
+      )
+  return pass
+}
+oracleProperty({
+  id: `svelte.descriptor-start-release`,
+  law: {
+    statement: `A rejected descriptor binding preserves its factory failure and releases every acquired source independently; later demand and cleanup honor each source's start policy.`,
+    authority: `docs/guides/ssr.md descriptor cleanup contract and packages/db/tests/descriptor-start-release-oracle.ts`,
+    limits: `The existing 85 finite synchronous factory/start histories at Svelte setup, demand and cleanup cuts; no provider shutdown or concurrent scheduling claim.`,
   },
-)
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  histories: descriptorStartHistories,
+  model: modelHistory,
+  driver: recordHistory,
+  check: checkHistory,
+})
 
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
-  check: [checkDescriptorStart],
+  check: [checkHistory],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],
 })

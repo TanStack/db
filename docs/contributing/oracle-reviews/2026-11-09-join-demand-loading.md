@@ -118,3 +118,55 @@ ordered windows, replay, or callback-time reentrancy. It does not change or
 claim transactional snapshot consistency. Those boundaries retain their
 existing [coverage owners](../oracle-coverage.md). No known counterexample
 remains within the stated controlled post-ready sibling-join boundary.
+
+## Upstream merge validation, 2026-11-11
+
+Merged `origin/main` at `8cd8627c6` without rewriting the published branch.
+The conflicts were additive entries in the coverage map and replay registry;
+both upstream additions and this property's entry are retained. The production
+diff against this base remains the same one-line tracker change.
+
+Upstream removed the standalone reach helper in its oracle framework migration.
+The test now uses `oracleProperty`: the same six-dimensional scenario grammar,
+current/settled set model, controlled Collection driver, and status checkpoints
+feed a recorded-trace comparison. The model predicts the status sequence from
+the scenario before comparing public observations. It checks every recorded
+prefix before completeness, so a later setup error cannot hide a loading
+mismatch. Fixed and random budgets remain 100 each. Nine constructed histories
+now guarantee the declared states while retaining generated dimensions; the
+original minimal regression is a named history through the same driver and
+comparison. The framework supplies determinism, reach accounting, and replay.
+This supersedes the original `declareOracle`/`createOracleReach` registration
+and replay mechanics described above, without changing the law or limits.
+
+The seven-file command above passed **1,121 tests**, including the named
+regression and framework determinism check. The fixed seed remains 291107;
+the random campaign seed was -575196917. Reach counts include the framework's
+constructed examples (109 histories per campaign):
+
+| Declared state | Fixed | Random |
+| --- | ---: | ---: |
+| One pending join | 50 | 43 |
+| Two pending joins | 59 | 66 |
+| Replacement while pending | 68 | 60 |
+| Retired pending demand | 48 | 49 |
+| Current failure | 29 | 25 |
+| Current rows | 21 | 20 |
+| Current empty result | 11 | 15 |
+| Obsolete settlement | 88 | 81 |
+| Settlement with another pending join | 43 | 43 |
+
+Restoring the original tracker call still fails the named history at `status 1`
+under law `current demand loading`, expected loading true and observed false.
+The fixed production call was restored before the passing seven-file run.
+Replay the named history with:
+
+```sh
+pnpm --filter @tanstack/db exec vitest run --coverage.enabled=false tests/query/join-demand-loading-oracle.test.ts -t 'ready empty query acquires its first joined demand'
+```
+
+The bundle comparison against the exact new base used
+`pnpm size:compare --packages db --exact-base --rebuild`: package gzip remains
+109,576 bytes; Brotli grows 34 bytes. The typical app remains 95,783 gzip bytes.
+No new production state or helper was added; this is the existing tracker call
+substitution, so the small compression delta does not justify extra machinery.

@@ -299,10 +299,36 @@ presence of a preferred heading, class, comment template, or helper.
   bug-class repair.
 - **Obligation:** The property MUST declare the states that its changed or
   cited laws depend on, and MUST fail when generated histories reach a declared
-  state fewer times than its stated minimum. Use
-  [`createOracleReach`](../../packages/db/tests/oracle-reach.ts) or an
-  equivalent counter that fails the property. A passing run count does not
-  satisfy this requirement.
+  state fewer times than its stated minimum. Declare the states with
+  `histories.states` in `oracleProperty` and supply `histories.constructed`
+  builders that splice them into generated histories. The pinned API has no
+  numeric minimum option. Enforce a normal campaign minimum of N with at least
+  N randomized constructed builders that each list the state in `enters` and
+  reach it. With multiple builders in the pinned API, their results MUST have
+  distinct object identities or provably disjoint primitive values. Prefer a
+  fresh object or array from each invocation. A single primitive-valued builder
+  does not have this collision.
+  Repeated primitive values or shared objects can replace an earlier builder
+  in the framework's history-to-builder map and bypass its state checks. Each
+  normal campaign checks one seed-derived construction from every builder.
+  Confirm every builder's named state checks with missing-state controls, and
+  verify that the reported counts meet N. These checks enforce the minimum.
+  The pinned framework also invokes builders during generated runs, but it
+  does not associate their fresh objects with their `enters` obligations.
+  The property MUST separately check each builder's generated outputs against
+  its named states, using the same production driver and state observations.
+  A missing-state control MUST show that this check rejects a generated
+  construction that omits a required state. Printed counts and additional
+  random hits alone do not enforce either obligation.
+  Literal fixed histories do not count toward required reach. A passing run
+  count does not satisfy this requirement.
+  An enumerated source runs every history, so it declares its states with
+  `histories: { enumerated, states }` and needs no constructed history. Its
+  `reach` test fails when no enumerated history enters a declared state
+  (maintainer decision, 2026-11-10, in the `oracleProperty` contract).
+  Every campaign uses `oracleProperty`. The framework removed the
+  `legacyCampaigns` exemption list, and the vendored legacy reach helpers are
+  deleted.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.
@@ -432,6 +458,23 @@ shared suite a registrar when the suite needs one. A helper from an oracle-named
 module is linted on its own, so the rule does not report a call to it. An
 `oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
 rule judges a call to its helpers as it judges an ordinary module's.
+
+An oracle file names the production code that it judges in the `owns` list of
+each `oracleProperty` call: `oracleProperty({ id, law, owns: [...], ... })`.
+An entry is a source path relative to the package (`src/x.ts`), or one of its
+functions with its static call tree (`src/x.ts#fn`, `src/x.ts#Class.method`).
+The gap report (`pnpm gap-report`) reads the list without running the file, so
+write it in the call as a non-empty array of string or template literals: no
+spread, variable, computed list, or quoted key, and call the function by the
+name `oracleProperty`, not an alias. A file with several `oracleProperty` calls
+repeats the list on each call; the gap report judges ownership per file. A file
+that registers only through a production driver or wrapper, with no inline
+`oracleProperty` call, keeps its list in `declareOracle({ owns: [...] })`
+while the migration lasts. The gap report reads both.
+
+A law has no owner field. Code ownership by people and teams belongs to
+CODEOWNERS (maintainer decision, 2026-11-10). The coverage map's oracle owner
+is a different concept: the file that owns a law's judgment.
 
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions run through the shared law; supplemental examples live

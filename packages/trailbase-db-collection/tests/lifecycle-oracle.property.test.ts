@@ -1,28 +1,3 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it, vi } from 'vitest'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { trailBaseCollectionOptions } from '../src/trailbase'
-import { MockRecordApi } from './mock-record-api'
-import {
-  deferred,
-  failure,
-  invalidValue,
-  observe,
-  sortedRows,
-  source,
-  turn,
-} from './lifecycle-support'
-import type { Event, ListResponse } from 'trailbase'
-import type { RaceRow, Row } from './lifecycle-support'
-
 /**
  * # Does a TrailBase sync run publish and retire one valid row history?
  *
@@ -43,6 +18,39 @@ import type { RaceRow, Row } from './lifecycle-support'
  * See `ORACLE.md` for the full domain, replay commands, mutation evidence, and
  * the boundary intentionally left to service-backed tests.
  */
+import { fc } from '@fast-check/vitest'
+import { vi } from 'vitest'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
+import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
+import { trailBaseCollectionOptions } from '../src/trailbase'
+import { observeHydrationLifecycle } from './lifecycle-hydration-driver'
+import { registerHydrationLifecycle } from './lifecycle-hydration-oracle-suite'
+import {
+  checkLawFacts,
+  createLawRecorder,
+  referenceFacts,
+} from './lifecycle-judgment-oracle'
+import { MockRecordApi } from './mock-record-api'
+import {
+  deferred,
+  failure,
+  invalidValue,
+  observe,
+  sortedRows,
+  source,
+  turn,
+} from './lifecycle-support'
+import type { LawRecorder } from './lifecycle-judgment-oracle'
+import type {
+  ConstructedHistory,
+  Observation,
+} from '../../db/tests/oracle-property'
+
+import type { Event, ListResponse } from 'trailbase'
+import type { RaceRow, Row } from './lifecycle-support'
 
 type Change = { operation: `set` | `delete`; id: number; value: number }
 type Ending =
@@ -66,6 +74,7 @@ type SyncRunPlan =
     }
 type Scenario = {
   mode: `eager` | `on-demand`
+  metadata?: `absent`
   syncRuns: Array<SyncRunPlan>
 }
 
@@ -75,8 +84,9 @@ type Scenario = {
  * the last rows and reports an error. Cleanup clears rows and retires work.
  * The model never reads adapter bookkeeping, pending transactions or caches.
  */
-async function checkLifecycle(
-  { mode, syncRuns }: Scenario,
+async function observeLifecycle(
+  { mode, syncRuns, metadata }: Scenario,
+  facts: LawRecorder,
   providerFault?: `list` | `set` | `buffered`,
 ) {
   const api = new MockRecordApi<Row>()
@@ -88,7 +98,7 @@ async function checkLifecycle(
   })
   const allSources: Array<ReturnType<typeof source>> = []
   const retired: Array<() => void> = []
-  const retiredChecks: Array<() => void> = []
+  const retiredObservations: Array<() => void> = []
   let observationEpoch = -1
   const unhandled: Array<{ epoch: number; error: unknown }> = []
   const reports: Array<{ epoch: number; args: Array<unknown> }> = []
@@ -102,20 +112,35 @@ async function checkLifecycle(
   const intervals = vi.spyOn(globalThis, `setInterval`)
   const cleared = vi.spyOn(globalThis, `clearInterval`)
   process.on(`unhandledRejection`, onUnhandled)
-  const collection = createCollection(
-    trailBaseCollectionOptions({
-      recordApi: api,
-      getKey: (row: Row) => row.id,
-      syncMode: mode,
-      parse: {
-        value: (value) => {
-          if (value === invalidValue) throw failure
-          return value
-        },
+  const options = trailBaseCollectionOptions({
+    recordApi: api,
+    getKey: (row: Row) => row.id,
+    syncMode: mode,
+    parse: {
+      value: (value) => {
+        if (value === invalidValue) throw failure
+        return value
       },
-      serialize: {},
-    }),
-  )
+    },
+    serialize: {},
+  })
+  // SyncParams.metadata is optional. A receiving wrapper may omit the whole
+  // API; an advertised API must still forward its persistence field intact.
+  const collection = createCollection({
+    ...options,
+    sync: {
+      ...options.sync,
+      sync: (params) => {
+        facts.reach(
+          metadata === `absent` ? `metadata-absent` : `metadata-present`,
+        )
+        return options.sync.sync({
+          ...params,
+          ...(metadata === `absent` ? { metadata: undefined } : {}),
+        })
+      },
+    },
+  })
   let expected = new Map<number, Row>()
   // Model entries come only from command scalars. Provider objects may be
   // changed before parse without changing any expected row.
@@ -132,26 +157,28 @@ async function checkLifecycle(
     Array.from(collection.values(), ({ id, value }) => ({ id, value })).sort(
       (a, b) => a.id - b.id,
     )
-  const assertRows = () =>
-    expect(publicRows(), JSON.stringify({ mode, reached })).toEqual(
+  const recordRows = () =>
+    facts.equal(
+      JSON.stringify({ mode, reached }),
+      publicRows(),
       [...expected.values()].sort((a, b) => a.id - b.id),
     )
-  const assertNoTimers = () => {
+  const recordTimers = () => {
     for (const timer of intervals.mock.results) {
       if (timer.type === `return`)
-        expect(cleared).toHaveBeenCalledWith(timer.value)
+        facts.calledWith('cleared', cleared, timer.value)
     }
   }
-  const assertReports = () => {
-    expect(reports).toEqual(expectedReports)
-    expect(unhandled).toEqual([])
+  const recordReports = () => {
+    facts.diagnostics('reports', reports, expectedReports)
+    facts.diagnostics('unhandled', unhandled, [])
   }
   const flushRetired = async () => {
     retired.splice(0).forEach((settle) => settle())
     await turn()
-    assertRows()
-    retiredChecks.forEach((check) => check())
-    assertReports()
+    recordRows()
+    retiredObservations.forEach((recordRetired) => recordRetired())
+    recordReports()
   }
   const failures: Array<unknown> = []
   try {
@@ -165,39 +192,43 @@ async function checkLifecycle(
       collection.startSyncImmediate()
       const preload = observe(collection.preload())
       await turn()
-      expect(api.subscribe).toHaveBeenCalledTimes(epoch + 1)
-      expect(collection.status).toBe(`loading`)
-      expect(preload.result).toBe(`pending`)
-      assertRows()
+      facts.calls('api.subscribe', api.subscribe, epoch + 1)
+      facts.equal('collection.status', collection.status, `loading`)
+      facts.equal('preload.result', preload.result, `pending`)
+      recordRows()
 
       if (plan.kind === `cancel-subscribe`) {
         reached.push(`${epoch}:cancel-subscribe`)
         if (plan.cancelRejects)
           active.cancel.mockRejectedValue(new Error(`retired cancel failure`))
         await collection.cleanup()
-        expect(preload.result).toBe(`rejected`)
-        expect(preload.error).toMatchObject({ name: `AbortError` })
+        facts.reach(`cleanup-during-subscribe`)
+        facts.equal('preload.result', preload.result, `rejected`)
+        facts.errorName('preload.error', preload.error, `AbortError`)
         const retiredError = preload.error
         retired.push(() =>
           plan.late === `resolve`
             ? active.subscription.resolve(active.stream)
             : active.subscription.reject(failure),
         )
-        retiredChecks.push(() => {
-          expect(preload.result).toBe(`rejected`)
-          expect(preload.error).toBe(retiredError)
-          expect(active.stream.locked).toBe(false)
-          expect(active.cancel).toHaveBeenCalledTimes(
+        retiredObservations.push(() => {
+          facts.equal('preload.result', preload.result, `rejected`)
+          facts.same('preload.error', preload.error, retiredError)
+          facts.equal('active.stream.locked', active.stream.locked, false)
+          facts.calls(
+            'active.cancel',
+            active.cancel,
             plan.late === `resolve` ? 1 : 0,
           )
         })
       } else if (plan.kind === `reject-subscribe`) {
         active.subscription.reject(failure)
         await turn()
-        expect(preload.result).toBe(`rejected`)
-        expect(preload.error).toBe(failure)
-        expect(collection.status).toBe(`error`)
-        expect(active.listCalls).toBe(0)
+        facts.reach(`subscribe-rejected`)
+        facts.equal('preload.result', preload.result, `rejected`)
+        facts.same('preload.error', preload.error, failure)
+        facts.equal('collection.status', collection.status, `error`)
+        facts.equal('active.listCalls', active.listCalls, 0)
         await collection.cleanup()
       } else {
         active.subscription.resolve(active.stream)
@@ -207,62 +238,80 @@ async function checkLifecycle(
             ? preload
             : observe(Promise.resolve(collection._sync.loadSubset({})))
         await turn()
-        expect(active.listCalls).toBe(1)
+        facts.equal('active.listCalls', active.listCalls, 1)
         reached.push(`${epoch}:list-pending`)
-        expect(load.result).toBe(`pending`)
-        expect(preload.result).toBe(mode === `eager` ? `pending` : `fulfilled`)
+        facts.equal('load.result', load.result, `pending`)
+        facts.equal(
+          'preload.result',
+          preload.result,
+          mode === `eager` ? `pending` : `fulfilled`,
+        )
 
         if (plan.kind === `cancel-load`) {
           reached.push(`${epoch}:cancel-load`)
           await collection.cleanup()
-          expect(preload.result).toBe(
+          facts.reach(`cleanup-during-list`)
+          facts.equal(
+            'preload.result',
+            preload.result,
             mode === `eager` ? `rejected` : `fulfilled`,
           )
           if (mode === `eager`)
-            expect(preload.error).toMatchObject({ name: `AbortError` })
-          else expect(load.result).toBe(`pending`)
+            facts.errorName('preload.error', preload.error, `AbortError`)
+          else facts.equal('load.result', load.result, `pending`)
           const retiredError = preload.error
           retired.push(() =>
             plan.late === `resolve`
               ? active.list.resolve({ records: [{ id: 99, value: epoch }] })
               : active.list.reject(failure),
           )
-          retiredChecks.push(() => {
-            expect(preload.result).toBe(
+          retiredObservations.push(() => {
+            facts.equal(
+              'preload.result',
+              preload.result,
               mode === `eager` ? `rejected` : `fulfilled`,
             )
-            expect(preload.error).toBe(retiredError)
+            facts.same('preload.error', preload.error, retiredError)
             // This is the adapter's direct subset promise, not an unfinished
             // initial preload: canceled I/O settles as a no-op after delivery.
-            expect(load.result).toBe(
+            facts.equal(
+              'load.result',
+              load.result,
               mode === `eager` ? `rejected` : `fulfilled`,
             )
-            expect(active.stream.locked).toBe(false)
-            expect(active.cancel).toHaveBeenCalledOnce()
+            facts.equal('active.stream.locked', active.stream.locked, false)
+            facts.calls('active.cancel', active.cancel, 1)
           })
         } else if (plan.kind === `reject-load`) {
           active.list.reject(failure)
           await turn()
-          expect(load.result).toBe(`rejected`)
-          expect(load.error).toBe(failure)
-          expect(collection.status).toBe(mode === `eager` ? `error` : `ready`)
-          assertRows()
+          facts.reach(`list-rejected`)
+          facts.equal('load.result', load.result, `rejected`)
+          facts.same('load.error', load.error, failure)
+          facts.equal(
+            'collection.status',
+            collection.status,
+            mode === `eager` ? `error` : `ready`,
+          )
+          recordRows()
           await collection.cleanup()
         } else {
           active.list.resolve({ records: [providerRow(0, epoch, `list`)] })
           expected.set(0, { id: 0, value: epoch })
           await turn()
           reached.push(`${epoch}:list-delivered`)
-          expect(load.result).toBe(`fulfilled`)
-          expect(preload.result).toBe(`fulfilled`)
-          expect(collection.status).toBe(`ready`)
-          assertRows()
+          facts.equal('load.result', load.result, `fulfilled`)
+          facts.equal('preload.result', preload.result, `fulfilled`)
+          facts.equal('collection.status', collection.status, `ready`)
+          recordRows()
 
           // Old subscribe/list work finishes only once the replacement owns
           // a live stream and baseline, not merely after the old cleanup.
+          if (retired.length > 0)
+            facts.reach(`replacement-before-retired-delivery`)
           await flushRetired()
-          expect(active.stream.locked).toBe(true)
-          expect(active.cancel).not.toHaveBeenCalled()
+          facts.equal('active.stream.locked', active.stream.locked, true)
+          facts.calls('active.cancel', active.cancel, 0)
 
           for (const change of plan.changes) {
             const previous = expected.get(change.id)
@@ -281,8 +330,8 @@ async function checkLifecycle(
             }
             await turn()
             reached.push(`${epoch}:${change.operation}:${change.id}`)
-            assertRows()
-            expect(collection.status).toBe(`ready`)
+            recordRows()
+            facts.equal('collection.status', collection.status, `ready`)
           }
 
           if (plan.ending === `buffered-close`) {
@@ -305,40 +354,39 @@ async function checkLifecycle(
           }
           await turn()
           reached.push(`${epoch}:${plan.ending}:immediate=${plan.immediate}`)
-          assertRows()
-          expect(active.stream.locked).toBe(false)
-          assertNoTimers()
+          facts.reach(`stream-${plan.ending}`)
+          if (plan.immediate) facts.reach(`stream-immediate-cleanup`)
+          recordRows()
+          facts.equal('active.stream.locked', active.stream.locked, false)
+          recordTimers()
           const isFailure =
             plan.ending === `read-error` || plan.ending === `parse-error`
           if (!plan.immediate && plan.ending !== `cleanup`) {
-            expect(
-              collection.health,
+            facts.health(
               `${epoch}:${plan.ending} error`,
-            ).toMatchObject({
-              hasErrors: true,
-              failureReason: null,
-              error: expect.objectContaining(
-                isFailure ? { cause: failure } : {},
-              ),
-            })
+              collection.health,
+              true,
+              isFailure ? failure : undefined,
+            )
           }
-          assertReports()
+          recordReports()
           if (plan.ending === `cleanup` || plan.ending === `parse-error`)
-            expect(active.cancel).toHaveBeenCalledOnce()
+            facts.calls('active.cancel', active.cancel, 1)
           if (!plan.immediate && plan.ending !== `cleanup`)
-            expect(collection.status).toBe(`ready`)
+            facts.equal('collection.status', collection.status, `ready`)
           await collection.cleanup()
         }
       }
       expected.clear()
       await turn()
-      assertRows()
-      expect(collection.status).toBe(`cleaned-up`)
-      assertReports()
-      assertNoTimers()
+      recordRows()
+      facts.equal('collection.status', collection.status, `cleaned-up`)
+      recordReports()
+      recordTimers()
     }
     await flushRetired()
-    for (const active of allSources) expect(active.stream.locked).toBe(false)
+    for (const active of allSources)
+      facts.equal('active.stream.locked', active.stream.locked, false)
   } catch (error) {
     failures.push(error)
   } finally {
@@ -354,9 +402,10 @@ async function checkLifecycle(
     }
     await turn()
     try {
-      assertReports()
-      assertNoTimers()
-      for (const active of allSources) expect(active.stream.locked).toBe(false)
+      recordReports()
+      recordTimers()
+      for (const active of allSources)
+        facts.equal('active.stream.locked', active.stream.locked, false)
     } catch (error) {
       failures.push(error)
     }
@@ -367,7 +416,7 @@ async function checkLifecycle(
   }
   if (failures.length === 1) throw failures[0]
   if (failures.length > 1)
-    throw new AggregateError(failures, `Lifecycle and cleanup checks failed`, {
+    throw new AggregateError(failures, `Lifecycle or cleanup failed`, {
       cause: failures[0],
     })
 }
@@ -378,8 +427,16 @@ const changeArb = fc.record({
   value: fc.integer({ min: -20, max: 20 }),
 })
 const syncRunArb: fc.Arbitrary<SyncRunPlan> = fc.oneof(
+  fc.record(
+    {
+      kind: fc.constant(`cancel-subscribe` as const),
+      late: fc.constantFrom(`resolve` as const, `reject` as const),
+      cancelRejects: fc.boolean(),
+    },
+    { requiredKeys: [`kind`, `late`] },
+  ),
   fc.record({
-    kind: fc.constantFrom(`cancel-subscribe` as const, `cancel-load` as const),
+    kind: fc.constant(`cancel-load` as const),
     late: fc.constantFrom(`resolve` as const, `reject` as const),
   }),
   fc.record({
@@ -398,13 +455,17 @@ const syncRunArb: fc.Arbitrary<SyncRunPlan> = fc.oneof(
     immediate: fc.boolean(),
   }),
 )
-const scenarioArb = fc.record({
-  mode: fc.constantFrom(`eager` as const, `on-demand` as const),
-  syncRuns: fc.array(syncRunArb, {
-    minLength: 1,
-    maxLength: 3,
-  }),
-})
+const scenarioArb = fc.record(
+  {
+    metadata: fc.option(fc.constant(`absent` as const), { nil: undefined }),
+    mode: fc.constantFrom(`eager` as const, `on-demand` as const),
+    syncRuns: fc.array(syncRunArb, {
+      minLength: 1,
+      maxLength: 3,
+    }),
+  },
+  { requiredKeys: [`mode`, `syncRuns`] },
+)
 const live = (ending: Ending, immediate = false): SyncRunPlan => ({
   kind: `stream`,
   ending,
@@ -441,58 +502,6 @@ const corpus: Array<{
     syncRuns: [{ kind }, live(`close`)],
   })),
 ]
-it.each(
-  corpus.flatMap((entry) =>
-    ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
-  ),
-)(`preserves lifecycle laws: $mode / $name`, ({ mode, syncRuns }) => {
-  oracleRoute(`case`)
-  return checkLifecycle({ mode, syncRuns })
-})
-it.each([`eager`, `on-demand`] as const)(
-  `releases a late acquired stream even when native cancellation rejects: %s`,
-  (mode) => {
-    oracleRoute(`case`)
-    return checkLifecycle({
-      mode,
-      syncRuns: [
-        { kind: `cancel-subscribe`, late: `resolve`, cancelRejects: true },
-        live(`close`),
-      ],
-    })
-  },
-)
-it.each([`list`, `set`, `buffered`] as const)(
-  `rejects provider-owned row corruption at the %s cut`,
-  async (cut) => {
-    oracleRoute(`calibration`)
-    const scenario: Scenario = {
-      mode: `eager`,
-      syncRuns: [live(`buffered-close`)],
-    }
-    await checkLifecycle(scenario)
-    await expect(checkLifecycle(scenario, cut)).rejects.toMatchObject({
-      name: `AssertionError`,
-      message: expect.stringContaining(`deeply equal`),
-    })
-  },
-)
-const scenarioFixedSeed = oracleFixedSeed(714_203, { numRuns: oracleRuns(50) })
-fcTest.prop([scenarioArb], scenarioFixedSeed)(
-  `matches generated lifecycle histories with a fixed seed`,
-  (scenario) => {
-    oracleRoute(oracleRouteOf(scenarioFixedSeed))
-    return checkLifecycle(scenario)
-  },
-)
-const scenarioCampaign = oraclePropertyOptions(50, `trailbase.lifecycle`)
-fcTest.prop([scenarioArb], scenarioCampaign)(
-  `matches generated lifecycle histories with a random or replayed seed`,
-  (scenario) => {
-    oracleRoute(oracleRouteOf(scenarioCampaign))
-    return checkLifecycle(scenario)
-  },
-)
 
 /**
  * ## Does an early on-demand load wait for the change listener?
@@ -583,7 +592,7 @@ function expectedEarlyDemand(plan: EarlyDemandPlan) {
   }
 }
 
-async function checkEarlyDemand(plan: EarlyDemandPlan) {
+async function observeEarlyDemand(plan: EarlyDemandPlan, facts: LawRecorder) {
   const expected = expectedEarlyDemand(plan)
   const service = new Map(earlyServiceRows.map((row) => [row.id, row]))
   const listeners: Array<WritableStreamDefaultWriter<Event>> = []
@@ -638,11 +647,11 @@ async function checkEarlyDemand(plan: EarlyDemandPlan) {
 
   try {
     await turn()
-    expect(state(), `${trace} waiting`).toEqual(expected.waiting)
+    facts.equal(`${trace} waiting`, state(), expected.waiting)
     if (plan.serviceChange) {
       commit({ id: 1, data: `hidden` })
       await turn()
-      expect(state(), `${trace} after service change`).toEqual(expected.waiting)
+      facts.equal(`${trace} after service change`, state(), expected.waiting)
     }
 
     if (plan.outcome === `listen`) {
@@ -664,37 +673,38 @@ async function checkEarlyDemand(plan: EarlyDemandPlan) {
     await turn()
 
     const after = expected.afterOutcome
-    expect(listCalls, `${trace} list calls`).toBe(after.listCalls)
-    expect(collection.status, `${trace} status`).toBe(after.status)
+    facts.equal(`${trace} list calls`, listCalls, after.listCalls)
+    facts.equal(`${trace} status`, collection.status, after.status)
     if (query) {
-      expect(consumer.result, `${trace} query preload`).toBe(after.load)
-      expect(firstReadyRows, `${trace} first-ready rows`).toEqual(
+      facts.equal(`${trace} query preload`, consumer.result, after.load)
+      facts.equal(
+        `${trace} first-ready rows`,
+        firstReadyRows,
         after.firstReadyRows,
       )
     } else {
-      expect(consumer.result, `${trace} load`).toBe(after.load)
+      facts.equal(`${trace} load`, consumer.result, after.load)
       if (after.abortError)
-        expect(consumer.error, `${trace} abort`).toMatchObject({
-          name: `AbortError`,
-        })
+        facts.errorName(`${trace} abort`, consumer.error, `AbortError`)
       else if (after.load === `rejected`)
-        expect(consumer.error, `${trace} failure`).toBeDefined()
+        facts.defined(`${trace} failure`, consumer.error)
     }
 
     if (expected.afterLaterChange && query) {
       commit({ id: 2, data: `hidden` })
       await turn()
-      expect(
-        query.toArray.map((row) => row.id).sort((a, b) => a - b),
+      facts.equal(
         `${trace} after a later change`,
-      ).toEqual(expected.afterLaterChange)
+        query.toArray.map((row) => row.id).sort((a, b) => a - b),
+        expected.afterLaterChange,
+      )
     }
 
     // Late subscription work after abort or cleanup must not fetch.
     if (plan.outcome === `abort` || plan.outcome === `cleanup`) {
       subscription.resolve(new TransformStream<Event>().readable)
       await turn()
-      expect(listCalls, `${trace} late list calls`).toBe(0)
+      facts.equal(`${trace} late list calls`, listCalls, 0)
     }
   } finally {
     subscription.resolve(new TransformStream<Event>().readable)
@@ -715,14 +725,6 @@ const earlyDemandPlans: Array<EarlyDemandPlan> = (
       : ([`live-query`, `subset`] as const)
     ).map((consumer) => ({ outcome, serviceChange, consumer })),
   ),
-)
-
-it.each(earlyDemandPlans)(
-  `waits for the listener before an early on-demand fetch: $outcome / change=$serviceChange / $consumer`,
-  (plan) => {
-    oracleRoute(`case`)
-    return checkEarlyDemand(plan)
-  },
 )
 
 /**
@@ -797,7 +799,7 @@ function raceChange(change: RacePlan[`change`]): {
   }
 }
 
-async function checkPageEventRace(plan: RacePlan) {
+async function observePageEventRace(plan: RacePlan, facts: LawRecorder) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   const { events, apply } = raceChange(plan.change)
   const stream = new TransformStream<Event>()
@@ -851,21 +853,25 @@ async function checkPageEventRace(plan: RacePlan) {
         : Promise.resolve(collection._sync.loadSubset({})),
     )
     await turn()
-    expect(snapshot, `${trace} list called`).toBeDefined()
+    facts.defined(`${trace} list called`, snapshot)
     if (plan.timing === `during-fetch`) await commitChange()
     if (delivery === `during-fetch`) await deliverEvents()
     page.resolve({ records: snapshot! })
     await turn()
     await turn()
-    expect(settled.result, `${trace} page settled`).toBe(`fulfilled`)
+    facts.equal(`${trace} page settled`, settled.result, `fulfilled`)
     if (delivery !== `after-page`)
-      expect(rows(), `${trace} rows after the page`).toEqual(
+      facts.equal(
+        `${trace} rows after the page`,
+        rows(),
         sortedRows(service.values()),
       )
 
     if (plan.timing === `after-page`) await commitChange()
     if (delivery === `after-page`) await deliverEvents()
-    expect(rows(), `${trace} rows after the last event`).toEqual(
+    facts.equal(
+      `${trace} rows after the last event`,
+      rows(),
       sortedRows(service.values()),
     )
 
@@ -873,8 +879,10 @@ async function checkPageEventRace(plan: RacePlan) {
     const later = { id: 2, data: `later` }
     service.set(2, later)
     await send({ Update: later })
-    expect(listenerGone, `${trace} listener torn down`).toBe(false)
-    expect(rows(), `${trace} rows after a later change`).toEqual(
+    facts.equal(`${trace} listener torn down`, listenerGone, false)
+    facts.equal(
+      `${trace} rows after a later change`,
+      rows(),
       sortedRows(service.values()),
     )
   } finally {
@@ -900,14 +908,6 @@ const racePlans: Array<RacePlan> = ([`eager`, `on-demand`] as const).flatMap(
             : [{ mode, change, timing }],
         ),
     ),
-)
-
-it.each(racePlans)(
-  `keeps a newer change over an older page: $mode / $change / $timing / $delivery`,
-  (plan) => {
-    oracleRoute(`case`)
-    return checkPageEventRace(plan)
-  },
 )
 
 /**
@@ -942,7 +942,7 @@ type HeldPlan = {
   change: `insert` | `update`
 }
 
-async function checkHeldPage(plan: HeldPlan) {
+async function observeHeldPage(plan: HeldPlan, facts: LawRecorder) {
   const id = plan.change === `insert` ? 3 : 1
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   const stream = new TransformStream<Event>()
@@ -1003,13 +1003,15 @@ async function checkHeldPage(plan: HeldPlan) {
 
     const settled = observe(Promise.resolve(collection._sync.loadSubset({})))
     await turn()
-    expect(snapshot, `${trace} list called`).toBeDefined()
+    facts.defined(`${trace} list called`, snapshot)
     page.resolve({ records: snapshot! })
     await turn()
     await turn()
     // Held commits apply only when the mutation settles, and a load waits
     // until its rows are visible. It must not fail in the meantime.
-    expect(settled.result, `${trace} load after the page`).toBe(
+    facts.equal(
+      `${trace} load after the page`,
+      settled.result,
       plan.held ? `pending` : `fulfilled`,
     )
 
@@ -1021,12 +1023,16 @@ async function checkHeldPage(plan: HeldPlan) {
       await turn()
       await deliver({ Update: confirmed })
       await turn()
-      expect(mutation.result, `${trace} mutation persisted`).toBe(`fulfilled`)
+      facts.equal(`${trace} mutation persisted`, mutation.result, `fulfilled`)
     }
-    expect(settled.result, `${trace} load after everything settles`).toBe(
+    facts.equal(
+      `${trace} load after everything settles`,
+      settled.result,
       `fulfilled`,
     )
-    expect(rows(), `${trace} rows after everything settles`).toEqual(
+    facts.equal(
+      `${trace} rows after everything settles`,
+      rows(),
       sortedRows(service.values()),
     )
   } finally {
@@ -1040,14 +1046,6 @@ async function checkHeldPage(plan: HeldPlan) {
 
 const heldPlans: Array<HeldPlan> = [true, false].flatMap((held) =>
   ([`insert`, `update`] as const).map((change) => ({ held, change })),
-)
-
-it.each(heldPlans)(
-  `converges while a mutation holds sync commits: held=$held / $change`,
-  (plan) => {
-    oracleRoute(`case`)
-    return checkHeldPage(plan)
-  },
 )
 
 /**
@@ -1077,7 +1075,10 @@ it.each(heldPlans)(
  * later load. Each compares rows, status, and subscribe calls. After the end,
  * The Collection's `error` stays, and nothing clears it in this sync run.
  */
-async function checkStreamEnd(ending: `close` | `read-error`) {
+async function observeStreamEnd(
+  ending: `close` | `read-error`,
+  facts: LawRecorder,
+) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   let controller!: ReadableStreamDefaultController<Event>
   const stream = new ReadableStream<Event>({
@@ -1108,50 +1109,37 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
     await collection._sync.loadSubset({})
     await turn()
     const established = sortedRows(service.values())
-    expect(rows(), `${ending} first page`).toEqual(established)
+    facts.equal(`${ending} first page`, rows(), established)
 
     if (ending === `close`) controller.close()
     else controller.error(failure)
     await turn()
-    expect(collection.status, `${ending} status after the end`).toBe(`ready`)
-    expect(rows(), `${ending} rows after the end`).toEqual(established)
-    const stopped = {
-      hasErrors: true,
-      failureReason: null,
-      error: expect.anything(),
-    }
-    expect(collection.health, `${ending} error after the end`).toMatchObject(
-      stopped,
-    )
+    facts.equal(`${ending} status after the end`, collection.status, `ready`)
+    facts.equal(`${ending} rows after the end`, rows(), established)
+    facts.health(`${ending} error after the end`, collection.health, false)
 
     service.set(1, { id: 1, data: `v2` })
     await turn()
-    expect(rows(), `${ending} a later change is not delivered`).toEqual(
+    facts.equal(
+      `${ending} a later change is not delivered`,
+      rows(),
       established,
     )
 
     await collection._sync.loadSubset({ limit: 10 } as never)
     await turn()
-    expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(1)
-    expect(rows(), `${ending} a later load lists current rows`).toEqual(
+    facts.calls(`${ending} subscribe calls`, api.subscribe, 1)
+    facts.equal(
+      `${ending} a later load lists current rows`,
+      rows(),
       sortedRows(service.values()),
     )
-    expect(collection.health, `${ending} error after the load`).toMatchObject(
-      stopped,
-    )
+    facts.health(`${ending} error after the load`, collection.health, false)
   } finally {
     await collection.cleanup()
     reported.mockRestore()
   }
 }
-
-it.each([`close`, `read-error`] as const)(
-  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
-  (ending) => {
-    oracleRoute(`case`)
-    return checkStreamEnd(ending)
-  },
-)
 
 /**
  * ## Do several pages, several changes, and overlapping loads still converge?
@@ -1208,6 +1196,26 @@ type PageHistory = {
 
 const pageServiceSize = 258
 
+// Normalize only grammar constraints. This is also the old arbitrary's mapping;
+// the inverse below accepts each normalized history as its own legal preimage.
+function normalizePage(h: PageHistory): PageHistory {
+  let changes = 0
+  return {
+    ...h,
+    steps: h.steps.slice(0, 10).filter((step) => {
+      if (step.kind !== `change`) return true
+      if (
+        changes >= 4 ||
+        (h.paging === `offset` &&
+          (step.operation === `delete` || step.id === 300))
+      )
+        return false
+      changes++
+      return true
+    }),
+  }
+}
+
 const pageHistoryArb: fc.Arbitrary<PageHistory> = fc
   .record({
     paging: fc.constantFrom<PagingMode>(`cursor`, `offset`),
@@ -1225,32 +1233,28 @@ const pageHistoryArb: fc.Arbitrary<PageHistory> = fc
           operation: fc.constantFrom<`set` | `delete`>(`set`, `delete`),
           delivery: fc.constantFrom<`now` | `later`>(`now`, `later`),
         }),
-        fc.constant({ kind: `deliver` as const }),
-        fc.constant({ kind: `start-second` as const }),
+        fc.record({ kind: fc.constant(`deliver` as const) }),
+        fc.record({ kind: fc.constant(`start-second` as const) }),
       ),
       { maxLength: 10 },
     ),
   })
-  .map((history) => {
-    let changes = 0
-    return {
-      ...history,
-      steps: history.steps.filter((step) => {
-        if (step.kind !== `change`) return true
-        if (changes >= 4) return false
-        // Offset paging: only updates of rows the service already holds.
-        if (
-          history.paging === `offset` &&
-          (step.operation === `delete` || step.id === 300)
-        )
-          return false
-        changes++
-        return true
-      }),
-    }
+  .map(normalizePage, (value) => {
+    const history = value as PageHistory
+    if (
+      history.steps.filter((step) => step.kind === `change`).length > 4 ||
+      (history.paging === `offset` &&
+        history.steps.some(
+          (step) =>
+            step.kind === `change` &&
+            (step.operation === `delete` || step.id === 300),
+        ))
+    )
+      throw new Error(`Not a normalized page history`)
+    return history
   })
 
-async function checkPageHistory(history: PageHistory) {
+async function observePageHistory(history: PageHistory, facts: LawRecorder) {
   const service = new Map<number, RaceRow>()
   for (let id = 1; id <= pageServiceSize; id++)
     service.set(id, { id, data: `v0` })
@@ -1259,6 +1263,7 @@ async function checkPageHistory(history: PageHistory) {
   // Each load's list calls, oldest first, with the answer captured at the call.
   type PendingPage = { answer: ListResponse<RaceRow>; resolve: () => void }
   const pending: [Array<PendingPage>, Array<PendingPage>] = [[], []]
+  const releasedPages: [number, number] = [0, 0]
   const returnedKeys = new Set<number>()
   const changedKeys = new Set<number>()
   // Events in transit, in commit order.
@@ -1275,6 +1280,7 @@ async function checkPageHistory(history: PageHistory) {
   const api = new MockRecordApi<RaceRow>()
   api.subscribe.mockImplementation(() => Promise.resolve(stream.readable))
   api.list.mockImplementation((opts) => {
+    facts.reach(`${history.paging}-paging`)
     const rows = [...service.values()].sort((a, b) => a.id - b.id)
     const limit = opts?.pagination?.limit ?? 256
     const after =
@@ -1318,16 +1324,22 @@ async function checkPageHistory(history: PageHistory) {
     loadOfNextCall = load
     loads[load] = observe(Promise.resolve(collection._sync.loadSubset(options)))
     await turn()
+    if (
+      load === 1 &&
+      loads[0]?.result === `pending` &&
+      loads[1]?.result === `pending`
+    )
+      facts.reach(`overlapping-loads`)
   }
   const value = (id: number) => {
     const row = collection.get(id)
     return row ? { id: row.id, data: row.data } : undefined
   }
   const trace = JSON.stringify(history)
-  const checkChangedKeys = (label: string) => {
+  const recordChangedKeys = (label: string) => {
     for (const id of changedKeys) {
-      if (inTransit.some((pending) => pending.id === id)) continue
-      expect(value(id), `${trace} ${label}: key ${id}`).toEqual(service.get(id))
+      if (inTransit.some((delivery) => delivery.id === id)) continue
+      facts.equal(`${trace} ${label}: key ${id}`, value(id), service.get(id))
     }
   }
   const deliverNext = async () => {
@@ -1338,9 +1350,12 @@ async function checkPageHistory(history: PageHistory) {
     const next = pending[load].shift()
     if (!next) return
     loadOfNextCall = load
+    const hasInTransitEvent = inTransit.length > 0
     next.resolve()
+    releasedPages[load]++
     await turn()
     await turn()
+    if (hasInTransitEvent) facts.reach(`event-in-transit-across-page`)
   }
 
   try {
@@ -1364,11 +1379,20 @@ async function checkPageHistory(history: PageHistory) {
         let event: Event | undefined
         if (step.operation === `delete`) {
           if (existing) {
+            if (
+              step.id === 1 &&
+              releasedPages[0] === 0 &&
+              pending[0].length > 0
+            )
+              facts.reach(`delete-first-page-in-flight`)
             service.delete(step.id)
             event = { Delete: existing }
           }
         } else {
           const row = { id: step.id, data: `v${++version}` }
+          if (!existing && step.id === 300) facts.reach(`insert-new-key`)
+          if (existing && releasedPages[0] > 0 && pending[0].length > 0)
+            facts.reach(`update-between-pages`)
           service.set(step.id, row)
           event = existing ? { Update: row } : { Insert: row }
         }
@@ -1380,7 +1404,7 @@ async function checkPageHistory(history: PageHistory) {
           else await send(event)
         }
       }
-      checkChangedKeys(`after step ${index}`)
+      recordChangedKeys(`after step ${index}`)
     }
     if (history.loads === 2 && !secondStarted) await startLoad(1)
 
@@ -1391,23 +1415,22 @@ async function checkPageHistory(history: PageHistory) {
     }
     while (inTransit.length > 0) await deliverNext()
     for (const load of loads)
-      expect(load.result, `${trace} load settled`).toBe(`fulfilled`)
+      facts.equal(`${trace} load settled`, load.result, `fulfilled`)
     const reached = new Set([...returnedKeys, ...changedKeys])
     for (const id of reached)
-      expect(value(id), `${trace} drained: key ${id}`).toEqual(service.get(id))
+      facts.equal(`${trace} drained: key ${id}`, value(id), service.get(id))
     // No other row exists: every visible key came from a page or an event.
-    expect(
-      [...collection.keys()].sort((a, b) => Number(a) - Number(b)),
+    facts.equal(
       `${trace} drained: key set`,
-    ).toEqual(
+      [...collection.keys()].sort((a, b) => Number(a) - Number(b)),
       [...reached].filter((id) => service.has(id)).sort((a, b) => a - b),
     )
     // The listener is still alive: a later change to an unrelated row arrives.
     const later = { id: 2, data: `later` }
     service.set(2, later)
     await send({ Update: later })
-    expect(listenerGone, `${trace} listener torn down`).toBe(false)
-    expect(value(2), `${trace} a later change arrives`).toEqual(later)
+    facts.equal(`${trace} listener torn down`, listenerGone, false)
+    facts.equal(`${trace} a later change arrives`, value(2), later)
   } finally {
     for (const queue of pending)
       for (const next of queue.splice(0)) next.resolve()
@@ -1490,29 +1513,6 @@ const pageFixedHistories: Array<[string, PageHistory]> = [
   ],
 ]
 
-it.each(pageFixedHistories)(`converges: %s`, (_name, history) => {
-  oracleRoute(`fixed history`)
-  return checkPageHistory(history)
-})
-const pageHistoryFixedSeed = oracleFixedSeed(205_917, {
-  numRuns: oracleRuns(40),
-})
-fcTest.prop([pageHistoryArb], pageHistoryFixedSeed)(
-  `converges across generated page histories with a fixed seed`,
-  (history) => {
-    oracleRoute(oracleRouteOf(pageHistoryFixedSeed))
-    return checkPageHistory(history)
-  },
-)
-const pageHistoryCampaign = oraclePropertyOptions(40, `trailbase.page-event`)
-fcTest.prop([pageHistoryArb], pageHistoryCampaign)(
-  `converges across generated page histories with a random or replayed seed`,
-  (history) => {
-    oracleRoute(oracleRouteOf(pageHistoryCampaign))
-    return checkPageHistory(history)
-  },
-)
-
 /**
  * ## Does a fresh sync run load a row an earlier run's event touched?
  *
@@ -1522,7 +1522,7 @@ fcTest.prop([pageHistoryArb], pageHistoryCampaign)(
  * clock makes the old run's event and the new run's list call share a
  * millisecond, the case a wall-clock fence cannot order.
  */
-async function checkFreshRunAfterEvent() {
+async function observeFreshRunAfterEvent(facts: LawRecorder) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   const streams: Array<WritableStreamDefaultWriter<Event>> = []
   const api = new MockRecordApi<RaceRow>()
@@ -1554,17 +1554,18 @@ async function checkFreshRunAfterEvent() {
     service.set(1, changed)
     await streams[0]!.write({ Update: changed })
     await turn()
-    expect(collection.get(1)?.data, `first run`).toBe(`v2`)
+    facts.equal(`first run`, collection.get(1)?.data, `v2`)
 
     await collection.cleanup()
     await collection.preload()
     await turn()
     await collection._sync.loadSubset({})
     await turn()
-    expect(
-      sortedRows(collection.toArray),
+    facts.equal(
       `fresh run after an event in the same millisecond`,
-    ).toEqual(sortedRows(service.values()))
+      sortedRows(collection.toArray),
+      sortedRows(service.values()),
+    )
   } finally {
     now.mockRestore()
     await collection.cleanup()
@@ -1573,23 +1574,525 @@ async function checkFreshRunAfterEvent() {
   }
 }
 
-it(`loads a row in a fresh run that an earlier run's event touched`, () => {
-  oracleRoute(`case`)
-  return checkFreshRunAfterEvent()
+/** The authored service and independent Map interpreters above are the trusted
+ * reference boundary. Their facts are transported separately from production
+ * facts; only checkLawFacts judges them, at every original observation cut.
+ * This conversion preserves all 36 lifecycle and five page fixed histories.
+ */
+const lifecycleStates = [
+  `metadata-absent`,
+  `metadata-present`,
+  `cleanup-during-subscribe`,
+  `cleanup-during-list`,
+  `subscribe-rejected`,
+  `list-rejected`,
+  `replacement-before-retired-delivery`,
+  `stream-close`,
+  `stream-buffered-close`,
+  `stream-read-error`,
+  `stream-parse-error`,
+  `stream-cleanup`,
+  `stream-immediate-cleanup`,
+] as const
+
+type LifecycleState = (typeof lifecycleStates)[number]
+const lifecycleRequired = new WeakMap<Scenario, ReadonlyArray<string>>()
+const streamFrom = (
+  h: Scenario,
+  ending: Ending,
+  immediate = false,
+): SyncRunPlan => ({
+  kind: `stream`,
+  ending,
+  immediate,
+  changes:
+    h.syncRuns
+      .find((run) => run.kind === `stream`)
+      ?.changes.map((change) => ({ ...change })) ?? [],
+})
+const lifecycleBuilds: Array<{
+  state: LifecycleState
+  build: (h: Scenario) => Scenario
+}> = [
+  ...([`absent`, undefined] as const).map((metadata) => ({
+    state:
+      metadata === `absent`
+        ? (`metadata-absent` as const)
+        : (`metadata-present` as const),
+    build: (h: Scenario): Scenario => ({ ...h, metadata }),
+  })),
+  ...(
+    [
+      `cancel-subscribe`,
+      `cancel-load`,
+      `reject-subscribe`,
+      `reject-load`,
+    ] as const
+  ).map((kind) => ({
+    state: (
+      {
+        'cancel-subscribe': `cleanup-during-subscribe`,
+        'cancel-load': `cleanup-during-list`,
+        'reject-subscribe': `subscribe-rejected`,
+        'reject-load': `list-rejected`,
+      } as const
+    )[kind],
+    build: (h: Scenario): Scenario => ({
+      ...h,
+      syncRuns: [
+        kind === `cancel-subscribe` || kind === `cancel-load`
+          ? { kind, late: h.syncRuns.length % 2 === 0 ? `reject` : `resolve` }
+          : { kind },
+        ...h.syncRuns.slice(0, 2),
+      ],
+    }),
+  })),
+  {
+    state: `replacement-before-retired-delivery`,
+    build: (h) => ({
+      ...h,
+      syncRuns: [
+        {
+          kind:
+            h.syncRuns.length % 2 === 0 ? `cancel-subscribe` : `cancel-load`,
+          late: h.metadata === `absent` ? `reject` : `resolve`,
+        },
+        streamFrom(h, `close`),
+        ...h.syncRuns.slice(0, 1),
+      ],
+    }),
+  },
+  ...(
+    [`close`, `buffered-close`, `read-error`, `parse-error`, `cleanup`] as const
+  ).map((ending) => ({
+    state: `stream-${ending}` as const,
+    build: (h: Scenario): Scenario => ({
+      ...h,
+      syncRuns: [streamFrom(h, ending), ...h.syncRuns.slice(0, 2)],
+    }),
+  })),
+  {
+    state: `stream-immediate-cleanup`,
+    build: (h) => ({
+      ...h,
+      syncRuns: [streamFrom(h, `close`, true), ...h.syncRuns.slice(0, 2)],
+    }),
+  },
+]
+function constructedWithRequired<T extends object>(
+  builds: ReadonlyArray<{ state: string; build: (h: T) => T }>,
+  required: WeakMap<T, ReadonlyArray<string>>,
+): Array<ConstructedHistory<T>> {
+  return builds.map(({ state, build }) => ({
+    name: `generated ${state}`,
+    enters: [state],
+    build: (generated) => {
+      const history = { ...build(generated) }
+      required.set(history, [state])
+      return history
+    },
+  }))
+}
+function checkConstructed<T extends object>(
+  h: T,
+  trace: ReadonlyArray<Observation>,
+  required: WeakMap<T, ReadonlyArray<string>>,
+) {
+  const reached = new Set(
+    trace
+      .filter((entry) => entry.checkpoint === `reach`)
+      .map((entry) => entry.value),
+  )
+  const missing = required.get(h)?.filter((state) => !reached.has(state)) ?? []
+  return missing.length
+    ? violation(
+        `complete`,
+        `generated construction omitted ${missing.join(`, `)}`,
+        `constructed builder reach`,
+      )
+    : pass
+}
+function missingStateControls<T extends object>(
+  builds: ReadonlyArray<{ state: string }>,
+  required: WeakMap<T, ReadonlyArray<string>>,
+) {
+  return builds.map(({ state }) => ({
+    name: `missing generated builder state ${state}`,
+    law: `constructed builder reach`,
+    corrupt: (trace: ReadonlyArray<Observation>, h: T) =>
+      required.get(h)?.includes(state)
+        ? trace.filter(
+            (entry) => !(entry.checkpoint === `reach` && entry.value === state),
+          )
+        : undefined,
+  }))
+}
+const lifecycleFixed = [
+  ...corpus.flatMap(({ name, syncRuns }) =>
+    ([`eager`, `on-demand`] as const).map((mode) => ({
+      name: `${mode} / ${name}`,
+      history: { mode, syncRuns },
+    })),
+  ),
+  ...([`eager`, `on-demand`] as const).map((mode) => ({
+    name: `${mode} / absent metadata`,
+    history: { mode, metadata: `absent` as const, syncRuns: [live(`close`)] },
+  })),
+  ...([`eager`, `on-demand`] as const).map((mode) => ({
+    name: `${mode} / rejecting late native cancellation`,
+    history: {
+      mode,
+      syncRuns: [
+        {
+          kind: `cancel-subscribe` as const,
+          late: `resolve` as const,
+          cancelRejects: true,
+        },
+        live(`close`),
+      ],
+    },
+  })),
+]
+function corruptFirstFact(
+  trace: ReadonlyArray<Observation>,
+  accepts: (entry: Observation) => boolean,
+  replacement: (value: unknown) => unknown,
+) {
+  const at = trace.findIndex(
+    (entry) => entry.checkpoint !== `reference` && accepts(entry),
+  )
+  return at < 0
+    ? undefined
+    : trace.map((entry, index) =>
+        index === at ? { ...entry, value: replacement(entry.value) } : entry,
+      )
+}
+const lifecycleLaw = `TrailBase lifecycle`
+const lifecycleDriver = async (
+  h: Scenario,
+  record: (checkpoint: string, value: unknown) => void,
+  fault?: `list` | `set` | `buffered`,
+) => {
+  const facts = createLawRecorder(record)
+  await observeLifecycle(h, facts, fault)
+  facts.finish()
+}
+oracleProperty({
+  id: `trailbase.lifecycle`,
+  law: {
+    statement: `A sync run publishes the independent service row history, settles startup and subset loads at their promised cuts, and cleanup retires its late work and resources.`,
+    authority: `TrailBase tests/ORACLE.md; Collection lifecycle readiness, cleanup, health, and exact reported-error contracts.`,
+    limits: `Controlled RecordApi/native streams, one to three sync runs, zero to eight scalar changes per stream. No deployed server, network retries, persistence or arbitrary scheduler.`,
+  },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+  histories: {
+    arbitrary: scenarioArb,
+    runs: 50,
+    fixedSeeds: [714203],
+    states: lifecycleStates,
+    constructed: constructedWithRequired(lifecycleBuilds, lifecycleRequired),
+    fixed: lifecycleFixed,
+  },
+  model: referenceFacts,
+  driver: lifecycleDriver,
+  check: (h, trace, expected) => {
+    const facts = checkLawFacts(h, trace, expected, lifecycleLaw)
+    return facts.kind === `violation`
+      ? facts
+      : checkConstructed(h, trace, lifecycleRequired)
+  },
+  calibrations: [
+    ...([`list`, `set`, `buffered`] as const).map((cut) => ({
+      name: `provider-owned ${cut} row corruption`,
+      law: lifecycleLaw,
+      driver: (
+        h: Scenario,
+        record: (checkpoint: string, value: unknown) => void,
+      ) => lifecycleDriver(h, record, cut),
+    })),
+    {
+      name: `Collection status changes before its promised cut`,
+      law: lifecycleLaw,
+      corrupt: (trace) =>
+        corruptFirstFact(
+          trace,
+          (entry) => entry.checkpoint.endsWith(`:collection.status`),
+          () => `wrong-status`,
+        ),
+    },
+    {
+      name: `a later observation replaces the exact startup error`,
+      law: lifecycleLaw,
+      corrupt: (trace) =>
+        corruptFirstFact(
+          trace,
+          (entry) =>
+            entry.checkpoint.endsWith(`.error`) &&
+            typeof entry.value === `object` &&
+            entry.value !== null &&
+            `token` in entry.value,
+          () => ({ kind: `object`, token: -1 }),
+        ),
+    },
+    {
+      name: `a retired reader remains owned`,
+      law: lifecycleLaw,
+      corrupt: (trace) =>
+        corruptFirstFact(
+          trace,
+          (entry) => entry.checkpoint.endsWith(`:active.stream.locked`),
+          (value) => !value,
+        ),
+    },
+    {
+      name: `cleanup leaves an acquired timer uncleared`,
+      law: lifecycleLaw,
+      corrupt: (trace) =>
+        corruptFirstFact(
+          trace,
+          (entry) => entry.checkpoint.endsWith(`:cleared`),
+          () => [],
+        ),
+    },
+    ...([`DOMException`, `class instance`, `symbol`] as const).map((kind) => ({
+      name: `detached ${kind} retains a lifecycle violation`,
+      law: lifecycleLaw,
+      driver: async (
+        h: Scenario,
+        record: (checkpoint: string, value: unknown) => void,
+      ) => {
+        const facts = createLawRecorder(record)
+        await observeLifecycle(h, facts)
+        class ProviderFailure {}
+        const error =
+          kind === `DOMException`
+            ? new DOMException(`retired work`, `AbortError`)
+            : kind === `symbol`
+              ? Symbol(`provider failure`)
+              : new ProviderFailure()
+        facts.diagnostics(
+          `detached diagnostic capture`,
+          [{ epoch: 0, error }],
+          [],
+        )
+        facts.finish()
+      },
+    })),
+    ...missingStateControls(lifecycleBuilds, lifecycleRequired),
+  ],
 })
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
+const pageStates = [
+  `cursor-paging`,
+  `offset-paging`,
+  `overlapping-loads`,
+  `event-in-transit-across-page`,
+  `update-between-pages`,
+  `delete-first-page-in-flight`,
+  `insert-new-key`,
+] as const
+const pageRequired = new WeakMap<PageHistory, ReadonlyArray<string>>()
+const pageBuilds: Array<{
+  state: (typeof pageStates)[number]
+  build: (h: PageHistory) => PageHistory
+}> = [
+  ...([`cursor`, `offset`] as const).map((paging) => ({
+    state: `${paging}-paging` as const,
+    build: (h: PageHistory) => normalizePage({ ...h, paging }),
+  })),
+  {
+    state: `overlapping-loads`,
+    build: (h) => ({ ...h, loads: 2, secondAtOnce: true }),
+  },
+  {
+    state: `event-in-transit-across-page`,
+    build: (h) =>
+      normalizePage({
+        ...h,
+        steps: [
+          {
+            kind: `change`,
+            id: h.steps.length % 2 === 0 ? 1 : 258,
+            operation: `set`,
+            delivery: `later`,
+          },
+          { kind: `release`, load: 0 },
+          { kind: `deliver` },
+          ...h.steps.slice(0, 7),
+        ],
+      }),
+  },
+  {
+    state: `update-between-pages`,
+    build: (h) =>
+      normalizePage({
+        ...h,
+        steps: [
+          { kind: `release`, load: 0 },
+          { kind: `change`, id: 258, operation: `set`, delivery: `now` },
+          { kind: `release`, load: 0 },
+          ...h.steps.slice(0, 7),
+        ],
+      }),
+  },
+  {
+    state: `delete-first-page-in-flight`,
+    build: (h) =>
+      normalizePage({
+        ...h,
+        paging: `cursor`,
+        steps: [
+          {
+            kind: `change`,
+            id: 1,
+            operation: `delete`,
+            delivery: h.steps.length % 2 === 0 ? `now` : `later`,
+          },
+          ...h.steps.slice(0, 9),
+        ],
+      }),
+  },
+  {
+    state: `insert-new-key`,
+    build: (h) =>
+      normalizePage({
+        ...h,
+        paging: `cursor`,
+        steps: [
+          {
+            kind: `change`,
+            id: 300,
+            operation: `set`,
+            delivery: h.steps.length % 2 === 0 ? `now` : `later`,
+          },
+          ...h.steps.slice(0, 9),
+        ],
+      }),
+  },
+]
+const pageLaw = `TrailBase page/event convergence`
+oracleProperty({
+  id: `trailbase.page-event`,
+  law: {
+    statement: `Pages and change events converge to the independent service map at every cut after the row's pending events arrive; cleanup fences an earlier sync run.`,
+    authority: `TrailBase tests/ORACLE.md page/event and fresh-run laws; subscribe-before-list boundary.`,
+    limits: `258 service rows, cursor or offset paging, one or two loads, up to ten steps and four scalar changes. Offset paging updates existing rows only; no live deployed server.`,
+  },
   owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
-  check: [
-    checkLifecycle,
-    checkEarlyDemand,
-    checkPageEventRace,
-    checkHeldPage,
-    checkStreamEnd,
-    checkPageHistory,
-    checkFreshRunAfterEvent,
+  histories: {
+    arbitrary: pageHistoryArb,
+    runs: 40,
+    fixedSeeds: [205917],
+    states: pageStates,
+    constructed: constructedWithRequired(pageBuilds, pageRequired),
+    fixed: pageFixedHistories.map(([name, history]) => ({ name, history })),
+  },
+  model: (h: PageHistory, trace) => referenceFacts(h, trace),
+  driver: async (h, record) => {
+    const facts = createLawRecorder(record)
+    await observePageHistory(h, facts)
+    facts.finish()
+  },
+  check: (h, trace, expected) => {
+    const facts = checkLawFacts(h, trace, expected, pageLaw)
+    return facts.kind === `violation`
+      ? facts
+      : checkConstructed(h, trace, pageRequired)
+  },
+  calibrations: [
+    {
+      name: `row result omitted`,
+      law: pageLaw,
+      corrupt: (trace) => {
+        const at = trace.findIndex((entry) =>
+          entry.checkpoint.includes(`drained: key set`),
+        )
+        return at < 0
+          ? undefined
+          : trace.map((entry, index) =>
+              index === at ? { ...entry, value: [] } : entry,
+            )
+      },
+    },
+    ...missingStateControls(pageBuilds, pageRequired),
   ],
-  model: [expectedEarlyDemand],
 })
+
+type BoundaryHistory =
+  | { kind: `early-demand`; plan: EarlyDemandPlan }
+  | { kind: `page-race`; plan: RacePlan }
+  | { kind: `held-page`; plan: HeldPlan }
+  | { kind: `stream-end`; ending: `close` | `read-error` }
+  | { kind: `fresh-run` }
+const boundaryHistories: Array<BoundaryHistory> = [
+  ...earlyDemandPlans.map((plan): BoundaryHistory => ({
+    kind: `early-demand`,
+    plan,
+  })),
+  ...racePlans.map((plan): BoundaryHistory => ({ kind: `page-race`, plan })),
+  ...heldPlans.map((plan): BoundaryHistory => ({ kind: `held-page`, plan })),
+  ...([`close`, `read-error`] as const).map((ending): BoundaryHistory => ({
+    kind: `stream-end`,
+    ending,
+  })),
+  { kind: `fresh-run` },
+]
+oracleProperty({
+  id: `trailbase.lifecycle.boundaries`,
+  law: {
+    statement: `Early demand waits for the listener; page/event overlap and held optimistic work converge to the service; stream end retains rows and health; a new sync run ignores old event fences.`,
+    authority: `TrailBase tests/ORACLE.md early demand, page/event, held-page, stream-end and fresh-run laws.`,
+    limits: `All 51 cases of the original finite grammars: 16 early demand, 28 one-page race, four held-page, two stream-end, one fresh-run. Controlled provider boundary only.`,
+  },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+  histories: boundaryHistories,
+  model: (h: BoundaryHistory, trace) => referenceFacts(h, trace),
+  driver: async (h, record) => {
+    const facts = createLawRecorder(record)
+    if (h.kind === `early-demand`) await observeEarlyDemand(h.plan, facts)
+    else if (h.kind === `page-race`) await observePageEventRace(h.plan, facts)
+    else if (h.kind === `held-page`) await observeHeldPage(h.plan, facts)
+    else if (h.kind === `stream-end`) await observeStreamEnd(h.ending, facts)
+    else await observeFreshRunAfterEvent(facts)
+    facts.finish()
+  },
+  check: (h, trace, expected) =>
+    checkLawFacts(h, trace, expected, `TrailBase lifecycle boundary`),
+  calibrations: [
+    {
+      name: `early fetch becomes visible before the listener`,
+      law: `TrailBase lifecycle boundary`,
+      corrupt: (trace) =>
+        trace.some((entry) => entry.checkpoint.includes(`waiting`))
+          ? trace.map((entry) =>
+              entry.checkpoint.includes(`waiting`) &&
+              entry.checkpoint !== `reference`
+                ? { ...entry, value: { listCalls: 1, settled: false } }
+                : entry,
+            )
+          : undefined,
+    },
+  ],
+})
+
+// The reusable judgments own this production boundary. The framework handles
+// campaign registration; this declaration retains gap-report discovery.
+declareOracle({
+  check: [checkLawFacts],
+  model: [referenceFacts, expectedEarlyDemand],
+  grammar: [scenarioArb, pageHistoryArb],
+})
+
+/** The same cleanup law receives controlled and real Node SQLite hydration.
+ * The shared hydration suite owns its model, generated grammar and cuts. */
+for (const host of [`controlled`, `node-sqlite`] as const)
+  registerHydrationLifecycle(
+    `trailbase.lifecycle.persisted-hydration.${host}`,
+    async (history, id) => {
+      const storage = createStartupHost(host)
+      return withOracleCleanup(
+        () => observeHydrationLifecycle(storage.persistence, history, id),
+        [() => storage.close()],
+      )
+    },
+  )

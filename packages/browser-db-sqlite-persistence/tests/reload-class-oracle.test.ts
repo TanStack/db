@@ -18,17 +18,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
-import { test as fcTest } from '@fast-check/vitest'
-import { describe, expect, onTestFinished } from 'vitest'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { onTestFinished } from 'vitest'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
+  expectedReload,
   fixedReloadHistories,
   inProcessSeams,
   observeReload,
@@ -38,9 +32,11 @@ import {
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import { createBrowserWASQLitePersistence } from '../src'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type {
   ReloadHistory,
   ReloadHost,
+  ReloadObservation,
 } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -118,52 +114,103 @@ function nodeBrowserHost(): ReloadHost {
   }
 }
 
-async function expectLawful(history: ReloadHistory) {
-  const observed = await observeReload(nodeBrowserHost(), history)
-  const violations = reloadViolations(history, observed)
+// Keep the shared independent model and the host's declared topology. The
+// checker still applies every existing setup, budget, row, and ordering law.
+function model(history: ReloadHistory) {
+  return expectedReload(history, { adapterPerTab: true })
+}
+
+function check(
+  history: ReloadHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof model>,
+): Verdict {
+  const observed = trace.find((entry) => entry.checkpoint === `reload`)
+    ?.value as ReloadObservation | undefined
+  if (!observed)
+    return violation(
+      `reload`,
+      `reload observation is missing`,
+      `reload work and rows`,
+    )
+  const violations = reloadViolations(history, observed, expected)
   if (violations.length > 0 && process.env.RELOAD_ORACLE_DEBUG) {
     console.log(JSON.stringify(violations))
   }
-  expect(violations).toEqual([])
+  return violations.length === 0
+    ? pass
+    : violation(`reload`, violations.join(`; `), `reload work and rows`)
+}
+
+// The full SQL recorder includes generated cache/claim IDs, table-name hashes,
+// clock readings, and host statement interleavings. Their exact spelling and
+// timing are not reload laws. Judge the unchanged raw record with the shared
+// independent model and comparison at the same reload checkpoint, then expose
+// that complete judgment to the native runner. This preserves every existing
+// count, identity relation, ordering check, and bounded-settlement comparison
+// without making the determinism check compare incidental host details.
+async function driveReload(
+  history: ReloadHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const observed = await observeReload(nodeBrowserHost(), history)
+  observe(
+    `reload`,
+    check(history, [{ checkpoint: `reload`, value: observed }], model(history)),
+  )
+}
+
+function checkRecordedReload(
+  _history: ReloadHistory,
+  trace: ReadonlyArray<Observation>,
+  _expected: ReturnType<typeof model>,
+): Verdict {
+  return (
+    (trace.find((entry) => entry.checkpoint === `reload`)?.value as
+      Verdict | undefined) ??
+    violation(`reload`, `reload observation is missing`, `reload work and rows`)
+  )
 }
 
 declareOracle({
-  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
-  check: [expectLawful],
+  model: [model],
+  check: [check, checkRecordedReload],
   grammar: [reloadHistoryArb],
 })
 
-describe(`reload class oracle (Node Browser driver)`, () => {
-  fcTest.each(
-    fixedReloadHistories.map(([name, history]) => ({ name, history })),
-  )(
-    `keeps a reload free of avoidable work: $name`,
-    async ({ history }) => {
-      oracleRoute(`fixed history`)
-      await expectLawful(history)
-    },
-    30_000,
-  )
+oracleProperty({
+  id: `sqlite-reload.class`,
+  law: {
+    statement: `A reload repairs missing setup and preserves lawful rows while performing only the setup, snapshot, registry, and election work allowed by the shared reload model.`,
+    authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `Node Browser receiving driver with the existing in-process host controls; no claim about real cross-process scheduling or physical OPFS.`,
+  },
+  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+  histories: {
+    arbitrary: reloadHistoryArb,
+    runs: 12,
+    fixedSeeds: [2204],
+  },
+  model,
+  driver: driveReload,
+  check: checkRecordedReload,
+  timeout: 300_000,
+})
 
-  const reloadHistoryFixedSeed = oracleFixedSeed(2204, {
-    numRuns: oracleRuns(12),
-  })
-  fcTest.prop([reloadHistoryArb], reloadHistoryFixedSeed)(
-    `keeps generated reloads lawful (fixed seed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(reloadHistoryFixedSeed))
-      return expectLawful(history)
-    },
-    300_000,
-  )
-
-  const reloadHistoryCampaign = oraclePropertyOptions(12, `sqlite-reload.class`)
-  fcTest.prop([reloadHistoryArb], reloadHistoryCampaign)(
-    `keeps generated reloads lawful (random or replayed)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(reloadHistoryCampaign))
-      return expectLawful(history)
-    },
-    300_000,
-  )
+// Retain the fixed host histories separately from the bounded random grammar.
+oracleProperty({
+  id: `sqlite-reload.class-fixed`,
+  law: {
+    statement: `The retained host reload histories satisfy every existing setup, row, budget, and ordering comparison.`,
+    authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `The named fixed histories on this existing in-process receiving driver.`,
+  },
+  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+  histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
+  label: (entry) => entry.name,
+  resolve: (entry) => entry.history,
+  model,
+  driver: driveReload,
+  check: checkRecordedReload,
+  timeout: 30_000,
 })

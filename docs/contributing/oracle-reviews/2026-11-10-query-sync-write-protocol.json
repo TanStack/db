@@ -1,0 +1,377 @@
+{
+  "date": "2026-11-10",
+  "head": "0e86c1fdae85520aff142f141f71ccf46a8ee8bd",
+  "workingFileSha256": {
+    "packages/query-db-collection/src/query.ts": "1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b",
+    "packages/query-db-collection/tests/persisted-direct-ownership-oracle.ts": "3f4441cbda41c5f8b71b957c7cd3fd483bd949ae1bcb86213be4bc97b4063d90",
+    "packages/query-db-collection/tests/persisted-direct-ownership-driver.ts": "41165f9a7c6e10814a673427ccbed8ecd981f4d551843a098688ad8737558ed6",
+    "packages/query-db-collection/tests/persisted-direct-ownership-oracle.test.ts": "24eb442d095112ecc40b8548392d247a7e65eb20196aabbb0e219a6cd4497e4f",
+    "packages/browser-db-sqlite-persistence/e2e/query-persisted-direct-ownership-oracle.browser.test.ts": "c48a2ef8bf027048cbd11f87a6d3fab89e6c5742b20ac027566e1b5ca69ea702",
+    "packages/browser-db-sqlite-persistence/e2e/query-ownership.opfs.ts": "9f3a993e200c54a013840102bc49baecf69bb8f2d89df069e9bfb2dec1e35ea7",
+    "packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts": "e0e1e06b91f388cff7c87bdc5883ec486c3ec88a6cc551a2e5f15ea27b012f5f"
+  },
+  "originalAudit": "docs/contributing/oracle-reviews/2026-11-10-query-changed-callback-gap-audit.json",
+  "mutant": {
+    "id": "query.ts:M1334",
+    "source": "packages/query-db-collection/src/query.ts",
+    "function": "applySuccessfulResult",
+    "line": 2756,
+    "position": 97728,
+    "operator": "field-drop",
+    "original": "type: `update`",
+    "replacement": "",
+    "selectionGlobalKey": "src/query.ts#applySuccessfulResult:field-drop:write ( { type : `update` , value : newItem } )",
+    "actualReportKey": "src/query.ts#applySuccessfulResult:field-drop:write ( { type : `update` , value : newItem } )",
+    "runnerRemovalIncludingSeparator": "type: `update`, ",
+    "sourceSha256": "1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b",
+    "transformedSha256": "8a1ffc1dbc0f37839b81a9faab2b21e0f253bc8accbc649b92117de5934216e0"
+  },
+  "immutableRunner": "import { createHash } from 'node:crypto'\nimport { readFileSync, writeFileSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { defineConfig, mergeConfig } from 'vitest/config'\nimport nodeBase from '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config'\nimport browserBase from '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config'\nconst repo = '/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367'\nconst evidence = '/private/tmp/tanstack-db-2394-sync-write-protocol'\nconst target = resolve(repo, 'packages/query-db-collection/src/query.ts')\nconst source = readFileSync(target, 'utf8')\nconst sha = (text: string) => createHash('sha256').update(text).digest('hex')\nif (sha(source) !== '1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b') throw new Error('Final Query source changed')\nconst mutant = process.env.QUERY_FINAL_MUTANT ?? 'clean'\nlet position = -1\nlet original = ''\nlet replacement = ''\nif (mutant === 'query.ts:M1334') {\n  original = 'type: `update`, '\n  replacement = ''\n  position = 97728\n} else if (mutant === 'original-value-defect') {\n  original = 'persistedBaseline?.get(key)?.value ?? currentSyncedItems.get(key)'\n  replacement = 'shouldUsePersistedBaseline ? persistedBaseline.get(key)?.value : currentSyncedItems.get(key)'\n  position = source.indexOf(original)\n} else if (mutant === 'query.ts:M563') {\n  original = 'unownedDirectWritePositions.has(rowKey)'\n  replacement = 'undefined'\n  position = 57583\n} else if (mutant === 'query.ts:M1468' || mutant === 'query.ts:M1469') {\n  const anchor = 'const needsPersistedBaseline = (queryHash: string) =>'\n  const start = source.indexOf(anchor)\n  const end = source.indexOf('const reconcileSuccessfulResult', start)\n  if (start < 0 || end < 0) throw new Error('Baseline predicate moved')\n  const conjunctions = [...source.slice(start, end).matchAll(/&&/g)]\n  if (conjunctions.length !== 2) throw new Error('Predicate shape changed')\n  position = start + conjunctions[mutant.endsWith('1469') ? 0 : 1].index!\n  original = '&&'\n  replacement = '||'\n} else if (mutant !== 'clean') throw new Error('Unknown immutable mutant ' + mutant)\nif (mutant !== 'clean' && (position < 0 || source.slice(position, position + original.length) !== original)) throw new Error('Immutable source span failed')\nif (mutant === 'original-value-defect' && source.indexOf(original, position + 1) >= 0) throw new Error('Mutation span is not unique')\nconst transformed = mutant === 'clean' ? source : source.slice(0, position) + replacement + source.slice(position + original.length)\nconst browser = process.env.QUERY_FINAL_BROWSER === '1'\nconst metadata = { mutant, source: sha(source), transformed: sha(transformed), position, line: source.slice(0, Math.max(0, position)).split('\\n').length, original, replacement, browser }\nconsole.info('FINAL_QUERY_SOURCE', JSON.stringify(metadata))\nwriteFileSync(resolve(evidence, 'source-' + mutant.replaceAll(':', '-') + '.json'), JSON.stringify(metadata, null, 2))\nexport default mergeConfig(browser ? browserBase : nodeBase, defineConfig({\n  root: resolve(repo, browser ? 'packages/browser-db-sqlite-persistence' : 'packages/query-db-collection'),\n  cacheDir: resolve(evidence, '.cache-' + (browser ? 'browser-' : 'node-') + mutant.replaceAll(':', '-')),\n  plugins: [{\n    name: 'final-query-immutable-evidence',\n    enforce: 'pre',\n    transform(code, id) {\n      if (id.split('?')[0] === target) {\n        console.info('FINAL_QUERY_APPLIED', mutant)\n        return { code: transformed, map: null }\n      }\n      if (id.split('?')[0] === resolve(repo, 'packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts')) {\n        const anchor = 'const server = await createServer({'\n        if (!code.includes(anchor)) throw new Error('Chromium host seam moved')\n        const injected = `cacheDir:${JSON.stringify(resolve(evidence, '.vite-' + mutant.replaceAll(':', '-')))},`\n        const plugin = `{name:'final-query-browser-source',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(target)}){console.info('FINAL_QUERY_BROWSER_APPLIED',${JSON.stringify(mutant)});return {code:${JSON.stringify(transformed)},map:null}}}},`\n        if (!code.includes('plugins: [')) throw new Error('Static receiving host plugin seam moved')\n        return { code: code.replace('plugins: [', 'plugins: [' + plugin).replace('optimizeDeps: {', 'optimizeDeps: {force:true,').replace(anchor, anchor + injected), map: null }\n      }\n    },\n  }],\n  test: {\n    coverage: { enabled: false },\n    fileParallelism: false,\n    fsModuleCache: false,\n    include: browser ? ['e2e/query-persisted-direct-ownership-oracle.browser.test.ts', 'e2e/query-immediate-cache-oracle.browser.test.ts'] : ['tests/persisted-direct-ownership-oracle.test.ts', 'tests/immediate-eager-materialization-oracle.test.ts'],\n  },\n}))\n",
+  "executions": [
+    {
+      "log": "node-clean-final.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection",
+      "environment": {},
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "--typecheck.enabled=false",
+        "tests/persisted-direct-ownership-oracle.test.ts"
+      ],
+      "exitCode": 0,
+      "classification": "green",
+      "reach": [
+        {
+          "campaign": "query.persisted-direct-ownership fixed seed 563",
+          "counts": {
+            "after-fetch-start": 20,
+            "before-fetch": 32,
+            "derived": 26,
+            "distinct-saved-direct-key": 29,
+            "fetched-row-write": 31,
+            "no-retention": 27,
+            "no-retention-direct-after-fetch": 13,
+            "overlapping-saved-direct-key": 23,
+            "raw": 26,
+            "retained": 25,
+            "retained-direct-before-returned-key": 7,
+            "returned-value-equals-saved-after-direct-change": 2,
+            "source-includes-direct": 31,
+            "source-omits-direct": 21
+          }
+        },
+        {
+          "campaign": "query.persisted-direct-ownership random seed",
+          "counts": {
+            "after-fetch-start": 24,
+            "before-fetch": 28,
+            "derived": 28,
+            "distinct-saved-direct-key": 30,
+            "fetched-row-write": 27,
+            "no-retention": 26,
+            "no-retention-direct-after-fetch": 14,
+            "overlapping-saved-direct-key": 22,
+            "raw": 24,
+            "retained": 26,
+            "retained-direct-before-returned-key": 5,
+            "returned-value-equals-saved-after-direct-change": 2,
+            "source-includes-direct": 28,
+            "source-omits-direct": 24
+          }
+        },
+        {
+          "campaign": "query.persisted-direct-ownership fixed seed 563",
+          "counts": {
+            "after-fetch-start": 20,
+            "before-fetch": 32,
+            "derived": 26,
+            "distinct-saved-direct-key": 29,
+            "fetched-row-write": 31,
+            "no-retention": 27,
+            "no-retention-direct-after-fetch": 13,
+            "overlapping-saved-direct-key": 23,
+            "raw": 26,
+            "retained": 25,
+            "retained-direct-before-returned-key": 7,
+            "returned-value-equals-saved-after-direct-change": 2,
+            "source-includes-direct": 31,
+            "source-omits-direct": 21
+          }
+        },
+        {
+          "campaign": "query.persisted-direct-ownership random seed",
+          "counts": {
+            "after-fetch-start": 20,
+            "before-fetch": 32,
+            "derived": 23,
+            "distinct-saved-direct-key": 36,
+            "fetched-row-write": 22,
+            "no-retention": 24,
+            "no-retention-direct-after-fetch": 10,
+            "overlapping-saved-direct-key": 16,
+            "raw": 29,
+            "retained": 28,
+            "retained-direct-before-returned-key": 6,
+            "returned-value-equals-saved-after-direct-change": 4,
+            "source-includes-direct": 28,
+            "source-omits-direct": 24
+          }
+        }
+      ],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"clean\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"position\":-1,\"line\":1,\"original\":\"\",\"replacement\":\"\",\"browser\":false}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection\n\nFINAL_QUERY_APPLIED clean\nquery.persisted-direct-ownership fixed seed 563 reach {\"after-fetch-start\":20,\"before-fetch\":32,\"derived\":26,\"distinct-saved-direct-key\":29,\"fetched-row-write\":31,\"no-retention\":27,\"no-retention-direct-after-fetch\":13,\"overlapping-saved-direct-key\":23,\"raw\":26,\"retained\":25,\"retained-direct-before-returned-key\":7,\"returned-value-equals-saved-after-direct-change\":2,\"source-includes-direct\":31,\"source-omits-direct\":21}\nquery.persisted-direct-ownership random seed reach {\"after-fetch-start\":24,\"before-fetch\":28,\"derived\":28,\"distinct-saved-direct-key\":30,\"fetched-row-write\":27,\"no-retention\":26,\"no-retention-direct-after-fetch\":14,\"overlapping-saved-direct-key\":22,\"raw\":24,\"retained\":26,\"retained-direct-before-returned-key\":5,\"returned-value-equals-saved-after-direct-change\":2,\"source-includes-direct\":28,\"source-omits-direct\":24}\nquery.persisted-direct-ownership fixed seed 563 reach {\"after-fetch-start\":20,\"before-fetch\":32,\"derived\":26,\"distinct-saved-direct-key\":29,\"fetched-row-write\":31,\"no-retention\":27,\"no-retention-direct-after-fetch\":13,\"overlapping-saved-direct-key\":23,\"raw\":26,\"retained\":25,\"retained-direct-before-returned-key\":7,\"returned-value-equals-saved-after-direct-change\":2,\"source-includes-direct\":31,\"source-omits-direct\":21}\nquery.persisted-direct-ownership random seed reach {\"after-fetch-start\":20,\"before-fetch\":32,\"derived\":23,\"distinct-saved-direct-key\":36,\"fetched-row-write\":22,\"no-retention\":24,\"no-retention-direct-after-fetch\":10,\"overlapping-saved-direct-key\":16,\"raw\":29,\"retained\":28,\"retained-direct-before-returned-key\":6,\"returned-value-equals-saved-after-direct-change\":4,\"source-includes-direct\":28,\"source-omits-direct\":24}\n\n Test Files  1 passed (1)\n      Tests  244 passed (244)\n   Start at  15:50:01\n   Duration  5.64s (tests 83%, transform 14%, import 3%)\n\n"
+    },
+    {
+      "log": "node-M1334-final-red.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection",
+      "environment": {
+        "QUERY_FINAL_MUTANT": "query.ts:M1334",
+        "TANSTACK_DB_ORACLE_PROPERTY": "query.persisted-direct-ownership",
+        "TANSTACK_DB_ORACLE_SEED": "563",
+        "TANSTACK_DB_ORACLE_PATH": "15:0:0:0:0:0"
+      },
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "--typecheck.enabled=false",
+        "tests/persisted-direct-ownership-oracle.test.ts"
+      ],
+      "exitCode": 1,
+      "classification": "assertion failure at declared sync-write operation",
+      "reach": [],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"query.ts:M1334\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"8a1ffc1dbc0f37839b81a9faab2b21e0f253bc8accbc649b92117de5934216e0\",\"position\":97728,\"line\":2756,\"original\":\"type: `update`, \",\"replacement\":\"\",\"browser\":false}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection\n\nFINAL_QUERY_APPLIED query.ts:M1334\nstdout | tests/persisted-direct-ownership-oracle.test.ts > controlled > query.persisted-direct-ownership > random seed\nORACLE_SEED {\"property\":\"query.persisted-direct-ownership\",\"seed\":563}\n\nstdout | tests/persisted-direct-ownership-oracle.test.ts > node-sqlite > query.persisted-direct-ownership > random seed\nORACLE_SEED {\"property\":\"query.persisted-direct-ownership\",\"seed\":563}\n\n \u276f tests/persisted-direct-ownership-oracle.test.ts (244 tests | 2 failed | 242 skipped) 32ms\n   \u276f controlled (122)\n     \u276f query.persisted-direct-ownership (122)\n       \u00d7 random seed 21ms\n   \u276f node-sqlite (122)\n     \u276f query.persisted-direct-ownership (122)\n       \u00d7 random seed 10ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  tests/persisted-direct-ownership-oracle.test.ts > controlled > query.persisted-direct-ownership > random seed\n FAIL  tests/persisted-direct-ownership-oracle.test.ts > node-sqlite > query.persisted-direct-ownership > random seed\nError: Property failed after 1 tests\n{ seed: 563, path: \"15:0:0:0:0:0\", endOnFailure: true }\nCounterexample: [{\"shape\":\"raw\",\"retained\":true,\"write\":\"before-fetch\",\"operation\":\"insert\",\"includesDirect\":true,\"keepsSaved\":false,\"directValue\":0,\"sourceValue\":1,\"savedValue\":0,\"overlapsSaved\":false}]\nShrunk 0 time(s)\n\nHint: Enable verbose mode in order to have the list of all failing values encountered during the run\n \u276f buildError ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2469:16\n \u276f asyncThrowIfFailed ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2481:8\n\nCaused by: OracleViolation: query.persisted-direct-ownership violated at checkpoint \"sync-write\" (law: declared sync-write operation).\nLaw: A later complete physical fetch replaces and claims a direct row; an older result preserves it without claiming source ownership. Query adapter sync writes declare an insert, update, or delete operation.\nDifference: SyncConfig.write requires insert, update, or delete; observed undefined\nHistory: {\"shape\":\"raw\",\"retained\":true,\"write\":\"before-fetch\",\"operation\":\"insert\",\"includesDirect\":true,\"keepsSaved\":false,\"directValue\":0,\"sourceValue\":1,\"savedValue\":0,\"overlapsSaved\":false}\nAuthority: docs/collections/query-collection.md: Understanding the Data Stores item1 and Direct Writes and Query Sync; primary ownership direct-order/direct-row-lifetime laws; docs/reference/interfaces/SyncConfig.md and ChangeMessage.md, ChangeMessageOrDeleteKeyMessage and OperationType API types.\nKnown limits: First eager result, one saved row and one same-run insert/upsert, numeric values, successful I/O. Public/durable cuts follow applied receipts; cleanup is diagnostic. No arbitrary mutations, peers, concurrent writers or eager unload claim.\nRerun: TANSTACK_DB_ORACLE_PROPERTY=query.persisted-direct-ownership with the seed and path that fast-check reports\n \u276f failure ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:707:17\n \u276f ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:806:13\n \u276f AsyncProperty.run ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:1217:19\n \u276f asyncPropertyExecution ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2564:14\n \u276f asyncRunIt ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2557:15\n \u276f runCampaign ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:836:5\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 242 skipped (244)\n   Start at  15:50:29\n   Duration  1.17s (transform 82%, import 15%, tests 3%)\n\n"
+    },
+    {
+      "log": "node-clean-final-replay.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection",
+      "environment": {
+        "TANSTACK_DB_ORACLE_PROPERTY": "query.persisted-direct-ownership",
+        "TANSTACK_DB_ORACLE_SEED": "563",
+        "TANSTACK_DB_ORACLE_PATH": "15:0:0:0:0:0"
+      },
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "--typecheck.enabled=false",
+        "tests/persisted-direct-ownership-oracle.test.ts"
+      ],
+      "exitCode": 0,
+      "classification": "green",
+      "reach": [
+        {
+          "campaign": "query.persisted-direct-ownership random seed",
+          "counts": {
+            "after-fetch-start": 0,
+            "before-fetch": 3,
+            "derived": 0,
+            "distinct-saved-direct-key": 3,
+            "fetched-row-write": 3,
+            "no-retention": 0,
+            "no-retention-direct-after-fetch": 0,
+            "overlapping-saved-direct-key": 0,
+            "raw": 3,
+            "retained": 3,
+            "retained-direct-before-returned-key": 3,
+            "returned-value-equals-saved-after-direct-change": 0,
+            "source-includes-direct": 3,
+            "source-omits-direct": 0
+          }
+        },
+        {
+          "campaign": "query.persisted-direct-ownership random seed",
+          "counts": {
+            "after-fetch-start": 0,
+            "before-fetch": 3,
+            "derived": 0,
+            "distinct-saved-direct-key": 3,
+            "fetched-row-write": 3,
+            "no-retention": 0,
+            "no-retention-direct-after-fetch": 0,
+            "overlapping-saved-direct-key": 0,
+            "raw": 3,
+            "retained": 3,
+            "retained-direct-before-returned-key": 3,
+            "returned-value-equals-saved-after-direct-change": 0,
+            "source-includes-direct": 3,
+            "source-omits-direct": 0
+          }
+        }
+      ],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"clean\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"position\":-1,\"line\":1,\"original\":\"\",\"replacement\":\"\",\"browser\":false}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection\n\nFINAL_QUERY_APPLIED clean\nquery.persisted-direct-ownership random seed reach {\"after-fetch-start\":0,\"before-fetch\":3,\"derived\":0,\"distinct-saved-direct-key\":3,\"fetched-row-write\":3,\"no-retention\":0,\"no-retention-direct-after-fetch\":0,\"overlapping-saved-direct-key\":0,\"raw\":3,\"retained\":3,\"retained-direct-before-returned-key\":3,\"returned-value-equals-saved-after-direct-change\":0,\"source-includes-direct\":3,\"source-omits-direct\":0}\nquery.persisted-direct-ownership random seed reach {\"after-fetch-start\":0,\"before-fetch\":3,\"derived\":0,\"distinct-saved-direct-key\":3,\"fetched-row-write\":3,\"no-retention\":0,\"no-retention-direct-after-fetch\":0,\"overlapping-saved-direct-key\":0,\"raw\":3,\"retained\":3,\"retained-direct-before-returned-key\":3,\"returned-value-equals-saved-after-direct-change\":0,\"source-includes-direct\":3,\"source-omits-direct\":0}\n\n Test Files  1 passed (1)\n      Tests  2 passed | 242 skipped (244)\n   Start at  15:50:55\n   Duration  1.49s (transform 81%, import 14%, tests 4%)\n\n"
+    },
+    {
+      "log": "browser-clean-final.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence",
+      "environment": {
+        "QUERY_FINAL_BROWSER": "1"
+      },
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "e2e/query-persisted-direct-ownership-oracle.browser.test.ts"
+      ],
+      "exitCode": 0,
+      "classification": "green",
+      "reach": [
+        {
+          "campaign": "query.persisted-direct-ownership.chromium-opfs fixed seed 563",
+          "counts": {
+            "after-fetch-start": 20,
+            "before-fetch": 32,
+            "derived": 26,
+            "distinct-saved-direct-key": 29,
+            "fetched-row-write": 31,
+            "no-retention": 27,
+            "no-retention-direct-after-fetch": 13,
+            "overlapping-saved-direct-key": 23,
+            "raw": 26,
+            "retained": 25,
+            "retained-direct-before-returned-key": 7,
+            "returned-value-equals-saved-after-direct-change": 2,
+            "source-includes-direct": 31,
+            "source-omits-direct": 21
+          }
+        },
+        {
+          "campaign": "query.persisted-direct-ownership.chromium-opfs random seed",
+          "counts": {
+            "after-fetch-start": 22,
+            "before-fetch": 30,
+            "derived": 30,
+            "distinct-saved-direct-key": 37,
+            "fetched-row-write": 20,
+            "no-retention": 30,
+            "no-retention-direct-after-fetch": 16,
+            "overlapping-saved-direct-key": 15,
+            "raw": 22,
+            "retained": 22,
+            "retained-direct-before-returned-key": 5,
+            "returned-value-equals-saved-after-direct-change": 3,
+            "source-includes-direct": 28,
+            "source-omits-direct": 24
+          }
+        }
+      ],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"clean\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"position\":-1,\"line\":1,\"original\":\"\",\"replacement\":\"\",\"browser\":true}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence\n\nquery.persisted-direct-ownership.chromium-opfs fixed seed 563 reach {\"after-fetch-start\":20,\"before-fetch\":32,\"derived\":26,\"distinct-saved-direct-key\":29,\"fetched-row-write\":31,\"no-retention\":27,\"no-retention-direct-after-fetch\":13,\"overlapping-saved-direct-key\":23,\"raw\":26,\"retained\":25,\"retained-direct-before-returned-key\":7,\"returned-value-equals-saved-after-direct-change\":2,\"source-includes-direct\":31,\"source-omits-direct\":21}\nquery.persisted-direct-ownership.chromium-opfs random seed reach {\"after-fetch-start\":22,\"before-fetch\":30,\"derived\":30,\"distinct-saved-direct-key\":37,\"fetched-row-write\":20,\"no-retention\":30,\"no-retention-direct-after-fetch\":16,\"overlapping-saved-direct-key\":15,\"raw\":22,\"retained\":22,\"retained-direct-before-returned-key\":5,\"returned-value-equals-saved-after-direct-change\":3,\"source-includes-direct\":28,\"source-omits-direct\":24}\n\n Test Files  1 passed (1)\n      Tests  122 passed (122)\n   Start at  15:50:21\n   Duration  146.67s (tests 99%)\n\n"
+    },
+    {
+      "log": "browser-M1334-final-red.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence",
+      "environment": {
+        "QUERY_FINAL_BROWSER": "1",
+        "QUERY_FINAL_MUTANT": "query.ts:M1334",
+        "TANSTACK_DB_ORACLE_PROPERTY": "query.persisted-direct-ownership.chromium-opfs",
+        "TANSTACK_DB_ORACLE_SEED": "563",
+        "TANSTACK_DB_ORACLE_PATH": "15:0:0:0:0:0"
+      },
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "e2e/query-persisted-direct-ownership-oracle.browser.test.ts"
+      ],
+      "exitCode": 1,
+      "classification": "assertion failure at declared sync-write operation",
+      "reach": [],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"query.ts:M1334\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"8a1ffc1dbc0f37839b81a9faab2b21e0f253bc8accbc649b92117de5934216e0\",\"position\":97728,\"line\":2756,\"original\":\"type: `update`, \",\"replacement\":\"\",\"browser\":true}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence\n\nstdout | e2e/query-persisted-direct-ownership-oracle.browser.test.ts > query.persisted-direct-ownership.chromium-opfs > random seed\nORACLE_SEED {\"property\":\"query.persisted-direct-ownership.chromium-opfs\",\"seed\":563}\n\nstdout | e2e/query-persisted-direct-ownership-oracle.browser.test.ts\n3:53:17 PM [vite] (client) Forced re-optimization of dependencies\n\nstdout | e2e/query-persisted-direct-ownership-oracle.browser.test.ts\nFINAL_QUERY_BROWSER_APPLIED query.ts:M1334\n\nstdout | e2e/query-persisted-direct-ownership-oracle.browser.test.ts\n3:53:18 PM [vite] (client) dependencies optimized: @journeyapps/wa-sqlite, @journeyapps/wa-sqlite/dist/wa-sqlite.mjs, @journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js\n\n \u276f |adapter-oracles-chromium| e2e/query-persisted-direct-ownership-oracle.browser.test.ts (122 tests | 1 failed | 121 skipped) 1218ms\n   \u276f query.persisted-direct-ownership.chromium-opfs (122)\n     \u00d7 random seed 349ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |adapter-oracles-chromium| e2e/query-persisted-direct-ownership-oracle.browser.test.ts > query.persisted-direct-ownership.chromium-opfs > random seed\nError: Property failed after 1 tests\n{ seed: 563, path: \"15:0:0:0:0:0\", endOnFailure: true }\nCounterexample: [{\"shape\":\"raw\",\"retained\":true,\"write\":\"before-fetch\",\"operation\":\"insert\",\"includesDirect\":true,\"keepsSaved\":false,\"directValue\":0,\"sourceValue\":1,\"savedValue\":0,\"overlapsSaved\":false}]\nShrunk 0 time(s)\n\nHint: Enable verbose mode in order to have the list of all failing values encountered during the run\n \u276f buildError ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2469:16\n \u276f asyncThrowIfFailed ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2481:8\n\nCaused by: OracleViolation: query.persisted-direct-ownership.chromium-opfs violated at checkpoint \"sync-write\" (law: declared sync-write operation).\nLaw: A later complete physical fetch replaces and claims a direct row; an older result preserves it without claiming source ownership. Query adapter sync writes declare an insert, update, or delete operation.\nDifference: SyncConfig.write requires insert, update, or delete; observed undefined\nHistory: {\"shape\":\"raw\",\"retained\":true,\"write\":\"before-fetch\",\"operation\":\"insert\",\"includesDirect\":true,\"keepsSaved\":false,\"directValue\":0,\"sourceValue\":1,\"savedValue\":0,\"overlapsSaved\":false}\nAuthority: docs/collections/query-collection.md: Understanding the Data Stores item1 and Direct Writes and Query Sync; primary ownership direct-order/direct-row-lifetime laws; docs/reference/interfaces/SyncConfig.md and ChangeMessage.md, ChangeMessageOrDeleteKeyMessage and OperationType API types.\nKnown limits: First eager result, one saved row and one same-run insert/upsert, numeric values, successful I/O. Public/durable cuts follow applied receipts; cleanup is diagnostic. No arbitrary mutations, peers, concurrent writers or eager unload claim.\nRerun: TANSTACK_DB_ORACLE_PROPERTY=query.persisted-direct-ownership.chromium-opfs with the seed and path that fast-check reports\n \u276f failure ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:707:17\n \u276f ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:806:13\n \u276f AsyncProperty.run ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:1217:19\n \u276f asyncPropertyExecution ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2564:14\n \u276f asyncRunIt ../../node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check/lib/fast-check.js:2557:15\n \u276f runCampaign ../../node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/dist/esm/oracle-property.js:836:5\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 121 skipped (122)\n   Start at  15:53:15\n   Duration  2.33s (tests 54%, import 29%, environment 13%, transform 3%)\n\n"
+    },
+    {
+      "log": "browser-clean-final-replay.log",
+      "cwd": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence",
+      "environment": {
+        "QUERY_FINAL_BROWSER": "1",
+        "TANSTACK_DB_ORACLE_PROPERTY": "query.persisted-direct-ownership.chromium-opfs",
+        "TANSTACK_DB_ORACLE_SEED": "563",
+        "TANSTACK_DB_ORACLE_PATH": "15:0:0:0:0:0"
+      },
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "/private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts",
+        "--maxWorkers=2",
+        "e2e/query-persisted-direct-ownership-oracle.browser.test.ts"
+      ],
+      "exitCode": 0,
+      "classification": "green",
+      "reach": [
+        {
+          "campaign": "query.persisted-direct-ownership.chromium-opfs random seed",
+          "counts": {
+            "after-fetch-start": 0,
+            "before-fetch": 3,
+            "derived": 0,
+            "distinct-saved-direct-key": 3,
+            "fetched-row-write": 3,
+            "no-retention": 0,
+            "no-retention-direct-after-fetch": 0,
+            "overlapping-saved-direct-key": 0,
+            "raw": 3,
+            "retained": 3,
+            "retained-direct-before-returned-key": 3,
+            "returned-value-equals-saved-after-direct-change": 0,
+            "source-includes-direct": 3,
+            "source-omits-direct": 0
+          }
+        }
+      ],
+      "stdoutAndStderr": "FINAL_QUERY_SOURCE {\"mutant\":\"clean\",\"source\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"transformed\":\"1a794774e60d3c1dbacd515d0350b048557714adf80d6e3b9d42e7250841754b\",\"position\":-1,\"line\":1,\"original\":\"\",\"replacement\":\"\",\"browser\":true}\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/vitest.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:5:22). Add the file extension\n  - import \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config\" without a file extension (../../../../../../../../private/tmp/tanstack-db-2394-sync-write-protocol/immutable.config.ts:6:25). Add the file extension\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence\n\nquery.persisted-direct-ownership.chromium-opfs random seed reach {\"after-fetch-start\":0,\"before-fetch\":3,\"derived\":0,\"distinct-saved-direct-key\":3,\"fetched-row-write\":3,\"no-retention\":0,\"no-retention-direct-after-fetch\":0,\"overlapping-saved-direct-key\":0,\"raw\":3,\"retained\":3,\"retained-direct-before-returned-key\":3,\"returned-value-equals-saved-after-direct-change\":0,\"source-includes-direct\":3,\"source-omits-direct\":0}\n\n Test Files  1 passed (1)\n      Tests  1 passed | 121 skipped (122)\n   Start at  15:53:43\n   Duration  3.08s (tests 61%, import 23%, environment 13%, transform 2%)\n\n"
+    }
+  ],
+  "staticChecks": {
+    "typescript": {
+      "exitCode": 0,
+      "command": [
+        "pnpm",
+        "--config.verifyDepsBeforeRun=false",
+        "exec",
+        "tsc",
+        "--project",
+        "/private/tmp/tanstack-db-2394-query-final/tsconfig.json",
+        "--noEmit"
+      ],
+      "config": "{\n  \"extends\": \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/tsconfig.json\",\n  \"compilerOptions\": {\n    \"module\": \"ESNext\",\n    \"target\": \"ES2022\",\n    \"types\": [\n      \"node\",\n      \"vitest/globals\"\n    ],\n    \"paths\": {\n      \"@tanstack/db\": [\n        \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/db/src\"\n      ],\n      \"@tanstack/db-ivm\": [\n        \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/db-ivm/src\"\n      ],\n      \"@tanstack/db-sqlite-persistence-core\": [\n        \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/db-sqlite-persistence-core/src\"\n      ],\n      \"@tanstack/query-core\": [\n        \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/node_modules/@tanstack/query-core\"\n      ]\n    }\n  },\n  \"include\": [\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/e2e/query-immediate-cache-oracle.browser.test.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/e2e/query-ownership-browser-support.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/e2e/query-ownership.opfs.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/e2e/query-persisted-direct-ownership-oracle.browser.test.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/immediate-eager-materialization-driver.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/immediate-eager-materialization-oracle.test.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/immediate-eager-materialization-oracle.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/persisted-direct-ownership-driver.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/persisted-direct-ownership-oracle.test.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/persisted-direct-ownership-oracle.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/query-db-collection/tests/query-receiving-fidelity.test.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/src/vite-env.d.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/src/wa-sqlite-examples.d.ts\",\n    \"/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-evaluate-review-2367/packages/browser-db-sqlite-persistence/tests/trailbase-browser-fidelity.test.ts\"\n  ],\n  \"exclude\": []\n}\n",
+      "output": ""
+    },
+    "eslint": {
+      "exitCode": 0,
+      "files": [
+        "packages/query-db-collection/tests/persisted-direct-ownership-oracle.ts",
+        "packages/query-db-collection/tests/persisted-direct-ownership-driver.ts"
+      ],
+      "output": ""
+    }
+  },
+  "limits": "Partial operation-value validation in the retained first-eager direct-write grammar across controlled storage, native SQLite and actual Chromium/OPFS. No write count/order, own-property rule, all-field validation, arbitrary mutations, failed I/O, peers or concurrent writers. Other original audit survivors remain separate."
+}

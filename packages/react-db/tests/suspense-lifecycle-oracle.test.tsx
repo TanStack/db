@@ -30,7 +30,7 @@ import {
   getStableValueHash,
 } from '@tanstack/db'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import {
@@ -43,25 +43,22 @@ import {
   expectKeyedRows,
   expectUnorderedRows,
 } from '../../db/tests/conformance/result-laws'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { atOracleCheckpoint } from '../../db/tests/oracle-failure-fidelity'
+import { declareOracle, oracleProperty } from '../../db/tests/oracle-config'
 import {
-  atOracleCheckpoint,
-  createOracleFailureFidelity,
-} from '../../db/tests/oracle-failure-fidelity'
-import {
-  declareOracle,
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import type { WindowRow } from '../../db/tests/conformance/window-history-oracle'
 import type { ReactNode } from 'react'
 import type { HealthNode, SyncConfig } from '@tanstack/db'
 
-type Row = { id: string; version: number }
+type Row = {
+  id: string
+  version: number
+}
 type CauseKind = `Error` | `record` | `undefined`
 type Scope = `none` | `provider` | `explicit`
 type View = {
@@ -77,18 +74,31 @@ type View = {
 // A copied result can be visible before this query's initial readiness. This
 // splits the public view from the initial-query gate (hydration oracle laws 1–2).
 // The next first-load rejection distinguishes that state from owned readiness.
-type Model = View & { attempt: number; queryReady: boolean }
+type Model = View & {
+  attempt: number
+  queryReady: boolean
+}
 type Event =
-  | { type: `start`; attempt: number }
-  | { type: `ready`; attempt: number; rows: Array<Row> }
-  | { type: `seed`; attempt: number; rows: Array<Row> }
+  | {
+      type: `start`
+      attempt: number
+    }
+  | {
+      type: `ready`
+      attempt: number
+      rows: Array<Row>
+    }
+  | {
+      type: `seed`
+      attempt: number
+      rows: Array<Row>
+    }
   | {
       type: `failure`
       attempt: number
       cause: unknown
       origin: `source` | `preload` | `client`
     }
-
 // A new attempt replaces the visible obligation. A stale event has no authority.
 // Source fail after readiness is health, not a new initial-load gate (glossary).
 function advance(model: Model, event: Event): Model {
@@ -138,17 +148,24 @@ function makeCause(kind: CauseKind, version: number): unknown {
 function rowsFor(count: number, version: number): Array<Row> {
   return Array.from({ length: count }, (_, id) => ({ id: String(id), version }))
 }
-
 type Result = {
   data: unknown
   state: ReadonlyMap<string | number, object>
   collection: object
   health: HealthNode | undefined
 }
-type Recorded = { result?: Result; error?: unknown }
+type Recorded = {
+  result?: Result
+  error?: unknown
+}
 class Boundary extends Component<
-  { children: ReactNode; record: Recorded },
-  { failed: boolean }
+  {
+    children: ReactNode
+    record: Recorded
+  },
+  {
+    failed: boolean
+  }
 > {
   state = { failed: false }
   static getDerivedStateFromError() {
@@ -178,7 +195,6 @@ function frame(
   )
   return client ? <DbProvider client={client}>{content}</DbProvider> : content
 }
-
 // Compare the actual committed host surface; a previously returned result cannot
 // disguise a current fallback/error. Empty results remain distinguishable from it.
 function compare(
@@ -188,24 +204,53 @@ function compare(
   cut: string,
 ) {
   atOracleCheckpoint(`current Suspense attempt`, cut, () => {
-    expect(host.querySelector(`output`)?.getAttribute(`data-phase`)).toBe(
-      model.phase,
+    oracleAssertion(
+      'expect(host.querySelector(`output`)?.getAttribute(`data-phase`)).toBe(',
+      () =>
+        expect(host.querySelector(`output`)?.getAttribute(`data-phase`)).toBe(
+          model.phase,
+        ),
     )
     if (model.phase === `ready`) {
-      expect(record.result, `a successful binding committed`).toBeDefined()
-      expectUnorderedRows(record.result!.data, model.rows)
-      expectKeyedRows(record.result!.state, model.rows)
+      oracleAssertion(
+        'expect(record.result, `a successful binding committed`).toBeDefined()',
+        () =>
+          expect(record.result, `a successful binding committed`).toBeDefined(),
+      )
+      oracleAssertion('expectUnorderedRows', () =>
+        expectUnorderedRows(record.result!.data, model.rows),
+      )
+      oracleAssertion('expectKeyedRows', () =>
+        expectKeyedRows(record.result!.state, model.rows),
+      )
       if (model.healthError) {
         const problem = record.result!.health?.sources[0]?.error
-        expect(problem, `a stopped source has a health problem`).toBeTruthy()
-        expect(problem?.cause).toBe(model.cause)
+        oracleAssertion(
+          'expect(problem, `a stopped source has a health problem`).toBeTruthy()',
+          () =>
+            expect(
+              problem,
+              `a stopped source has a health problem`,
+            ).toBeTruthy(),
+        )
+        oracleAssertion('expect(problem?.cause).toBe(model.cause)', () =>
+          expect(problem?.cause).toBe(model.cause),
+        )
       }
     }
     if (model.phase === `error`) {
       if (model.wrapCause && !(model.cause instanceof Error)) {
-        expect(record.error).toBeInstanceOf(Error)
-        expect((record.error as Error).cause).toBe(model.cause)
-      } else expect(record.error).toBe(model.cause)
+        oracleAssertion('expect(record.error).toBeInstanceOf(Error)', () =>
+          expect(record.error).toBeInstanceOf(Error),
+        )
+        oracleAssertion(
+          'expect((record.error as Error).cause).toBe(model.cause)',
+          () => expect((record.error as Error).cause).toBe(model.cause),
+        )
+      } else
+        oracleAssertion('expect(record.error).toBe(model.cause)', () =>
+          expect(record.error).toBe(model.cause),
+        )
     }
   })
 }
@@ -214,7 +259,6 @@ async function settle() {
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
   })
 }
-
 // Each history fails, crashes, or abandons its initial load, then cleans up
 // before a new sync run. Only that new run may become ready. Bounded rows and
 // pending rerenders vary the public result and discarded-render retry path.
@@ -235,7 +279,7 @@ const retryExamples: Array<[RetryHistory]> = [
       version: 0,
       rerenders: 2,
       cause: `Error`,
-      first: `fail`,
+      first: `fail` as const,
       remount: false,
     },
   ],
@@ -245,7 +289,7 @@ const retryExamples: Array<[RetryHistory]> = [
       version: 1,
       rerenders: 0,
       cause: `undefined`,
-      first: `crash`,
+      first: `crash` as const,
       remount: true,
     },
   ],
@@ -255,7 +299,7 @@ const retryExamples: Array<[RetryHistory]> = [
       version: 2,
       rerenders: 1,
       cause: `record`,
-      first: `abandon`,
+      first: `abandon` as const,
       remount: false,
     },
   ],
@@ -274,12 +318,13 @@ const retryStates = [
   `independent peer`,
   `post-ready failure`,
 ] as const
-
 async function checkRetry(
   history: RetryHistory,
   scope: Scope,
   keyed: boolean,
-  reach: ReturnType<typeof createOracleReach<(typeof retryStates)[number]>>,
+  reach: {
+    reach: (state: (typeof retryStates)[number]) => void
+  },
 ) {
   const lifetime = new ScenarioLifetime()
   const record: Recorded = {}
@@ -360,7 +405,13 @@ async function checkRetry(
       reach.reach(`crash`)
     } else {
       compare(mounted.container, record, model, `initial pending`)
-      expect(demands.length, `real query demand started`).toBeGreaterThan(0)
+      oracleAssertion(
+        'expect(demands.length, `real query demand started`).toBeGreaterThan(0)',
+        () =>
+          expect(demands.length, `real query demand started`).toBeGreaterThan(
+            0,
+          ),
+      )
       reach.reach(`initial fallback`)
       for (let n = 0; n < history.rerenders; n++) {
         mounted.rerender(tree(0))
@@ -394,7 +445,11 @@ async function checkRetry(
     await settle()
     model = advance(model, { type: `start`, attempt: 1 })
     compare(mounted.container, record, model, `new attempt pending`)
-    expect(run, `cleanup was followed by a new source sync run`).toBe(2)
+    oracleAssertion(
+      'expect(run, `cleanup was followed by a new source sync run`).toBe(2)',
+      () =>
+        expect(run, `cleanup was followed by a new source sync run`).toBe(2),
+    )
     reach.reach(`new attempt pending`)
     reach.reach(history.remount ? `root remount` : `boundary reset`)
     await act(() => {
@@ -449,7 +504,13 @@ async function checkRetry(
     await settle()
     compare(peer.container, peerRecord, model, `successful peer`)
     atOracleCheckpoint(`exclusive successful outputs`, `peer ownership`, () => {
-      expect(peerRecord.result!.collection).not.toBe(record.result!.collection)
+      oracleAssertion(
+        'expect(peerRecord.result!.collection).not.toBe(record.result!.collection)',
+        () =>
+          expect(peerRecord.result!.collection).not.toBe(
+            record.result!.collection,
+          ),
+      )
     })
     reach.reach(`independent peer`)
     const stopped = makeCause(history.cause, history.version + 2)
@@ -471,7 +532,6 @@ async function checkRetry(
     reach.reach(`post-ready failure`)
   })
 }
-
 // These request-only histories keep query preload pending. A client snapshot
 // supplies the replacement rows; source writes cannot accidentally rescue it.
 const replacementArbitrary = fc.record({
@@ -487,10 +547,38 @@ const replacementArbitrary = fc.record({
 })
 type ReplacementHistory = HistoryOf<typeof replacementArbitrary>
 const replacementExamples: Array<[ReplacementHistory]> = [
-  [{ count: 0, version: 0, cause: `undefined`, schedule: `failure-first` }],
-  [{ count: 1, version: 1, cause: `Error`, schedule: `replace-first` }],
-  [{ count: 2, version: 2, cause: `record`, schedule: `cleanup-first` }],
-  [{ count: 3, version: 3, cause: `undefined`, schedule: `client-first` }],
+  [
+    {
+      count: 0,
+      version: 0,
+      cause: `undefined`,
+      schedule: `failure-first` as const,
+    },
+  ],
+  [
+    {
+      count: 1,
+      version: 1,
+      cause: `Error`,
+      schedule: `replace-first` as const,
+    },
+  ],
+  [
+    {
+      count: 2,
+      version: 2,
+      cause: `record`,
+      schedule: `cleanup-first` as const,
+    },
+  ],
+  [
+    {
+      count: 3,
+      version: 3,
+      cause: `undefined`,
+      schedule: `client-first` as const,
+    },
+  ],
 ]
 const replacementStates = [
   `failure-first`,
@@ -505,9 +593,9 @@ const replacementStates = [
 ] as const
 async function checkReplacement(
   history: ReplacementHistory,
-  reach: ReturnType<
-    typeof createOracleReach<(typeof replacementStates)[number]>
-  >,
+  reach: {
+    reach: (state: (typeof replacementStates)[number]) => void
+  },
 ) {
   const lifetime = new ScenarioLifetime()
   let mounted: ReturnType<typeof render> | undefined
@@ -541,11 +629,14 @@ async function checkReplacement(
     const hash = getStableValueHash([`collection`, query.id], `queryKey`)
     const cause = makeCause(history.cause, history.version)
     let rejectOld!: (error: unknown) => void
-    const old = new Promise<{ rows: Array<{ key: string; value: Row }> }>(
-      (_, reject) => {
-        rejectOld = reject
-      },
-    )
+    const old = new Promise<{
+      rows: Array<{
+        key: string
+        value: Row
+      }>
+    }>((_, reject) => {
+      rejectOld = reject
+    })
     void clients[0]!._registerLiveQuery(hash, old).catch(() => {})
     const record: Recorded = {}
     function Consumer() {
@@ -586,13 +677,19 @@ async function checkReplacement(
     }
     const client = clients[history.schedule === `client-first` ? 1 : 0]!
     let finish!: (snapshot: {
-      rows: Array<{ key: string; value: Row }>
+      rows: Array<{
+        key: string
+        value: Row
+      }>
     }) => void
-    const newer = new Promise<{ rows: Array<{ key: string; value: Row }> }>(
-      (resolve) => {
-        finish = resolve
-      },
-    )
+    const newer = new Promise<{
+      rows: Array<{
+        key: string
+        value: Row
+      }>
+    }>((resolve) => {
+      finish = resolve
+    })
     const register = () => {
       void client._registerLiveQuery(hash, newer).catch(() => {})
     }
@@ -612,8 +709,12 @@ async function checkReplacement(
       await reject()
       register()
     } else register()
-    expect(client._getLiveQuery(hash)?.status, `new request admitted`).toBe(
-      `pending`,
+    oracleAssertion(
+      'expect(client._getLiveQuery(hash)?.status, `new request admitted`).toBe(',
+      () =>
+        expect(client._getLiveQuery(hash)?.status, `new request admitted`).toBe(
+          `pending`,
+        ),
     )
     const app = frame(<Consumer />, record, 1, client)
     if (history.schedule === `cleanup-first`) mounted = render(app)
@@ -654,7 +755,6 @@ async function checkReplacement(
     reach.reach(`replacement ready`)
   })
 }
-
 // Query-only preload failure has no source status transition. Keep this lane
 // separate from source failure so source status cannot hide a stale wrapper error.
 const preloadArbitrary = fc.record({
@@ -695,7 +795,9 @@ const preloadStates = [
 async function checkPreload(
   history: PreloadHistory,
   scope: Exclude<Scope, `explicit`>,
-  reach: ReturnType<typeof createOracleReach<(typeof preloadStates)[number]>>,
+  reach: {
+    reach: (state: (typeof preloadStates)[number]) => void
+  },
 ) {
   const lifetime = new ScenarioLifetime()
   let mounted: ReturnType<typeof render> | undefined
@@ -752,7 +854,9 @@ async function checkPreload(
     let model = initial()
     mounted = render(tree(0))
     compare(mounted.container, record, model, `query preload pending`)
-    expect(preload).toHaveBeenCalled()
+    oracleAssertion('expect(preload).toHaveBeenCalled()', () =>
+      expect(preload).toHaveBeenCalled(),
+    )
     reach.reach(`pending`)
     for (let n = 0; n < history.rerenders; n++) {
       mounted.rerender(tree(0))
@@ -819,160 +923,259 @@ async function checkPreload(
     reach.reach(`restart ready`)
   })
 }
-
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   model: [advance],
   grammar: [retryArbitrary, replacementArbitrary, preloadArbitrary],
   check: [compare, checkRetry, checkReplacement, checkPreload],
 })
-
+// Registration adapts the complete original helpers. Their model transitions,
+// public observations and assertions stay at the original host cuts.
 describe(`Suspense lifecycle histories`, () => {
   for (const scope of [`none`, `provider`, `explicit`] as const)
     for (const keyed of [false, true])
-      for (const campaign of [`fixed`, `fresh`] as const) {
-        const property = `react.suspense-retry-history`
-        const test =
-          campaign === `fixed`
-            ? oracleReplayTest(it)
-            : oracleReplayTest(it, property)
-        test(`${scope}/${keyed ? `keyed` : `derived`} retry (${campaign})`, async () => {
-          const reach = createOracleReach(
-            `${property}/${scope}/${keyed}/${campaign}`,
-            retryStates,
-            { fixedHistories: retryExamples.length },
-          )
-          let index = 0
-          const fidelity = createOracleFailureFidelity<RetryHistory>()
-          try {
-            const parameters =
-              campaign === `fixed`
-                ? oracleFixedSeed(2345, {
-                    numRuns: oracleRuns(24) + retryExamples.length,
-                    examples: retryExamples,
-                  })
-                : oraclePropertyOptions(24, property, {
-                    examples: retryExamples,
-                  })
-            oracleRoute(oracleRouteOf(parameters))
-            await fidelity.assert(() =>
-              fc.assert(
-                fc.asyncProperty(retryArbitrary, async (history) => {
-                  reach.beginHistory({ fixed: index++ < retryExamples.length })
-                  await fidelity.run(history, () =>
-                    checkRetry(history, scope, keyed, reach),
-                  )
+      describe(`${scope}/${keyed ? `keyed` : `derived`} retry`, () => {
+        oracleProperty({
+          id: `react.suspense-retry-history`,
+          law: {
+            statement: `The current initial attempt determines fallback, rows and boundary errors; cleanup and retry retire stale failures and successful peers own independent outputs.`,
+            authority: `docs/guides/error-handling.md Suspense and Error Boundaries, hook JSDoc and shared conformance contract, enacted by advance and compare.`,
+            limits: `The unchanged finite fail/crash/abandon, pending rerenders, reset/remount and post-ready source paths across none/provider/explicit and keyed/derived React hooks.`,
+          },
+          owns: [
+            `src/DbProvider.tsx#DbProvider`,
+            `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+          ],
+          histories: {
+            arbitrary: retryArbitrary,
+            runs: 24,
+            fixedSeeds: [2345],
+            states: retryStates,
+            fixed: retryExamples.map(([history], index) => ({
+              name: `retry ${index}`,
+              history,
+            })),
+            constructed: [
+              {
+                name: `failed boundary reset`,
+                enters: [
+                  `fail`,
+                  `boundary reset`,
+                  `initial fallback`,
+                  `first failure`,
+                  `new attempt pending`,
+                  `retry progress`,
+                  `independent peer`,
+                  `post-ready failure`,
+                ],
+                build: (history) => ({
+                  ...history,
+                  first: `fail` as const,
+                  remount: false,
                 }),
-                parameters,
-              ),
-            )
-            reach.assertReached()
-          } finally {
-            console.info(
-              `retry lifecycle reach ${scope}/${keyed}/${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-        }, 60_000)
-      }
-  for (const campaign of [`fixed`, `fresh`] as const) {
-    const property = `react.suspense-replacement-history`
-    const test =
-      campaign === `fixed`
-        ? oracleReplayTest(it)
-        : oracleReplayTest(it, property)
-    test(`client request replacement (${campaign})`, async () => {
-      const reach = createOracleReach(
-        `${property}/${campaign}`,
-        replacementStates,
-        { fixedHistories: replacementExamples.length },
-      )
-      let index = 0
-      const fidelity = createOracleFailureFidelity<ReplacementHistory>()
-      try {
-        const parameters =
-          campaign === `fixed`
-            ? oracleFixedSeed(2345, {
-                numRuns: oracleRuns(32) + replacementExamples.length,
-                examples: replacementExamples,
-              })
-            : oraclePropertyOptions(32, property, {
-                examples: replacementExamples,
-              })
-        oracleRoute(oracleRouteOf(parameters))
-        await fidelity.assert(() =>
-          fc.assert(
-            fc.asyncProperty(replacementArbitrary, async (history) => {
-              reach.beginHistory({
-                fixed: index++ < replacementExamples.length,
-              })
-              await fidelity.run(history, () =>
-                checkReplacement(history, reach),
-              )
-            }),
-            parameters,
-          ),
-        )
-        reach.assertReached()
-      } finally {
-        console.info(
-          `replacement lifecycle reach ${campaign}`,
-          Object.fromEntries(reach.counts()),
-        )
-      }
-    }, 60_000)
-  }
-  for (const scope of [`none`, `provider`] as const)
-    for (const campaign of [`fixed`, `fresh`] as const) {
-      const property = `react.suspense-preload-restart-history`
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(`${scope} preload restart (${campaign})`, async () => {
-        const reach = createOracleReach(
-          `${property}/${scope}/${campaign}`,
-          preloadStates,
-          { fixedHistories: preloadExamples.length },
-        )
-        const fidelity = createOracleFailureFidelity<PreloadHistory>()
-        let index = 0
-        try {
-          const parameters =
-            campaign === `fixed`
-              ? oracleFixedSeed(2345, {
-                  numRuns: oracleRuns(24) + preloadExamples.length,
-                  examples: preloadExamples,
-                })
-              : oraclePropertyOptions(24, property, {
-                  examples: preloadExamples,
-                })
-          oracleRoute(oracleRouteOf(parameters))
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(preloadArbitrary, async (history) => {
-                reach.beginHistory({ fixed: index++ < preloadExamples.length })
-                await fidelity.run(history, () =>
-                  checkPreload(history, scope, reach),
-                )
-              }),
-              parameters,
+              },
+              {
+                name: `crashed root remount`,
+                enters: [
+                  `crash`,
+                  `root remount`,
+                  `first failure`,
+                  `new attempt pending`,
+                  `retry progress`,
+                  `independent peer`,
+                  `post-ready failure`,
+                ],
+                build: (history) => ({
+                  ...history,
+                  first: `crash` as const,
+                  remount: true,
+                }),
+              },
+              {
+                name: `abandoned pending attempt`,
+                enters: [
+                  `abandon`,
+                  `pending retirement`,
+                  `initial fallback`,
+                  `new attempt pending`,
+                  `retry progress`,
+                  `independent peer`,
+                  `post-ready failure`,
+                ],
+                build: (history) => ({ ...history, first: `abandon` as const }),
+              },
+            ],
+          },
+          resolve: (history) => ({ history }),
+          model: recordedAssertionJudgment,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `Suspense current retry attempt`,
+              plan,
+              observe,
+              () =>
+                checkRetry(plan.history, scope, keyed, {
+                  reach: (state) => observe(`reach`, state),
+                }),
             ),
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `preload lifecycle reach ${scope}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      }, 60_000)
-    }
+          check: forwardAssertionJudgment,
+          timeout: 60000,
+        })
+      })
+  oracleProperty({
+    id: `react.suspense-replacement-history`,
+    law: {
+      statement: `A replacement client request supplies the current attempt; late obsolete rejection cannot poison its pending or ready view.`,
+      authority: `The existing replacement and cleanup contract examples, and advance/compare's independent current-attempt law.`,
+      limits: `The unchanged failure-first, replace-first, cleanup-first and client-first schedules with finite rows and Error/record/undefined causes.`,
+    },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: {
+      arbitrary: replacementArbitrary,
+      runs: 32,
+      fixedSeeds: [2345],
+      states: replacementStates,
+      fixed: replacementExamples.map(([history], index) => ({
+        name: `replacement ${index}`,
+        history,
+      })),
+      constructed: [
+        {
+          name: `failure before replacement`,
+          enters: [
+            `failure-first`,
+            `first request pending`,
+            `first request failure`,
+            `replacement pending`,
+            `replacement ready`,
+          ],
+          build: (history) => ({
+            ...history,
+            schedule: `failure-first` as const,
+          }),
+        },
+        {
+          name: `replacement in rejection reaction`,
+          enters: [
+            `replace-first`,
+            `first request pending`,
+            `replacement pending`,
+            `late rejection ignored`,
+            `replacement ready`,
+          ],
+          build: (history) => ({
+            ...history,
+            schedule: `replace-first` as const,
+          }),
+        },
+        {
+          name: `cleanup before rejection`,
+          enters: [
+            `cleanup-first`,
+            `first request pending`,
+            `replacement pending`,
+            `replacement ready`,
+          ],
+          build: (history) => ({
+            ...history,
+            schedule: `cleanup-first` as const,
+          }),
+        },
+        {
+          name: `client switch before rejection`,
+          enters: [
+            `client-first`,
+            `first request pending`,
+            `replacement pending`,
+            `late rejection ignored`,
+            `replacement ready`,
+          ],
+          build: (history) => ({
+            ...history,
+            schedule: `client-first` as const,
+          }),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `Suspense replacement attempt`,
+        plan,
+        observe,
+        () =>
+          checkReplacement(plan.history, {
+            reach: (state) => observe(`reach`, state),
+          }),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 60000,
+  })
+  for (const scope of [`none`, `provider`] as const)
+    describe(`${scope} preload restart`, () => {
+      oracleProperty({
+        id: `react.suspense-preload-restart-history`,
+        law: {
+          statement: `Cleanup and restart replace the query-only preload obligation; its retired rejection cannot replace the new pending or ready view.`,
+          authority: `The existing supplied-query preload cleanup contract, enacted by advance and compare.`,
+          limits: `The unchanged unscoped/provider supplied Collections, finite rerenders, and rejection before/after cleanup; no provider transport or native hydration claim.`,
+        },
+        owns: [
+          `src/DbProvider.tsx#DbProvider`,
+          `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+        ],
+        histories: {
+          arbitrary: preloadArbitrary,
+          runs: 24,
+          fixedSeeds: [2345],
+          states: preloadStates,
+          fixed: preloadExamples.map(([history], index) => ({
+            name: `preload ${index}`,
+            history,
+          })),
+          constructed: [
+            {
+              name: `failure before cleanup`,
+              enters: [
+                `pending`,
+                `failure before cleanup`,
+                `restart pending`,
+                `restart ready`,
+              ],
+              build: (history) => ({ ...history, rejectAfterCleanup: false }),
+            },
+            {
+              name: `retired rejection after cleanup`,
+              enters: [
+                `pending`,
+                `rejection after cleanup`,
+                `restart pending`,
+                `restart ready`,
+              ],
+              build: (history) => ({ ...history, rejectAfterCleanup: true }),
+            },
+          ],
+        },
+        resolve: (history) => ({ history }),
+        model: recordedAssertionJudgment,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `Suspense preload restart`,
+            plan,
+            observe,
+            () =>
+              checkPreload(plan.history, scope, {
+                reach: (state) => observe(`reach`, state),
+              }),
+          ),
+        check: forwardAssertionJudgment,
+        timeout: 60000,
+      })
+    })
 })
-
 /** Initial sibling histories cross boundary placement, query identity, and
  * readiness order. The existing current-attempt model predicts each ready view;
  * the shared window judgment checks rows and exclusive/retained Collections.
@@ -1094,7 +1297,13 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
 }
 function checkSiblingOwnership(left: object, right: object, cut: string) {
   atOracleCheckpoint(`independent successful outputs`, cut, () => {
-    expect(left, `every successful sibling owns its output`).not.toBe(right)
+    oracleAssertion(
+      'expect(left, `every successful sibling owns its output`).not.toBe(right)',
+      () =>
+        expect(left, `every successful sibling owns its output`).not.toBe(
+          right,
+        ),
+    )
   })
 }
 // A successful view must expose its source's current failure reason and its
@@ -1106,10 +1315,22 @@ function checkSiblingHealth(
 ) {
   atOracleCheckpoint(`seeded source health notification`, cut, () => {
     const problem = health?.sources[0]?.failureReason
-    if (cause === undefined) expect(problem).toBeNull()
+    if (cause === undefined)
+      oracleAssertion('expect(problem).toBeNull()', () =>
+        expect(problem).toBeNull(),
+      )
     else {
-      expect(problem, `source report reaches the committed hook`).toBeTruthy()
-      expect(problem!.cause).toBe(cause)
+      oracleAssertion(
+        'expect(problem, `source report reaches the committed hook`).toBeTruthy()',
+        () =>
+          expect(
+            problem,
+            `source report reaches the committed hook`,
+          ).toBeTruthy(),
+      )
+      oracleAssertion('expect(problem!.cause).toBe(cause)', () =>
+        expect(problem!.cause).toBe(cause),
+      )
     }
   })
 }
@@ -1118,12 +1339,21 @@ function checkSiblingRequestIsolation(health: HealthNode | undefined) {
     `query-local request health`,
     `seed after peer request failure`,
     () => {
-      expect(health, `successful seed exposes health`).toBeDefined()
-      expect(
-        health!.error,
-        `peer query does not own this output's demand`,
-      ).toBeNull()
-      expect(health!.sources[0]?.error, `source did not fail`).toBeNull()
+      oracleAssertion(
+        'expect(health, `successful seed exposes health`).toBeDefined()',
+        () => expect(health, `successful seed exposes health`).toBeDefined(),
+      )
+      oracleAssertion('expect(', () =>
+        expect(
+          health!.error,
+          `peer query does not own this output's demand`,
+        ).toBeNull(),
+      )
+      oracleAssertion(
+        'expect(health!.sources[0]?.error, `source did not fail`).toBeNull()',
+        () =>
+          expect(health!.sources[0]?.error, `source did not fail`).toBeNull(),
+      )
     },
   )
 }
@@ -1161,7 +1391,9 @@ async function checkSiblings(
   history: SiblingsHistory,
   scope: Scope,
   keyed: boolean,
-  reach: ReturnType<typeof createOracleReach<(typeof siblingStates)[number]>>,
+  reach: {
+    reach: (state: (typeof siblingStates)[number]) => void
+  },
 ) {
   const lifetime = new ScenarioLifetime()
   let mounted: ReturnType<typeof render> | undefined
@@ -1180,7 +1412,10 @@ async function checkSiblings(
       reportHealthy: () => void
     }> = []
     const demands: Array<
-      Array<{ fulfill: () => void; reject: (cause: unknown) => void }>
+      Array<{
+        fulfill: () => void
+        reject: (cause: unknown) => void
+      }>
     > = [[], []]
     const sources = [0, 1].map((slot) =>
       createCollection<WindowRow, string>({
@@ -1224,7 +1459,10 @@ async function checkSiblings(
       result?: {
         data: unknown
         state: ReadonlyMap<string | number, object>
-        collection: { status: string; health: HealthNode }
+        collection: {
+          status: string
+          health: HealthNode
+        }
         health: HealthNode | undefined
       }
     }> = [{}, {}]
@@ -1296,13 +1534,17 @@ async function checkSiblings(
     }
     mounted = render(tree(0))
     await settle()
-    expect(
-      rendered.every((n) => n > 0),
-      `React attempted both co-mounted peers`,
-    ).toBe(true)
-    expect(
-      mounted.container.querySelectorAll('[data-phase="ready"]'),
-    ).toHaveLength(0)
+    oracleAssertion('expect(', () =>
+      expect(
+        rendered.every((n) => n > 0),
+        `React attempted both co-mounted peers`,
+      ).toBe(true),
+    )
+    oracleAssertion('expect(', () =>
+      expect(
+        mounted!.container.querySelectorAll('[data-phase="ready"]'),
+      ).toHaveLength(0),
+    )
     reach.reach(`co-mounted pending peers`)
     reach.reach(
       history.sharedBoundary ? `shared boundary` : `separate boundaries`,
@@ -1323,17 +1565,27 @@ async function checkSiblings(
         await act(() => mounted!.rerender(tree(0)))
         await settle()
       }
-      expect(
-        successfulReturns[history.first],
-        `first candidate returned while its peer remains pending`,
-      ).toBeGreaterThan(0)
-      expect(successfulReturns[1 - history.first]).toBe(0)
-      expect(demands[1 - history.first]!.length).toBeGreaterThan(0)
-      if (history.sharedBoundary) {
+      oracleAssertion('expect(', () =>
         expect(
-          records.every((record) => record.result === undefined),
-          `no sibling has committed through the shared pending boundary`,
-        ).toBe(true)
+          successfulReturns[history.first],
+          `first candidate returned while its peer remains pending`,
+        ).toBeGreaterThan(0),
+      )
+      oracleAssertion(
+        'expect(successfulReturns[1 - history.first]).toBe(0)',
+        () => expect(successfulReturns[1 - history.first]).toBe(0),
+      )
+      oracleAssertion(
+        'expect(demands[1 - history.first]!.length).toBeGreaterThan(0)',
+        () => expect(demands[1 - history.first]!.length).toBeGreaterThan(0),
+      )
+      if (history.sharedBoundary) {
+        oracleAssertion('expect(', () =>
+          expect(
+            records.every((record) => record.result === undefined),
+            `no sibling has committed through the shared pending boundary`,
+          ).toBe(true),
+        )
       }
       reach.reach(`staggered readiness`)
       reach.reach(`successful candidate while peer pending`)
@@ -1354,17 +1606,23 @@ async function checkSiblings(
       await settle()
     }
     if (holdCandidate) {
-      expect(
-        discardedCandidates,
-        `React discarded a candidate after its hook returned`,
-      ).toBeGreaterThan(0)
+      oracleAssertion('expect(', () =>
+        expect(
+          discardedCandidates,
+          `React discarded a candidate after its hook returned`,
+        ).toBeGreaterThan(0),
+      )
       reach.reach(`post-hook discarded candidate`)
       if (!history.sharedBoundary) {
-        expect(records[0]!.result).toBeUndefined()
-        expect(
-          records[1]!.result,
-          `independent boundary let the peer commit first`,
-        ).toBeDefined()
+        oracleAssertion('expect(records[0]!.result).toBeUndefined()', () =>
+          expect(records[0]!.result).toBeUndefined(),
+        )
+        oracleAssertion('expect(', () =>
+          expect(
+            records[1]!.result,
+            `independent boundary let the peer commit first`,
+          ).toBeDefined(),
+        )
         reach.reach(`peer commits before candidate`)
       }
       holdCandidate = false
@@ -1385,10 +1643,12 @@ async function checkSiblings(
     }
     // This bounded cut asks for host progress, not a particular retry count.
     // A fallback after every requested source is ready violates the model's view.
-    expect(
-      mounted.container.querySelectorAll('[data-phase="ready"]'),
-      `both initial obligations made retry progress`,
-    ).toHaveLength(2)
+    oracleAssertion('expect(', () =>
+      expect(
+        mounted!.container.querySelectorAll('[data-phase="ready"]'),
+        `both initial obligations made retry progress`,
+      ).toHaveLength(2),
+    )
     reach.reach(`both committed`)
     if (history.holdCandidate || history.sameQuery || !history.simultaneous)
       console.info(`sibling initial work`, {
@@ -1424,16 +1684,20 @@ async function checkSiblings(
       for (const slot of [0, 1]) {
         const record = records[slot]!.result!
         const page = slot === history.first ? offset : 0
-        checkWindowObservation(
-          { rows: record.data, collection: record.collection },
-          {
-            rows: expected(page),
-            previousCollection: before[slot],
-            retain: true,
-          },
-          `${cut}/${slot}`,
+        oracleAssertion('checkWindowObservation', () =>
+          checkWindowObservation(
+            { rows: record.data, collection: record.collection },
+            {
+              rows: expected(page),
+              previousCollection: before[slot],
+              retain: true,
+            },
+            `${cut}/${slot}`,
+          ),
         )
-        checkWindowState(record.state, expected(page), `${cut}/${slot}`)
+        oracleAssertion('checkWindowState', () =>
+          checkWindowState(record.state, expected(page), `${cut}/${slot}`),
+        )
       }
       checkSiblingOwnership(
         records[0]!.result!.collection,
@@ -1444,27 +1708,43 @@ async function checkSiblings(
     comparePeers(0, `co-mounted exclusive outputs`)
     reach.reach(`exclusive outputs`)
     const rejectPrivate = async (
-      held: { reject: (cause: unknown) => void },
+      held: {
+        reject: (cause: unknown) => void
+      },
       offset: number,
     ) => {
       const privateResult = records[1]!.result!
-      expect(
-        privateResult.collection.status,
-        `private output startup is held`,
-      ).toBe(`loading`)
+      oracleAssertion('expect(', () =>
+        expect(
+          privateResult.collection.status,
+          `private output startup is held`,
+        ).toBe(`loading`),
+      )
       reach.reach(`private startup pending after success`)
       const cause = makeCause(history.cause, history.offset)
       await act(() => held.reject(cause))
       await settle()
-      expect(privateResult.collection.status, `private first load failed`).toBe(
-        `error`,
+      oracleAssertion(
+        'expect(privateResult.collection.status, `private first load failed`).toBe(',
+        () =>
+          expect(
+            privateResult.collection.status,
+            `private first load failed`,
+          ).toBe(`error`),
       )
       reach.reach(`private startup rejection after success`)
       // Subset acquisition normalizes provider rejections in core. This
       // receiver judges the adapter against the Collection's public failure;
       // it does not duplicate core's normalization of non-Error values.
       const problem = privateResult.collection.health.error
-      expect(problem, `the private Collection exposes its failure`).toBeTruthy()
+      oracleAssertion(
+        'expect(problem, `the private Collection exposes its failure`).toBeTruthy()',
+        () =>
+          expect(
+            problem,
+            `the private Collection exposes its failure`,
+          ).toBeTruthy(),
+      )
       const model = advance(
         advance(initial(), { type: `seed`, attempt: 0, rows: [] }),
         {
@@ -1512,10 +1792,12 @@ async function checkSiblings(
       )
         return
       const privateResult = records[1]!.result!
-      expect(
-        privateResult.collection.status,
-        `private startup held for health`,
-      ).toBe(`loading`)
+      oracleAssertion('expect(', () =>
+        expect(
+          privateResult.collection.status,
+          `private startup held for health`,
+        ).toBe(`loading`),
+      )
       const cause = new Error(`source health at ${offset}`)
       await act(() => reports[0]!.reportError(cause))
       await settle()
@@ -1549,7 +1831,11 @@ async function checkSiblings(
       history.rejectBeforeMove
     ) {
       const pending = demands[0]![0]
-      expect(pending, `private startup has outstanding work`).toBeDefined()
+      oracleAssertion(
+        'expect(pending, `private startup has outstanding work`).toBeDefined()',
+        () =>
+          expect(pending, `private startup has outstanding work`).toBeDefined(),
+      )
       await rejectPrivate(pending!, 0)
       return
     }
@@ -1582,24 +1868,34 @@ async function checkSiblings(
     }
     await settle()
     if (held && history.peerFailure) {
-      expect(
-        rejectedPeerMove,
-        `peer's changed-window acquisition rejected`,
-      ).toBe(true)
+      oracleAssertion('expect(', () =>
+        expect(
+          rejectedPeerMove,
+          `peer's changed-window acquisition rejected`,
+        ).toBe(true),
+      )
       await act(() => mounted!.rerender(tree(history.offset)))
       await settle()
       const peer = records[0]!.result!
-      expect(peer.collection.status, `peer passed initial readiness`).toBe(
-        `ready`,
+      oracleAssertion(
+        'expect(peer.collection.status, `peer passed initial readiness`).toBe(',
+        () =>
+          expect(peer.collection.status, `peer passed initial readiness`).toBe(
+            `ready`,
+          ),
       )
-      expect(
-        peer.health?.error,
-        `failed demand belongs to peer query`,
-      ).toBeTruthy()
-      expect(
-        records[1]!.result!.collection.status,
-        `private initial acquisition still held`,
-      ).toBe(`loading`)
+      oracleAssertion('expect(', () =>
+        expect(
+          peer.health?.error,
+          `failed demand belongs to peer query`,
+        ).toBeTruthy(),
+      )
+      oracleAssertion('expect(', () =>
+        expect(
+          records[1]!.result!.collection.status,
+          `private initial acquisition still held`,
+        ).toBe(`loading`),
+      )
       // The glossary assigns request errors to the query that owns the demand.
       // Source health is shared; this query-local problem is not source health.
       checkSiblingRequestIsolation(records[1]!.result!.health)
@@ -1616,10 +1912,12 @@ async function checkSiblings(
       reach.reach(`seed isolated during peer move`)
       await reportSeedHealth(history.offset, true)
       const privateResult = records[1]!.result!
-      expect(
-        privateResult.collection.status,
-        `private output startup is held`,
-      ).toBe(`loading`)
+      oracleAssertion('expect(', () =>
+        expect(
+          privateResult.collection.status,
+          `private output startup is held`,
+        ).toBe(`loading`),
+      )
       reach.reach(`private startup pending after success`)
       if (history.startup === `reject`) {
         await rejectPrivate(held, history.offset)
@@ -1633,54 +1931,61 @@ async function checkSiblings(
       reach.reach(`private startup handoff`)
     }
     comparePeers(history.offset, `co-mounted page independence`)
-    expect(
-      mounted.container.querySelectorAll('[data-phase="ready"]'),
-    ).toHaveLength(2)
+    oracleAssertion('expect(', () =>
+      expect(
+        mounted!.container.querySelectorAll('[data-phase="ready"]'),
+      ).toHaveLength(2),
+    )
     reach.reach(`retained peer move`)
   })
 }
 for (const scope of [`none`, `provider`, `explicit`] as const)
   for (const keyed of [false, true])
-    for (const campaign of [`fixed`, `fresh`] as const) {
-      const property = `react.suspense-siblings`
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(`co-mounted siblings/${scope}/${keyed}/${campaign}`, async () => {
-        const reach = createOracleReach(
-          `${property}/${scope}/${keyed}/${campaign}`,
-          siblingStates,
-        )
-        const fidelity = createOracleFailureFidelity<SiblingsHistory>()
-        try {
-          const parameters =
-            campaign === `fixed`
-              ? oracleFixedSeed(2348, { numRuns: oracleRuns(8) })
-              : oraclePropertyOptions(8, property)
-          oracleRoute(oracleRouteOf(parameters))
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(siblingsArbitrary, async (history) => {
-                for (const member of siblingHistories(history)) {
-                  reach.beginHistory()
-                  await fidelity.run(member, () =>
-                    checkSiblings(member, scope, keyed, reach),
-                  )
-                }
-              }),
-              parameters,
-            ),
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `sibling reach ${scope}/${keyed}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      }, 60_000)
-    }
+    describe(`co-mounted siblings/${scope}/${keyed}`, () => {
+      oracleProperty({
+        id: `react.suspense-siblings`,
+        law: {
+          statement: `Co-mounted current attempts make retry progress, own exclusive outputs and retain private page and health observations independently of their peer.`,
+          authority: `The shared conformance exclusive output/window laws, observer hydration failure-ending-seed law, and current-attempt model advance/compare.`,
+          limits: `The unchanged siblingHistories expansion for each generated base history across none/provider/explicit and keyed/derived modes; controlled subset work in React 19 jsdom.`,
+        },
+        owns: [
+          `src/DbProvider.tsx#DbProvider`,
+          `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+        ],
+        histories: {
+          arbitrary: siblingsArbitrary,
+          runs: 8,
+          fixedSeeds: [2348],
+          states: siblingStates,
+          // Every original family already splices the reported schedules into
+          // the generated base. Preserve that expansion in the driver below.
+          constructed: [
+            {
+              name: `complete sibling family`,
+              enters: siblingStates,
+              build: (history) => ({ ...history }),
+            },
+          ],
+        },
+        resolve: (history) => ({ history }),
+        model: recordedAssertionJudgment,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `Suspense sibling ownership`,
+            plan,
+            observe,
+            async () => {
+              for (const member of siblingHistories(plan.history))
+                await checkSiblings(member, scope, keyed, {
+                  reach: (state) => observe(`reach`, state),
+                })
+            },
+          ),
+        check: forwardAssertionJudgment,
+        timeout: 60000,
+      })
+    })
 declareOracle({
   grammar: [siblingsArbitrary, siblingHistories],
   check: [

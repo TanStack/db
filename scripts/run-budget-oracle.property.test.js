@@ -61,22 +61,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import fc from 'fast-check'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
+import { afterAll, beforeAll, expect } from 'vitest'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  oracleReplayRequested,
+  pass,
 } from '../packages/db/tests/oracle-config.js'
-import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
-
-declareOracle({
-  model: [predictReport],
-  check: [compareReport],
-  grammar: [programArbitrary],
-})
 
 const PROPERTY = `scripts.run-budget`
 const FIXED_SEED = 2234
@@ -453,6 +444,7 @@ function renderFiles(program, revision) {
 
 let work
 let scriptText
+let loadFailureText
 
 beforeAll(() => {
   // Each run has its own directory, so concurrent runs cannot remove each
@@ -462,6 +454,10 @@ beforeAll(() => {
   scriptText = readFileSync(
     process.env.RUN_BUDGET_SCRIPT ??
       join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`),
+    `utf8`,
+  )
+  loadFailureText = readFileSync(
+    join(repoRoot, `scripts`, `lint-load-failure.mjs`),
     `utf8`,
   )
 })
@@ -538,6 +534,11 @@ async function reportOf(program) {
       join(directory, `scripts`, `check-oracle-run-counts.mjs`),
       scriptText,
     )
+    // The script imports the module that words its failure line.
+    writeFileSync(
+      join(directory, `scripts`, `lint-load-failure.mjs`),
+      loadFailureText,
+    )
     write(renderFiles(program, `base`))
     await git(`add`, `-A`)
     await git(`commit`, `-q`, `-m`, `base`)
@@ -565,7 +566,9 @@ async function reportOf(program) {
 
 /** The script's report equals the model's prediction, as sorted lists. */
 function compareReport(actual, expected) {
-  expect(actual).toEqual(expected)
+  return (
+    differs(`completed report`, `tracked budgets`, actual, expected) ?? pass
+  )
 }
 
 // -- 5. Reach -----------------------------------------------------------------
@@ -595,11 +598,10 @@ const STATES = [
   `js-oracle`,
   `js-support`,
 ]
-const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
+const counts = new Map(STATES.map((state) => [state, 0]))
 
 /** Marks the states that the program enters. */
-function recordStates(program) {
-  reach.beginHistory()
+function recordStates(program, observe) {
   const states = new Set()
   const { files } = program
   for (const budget of program.budgets) {
@@ -649,56 +651,83 @@ function recordStates(program) {
   if (files.large) states.add(`large-base-file`)
   if (files.oracleExtension === `js`) states.add(`js-oracle`)
   if (files.supportExtension === `js`) states.add(`js-support`)
-  for (const state of states) reach.reach(state)
-}
-
-// Each campaign has its own fixed seed, declared with oracleFixedSeed, so the
-// four campaigns do not draw the same programs and each fixed campaign runs on
-// the `fixed seed` route. The fixed options are written where the campaign is
-// named, so the run-count script tracks each budget.
-function campaign(name, sources, fixed, supportOnly = false) {
-  const arbitrary = programArbitrary(sources, supportOnly)
-  const predicate = async (program) => {
-    recordStates(program)
-    compareReport(await reportOf(program), predictReport(program))
+  for (const state of states) {
+    observe(`reach`, state)
+    if (!expect.getState().currentTestName.endsWith(`determinism`))
+      counts.set(state, counts.get(state) + 1)
   }
-  it(`${name}: fixed-seed campaign`, async () => {
-    oracleRoute(oracleRouteOf(fixed))
-    await fc.assert(fc.asyncProperty(arbitrary, predicate), fixed)
-  }, 900_000)
-  it(`${name}: random-seed campaign`, async () => {
-    const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(fc.asyncProperty(arbitrary, predicate), parameters)
-  }, 900_000)
 }
 
-describe(`run budgets that the run-count script tracks`, () => {
-  campaign(
-    `inline and imported counts`,
-    [`inline`, `imported`],
-    oracleFixedSeed(FIXED_SEED, { numRuns: oracleRuns(BASE_RUNS) }),
-  )
-  campaign(
-    `re-exported counts`,
-    [`reexported`],
-    oracleFixedSeed(2235, { numRuns: oracleRuns(BASE_RUNS) }),
-  )
-  campaign(
-    `every source`,
-    ALL,
-    oracleFixedSeed(2236, { numRuns: oracleRuns(BASE_RUNS) }),
-  )
-  campaign(
-    `support-only edits`,
-    [`imported`, `reexported`],
-    oracleFixedSeed(2237, { numRuns: oracleRuns(BASE_RUNS) }),
-    true,
-  )
-  // Every declared state must be entered by the campaigns above.
-  afterAll(() => {
-    if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
-      console.log(`REACH`, JSON.stringify([...reach.counts()]))
-    reach.assertReached()
-  })
+// Each source keeps its own original fixed seed and full base budget. Explicit
+// ids make each source independently replayable under the native selector.
+const budgetOracle = {
+  law: {
+    statement: `Every lowered or removed tracked oracle run budget is reported with its exact before and after values.`,
+    authority: `AGENTS.md: Lint feedback while you work; oracle rubric ORC-007; maintainer removal decision 2026-10-27.`,
+    limits: `The unchanged bounded source grammar and report normalization described above.`,
+  },
+  model: predictReport,
+  driver: async (program, observe) => {
+    recordStates(program, observe)
+    observe(`completed report`, await reportOf(program))
+  },
+  check: (_program, trace, expected) => {
+    const completed = trace.find(
+      ({ checkpoint }) => checkpoint === `completed report`,
+    )
+    return compareReport(completed?.value, expected)
+  },
+  timeout: 900_000,
+}
+
+// Keep counts and seeds literal at registration so the run-budget report can
+// still track the same four original fixed campaigns.
+oracleProperty({
+  ...budgetOracle,
+  id: PROPERTY,
+  histories: {
+    arbitrary: programArbitrary([`inline`, `imported`]),
+    runs: BASE_RUNS,
+    fixedSeeds: [FIXED_SEED],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-reexported`,
+  histories: {
+    arbitrary: programArbitrary([`reexported`]),
+    runs: BASE_RUNS,
+    fixedSeeds: [2235],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-every-source`,
+  histories: {
+    arbitrary: programArbitrary(ALL),
+    runs: BASE_RUNS,
+    fixedSeeds: [2236],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-support-only`,
+  histories: {
+    arbitrary: programArbitrary([`imported`, `reexported`], true),
+    runs: BASE_RUNS,
+    fixedSeeds: [2237],
+    measured: STATES,
+  },
+})
+
+// Native measured reach retains the original aggregate minimum across these
+// four campaigns. Determinism executions do not contribute to that minimum.
+afterAll(() => {
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+    console.log(`REACH`, JSON.stringify([...counts]))
+  if (!oracleReplayRequested())
+    expect([...counts].filter(([, count]) => count < 1)).toEqual([])
 })

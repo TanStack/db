@@ -23,16 +23,14 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  recordOracleReplay,
-} from '../oracle-config'
+import { oracleProperty, oracleRoute } from '../oracle-config'
 import { declareOracle } from '../oracle-declaration'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter'
 import {
   Channel,
   assertRows,
@@ -123,18 +121,22 @@ async function runHistory(steps: Array<Step>) {
         versionKey: string
       }>(h.db, '_versions')
       // Typed key comparison avoids String conflating number 0 with string "0".
-      expect(
-        versions.keys.map((key) => JSON.stringify(key)).sort(),
-        cut + ': version ownership',
-      ).toEqual(
-        model
-          .flatMap((rows, slot) =>
-            rows.map((row) => JSON.stringify([names[slot], row.id])),
-          )
-          .sort(),
+      oracleAssertion(cut + ': version ownership', () =>
+        expect(
+          versions.keys.map((key) => JSON.stringify(key)).sort(),
+          cut + ': version ownership',
+        ).toEqual(
+          model
+            .flatMap((rows, slot) =>
+              rows.map((row) => JSON.stringify([names[slot], row.id])),
+            )
+            .sort(),
+        ),
       )
       for (const value of versions.rows) {
-        expect(value.versionKey).toEqual(expect.any(String))
+        oracleAssertion(`settled persistence comparison`, () =>
+          expect(value.versionKey).toEqual(expect.any(String)),
+        )
       }
       checks++
     }
@@ -241,18 +243,26 @@ async function runHistory(steps: Array<Step>) {
         )
         if (next < 0) continue
         if (changed.has(JSON.stringify(oldKey)))
-          expect(after.rows[next]!.versionKey).not.toBe(
-            before.rows[at]!.versionKey,
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(after.rows[next]!.versionKey).not.toBe(
+              before.rows[at]!.versionKey,
+            ),
           )
         else if (!touched.has(JSON.stringify(oldKey)))
-          expect(after.rows[next]!.versionKey).toBe(before.rows[at]!.versionKey)
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(after.rows[next]!.versionKey).toBe(
+              before.rows[at]!.versionKey,
+            ),
+          )
       }
     }
     for (const [slot, name] of names.entries()) {
       const reopened = await h.open(name)
       assertRows(reopened.values(), model[slot]!, 'fresh Collection restore')
     }
-    expect(checks).toBe(steps.length + 1)
+    oracleAssertion(`settled persistence comparison`, () =>
+      expect(checks).toBe(steps.length + 1),
+    )
   })
 }
 
@@ -305,45 +315,29 @@ describe('settled histories', () => {
   // A fixed campaign and a random campaign share one grammar and budget. A path
   // replay of this property selects only its random campaign.
   const settledProperty = `indexeddb.settled-history`
-  const settledCampaign = (
-    mode: `fixed` | `random`,
-    parameters: { numRuns: number; seed?: number; path?: string },
-  ) => {
-    return async () => {
-      oracleRoute(oracleRouteOf(parameters))
-      console.info('indexeddb.persistence campaign', mode, parameters)
-      await fc.assert(fc.asyncProperty(history, runHistory), {
-        verbose: true,
-        ...parameters,
-        asyncReporter: async (details) => {
-          recordOracleReplay(settledProperty, details)
-          console.info('indexeddb.persistence completed', {
-            mode,
-            seed: details.seed,
-            path: details.counterexamplePath,
-            runs: details.numRuns,
-            failed: details.failed,
-          })
-          const report = await fc.asyncDefaultReportMessage(details)
-          if (report !== undefined)
-            throw new Error(report, { cause: details.errorInstance })
-        },
-      })
-    }
-  }
-  oracleReplayTest(it)(
-    'matches authored data through fixed histories',
-    settledCampaign(
-      `fixed`,
-      oracleFixedSeed(1179001, { numRuns: oracleRuns(30) }),
-    ),
-    30_000,
-  )
-  oracleReplayTest(it, settledProperty)(
-    'matches authored data through random histories',
-    settledCampaign(`random`, oraclePropertyOptions(30, settledProperty)),
-    30_000,
-  )
+  oracleProperty({
+    id: settledProperty,
+    law: {
+      statement: `Each settled authored history reconstructs the same public, subscription, durable, export, peer and reopened rows with key-owned versions.`,
+      authority: `IndexedDB CRUD/persistence, store isolation, clear/import/export and cross-tab APIs; Collection optimistic settlement and cleanup`,
+      limits: `Controlled BroadcastChannel and fake IndexedDB, bounded scalar rows and sequential settled actions; no browser scheduling, crash durability or overlapping writers.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexed-db.ts#createIndexedDB',
+      'src/indexed-db.ts#indexedDBCollectionOptions',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: { arbitrary: history, runs: 30, fixedSeeds: [1179001] },
+    resolve: (steps) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`settled IndexedDB history`, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 30_000,
+  })
 })
 
 // The manual-acceptance model: accepting one owner removes its authored key from
@@ -366,12 +360,6 @@ function acceptOwnerInModel(
 // peer and version rows with the authored model that it keeps for the history.
 // acceptOwnerInModel is the model of the manual-acceptance test below.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-    'src/transactions.ts#createTransaction',
-  ],
   check: [runHistory],
   model: [acceptOwnerInModel],
 })
@@ -414,17 +402,19 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
       const tx = createTransaction({
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
-          expect(
-            transaction.mutations.map((mutation) => [
-              mutation.collection.id,
-              mutation.type,
-              mutation.key,
-            ]),
-          ).toEqual(
-            collections.flatMap((collection, index) => [
-              [collection.id, 'delete', removed[index]],
-              [collection.id, 'insert', added[index]],
-            ]),
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(
+              transaction.mutations.map((mutation) => [
+                mutation.collection.id,
+                mutation.type,
+                mutation.key,
+              ]),
+            ).toEqual(
+              collections.flatMap((collection, index) => [
+                [collection.id, 'delete', removed[index]],
+                [collection.id, 'insert', added[index]],
+              ]),
+            ),
           )
           for (const index of order) {
             const priorVersions = await readStore<{ versionKey: string }>(
@@ -456,10 +446,12 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
                 (candidate) =>
                   JSON.stringify(candidate) === JSON.stringify(key),
               )
-              expect(
-                afterVersions.rows[position],
-                'unrelated version ownership',
-              ).toEqual(priorVersions.rows[offset])
+              oracleAssertion('unrelated version ownership', () =>
+                expect(
+                  afterVersions.rows[position],
+                  'unrelated version ownership',
+                ).toEqual(priorVersions.rows[offset]),
+              )
             }
           }
         },

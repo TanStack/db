@@ -525,6 +525,7 @@ describe(`RxDB Integration`, () => {
         // A first load: the Collection holds no synced rows.
         collection: {
           status: `loading`,
+          health: { reloading: false },
           _state: { acceptedSyncedEntries: () => new Map().entries() },
         },
       } as never)

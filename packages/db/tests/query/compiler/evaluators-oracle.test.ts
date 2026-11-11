@@ -1,15 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, Value } from '../../../src/query/ir.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  pass,
+  violation,
 } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from '../../oracle-config.js'
 
 /**
  * # Does the LIKE evaluator preserve wildcard meaning without regex work?
@@ -31,49 +34,20 @@ import { declareOracle } from '../../oracle-declaration.js'
  * it at the synchronous evaluator boundary.
  *
  * Refinement check: production and the model must return the same boolean for
- * every fixed, random, or replayed case. The recorder retains the seed and the
- * first five mismatches. A deliberate wrong-result control proves that the
+ * every fixed, random, or replayed case. The shared runner retains seed/path
+ * coordinates and the first named mismatch. A deliberate wrong-result control proves that the
  * comparison rejects the literal-before-wildcard regression. Nullish SQL
  * three-valued logic and broader Unicode folding remain in focused unit tests
  * in evaluators.test.ts.
  */
-type LikeCase = {
-  value: string
-  pattern: string
-  caseInsensitive: boolean
-}
+type LikeCase = { value: string; pattern: string; caseInsensitive: boolean }
 
-type LikeMismatch = LikeCase & {
-  expected: boolean
-  actual: boolean
-}
-
-const FIXED_LIKE_ORACLE_SEED = 0x1745
-const likeProperty = `evaluators.like`
-const LIKE_ORACLE_RUNS = oracleRuns(10_000)
 const likeCalibrationCases: Array<LikeCase> = [
   { value: ``, pattern: ``, caseInsensitive: false },
   { value: `A`, pattern: `a`, caseInsensitive: true },
   { value: `anything`, pattern: `%`, caseInsensitive: false },
   { value: `a`, pattern: `_`, caseInsensitive: true },
   { value: `100% done`, pattern: `100%done`, caseInsensitive: false },
-]
-
-// The fixed campaign stands aside during a path replay. The random campaign uses
-// the seed of a replay of this property, when TANSTACK_DB_ORACLE_SEED supplies
-// one. This generator has no shrink path, so a path replay only reseeds it.
-// Each campaign's parameters carry its seed and give the test its route.
-const likeOracleCampaigns = [
-  {
-    name: `fixed`,
-    test: oracleReplayTest(it),
-    parameters: oracleFixedSeed(FIXED_LIKE_ORACLE_SEED),
-  },
-  {
-    name: `random`,
-    test: oracleReplayTest(it, likeProperty),
-    parameters: oraclePropertyOptions(10_000, likeProperty),
-  },
 ]
 
 function referenceLike(
@@ -116,133 +90,241 @@ function referenceLike(
   return previous[searchPattern.length]!
 }
 
-function* seededLikeCases(count: number, seed: number): Generator<LikeCase> {
-  // Repeated wildcard entries keep the bounded campaign concentrated on the
-  // precedence boundary while retaining literals, case folds, and newlines.
-  const alphabet = [`a`, `b`, `A`, `B`, `%`, `%`, `%`, `_`, `_`, `.`, `\n`, `é`]
-  let state = seed
-  const next = () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-    return state
-  }
-  const pick = (exclusiveUpperBound: number) =>
-    Math.floor((next() / 0x1_0000_0000) * exclusiveUpperBound)
-  const build = (length: number) => {
-    let result = ``
-    for (let index = 0; index < length; index++) {
-      result += alphabet[pick(alphabet.length)]
-    }
-    return result
-  }
+// The original random language has strings of zero to seven code units.
+// The five pre-existing fixed histories supply the additional literal strings.
+// Separate string choices let those histories share this grammar without
+// turning a whole fixed history into generated reach.
+const alphabet = [`a`, `b`, `A`, `B`, `%`, `%`, `%`, `_`, `_`, `.`, `\n`, `é`]
+const boundedString = fc.string({
+  unit: fc.constantFrom(...alphabet),
+  maxLength: 7,
+})
+const likeCase: fc.Arbitrary<LikeCase> = fc.record({
+  value: fc.oneof(
+    boundedString,
+    fc.constantFrom(...likeCalibrationCases.map(({ value }) => value)),
+  ),
+  pattern: fc.oneof(
+    boundedString,
+    fc.constantFrom(...likeCalibrationCases.map(({ pattern }) => pattern)),
+  ),
+  caseInsensitive: fc.boolean(),
+})
 
-  yield* likeCalibrationCases
-  for (let index = likeCalibrationCases.length; index < count; index++) {
-    const value = build(pick(8))
-    const pattern = build(pick(8))
-    yield { value, pattern, caseInsensitive: pick(2) === 1 }
+// These obligations belong only to the test construction. Every fresh build,
+// including a shrunk build, must enter its states during the real evaluation.
+const constructionRequirements = new WeakMap<LikeCase, ReadonlyArray<string>>()
+function constructed(
+  builders: ReadonlyArray<ConstructedHistory<LikeCase>>,
+): ReadonlyArray<ConstructedHistory<LikeCase>> {
+  return builders.map((builder) => ({
+    ...builder,
+    build: (history) => {
+      const result = { ...builder.build(history) }
+      constructionRequirements.set(result, [...builder.enters])
+      return result
+    },
+  }))
+}
+
+function bounded(history: LikeCase): LikeCase {
+  const retain = (text: string) =>
+    [...text]
+      .filter((unit) => alphabet.includes(unit))
+      .slice(0, 7)
+      .join(``)
+  return {
+    ...history,
+    value: retain(history.value),
+    pattern: retain(history.pattern),
   }
 }
 
-function evaluateLikeWithProduction(testCase: LikeCase): boolean {
-  const functionName = testCase.caseInsensitive ? `ilike` : `like`
-  return compileExpression(
-    new Func(functionName, [
-      new Value(testCase.value),
-      new Value(testCase.pattern),
-    ]),
-  )({})
-}
-
-function findLikeMismatch(
-  testCase: LikeCase,
-  actual: boolean,
-): LikeMismatch | undefined {
-  const expected = referenceLike(
-    testCase.value,
-    testCase.pattern,
-    testCase.caseInsensitive,
+function isPercentCollision({ value, pattern }: LikeCase): boolean {
+  return (
+    value.startsWith(`%%`) &&
+    pattern.startsWith(`%`) &&
+    pattern.length > 1 &&
+    value.slice(2) === pattern.slice(1)
   )
-  return actual === expected ? undefined : { ...testCase, expected, actual }
+}
+
+function modelLike(history: LikeCase) {
+  return {
+    result: referenceLike(
+      history.value,
+      history.pattern,
+      history.caseInsensitive,
+    ),
+    requiredStates: constructionRequirements.get(history) ?? [],
+  }
+}
+
+// Record the uncoerced result. A malformed mutant result reaches the same
+// boolean judgment rather than throwing during observation or becoming false.
+function driveLike(
+  history: LikeCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
+  const name = history.caseInsensitive ? `ilike` : `like`
+  const actual = compileExpression(
+    new Func(name, [new Value(history.value), new Value(history.pattern)]),
+  )({})
+  observe(`evaluation returned`, actual)
+  observe(
+    `reach`,
+    history.caseInsensitive ? `case insensitive` : `case sensitive`,
+  )
+  if (history.pattern.includes(`%`)) observe(`reach`, `percent pattern`)
+  if (history.pattern.includes(`_`)) observe(`reach`, `underscore pattern`)
+  if (/[^%_]/u.test(history.pattern)) observe(`reach`, `literal pattern`)
+  if (isPercentCollision(history)) observe(`reach`, `percent literal collision`)
+}
+
+// Product judgment precedes construction completeness. The virtual checkpoint
+// cannot replace a driver error after an observed evaluation return.
+function checkLike(
+  _history: LikeCase,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelLike>,
+): Verdict {
+  const returned = trace.find(
+    ({ checkpoint }) => checkpoint === `evaluation returned`,
+  )
+  if (returned === undefined)
+    return violation(
+      `evaluation returned`,
+      `the evaluator did not return`,
+      `LIKE result`,
+    )
+  const mismatch = differs(
+    `evaluation returned`,
+    `LIKE result`,
+    returned.value,
+    expected.result,
+  )
+  if (mismatch !== undefined) return mismatch
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  const missing = expected.requiredStates.filter((state) => !reached.has(state))
+  return missing.length === 0
+    ? pass
+    : violation(
+        `constructed states`,
+        `constructed history did not enter ${missing.join(`, `)}`,
+        `constructed reach`,
+      )
 }
 
 declareOracle({
-  owns: ['src/query/compiler/evaluators.ts#compileExpression'],
-  check: [findLikeMismatch],
-  model: [referenceLike],
-  grammar: [seededLikeCases],
+  model: [referenceLike, modelLike],
+  grammar: [likeCase],
+  check: [checkLike],
 })
 
-describe(`evaluators`, () => {
-  describe(`compileExpression`, () => {
-    describe(`function compilation`, () => {
-      describe(`like/ilike functions`, () => {
-        it(`rejects the literal-before-wildcard wrong result`, () => {
-          oracleRoute(`calibration`)
-          const witness: LikeCase = {
-            value: `100% done`,
-            pattern: `100%done`,
-            caseInsensitive: false,
-          }
-
-          expect(
-            findLikeMismatch(witness, evaluateLikeWithProduction(witness)),
-          ).toBeUndefined()
-          expect(findLikeMismatch(witness, false)).toEqual({
-            ...witness,
-            expected: true,
-            actual: false,
-          })
-        })
-
-        for (const campaign of likeOracleCampaigns)
-          campaign.test(
-            `matches the LIKE law in the ${campaign.name} campaign`,
-            () => {
-              oracleRoute(oracleRouteOf(campaign.parameters))
-              const seed =
-                campaign.parameters.seed ??
-                Math.floor(Math.random() * 0x1_0000_0000)
-              let mismatchCount = 0
-              const mismatchSamples: Array<LikeMismatch> = []
-              const reach = {
-                caseSensitive: 0,
-                caseInsensitive: 0,
-                percentPattern: 0,
-                underscorePattern: 0,
-                literalPattern: 0,
-              }
-
-              for (const testCase of seededLikeCases(LIKE_ORACLE_RUNS, seed)) {
-                reach[
-                  testCase.caseInsensitive ? `caseInsensitive` : `caseSensitive`
-                ]++
-                if (testCase.pattern.includes(`%`)) reach.percentPattern++
-                if (testCase.pattern.includes(`_`)) reach.underscorePattern++
-                if (/[^%_]/u.test(testCase.pattern)) reach.literalPattern++
-
-                const mismatch = findLikeMismatch(
-                  testCase,
-                  evaluateLikeWithProduction(testCase),
-                )
-                if (mismatch !== undefined) {
-                  mismatchCount++
-                  if (mismatchSamples.length < 5) {
-                    mismatchSamples.push(mismatch)
-                  }
-                }
-              }
-
-              expect({ seed, mismatchCount, mismatchSamples }).toEqual({
-                seed,
-                mismatchCount: 0,
-                mismatchSamples: [],
-              })
-              expect(
-                Object.entries(reach).filter(([, count]) => count === 0),
-              ).toEqual([])
-            },
-          )
-      })
-    })
-  })
+oracleProperty({
+  id: `evaluators.like`,
+  law: {
+    statement: `LIKE and ILIKE match the complete string, with percent consuming zero or more UTF-16 code units and underscore consuming one.`,
+    authority: `The LIKE/ILIKE contract in evaluators.ts and the Structural values and ordered primitives coverage owner.`,
+    limits: `The existing bounded alphabet and fixed string witnesses; boolean matching only. No nullish three-valued logic, general Unicode collation, or work-bound claim.`,
+  },
+  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
+  histories: {
+    arbitrary: likeCase,
+    runs: 10_000,
+    fixedSeeds: [0x1745],
+    fixed: likeCalibrationCases.map((history, index) => ({
+      name: `original wildcard boundary ${index}`,
+      history,
+    })),
+    states: [
+      `case sensitive`,
+      `case insensitive`,
+      `percent pattern`,
+      `underscore pattern`,
+      `literal pattern`,
+      `percent literal collision`,
+    ],
+    constructed: constructed([
+      ...([false, true] as const).map((caseInsensitive) => ({
+        name: caseInsensitive ? `case insensitive` : `case sensitive`,
+        enters: [caseInsensitive ? `case insensitive` : `case sensitive`],
+        build: (history: LikeCase) => ({ ...history, caseInsensitive }),
+      })),
+      ...([`%`, `_`, `a`] as const).map((unit) => ({
+        name: `pattern contains ${unit}`,
+        enters: [
+          unit === `%`
+            ? `percent pattern`
+            : unit === `_`
+              ? `underscore pattern`
+              : `literal pattern`,
+        ],
+        build: (history: LikeCase) => {
+          const result = bounded(history)
+          return { ...result, pattern: unit + result.pattern.slice(0, 6) }
+        },
+      })),
+      {
+        name: `percent collision with a generated literal suffix`,
+        enters: [
+          `percent pattern`,
+          `literal pattern`,
+          `percent literal collision`,
+        ],
+        build: (history) => {
+          const result = bounded(history)
+          const suffix = result.pattern.replace(/[%_]/gu, ``).slice(0, 3) + `a`
+          return { ...result, value: `%%${suffix}`, pattern: `%${suffix}` }
+        },
+      },
+    ]),
+  },
+  model: modelLike,
+  driver: driveLike,
+  check: checkLike,
+  calibrations: [
+    {
+      name: `literal-before-wildcard wrong result`,
+      law: `LIKE result`,
+      corrupt: (trace, history) =>
+        history.value === `100% done` &&
+        history.pattern === `100%done` &&
+        !history.caseInsensitive
+          ? trace.map((entry) =>
+              entry.checkpoint === `evaluation returned`
+                ? { ...entry, value: false }
+                : entry,
+            )
+          : undefined,
+    },
+    {
+      name: `misses a generated percent collision`,
+      law: `LIKE result`,
+      corrupt: (trace, history) =>
+        isPercentCollision(history)
+          ? trace.map((entry) =>
+              entry.checkpoint === `evaluation returned`
+                ? { ...entry, value: false }
+                : entry,
+            )
+          : undefined,
+    },
+    {
+      name: `omits a constructed state`,
+      law: `constructed reach`,
+      corrupt: (trace, history) => {
+        const state = modelLike(history).requiredStates[0]
+        return state === undefined
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `reach` || entry.value !== state,
+            )
+      },
+    },
+  ],
 })

@@ -1,15 +1,10 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config'
+import { oracleProperty, oracleRoute, pass, violation } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
+import type { Observation, Verdict } from './oracle-config'
 
 /**
  * # Which cleanup callback must run?
@@ -130,15 +125,85 @@ function expectQueueState(
   ).toEqual([...model.errors].sort())
 }
 
-// What this oracle owns: the gap report judges every function in
-// cleanup-queue.ts by this file's tests.
 declareOracle({
-  owns: [`src/collection/cleanup-queue.ts`],
   check: [expectQueueState],
   model: [stepModel],
 })
 
-async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
+type QueueObservation = {
+  deliveries: Array<Delivery>
+  errors: Array<Array<unknown>>
+  timers: number
+}
+type QueueExpectation = { model: Model; timers?: number; atMostOne?: true }
+
+// The model predicts the same cuts as the original per-action comparison.
+// Timer cardinality is owed before and after an elapsed advance, while every
+// action also checks that registration and cancellation do not deliver inline.
+function modelHistory(actions: Array<Action>): Array<QueueExpectation> {
+  let model: Model = {
+    now: 0,
+    appointments: [],
+    deliveries: [],
+    errors: [],
+  }
+  const cuts: Array<QueueExpectation> = [{ model }]
+  const advance = (elapsed: number) => {
+    cuts.push({ model, atMostOne: true })
+    model = stepModel(model, -1, { kind: `advance`, elapsed })
+    cuts.push({ model }, { model, timers: model.appointments.length ? 1 : 0 })
+  }
+  for (const [id, action] of actions.entries()) {
+    if (action.kind === `advance`) advance(action.elapsed)
+    else model = stepModel(model, id, action)
+    cuts.push({ model })
+  }
+  advance(21)
+  return cuts
+}
+
+function expectCut(actual: QueueObservation, expected: QueueExpectation): void {
+  if (expected.atMostOne) expect(actual.timers).toBeLessThanOrEqual(1)
+  else if (expected.timers !== undefined)
+    expect(actual.timers).toBe(expected.timers)
+  else expectQueueState(actual.deliveries, expected.model, actual.errors)
+}
+
+function checkHistory(
+  _actions: Array<Action>,
+  observations: ReadonlyArray<Observation>,
+  expected: Array<QueueExpectation>,
+): Verdict {
+  for (const [index, observation] of observations.entries()) {
+    try {
+      expectCut(observation.value as QueueObservation, expected[index]!)
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== `AssertionError`)
+        throw error
+      return {
+        kind: `violation`,
+        checkpoint: observation.checkpoint,
+        difference: error.message,
+        law: `appointment histories`,
+        cause: error,
+      }
+    }
+  }
+  return observations.length === expected.length
+    ? pass
+    : violation(
+        `complete history`,
+        `the queue history stopped before its final drain`,
+      )
+}
+
+// The production driver records the existing action cuts before cleanup. It
+// retains the original timer scheduling, error capture and cleanup diagnostics.
+async function driveHistory(
+  actions: Array<Action>,
+  record: (checkpoint: string, value: QueueObservation) => void,
+  fault: Fault = `none`,
+) {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   resetCleanupQueue()
@@ -149,20 +214,19 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
   const actual: Array<Delivery> = []
   let wallClockOffset = 0
-  let model: Model = {
-    now: 0,
-    appointments: [],
-    deliveries: [],
-    errors: [],
-  }
-  const check = () => expectQueueState(actual, model, errors.mock.calls)
+  let cut = 0
+  const check = () =>
+    record(`cut ${cut++}`, {
+      deliveries: actual.map((delivery) => ({ ...delivery })),
+      errors: errors.mock.calls.map((call) => [...call]),
+      timers: vi.getTimerCount(),
+    })
   const advance = async (elapsed: number) => {
     await Promise.resolve() // Admit the whole synchronous registration batch.
-    expect(vi.getTimerCount()).toBeLessThanOrEqual(1)
-    model = stepModel(model, -1, { kind: `advance`, elapsed })
+    check()
     vi.advanceTimersByTime(elapsed)
     check()
-    expect(vi.getTimerCount()).toBe(model.appointments.length ? 1 : 0)
+    check()
   }
   let primaryFailure: unknown
   let failed = false
@@ -176,10 +240,8 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
         wallClockOffset += action.offset
         vi.setSystemTime(Date.now() + action.offset)
       } else if (action.kind === `cancel`) {
-        model = stepModel(model, id, action)
         if (fault !== `ignore-cancel`) queue.cancel(keys[action.key])
       } else {
-        model = stepModel(model, id, action)
         queue.schedule(
           fault === `lose-replacement` ? { key: action.key } : keys[action.key],
           action.delay + (fault === `late` ? 1 : 0),
@@ -224,6 +286,19 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   if (failed) throw primaryFailure
 }
 
+// Fixed wrong-driver controls retain their original assertion boundary.
+async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
+  const expected = modelHistory(actions)
+  let cut = 0
+  await driveHistory(
+    actions,
+    (_checkpoint, actual) => {
+      expectCut(actual, expected[cut++]!)
+    },
+    fault,
+  )
+}
+
 const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   fc.record({
     kind: fc.constant(`schedule` as const),
@@ -260,70 +335,76 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 // clock. The fixed seed and seedless campaigns use the same property and run
 // budget. The shared oracle config
 // accepts a seed and shrink path for direct replay of the seedless grammar.
-it.each([20260913, undefined])(
-  `obeys appointment histories (seed %s)`,
-  async (seed) => {
-    const parameters = {
-      ...(seed === undefined
-        ? oraclePropertyOptions(100, `cleanup-queue.history`)
-        : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-      examples: [
-        [
-          [
-            { kind: `schedule`, key: 0, delay: 10, throws: false },
-            { kind: `stepWallClock`, offset: -1000 },
-            // At 9 the callback is early; at 10 it is due.
-            { kind: `advance`, elapsed: 9 },
-            { kind: `advance`, elapsed: 1 },
-          ],
-        ],
-        [
-          [
-            { kind: `schedule`, key: 0, delay: 10, throws: false },
-            { kind: `stepWallClock`, offset: 1000 },
-            { kind: `schedule`, key: 1, delay: 20, throws: false },
-            { kind: `advance`, elapsed: 0 },
-            // The wall step cannot shift this elapsed-time boundary.
-            { kind: `advance`, elapsed: 9 },
-            { kind: `advance`, elapsed: 1 },
-          ],
-        ],
-        [
-          [
-            { kind: `schedule`, key: 0, delay: 1, throws: false },
-            { kind: `schedule`, key: 0, delay: 4, throws: true },
-            { kind: `schedule`, key: 1, delay: 4, throws: false },
-            { kind: `schedule`, key: 2, delay: 2, throws: false },
-            { kind: `cancel`, key: 2 },
-            { kind: `advance`, elapsed: 3 },
-            { kind: `advance`, elapsed: 1 },
-            { kind: `schedule`, key: 0, delay: 0, throws: false },
-            { kind: `advance`, elapsed: 0 },
-          ],
-        ],
-        [
-          [
-            { kind: `schedule`, key: 0, delay: 0, throws: false },
-            { kind: `schedule`, key: 1, delay: 0, throws: false },
-            { kind: `schedule`, key: 2, delay: 20, throws: false },
-            { kind: `schedule`, key: 3, delay: 20, throws: false },
-            { kind: `advance`, elapsed: 0 },
-            { kind: `cancel`, key: 2 },
-            { kind: `advance`, elapsed: 20 },
-          ],
-        ],
-      ],
-    }
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(actionArbitrary, { maxLength: 50 }),
-        (actions) => runHistory(actions),
-      ),
-      parameters,
-    )
+const fixedHistories: Array<[Array<Action>]> = [
+  [
+    [
+      { kind: `schedule`, key: 0, delay: 10, throws: false },
+      { kind: `stepWallClock`, offset: -1000 },
+      // At 9 the callback is early; at 10 it is due.
+      { kind: `advance`, elapsed: 9 },
+      { kind: `advance`, elapsed: 1 },
+    ],
+  ],
+  [
+    [
+      { kind: `schedule`, key: 0, delay: 10, throws: false },
+      { kind: `stepWallClock`, offset: 1000 },
+      { kind: `schedule`, key: 1, delay: 20, throws: false },
+      { kind: `advance`, elapsed: 0 },
+      // The wall step cannot shift this elapsed-time boundary.
+      { kind: `advance`, elapsed: 9 },
+      { kind: `advance`, elapsed: 1 },
+    ],
+  ],
+  [
+    [
+      { kind: `schedule`, key: 0, delay: 1, throws: false },
+      { kind: `schedule`, key: 0, delay: 4, throws: true },
+      { kind: `schedule`, key: 1, delay: 4, throws: false },
+      { kind: `schedule`, key: 2, delay: 2, throws: false },
+      { kind: `cancel`, key: 2 },
+      { kind: `advance`, elapsed: 3 },
+      { kind: `advance`, elapsed: 1 },
+      { kind: `schedule`, key: 0, delay: 0, throws: false },
+      { kind: `advance`, elapsed: 0 },
+    ],
+  ],
+  [
+    [
+      { kind: `schedule`, key: 0, delay: 0, throws: false },
+      { kind: `schedule`, key: 1, delay: 0, throws: false },
+      { kind: `schedule`, key: 2, delay: 20, throws: false },
+      { kind: `schedule`, key: 3, delay: 20, throws: false },
+      { kind: `advance`, elapsed: 0 },
+      { kind: `cancel`, key: 2 },
+      { kind: `advance`, elapsed: 20 },
+    ],
+  ],
+]
+
+oracleProperty({
+  id: `cleanup-queue.history`,
+  law: {
+    statement: `Cleanup appointments replace and cancel by key, run once at their elapsed deadline, isolate callback failures, and use at most one root timer.`,
+    authority: `CleanupQueue.schedule/cancel batching contract; docs/contributing/oracle-reviews/issue-1796-gc-clock.md`,
+    limits: `Bounded non-reentrant callbacks, finite delays, and controlled elapsed and wall clocks; no suspend/resume or timer-provider replacement.`,
   },
-)
+  // What this oracle owns: the gap report judges every function in
+  // cleanup-queue.ts by this file's tests.
+  owns: [`src/collection/cleanup-queue.ts`],
+  histories: {
+    arbitrary: fc.array(actionArbitrary, { maxLength: 50 }),
+    runs: 100,
+    fixedSeeds: [20260913],
+    fixed: fixedHistories.map(([history], index) => ({
+      name: `appointment regression ${index + 1}`,
+      history,
+    })),
+  },
+  model: modelHistory,
+  driver: (actions, observe) => driveHistory(actions, observe),
+  check: checkHistory,
+})
 
 // These controls prove that the oracle rejects four plausible wrong queues.
 it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(

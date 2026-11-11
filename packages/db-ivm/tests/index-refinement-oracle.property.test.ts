@@ -56,13 +56,16 @@ import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
 import {
   oracleFixedSeed,
-  oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
 type Prefix = number | string | bigint
 type Value = [Prefix, number | string] | number | string
@@ -211,28 +214,93 @@ function observedMultiplicities(
   return values
 }
 
+type IndexSnapshot = {
+  values: Map<string, number>
+  has: boolean
+  get: Array<[Value, number]>
+  iterator: Array<[Value, number]>
+}
+
+function indexExpectations(
+  additions: ReadonlyArray<Addition>,
+  modes: ReadonlyArray<Mode>,
+) {
+  const expected = new Map<
+    string,
+    { values: Map<string, number>; has: boolean }
+  >()
+  for (const mode of modes)
+    for (const step of additions.keys()) {
+      const model = expectedIndex(additions.slice(0, step + 1), mode)
+      for (const key of [`k1`, `k2`])
+        expected.set(`${mode}: after addition ${step} for ${key}`, {
+          values: model.get(key) ?? new Map(),
+          has: model.has(key),
+        })
+    }
+  return expected
+}
+
+// Copy every public observation at its original per-addition cut, so later
+// index changes cannot rewrite a prior get/iterator result.
+function driveIndex(
+  additions: ReadonlyArray<Addition>,
+  modes: ReadonlyArray<Mode>,
+  observe: (checkpoint: string, value: IndexSnapshot) => void,
+) {
+  for (const mode of modes) {
+    const index = new Index<string, Value>({
+      prefixIdentity: mode === `prefixIdentity`,
+    })
+    for (const [step, addition] of additions.entries()) {
+      index.addValue(addition.key, [addition.value, addition.multiplicity])
+      for (const key of [`k1`, `k2`])
+        observe(`${mode}: after addition ${step} for ${key}`, {
+          values: observedMultiplicities(index, key, mode),
+          has: index.has(key),
+          get: structuredClone(index.get(key)),
+          iterator: structuredClone([...index.getIterator(key)]),
+        })
+    }
+  }
+}
+
+function checkIndex(
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof indexExpectations>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const actual = value as IndexSnapshot
+    const model = expected.get(checkpoint)!
+    const mismatch =
+      differs(
+        checkpoint,
+        `summed multiplicities`,
+        actual.values,
+        model.values,
+      ) ??
+      differs(checkpoint, `key presence`, actual.has, model.has) ??
+      differs(checkpoint, `iterator agreement`, actual.get, actual.iterator)
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+// Fixed regressions use the same production driver, model and comparison as
+// the generated native campaign, with no hand-written expected answer.
 function expectRefinement(
   additions: ReadonlyArray<Addition>,
   mode: Mode = `structural`,
 ): void {
-  const index = new Index<string, Value>({
-    prefixIdentity: mode === `prefixIdentity`,
-  })
-  for (const [step, addition] of additions.entries()) {
-    index.addValue(addition.key, [addition.value, addition.multiplicity])
-    const model = expectedIndex(additions.slice(0, step + 1), mode)
-    for (const key of [`k1`, `k2`]) {
-      const checkpoint = `${mode}: after addition ${step} for ${key}`
-      expect(observedMultiplicities(index, key, mode), checkpoint).toEqual(
-        model.get(key) ?? new Map(),
-      )
-      expect(index.has(key), `${checkpoint} has`).toBe(model.has(key))
-      // get and getIterator walk the storage separately; they must agree.
-      expect(index.get(key), `${checkpoint} get matches getIterator`).toEqual([
-        ...index.getIterator(key),
-      ])
-    }
-  }
+  const trace: Array<Observation> = []
+  driveIndex(additions, [mode], (checkpoint, value) =>
+    trace.push({ checkpoint, value }),
+  )
+  const verdict = checkIndex(trace, indexExpectations(additions, [mode]))
+  if (verdict.kind === `violation`)
+    expect(verdict.values?.actual, verdict.difference).toEqual(
+      verdict.values?.expected,
+    )
 }
 
 // The refinement law is declared with its model, the multiset of values per
@@ -240,14 +308,8 @@ function expectRefinement(
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/indexes.ts#Index.addValue`,
-    `src/indexes.ts#Index.get`,
-    `src/indexes.ts#Index.has`,
-    `src/indexes.ts#Index.getIterator`,
-  ],
-  check: [expectRefinement],
-  model: [expectedIndex],
+  check: [expectRefinement, checkIndex],
+  model: [expectedIndex, indexExpectations],
   grammar: [historyArbitrary],
 })
 
@@ -256,8 +318,6 @@ declareOracle({
 // check, and budget. A seed alone reseeds the random campaign. A path replay
 // of INDEX_REFINEMENT_PROPERTY runs its recorded history, and every other
 // test in this file stands aside.
-
-const INDEX_REFINEMENT_PROPERTY = `ivm.index-refinement`
 
 describe(`Index refinement oracle`, () => {
   for (const { name, additions } of fixedHistories) {
@@ -268,38 +328,32 @@ describe(`Index refinement oracle`, () => {
     })
   }
 
-  oracleReplayTest(it)(
-    `matches the multiset model across generated additions (20260930)`,
-    () => {
-      const parameters = oracleFixedSeed(20260930, { numRuns: oracleRuns(300) })
-      oracleRoute(oracleRouteOf(parameters))
-      fc.assert(
-        fc.property(historyArbitrary, (additions) => {
-          expectRefinement(additions)
-          expectRefinement(additions, `prefixIdentity`)
-        }),
-        parameters,
-      )
+  // Preserve both storage modes and every get/has/iterator cut. The model
+  // recomputes each prefix without reading the production Index.
+  oracleProperty({
+    id: `ivm.index-refinement`,
+    law: {
+      statement: `After each addition the Index get/has observations equal independently summed multiplicities, and get agrees with getIterator in order, in both structural and prefixIdentity modes.`,
+      authority: `Existing Index multiset and prefixIdentity contract documented above.`,
+      limits: `At most twelve signed additions to two keys over the original primitive/prefixed domain; joins, compaction and richer structural payloads remain outside this owner.`,
     },
-  )
-
-  oracleReplayTest(it, INDEX_REFINEMENT_PROPERTY)(
-    `matches the multiset model across generated additions (random or replayed)`,
-    () => {
-      const campaignParameters = oraclePropertyOptions(
-        300,
-        INDEX_REFINEMENT_PROPERTY,
-      )
-      oracleRoute(oracleRouteOf(campaignParameters))
-      fc.assert(
-        fc.property(historyArbitrary, (additions) => {
-          expectRefinement(additions)
-          expectRefinement(additions, `prefixIdentity`)
-        }),
-        campaignParameters,
-      )
+    owns: [
+      `src/indexes.ts#Index.addValue`,
+      `src/indexes.ts#Index.get`,
+      `src/indexes.ts#Index.has`,
+      `src/indexes.ts#Index.getIterator`,
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 300,
+      fixedSeeds: [20260930],
     },
-  )
+    model: (additions) =>
+      indexExpectations(additions, [`structural`, `prefixIdentity`]),
+    driver: (additions, observe) =>
+      driveIndex(additions, [`structural`, `prefixIdentity`], observe),
+    check: (_additions, trace, expected) => checkIndex(trace, expected),
+  })
 
   // Positive execution witness: generated histories reach a NaN prefix that
   // cancels after another value joined its key.

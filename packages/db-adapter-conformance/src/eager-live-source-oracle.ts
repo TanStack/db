@@ -557,9 +557,17 @@ function valueArb(
       if (examples.length === 0) {
         throw new Error(`every ${kind} example is excluded`)
       }
-      return fc
-        .integer({ min: 0, max: examples.length - 1 })
-        .map((index) => examples[index]!())
+      return fc.integer({ min: 0, max: examples.length - 1 }).map(
+        (index) => examples[index]!(),
+        (value) => {
+          const described = describeValue(value)
+          const index = examples.findIndex(
+            (example) => describeValue(example()) === described,
+          )
+          if (index < 0) throw new Error(`not a declared ${kind} value`)
+          return index
+        },
+      )
     }),
   )
 }
@@ -600,22 +608,126 @@ function changeArb(
   excludes?: ValueExclusion,
 ): fc.Arbitrary<HistoryChange> {
   const changes: Array<fc.Arbitrary<HistoryChange>> = [
-    rowArb(kinds, fieldKinds, excludes).map((row) => ({
-      type: `upsert` as const,
-      row,
-    })),
-    fc
-      .integer({ min: 1, max: 5 })
-      .map((id) => ({ type: `delete` as const, id })),
+    rowArb(kinds, fieldKinds, excludes).map(
+      (row) => ({ type: `upsert` as const, row }),
+      (value) => unmapChange(`upsert`, value).row,
+    ),
+    fc.integer({ min: 1, max: 5 }).map(
+      (id) => ({ type: `delete` as const, id }),
+      (value) => unmapChange(`delete`, value).id,
+    ),
   ]
   if (kinds.length > 0 || fieldKinds.length > 0) {
     changes.push(
-      fc
-        .integer({ min: 1, max: 5 })
-        .map((id) => ({ type: `retouch` as const, id })),
+      fc.integer({ min: 1, max: 5 }).map(
+        (id) => ({ type: `retouch` as const, id }),
+        (value) => unmapChange(`retouch`, value).id,
+      ),
     )
   }
   return fc.oneof(...changes)
+}
+
+// Unmappers describe the same generated language to fast-check's membership
+// and context-free shrinking checks. They do not change generation or its
+// random choices. The underlying arbitraries validate the recovered fields.
+function unmapChange<T extends HistoryChange[`type`]>(
+  type: T,
+  value: unknown,
+): Extract<HistoryChange, { type: T }> {
+  if (
+    typeof value !== `object` ||
+    value === null ||
+    !(`type` in value) ||
+    value.type !== type
+  )
+    throw new Error(`not a ${type} change`)
+  return value as Extract<HistoryChange, { type: T }>
+}
+
+function unmapStep<T extends EagerLiveSourceStep[`kind`]>(
+  kind: T,
+  value: unknown,
+): Extract<EagerLiveSourceStep, { kind: T }> {
+  if (
+    typeof value !== `object` ||
+    value === null ||
+    !(`kind` in value) ||
+    value.kind !== kind
+  )
+    throw new Error(`not a ${kind} step`)
+  return value as Extract<EagerLiveSourceStep, { kind: T }>
+}
+
+function unmapHistory(value: unknown): Array<EagerLiveSourceStep> {
+  if (!Array.isArray(value)) throw new Error(`not a history`)
+  return value as Array<EagerLiveSourceStep>
+}
+
+function unmapAttempt(value: unknown): {
+  kind: `transient-failure`
+  variant: number
+} {
+  return {
+    kind: `transient-failure`,
+    variant: unmapStep(`transient-failure`, value).variant ?? 0,
+  }
+}
+
+function constantStep<T extends EagerLiveSourceStep[`kind`]>(kind: T) {
+  return fc.constant(undefined).map(
+    () => ({ kind }) as Extract<EagerLiveSourceStep, { kind: T }>,
+    (value) => {
+      unmapStep(kind, value)
+      return undefined
+    },
+  )
+}
+
+function splitHistory<
+  TLeft extends EagerLiveSourceStep,
+  TRight extends EagerLiveSourceStep,
+>(
+  value: unknown,
+  left: fc.Arbitrary<Array<TLeft>>,
+  right: fc.Arbitrary<Array<TRight>>,
+): [Array<TLeft>, Array<TRight>] {
+  const history = unmapHistory(value)
+  for (let cut = 0; cut <= history.length; cut++) {
+    const first = history.slice(0, cut)
+    const last = history.slice(cut)
+    if (
+      left.canShrinkWithoutContext(first) &&
+      right.canShrinkWithoutContext(last)
+    )
+      return [first, last]
+  }
+  throw new Error(`history has no legal prefix and suffix`)
+}
+
+function unflattenHistory(
+  value: unknown,
+  element: fc.Arbitrary<Array<EagerLiveSourceStep>>,
+): Array<Array<EagerLiveSourceStep>> {
+  const history = unmapHistory(value)
+  const paths = new Map<number, Array<Array<EagerLiveSourceStep>>>([[0, []]])
+  for (let start = 0; start < history.length; start++) {
+    const prefix = paths.get(start)
+    if (prefix === undefined || prefix.length >= 12) continue
+    for (let end = start + 1; end <= history.length; end++) {
+      const part = history.slice(start, end)
+      const earlier = paths.get(end)
+      if (
+        (earlier === undefined || earlier.length > prefix.length + 1) &&
+        element.canShrinkWithoutContext(part)
+      )
+        paths.set(end, [...prefix, part])
+    }
+  }
+  const path = paths.get(history.length)
+  if (path === undefined)
+    throw new Error(`history has no legal element partition`)
+  return path
 }
 
 /** What the grammar needs from a driver: its capabilities and value kinds. */
@@ -654,10 +766,15 @@ export function eagerLiveSourceHistoryArb(
           ),
           seen: fc.integer({ min: 0, max: 3 }),
         })
-        .map(({ rows, seen }) =>
-          capabilities.has(`listen-before-fetch`)
-            ? { kind: `snapshot` as const, rows, seen }
-            : { kind: `snapshot` as const, rows },
+        .map(
+          ({ rows, seen }) =>
+            capabilities.has(`listen-before-fetch`)
+              ? { kind: `snapshot` as const, rows, seen }
+              : { kind: `snapshot` as const, rows },
+          (value) => {
+            const step = unmapStep(`snapshot`, value)
+            return { rows: [...step.rows], seen: step.seen ?? 0 }
+          },
         ),
     },
     {
@@ -666,14 +783,20 @@ export function eagerLiveSourceHistoryArb(
         .array(changeArb(kinds, fieldKinds, domain.excludesValue), {
           maxLength: 3,
         })
-        .map((changes) => ({ kind: `changes` as const, changes })),
+        .map(
+          (changes) => ({ kind: `changes` as const, changes }),
+          (value) => [...unmapStep(`changes`, value).changes],
+        ),
     },
-    { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
+    { weight: 2, arbitrary: constantStep(`fail`) },
     {
       weight: 1,
       arbitrary: capabilities.has(`prompt-after-restart`)
-        ? fc.boolean().map((prompt) => ({ kind: `restart` as const, prompt }))
-        : fc.constant({ kind: `restart` as const }),
+        ? fc.boolean().map(
+            (prompt) => ({ kind: `restart` as const, prompt }),
+            (value) => unmapStep(`restart`, value).prompt ?? false,
+          )
+        : constantStep(`restart`),
     },
   ]
   if (capabilities.has(`duplicate-key-delivery`)) {
@@ -691,11 +814,17 @@ export function eagerLiveSourceHistoryArb(
           ),
           duplicate: fc.nat(2),
         })
-        .map(({ rows, duplicate }) => ({
-          kind: `malformed` as const,
-          rows,
-          duplicate,
-        })),
+        .map(
+          ({ rows, duplicate }) => ({
+            kind: `malformed` as const,
+            rows,
+            duplicate,
+          }),
+          (value) => {
+            const step = unmapStep(`malformed`, value)
+            return { rows: [...step.rows], duplicate: step.duplicate }
+          },
+        ),
     })
   }
   if (capabilities.has(`await-evidence`)) {
@@ -706,13 +835,22 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc
         .record({
           ahead: fc.integer({ min: 0, max: 2 }),
-          timeout: fc.integer({ min: 0, max: 3 }).map((n) => n === 0),
+          timeout: fc.integer({ min: 0, max: 3 }).map(
+            (n) => n === 0,
+            (value) => {
+              if (typeof value !== `boolean`)
+                throw new Error(`not a timeout flag`)
+              return value ? 0 : 1
+            },
+          ),
         })
-        .map(({ ahead, timeout }) => ({
-          kind: `wait` as const,
-          ahead,
-          timeout,
-        })),
+        .map(
+          ({ ahead, timeout }) => ({ kind: `wait` as const, ahead, timeout }),
+          (value) => {
+            const step = unmapStep(`wait`, value)
+            return { ahead: step.ahead, timeout: step.timeout ?? false }
+          },
+        ),
     })
   }
   // An outage is a run of failed attempts. It is one element of the
@@ -721,9 +859,10 @@ export function eagerLiveSourceHistoryArb(
   if (capabilities.has(`retry-policy`)) {
     const variants = domain.transientVariants?.length ?? 1
     const threshold = domain.retryReportAfter ?? 1
-    const attempt = fc
-      .nat(variants - 1)
-      .map((variant) => ({ kind: `transient-failure` as const, variant }))
+    const attempt = fc.nat(variants - 1).map(
+      (variant) => ({ kind: `transient-failure` as const, variant }),
+      (value) => unmapStep(`transient-failure`, value).variant ?? 0,
+    )
     // Half the outages stay below the threshold, half cross it by up to two
     // attempts. A recurring outage crosses it, recovers on a live batch, and
     // crosses it again, so a second report in one run is not rare.
@@ -747,11 +886,27 @@ export function eagerLiveSourceHistoryArb(
           }),
           crossing,
         )
-        .map(([first, changes, second]): Array<EagerLiveSourceStep> => [
-          ...first,
-          { kind: `changes`, changes },
-          ...second,
-        ]),
+        .map(
+          ([first, changes, second]): Array<EagerLiveSourceStep> => [
+            ...first,
+            { kind: `changes`, changes },
+            ...second,
+          ],
+          (value) => {
+            const history = unmapHistory(value)
+            const cut = history.findIndex((step) => step.kind === `changes`)
+            if (cut < 0) throw new Error(`not a recurring outage`)
+            return [
+              history.slice(0, cut).map(unmapAttempt),
+              [...unmapStep(`changes`, history[cut]).changes],
+              history.slice(cut + 1).map(unmapAttempt),
+            ] as [
+              Array<{ kind: `transient-failure`; variant: number }>,
+              Array<HistoryChange>,
+              Array<{ kind: `transient-failure`; variant: number }>,
+            ]
+          },
+        ),
     )
     if (capabilities.has(`empty-response`)) {
       // Two outages below the threshold around an empty response: together
@@ -761,63 +916,83 @@ export function eagerLiveSourceHistoryArb(
         maxLength: Math.max(1, threshold - 1),
       })
       outages.push(
-        fc
-          .tuple(below, below)
-          .map(([first, second]): Array<EagerLiveSourceStep> => [
+        fc.tuple(below, below).map(
+          ([first, second]): Array<EagerLiveSourceStep> => [
             ...first,
             { kind: `empty-response` },
             ...second,
-          ]),
+          ],
+          (value) => {
+            const history = unmapHistory(value)
+            const cut = history.findIndex(
+              (step) => step.kind === `empty-response`,
+            )
+            if (cut < 0) throw new Error(`not an outage reset`)
+            return [
+              history.slice(0, cut).map(unmapAttempt),
+              history.slice(cut + 1).map(unmapAttempt),
+            ] as [
+              Array<{ kind: `transient-failure`; variant: number }>,
+              Array<{ kind: `transient-failure`; variant: number }>,
+            ]
+          },
+        ),
       )
     }
   }
   if (capabilities.has(`empty-response`)) {
     steps.push({
       weight: 1,
-      arbitrary: fc.constant({ kind: `empty-response` as const }),
+      arbitrary: constantStep(`empty-response`),
     })
   }
   if (capabilities.has(`await-sync`)) {
     steps.push({
       weight: 2,
-      arbitrary: fc.constant({ kind: `sync-wait` as const }),
+      arbitrary: constantStep(`sync-wait`),
     })
   }
   if (capabilities.has(`delivery-error`)) {
     steps.push({
       weight: 3,
-      arbitrary: fc.constant({ kind: `delivery-error` as const }),
+      arbitrary: constantStep(`delivery-error`),
     })
   }
   if (capabilities.has(`transport-reconnect`)) {
     steps.push(
       // A reconnect needs a ready run and a disconnect before it, so both
       // weigh enough that random seeds keep the reach minimum.
-      { weight: 2, arbitrary: fc.constant({ kind: `disconnect` as const }) },
-      { weight: 3, arbitrary: fc.constant({ kind: `reconnect` as const }) },
+      { weight: 2, arbitrary: constantStep(`disconnect`) },
+      { weight: 3, arbitrary: constantStep(`reconnect`) },
     )
   }
   if (capabilities.has(`capability-renewal`)) {
     steps.push({
       weight: 2,
-      arbitrary: fc.constant({ kind: `renew` as const }),
+      arbitrary: constantStep(`renew`),
     })
   }
-  const generated = fc
-    .array(
-      fc.oneof(
-        ...steps.map(({ weight, arbitrary }) => ({
-          weight,
-          arbitrary: arbitrary.map((step) => [step]),
-        })),
-        ...outages.map((arbitrary, index) => ({
-          weight: index === 0 ? 3 : 1,
-          arbitrary,
-        })),
+  const element = fc.oneof(
+    ...steps.map(({ weight, arbitrary }) => ({
+      weight,
+      arbitrary: arbitrary.map(
+        (step) => [step],
+        (value) => {
+          const history = unmapHistory(value)
+          if (history.length !== 1) throw new Error(`not a one-step element`)
+          return history[0]!
+        },
       ),
-      { minLength: 1, maxLength: 12 },
-    )
-    .map((elements) => elements.flat())
+    })),
+    ...outages.map((arbitrary, index) => ({
+      weight: index === 0 ? 3 : 1,
+      arbitrary,
+    })),
+  )
+  const generated = fc.array(element, { minLength: 1, maxLength: 12 }).map(
+    (elements) => elements.flat(),
+    (value) => unflattenHistory(value, element),
+  )
   // EVID-2 and a prompt restart after a failure need sequences that random
   // steps rarely produce, so a history can open with one: no prefix weighs 5
   // and each declared scenario 1, so with one scenario one history in six
@@ -838,38 +1013,73 @@ export function eagerLiveSourceHistoryArb(
           }),
           fc.boolean(),
         )
-        .map(([first, changes, timeout]): Array<EagerLiveSourceStep> => [
-          first,
-          { kind: `changes`, changes },
-          { kind: `restart` },
-          { kind: `wait`, ahead: 0, timeout },
-        ]),
+        .map(
+          ([first, changes, timeout]): Array<EagerLiveSourceStep> => [
+            first,
+            { kind: `changes`, changes },
+            { kind: `restart` },
+            { kind: `wait`, ahead: 0, timeout },
+          ],
+          (value) => {
+            const history = unmapHistory(value)
+            if (
+              history.length !== 4 ||
+              unmapStep(`wait`, history[3]).ahead !== 0
+            )
+              throw new Error(`not a retired-evidence prefix`)
+            unmapStep(`restart`, history[2])
+            return [
+              history[0]!,
+              unmapStep(`changes`, history[1]).changes,
+              unmapStep(`wait`, history[3]).timeout ?? false,
+            ] as [EagerLiveSourceStep, Array<HistoryChange>, boolean]
+          },
+        ),
     )
   }
   if (capabilities.has(`prompt-after-restart`)) {
     // A failed run, its prompt restart, and the new run's first step.
     scenarios.push(
-      fc
-        .oneof(fc.constant({ kind: `fail` as const }), snapshot)
-        .map((next): Array<EagerLiveSourceStep> => [
+      fc.oneof(constantStep(`fail`), snapshot).map(
+        (next): Array<EagerLiveSourceStep> => [
           { kind: `fail` },
           { kind: `restart`, prompt: true },
           next,
-        ]),
+        ],
+        (value) => {
+          const history = unmapHistory(value)
+          if (
+            history.length !== 3 ||
+            unmapStep(`restart`, history[1]).prompt !== true
+          )
+            throw new Error(`not a prompt restart prefix`)
+          unmapStep(`fail`, history[0])
+          return history[2]!
+        },
+      ),
     )
   }
+  const opening: fc.Arbitrary<Array<EagerLiveSourceStep>> = fc.oneof(
+    {
+      weight: 5,
+      arbitrary: fc.constant(undefined).map(
+        (): Array<EagerLiveSourceStep> => [],
+        (value) => {
+          if (unmapHistory(value).length !== 0)
+            throw new Error(`not an empty history`)
+          return undefined
+        },
+      ),
+    },
+    ...scenarios.map((arbitrary) => ({ weight: 1, arbitrary })),
+  )
   const history =
     scenarios.length === 0
       ? generated
-      : fc
-          .tuple(
-            fc.oneof(
-              { weight: 5, arbitrary: fc.constant([]) },
-              ...scenarios.map((arbitrary) => ({ weight: 1, arbitrary })),
-            ),
-            generated,
-          )
-          .map(([prefix, rest]) => [...prefix, ...rest])
+      : fc.tuple(opening, generated).map(
+          ([prefix, rest]) => [...prefix, ...rest],
+          (value) => splitHistory(value, opening, generated),
+        )
   if (!capabilities.has(`listen-before-fetch`)) return history
   // A startup burst: batches the backend commits while the first fetch is
   // outstanding. Without it, two buffered batches that touch one key before
@@ -879,10 +1089,417 @@ export function eagerLiveSourceHistoryArb(
       minLength: 1,
       maxLength: 3,
     })
-    .map((changes) => ({ kind: `changes` as const, changes }))
-  return fc
-    .tuple(fc.array(startup, { maxLength: 3 }), history)
-    .map(([burst, rest]) => [...burst, ...rest])
+    .map(
+      (changes) => ({ kind: `changes` as const, changes }),
+      (value) => [...unmapStep(`changes`, value).changes],
+    )
+  const startupBurst = fc.array(startup, { maxLength: 3 })
+  return fc.tuple(startupBurst, history).map(
+    ([batches, rest]) => [...batches, ...rest],
+    (value) => splitHistory(value, startupBurst, history),
+  )
+}
+
+// Campaign history data represents Dates and Float64Arrays with tagged values.
+// resolveEagerLiveSourceHistory restores their native forms before the same
+// provider/model/checker runs, so FID-1 keeps both type and signed-zero laws.
+type HistoryValueData =
+  | { kind: `date`; milliseconds: number }
+  | { kind: `float-array`; values: ReadonlyArray<number> }
+  | { kind: `plain`; value: unknown }
+
+function historyValueData(value: unknown): HistoryValueData {
+  if (value instanceof Date)
+    return { kind: `date`, milliseconds: value.getTime() }
+  if (value instanceof Float64Array)
+    return { kind: `float-array`, values: [...value] }
+  return { kind: `plain`, value }
+}
+function historyValue(value: unknown): unknown {
+  if (typeof value !== `object` || value === null || !(`kind` in value))
+    throw new Error(`not a history value`)
+  const data = value as HistoryValueData
+  switch (data.kind) {
+    case `date`:
+      return new Date(data.milliseconds)
+    case `float-array`:
+      return Float64Array.from(data.values)
+    case `plain`:
+      return data.value
+    default:
+      throw new Error(`not a history value`)
+  }
+}
+function mapHistoryValues(
+  history: EagerLiveSourceHistory,
+  map: (value: unknown) => unknown,
+): EagerLiveSourceHistory {
+  const row = (value: ConformanceRow): ConformanceRow => ({
+    ...value,
+    ...(Object.hasOwn(value, `value`) ? { value: map(value.value) } : {}),
+    ...(value.typed === undefined
+      ? {}
+      : {
+          typed: Object.fromEntries(
+            Object.entries(value.typed).map(([kind, item]) => [
+              kind,
+              map(item),
+            ]),
+          ),
+        }),
+  })
+  return history.map((step): EagerLiveSourceStep => {
+    if (step.kind === `snapshot` || step.kind === `malformed`)
+      return { ...step, rows: step.rows.map(row) }
+    if (step.kind !== `changes`) return step
+    return {
+      ...step,
+      changes: step.changes.map((change) =>
+        change.type === `upsert` ? { ...change, row: row(change.row) } : change,
+      ),
+    }
+  })
+}
+/** Same history shape; row values are tagged history data until resolution. */
+export function eagerLiveSourceHistoryData(
+  history: EagerLiveSourceHistory,
+): EagerLiveSourceHistory {
+  return mapHistoryValues(history, historyValueData)
+}
+export function resolveEagerLiveSourceHistory(
+  history: EagerLiveSourceHistory,
+): EagerLiveSourceHistory {
+  return mapHistoryValues(history, historyValue)
+}
+export function eagerLiveSourceDataHistoryArb(
+  domain: GrammarDomain,
+): fc.Arbitrary<EagerLiveSourceHistory> {
+  return eagerLiveSourceHistoryArb(domain).map(
+    eagerLiveSourceHistoryData,
+    (value) => resolveEagerLiveSourceHistory(unmapHistory(value)),
+  )
+}
+
+export interface EagerLiveSourceConstruction {
+  name: string
+  enters: ReadonlyArray<EagerLiveSourceReachState>
+  build: (generated: EagerLiveSourceHistory) => EagerLiveSourceHistory
+}
+
+/**
+ * Constructed histories keep generated rows and a generated suffix. Each
+ * recipe fixes only the action relationships that make its states reachable.
+ * All recipes remain inside the original grammar, including its 12-element
+ * bound and capability/value declarations. Five independently seeded witnesses
+ * per recipe preserve the old minimum of five histories per required state.
+ */
+export function eagerLiveSourceConstructedHistories(
+  domain: GrammarDomain,
+): Array<EagerLiveSourceConstruction> {
+  const required = reachStatesFor(domain)
+  const recipes: Array<{
+    name: string
+    enters: ReadonlyArray<EagerLiveSourceReachState>
+    steps: (
+      row: (offset?: number, kind?: ValueKind) => ConformanceRow,
+    ) => Array<EagerLiveSourceStep>
+  }> = []
+  const capabilities = domain.capabilities
+  const listen = capabilities.has(`listen-before-fetch`)
+  const snapshot = (
+    rows: ReadonlyArray<ConformanceRow>,
+    seen = 0,
+  ): EagerLiveSourceStep =>
+    listen ? { kind: `snapshot`, rows, seen } : { kind: `snapshot`, rows }
+  const restart = (): EagerLiveSourceStep =>
+    capabilities.has(`prompt-after-restart`)
+      ? { kind: `restart`, prompt: false }
+      : { kind: `restart` }
+  const changes = (...rows: Array<ConformanceRow>): EagerLiveSourceStep => ({
+    kind: `changes`,
+    changes: rows.map((row) => ({ type: `upsert`, row })),
+  })
+  const add = (
+    name: string,
+    enters: Array<EagerLiveSourceReachState>,
+    steps: (
+      row: (offset?: number, kind?: ValueKind) => ConformanceRow,
+    ) => Array<EagerLiveSourceStep>,
+  ) => {
+    const owned = enters.filter((state) => required.includes(state))
+    if (owned.length > 0) recipes.push({ name, enters: owned, steps })
+  }
+  add(
+    `whole rows and a complete batch`,
+    [
+      `first-ready`,
+      `change-batch`,
+      `multi-change-batch`,
+      `field-removed`,
+      `replacing-snapshot`,
+    ],
+    (row) => {
+      const a = row(),
+        b = row(1),
+        c = row(2)
+      return [
+        snapshot([{ ...a, note: `x` }, b]),
+        {
+          kind: `changes`,
+          changes: [
+            { type: `delete`, id: b.id },
+            { type: `upsert`, row: a },
+            { type: `upsert`, row: c },
+          ],
+        },
+        ...(capabilities.has(`complete-snapshot`) ? [snapshot([a])] : []),
+      ]
+    },
+  )
+  add(
+    `restart after a loading failure`,
+    [`failure-before-ready`, `restart`, `restart-after-failure`],
+    (row) => [{ kind: `fail` }, restart(), snapshot([row()])],
+  )
+  if (capabilities.has(`source-failure-after-ready`))
+    add(`failure after readiness`, [`failure-after-ready`], (row) => [
+      snapshot([row()]),
+      { kind: `fail` },
+    ])
+  if (capabilities.has(`prompt-after-restart`))
+    add(
+      `prompt failure after a failed run`,
+      [`prompt-restart`, `prompt-failure-after-failed-run`],
+      () => [
+        { kind: `fail` },
+        { kind: `restart`, prompt: true },
+        { kind: `fail` },
+      ],
+    )
+  if (capabilities.has(`await-evidence`))
+    add(
+      `evidence before and across retirement`,
+      [
+        `wait-before-evidence-fulfilled`,
+        `wait-timed-out`,
+        `wait-rejected-at-retirement`,
+        `wait-on-retired-evidence`,
+      ],
+      (row) => [
+        ...(listen
+          ? [
+              { kind: `wait` as const, ahead: 1, timeout: false },
+              changes(row(1)),
+              snapshot([row()]),
+            ]
+          : [
+              snapshot([row()]),
+              { kind: `wait` as const, ahead: 1, timeout: false },
+              changes(row(1)),
+            ]),
+        { kind: `wait`, ahead: 2, timeout: true },
+        { kind: `wait`, ahead: 1, timeout: false },
+        restart(),
+        { kind: `wait`, ahead: 0, timeout: false },
+        snapshot([row(2)]),
+      ],
+    )
+  if (capabilities.has(`transport-reconnect`))
+    add(`reconnect`, [`reconnect`], (row) => [
+      snapshot([row()]),
+      { kind: `disconnect` },
+      { kind: `reconnect` },
+    ])
+  if (capabilities.has(`capability-renewal`))
+    add(`renewal`, [`renewal`], () => [{ kind: `renew` }])
+  if (capabilities.has(`retry-policy`)) {
+    const threshold = domain.retryReportAfter ?? 1
+    const attempts = (n: number, variant = 0): Array<EagerLiveSourceStep> =>
+      Array.from({ length: n }, () => ({ kind: `transient-failure`, variant }))
+    add(
+      `recurring outages across a batch and restart`,
+      [
+        `transient-failure-reported`,
+        `transient-failure-below-threshold`,
+        `transient-failure-repeated`,
+        `transient-failure-recovered`,
+        `outage-reported-again`,
+        `outage-reported-after-batch`,
+        `outage-reported-in-later-run`,
+      ],
+      (row) => [
+        snapshot([row()]),
+        ...attempts(threshold + 1),
+        changes(row(1)),
+        ...attempts(threshold),
+        restart(),
+        snapshot([row(2)]),
+        ...attempts(threshold),
+      ],
+    )
+    for (const [variant, name] of (domain.transientVariants ?? []).entries())
+      add(`outage kind ${name}`, [`transient:${name}`], (row) => [
+        snapshot([row()]),
+        ...attempts(threshold, variant),
+      ])
+    if (capabilities.has(`empty-response`))
+      add(
+        `an empty response restarts the outage count`,
+        [`outage-count-reset`],
+        (row) => [
+          snapshot([row()]),
+          ...attempts(Math.max(1, threshold - 1)),
+          { kind: `empty-response` },
+          ...attempts(Math.max(1, threshold - 1)),
+        ],
+      )
+  }
+  if (capabilities.has(`delivery-error`))
+    add(
+      `delivery error and recovery`,
+      [`delivery-error-reported`, `delivery-error-recovered`],
+      (row) => [snapshot([row()]), { kind: `delivery-error` }, changes(row(1))],
+    )
+  if (capabilities.has(`await-sync`))
+    add(
+      `awaitSync before readiness and after failure`,
+      [`sync-wait-pending`, `sync-wait-on-failure`],
+      () => [{ kind: `sync-wait` }, { kind: `fail` }, { kind: `sync-wait` }],
+    )
+  if (listen) {
+    add(
+      `a read misses a buffered change`,
+      [`change-before-ready`, `read-missed-change`],
+      (row) => {
+        const a = row()
+        return [
+          changes({ ...a, title: `a` }),
+          changes({ ...a, title: `b` }),
+          snapshot([{ ...a, title: `c` }], 1),
+        ]
+      },
+    )
+    add(
+      `an already-seen change is superseded`,
+      [`seen-change-superseded`],
+      (row) => {
+        const a = row()
+        return [
+          changes({ ...a, title: `a` }),
+          changes({ ...a, title: `b` }),
+          snapshot([{ ...a, title: `c` }], 2),
+        ]
+      },
+    )
+  }
+  if (capabilities.has(`duplicate-key-delivery`)) {
+    add(`malformed initial delivery`, [`malformed-before-ready`], (row) => [
+      { kind: `malformed`, rows: [row(), row(1)], duplicate: 0 },
+    ])
+    if (capabilities.has(`complete-snapshot`))
+      add(
+        `malformed replacement delivery`,
+        [`malformed-after-ready`, `rejected-delivery-reported`],
+        (row) => [
+          snapshot([row()]),
+          { kind: `malformed`, rows: [row(1), row(2)], duplicate: 1 },
+          changes(row(3)),
+        ],
+      )
+  }
+  const kinds = domain.valueKinds ?? []
+  for (let at = 0; at < kinds.length; at += 4) {
+    const group = kinds.slice(at, at + 4)
+    add(
+      `value kinds ${group.join(`, `)}`,
+      group.flatMap((kind): Array<ValueReachState> => [
+        `value:${kind}:load`,
+        `value:${kind}:change`,
+      ]),
+      (row) => {
+        const rows = group.map((kind, index) => row(index, kind))
+        return [
+          snapshot(rows),
+          changes(...rows.slice(0, 3)),
+          ...(rows.length > 3 ? [changes(...rows.slice(3))] : []),
+        ]
+      },
+    )
+  }
+  if ((domain.fieldKinds ?? []).length > 0)
+    add(
+      `typed fields on both delivery paths`,
+      (domain.fieldKinds ?? []).flatMap((kind): Array<ValueReachState> => [
+        `field:${kind}:load`,
+        `field:${kind}:change`,
+      ]),
+      (row) => [snapshot([row()]), changes(row(1))],
+    )
+  if (kinds.includes(`negative-zero`))
+    add(`a retouch flips zero signs`, [`zero-sign-flipped`], (row) => [
+      snapshot([row(0, `negative-zero`)]),
+      { kind: `changes`, changes: [{ type: `retouch`, id: 1 }] },
+    ])
+  const covered = new Set(recipes.flatMap((recipe) => recipe.enters))
+  const missing = required.filter((state) => !covered.has(state))
+  if (missing.length > 0)
+    throw new Error(`no construction for ${missing.join(`, `)}`)
+  const arbitrary = eagerLiveSourceHistoryArb(domain)
+  return recipes.flatMap((recipe) =>
+    Array.from({ length: 5 }, (_, witness) => ({
+      name: `${recipe.name}, witness ${witness + 1}`,
+      enters: recipe.enters,
+      build: (generated: EagerLiveSourceHistory): EagerLiveSourceHistory => {
+        const native = resolveEagerLiveSourceHistory(generated)
+        const text = describeValue(native)
+        const entropy = [...text].reduce(
+          (sum, character) => (sum + character.charCodeAt(0)) % 65_521,
+          witness,
+        )
+        const pick = (
+          kind: ValueKind,
+          offset: number,
+          valuePath = false,
+        ): unknown => {
+          const examples = valueExamples[kind].filter(
+            (make) =>
+              !domain.excludesValue?.(kind, make()) &&
+              (!valuePath || kindOf(make()) === kind),
+          )
+          if (examples.length === 0)
+            throw new Error(`no constructed ${kind} value`)
+          return examples[(entropy + offset) % examples.length]!()
+        }
+        const row = (
+          offset = 0,
+          kind = kinds[(entropy + offset) % kinds.length],
+        ): ConformanceRow => ({
+          id: ((entropy + offset) % 5) + 1,
+          title: ([`a`, `b`, `c`] as const)[(entropy + offset) % 3]!,
+          ...(kind === undefined ? {} : { value: pick(kind, offset, true) }),
+          ...((domain.fieldKinds ?? []).length === 0
+            ? {}
+            : {
+                typed: Object.fromEntries(
+                  (domain.fieldKinds ?? []).map((field, index) => [
+                    field,
+                    pick(field, offset + index),
+                  ]),
+                ),
+              }),
+        })
+        const prefix = recipe.steps(row)
+        // Keep the longest generated suffix that fits the same language. A
+        // recipe itself is generated-data dependent even when no suffix fits.
+        for (let keep = Math.min(native.length, 4); keep >= 0; keep--) {
+          const history = [...prefix, ...native.slice(0, keep)]
+          if (arbitrary.canShrinkWithoutContext(history))
+            return eagerLiveSourceHistoryData(history)
+        }
+        throw new Error(`${recipe.name} is outside the history grammar`)
+      },
+    })),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -2820,7 +3437,7 @@ function foldChanges(collection: ObservedCollection) {
   }
 }
 
-/** A reach counter, such as the one `createOracleReach` returns. */
+/** A reach counter: a driver begins each history, then records each declared state it enters. */
 export interface ReachCounter {
   beginHistory: () => void
   reach: (state: EagerLiveSourceReachState) => void

@@ -25,9 +25,14 @@
 import { createLiveQueryCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import {
@@ -40,9 +45,11 @@ import {
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { LazyRow } from './lazy-paging-model-oracle'
 
-declareOracle({
-  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
-})
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 const drain = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve()
@@ -166,8 +173,14 @@ async function runFailureHistory(h: History) {
       f.remote.error(failure)
       await drain()
       for (const attempt of failed)
-        await expect(attempt.complete()).rejects.toBe(failure)
-      expect(f.source.base.size).toBe(0)
+        await oracleAssertion(
+          `lazy-paging-failure-history-oracle.property.test.ts:171:toBe`,
+          () => expect(attempt.complete()).rejects.toBe(failure),
+        )
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:172:toBe`,
+        () => expect(f.source.base.size).toBe(0),
+      )
       failed.forEach((attempt) => attempt.release())
       reaches.add(`failure-before-acceptance`)
       await f.source.cleanup()
@@ -182,8 +195,13 @@ async function runFailureHistory(h: History) {
       const graphReady = preload(graph)
       await f.remote.pump(() => false, h.reverse)
       await drain()
-      expect(graph.status, `native progress: initial dependent stranded`).toBe(
-        `ready`,
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:187:toBe`,
+        () =>
+          expect(
+            graph.status,
+            `native progress: initial dependent stranded`,
+          ).toBe(`ready`),
       )
       await graphReady()
 
@@ -193,7 +211,10 @@ async function runFailureHistory(h: History) {
       const model = new LazyReceiptModel()
       let acquiring = false
       const required = ordered(rows, h.descending).at(-1)!
-      expect(f.source.base.has(required.id)).toBe(false)
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:198:toBe`,
+        () => expect(f.source.base.has(required.id)).toBe(false),
+      )
       const ids = [`owner-0`, `owner-1`]
       const controllers = [new AbortController(), new AbortController()]
       const outcomes = new Map<string, string>()
@@ -244,12 +265,21 @@ async function runFailureHistory(h: History) {
       })
       await f.remote.pump(() => false, h.reverse)
       acquiring = false
-      expect(
-        accepted.length,
-        `native batch lacks unique establishing fact`,
-      ).toBe(1)
-      expect(outcomes.size, `native load settled before held application`).toBe(
-        0,
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:249:toBe`,
+        () =>
+          expect(
+            accepted.length,
+            `native batch lacks unique establishing fact`,
+          ).toBe(1),
+      )
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:253:toBe`,
+        () =>
+          expect(
+            outcomes.size,
+            `native load settled before held application`,
+          ).toBe(0),
       )
       reaches.add(`two-owners-share-held-native-receipt`)
       const canceled = h.retiring
@@ -259,31 +289,53 @@ async function runFailureHistory(h: History) {
       const providerError = new Error(`after acceptance`)
       f.remote.error(providerError)
       await drain()
-      expect(
-        f.errors,
-        `native provider failure path was not observed`,
-      ).toContain(providerError)
-      expect(
-        outcomes.has(ids[canceled]!),
-        `native canceled owner settled before accepted application`,
-      ).toBe(false)
-      expect(f.source.base.has(required.id)).toBe(false)
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:264:toContain`,
+        () =>
+          expect(
+            f.errors,
+            `native provider failure path was not observed`,
+          ).toContain(providerError),
+      )
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:268:toBe`,
+        () =>
+          expect(
+            outcomes.has(ids[canceled]!),
+            `native canceled owner settled before accepted application`,
+          ).toBe(false),
+      )
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:272:toBe`,
+        () => expect(f.source.base.has(required.id)).toBe(false),
+      )
       reaches.add(`error-after-acceptance-with-surviving-owner`)
       await releaseApplication()
       await drain()
-      expect(
-        outcomes.size,
-        `native progress: callers stranded after accepted application`,
-      ).toBe(2)
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:276:toBe`,
+        () =>
+          expect(
+            outcomes.size,
+            `native progress: callers stranded after accepted application`,
+          ).toBe(2),
+      )
       // A subsequent valid coherent cache observation can recover the native
       // source before the surviving caller settles. Its ordinary error is not
       // terminal: either rejection or successful applied coverage is legal.
       await Promise.allSettled(owners.map((owner) => owner.result))
-      await expect(owners[canceled]!.result).rejects.toMatchObject({
-        name: `AbortError`,
-      })
+      await oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:284:toMatchObject`,
+        () =>
+          expect(owners[canceled]!.result).rejects.toMatchObject({
+            name: `AbortError`,
+          }),
+      )
       assertLazyCoverage([...f.source.base.values()], rows, {}, h.descending)
-      expect(outcomes.get(ids[canceled]!)).toBe(`canceled`)
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:288:toBe`,
+        () => expect(outcomes.get(ids[canceled]!)).toBe(`canceled`),
+      )
       if (receiptFailures.length) throw receiptFailures[0]
       model.complete()
       stopBatches()
@@ -305,13 +357,22 @@ async function runFailureHistory(h: History) {
       const freshReady = preload(fresh)
       await f.remote.pump(() => false, h.reverse)
       await drain()
-      expect(fresh.status, `native progress: fresh dependent stranded`).toBe(
-        `ready`,
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:310:toBe`,
+        () =>
+          expect(
+            fresh.status,
+            `native progress: fresh dependent stranded`,
+          ).toBe(`ready`),
       )
       await freshReady()
       terminal.observe(graph.status, graph.toArray)
-      expect(copyLazyRows(fresh.toArray)).toEqual(
-        expectedLazyRows(rows, { limit: 2 }, h.descending),
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:315:toEqual`,
+        () =>
+          expect(copyLazyRows(fresh.toArray)).toEqual(
+            expectedLazyRows(rows, { limit: 2 }, h.descending),
+          ),
       )
 
       // A subsequent native update is accepted but held. Cleanup may abandon
@@ -321,8 +382,12 @@ async function runFailureHistory(h: History) {
       f.remote.change(changed)
       const before = f.receipts.length
       await f.remote.pump(() => false, h.reverse)
-      expect(f.receipts.slice(before).some((receipt) => receipt !== true)).toBe(
-        true,
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:326:toBe`,
+        () =>
+          expect(
+            f.receipts.slice(before).some((receipt) => receipt !== true),
+          ).toBe(true),
       )
       const freshTerminal = terminalMonitor(fresh)
       freshTerminal.cleanup(fresh.toArray)
@@ -343,23 +408,30 @@ async function runFailureHistory(h: History) {
           : ([`success`, `error`] as const))
           f.remote.late(outcome)
         await drain()
-        expect(
-          {
-            base: copyLazyRows([...f.source.base.values()]),
-            status: f.source.status,
-            statuses: [...f.statuses],
-            errors: [...f.errors],
-            syncError: f.source.utils.getSyncError(),
-            publications: [...f.publications],
-          },
-          `native lifecycle: retired callback retained authority`,
-        ).toEqual(baseline)
+        oracleAssertion(
+          `lazy-paging-failure-history-oracle.property.test.ts:348:toEqual`,
+          () =>
+            expect(
+              {
+                base: copyLazyRows([...f.source.base.values()]),
+                status: f.source.status,
+                statuses: [...f.statuses],
+                errors: [...f.errors],
+                syncError: f.source.utils.getSyncError(),
+                publications: [...f.publications],
+              },
+              `native lifecycle: retired callback retained authority`,
+            ).toEqual(baseline),
+        )
         terminal.observe(graph.status, graph.toArray)
         freshTerminal.observe(fresh.status, fresh.toArray)
         if (receiptFailures.length) throw receiptFailures[0]
       }
       await staleCheckpoint()
-      expect(f.source.status).not.toBe(`cleaned-up`)
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:364:toBe`,
+        () => expect(f.source.status).not.toBe(`cleaned-up`),
+      )
       await releaseApplication()
       await staleCheckpoint()
       cleanupHold.resolve()
@@ -373,15 +445,26 @@ async function runFailureHistory(h: History) {
       const newestReady = preload(newest)
       await f.remote.pump(() => false, h.reverse)
       await drain()
-      expect(
-        newest.status,
-        `native progress: restarted dependent stranded`,
-      ).toBe(`ready`)
-      await newestReady()
-      expect(copyLazyRows(newest.toArray)).toEqual(
-        expectedLazyRows(changed, { limit: 3 }, h.descending),
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:378:toBe`,
+        () =>
+          expect(
+            newest.status,
+            `native progress: restarted dependent stranded`,
+          ).toBe(`ready`),
       )
-      expect(newest.status).toBe(`ready`)
+      await newestReady()
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:383:toEqual`,
+        () =>
+          expect(copyLazyRows(newest.toArray)).toEqual(
+            expectedLazyRows(changed, { limit: 3 }, h.descending),
+          ),
+      )
+      oracleAssertion(
+        `lazy-paging-failure-history-oracle.property.test.ts:386:toBe`,
+        () => expect(newest.status).toBe(`ready`),
+      )
       terminal.observe(graph.status, graph.toArray)
       freshTerminal.observe(fresh.status, fresh.toArray)
       if (receiptFailures.length) throw receiptFailures[0]
@@ -403,10 +486,44 @@ async function runFailureHistory(h: History) {
   return reaches
 }
 
-it(`composes native failures, shared holds, retirement and terminal restart`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_FAILURE_HISTORY_ORACLE`,
-    [
+const convex_lazy_failure_historyHistory = grammar
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_failure_historyJudgment(
+  h: AssertionHistory<typeof convex_lazy_failure_historyHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const states = await runFailureHistory(h)
+  for (const state of [
+    `failure-before-acceptance`,
+    `two-owners-share-held-native-receipt`,
+    `error-after-acceptance-with-surviving-owner`,
+    `accepted-writes-survive-peer-retirement-and-error`,
+    `held-cleanup-after-failure-recovery`,
+    `fresh-graph-after-held-cleanup-old-graphs-terminal`,
+  ] as const) {
+    oracleAssertion(
+      `lazy-paging-failure-history-oracle.property.test.ts:423:toBe`,
+      () => expect(states.has(state)).toBe(true),
+    )
+    reach.reach(state)
+  }
+}
+
+oracleProperty({
+  id: `convex.lazy-failure-history`,
+  law: {
+    statement: `composes native failures, shared holds, retirement and terminal restart`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_lazy_failure_historyHistory,
+    runs: 40,
+    fixedSeeds: [20261027],
+    states: [
       `failure-before-acceptance`,
       `two-owners-share-held-native-receipt`,
       `error-after-acceptance-with-surviving-owner`,
@@ -414,28 +531,33 @@ it(`composes native failures, shared holds, retirement and terminal restart`, as
       `held-cleanup-after-failure-recovery`,
       `fresh-graph-after-held-cleanup-old-graphs-terminal`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(grammar, async (h) => {
-          reach.beginHistory()
-          const states = await runFailureHistory(h)
-          for (const state of [
-            `failure-before-acceptance`,
-            `two-owners-share-held-native-receipt`,
-            `error-after-acceptance-with-surviving-owner`,
-            `accepted-writes-survive-peer-retirement-and-error`,
-            `held-cleanup-after-failure-recovery`,
-            `fresh-graph-after-held-cleanup-old-graphs-terminal`,
-          ] as const) {
-            expect(states.has(state)).toBe(true)
-            reach.reach(state)
-          }
-        }),
-        { numRuns: oracleRuns(40), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [
+          `failure-before-acceptance`,
+          `two-owners-share-held-native-receipt`,
+          `error-after-acceptance-with-surviving-owner`,
+          `accepted-writes-survive-peer-retirement-and-error`,
+          `held-cleanup-after-failure-recovery`,
+          `fresh-graph-after-held-cleanup-old-graphs-terminal`,
+        ] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.lazy-failure-history`, plan, observe, () =>
+      convex_lazy_failure_historyJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 60000,
+})
 
 it(`rejects old graphs recovering or changing after cleanup`, () => {
   oracleRoute(`calibration`)
@@ -443,8 +565,18 @@ it(`rejects old graphs recovering or changing after cleanup`, () => {
   const model = new LazyTerminalGraphModel()
   model.cleanup([row])
   model.observe(`crashed`, [row])
-  expect(() => model.observe(`ready`, [row])).toThrow(`old graph recovered`)
-  expect(() => model.observe(`crashed`, [{ ...row, text: `new run` }])).toThrow(
-    `dead graph published`,
+  oracleAssertion(
+    `lazy-paging-failure-history-oracle.property.test.ts:459:toThrow`,
+    () =>
+      expect(() => model.observe(`ready`, [row])).toThrow(
+        `old graph recovered`,
+      ),
+  )
+  oracleAssertion(
+    `lazy-paging-failure-history-oracle.property.test.ts:460:toThrow`,
+    () =>
+      expect(() =>
+        model.observe(`crashed`, [{ ...row, text: `new run` }]),
+      ).toThrow(`dead graph published`),
   )
 })

@@ -34,13 +34,15 @@ import { declareOracle } from './oracle-declaration.js'
  * legal commands with fixed and random seeds. The drivers compare production
  * loads, unloads, results, status, errors, and publication against this trace.
  *
- * A demand change is one step (ARCHITECTURE law 9, "Replay participants and
- * failure"). Its `change` command retires several logical owners at once, as
- * a lazy join's demand change retires several segments, and the model judges
+ * A demand change is one step (ARCHITECTURE normative law 9, "Publication";
+ * replay failure is in the "Replay participants and failure" section). Its
+ * `change` command retires several logical owners at once, as a lazy join's
+ * demand change retires several segments, and the model judges
  * an open replay once, after every owner in the change has retired. Its
  * `replace` command marks one held owner as the replacement for another's
- * coverage, as a lazy join's fragmented-churn replacement does (law 10,
- * "Source cancellation and applied settlement"): the replacement requests the
+ * coverage, as a lazy join's fragmented-churn replacement does (ARCHITECTURE
+ * normative law 10, "Initial demand"; the source rule is in the "Source
+ * cancellation and applied settlement" section): the replacement requests the
  * whole current key union, so while it is held and its own acquisition did
  * not fail, the replay does not fail for the owner it replaces. Retiring the
  * replacement returns that verdict to the replaced owner. Only the
@@ -314,6 +316,66 @@ export function createLifecycleModel(
   }
 }
 
+/**
+ * ## Transition table
+ *
+ * The reducer is an extended state machine. Its phase is a function of two
+ * model flags: `unsubscribed` (this subscription has ended) and `active` (the
+ * Collection's sync run is live). `lifecycleTable` has one row per phase and
+ * event. Rows are tried in order: an effective row precedes the noop row that
+ * catches the same event when the effective row's `select` finds no target.
+ *
+ * Each row states the phase it ends in (`to`, or `same` when the phase must not
+ * change) and the state variables it may write (`writes`). The engine checks
+ * both after every effect. A phase change the row did not state throws, and so
+ * does a write to a variable the row did not declare. `writes` is therefore
+ * checked against the state, not hand-audited. Reads (`reads`) are declared
+ * only: nothing measures them.
+ *
+ * Reach comes from the table too. Every fired row adds `row:<id>`, and
+ * `lifecycleRowIds` names all of them, so a campaign declares that it reaches
+ * every row. The other reach labels are predicates over one step: the command,
+ * the row, the state captured before the effect, the facts the effect recorded,
+ * and the attempts it created.
+ */
+
+export type LifecyclePhase =
+  `live` | `cleaned-up` | `unsubscribed` | `unsubscribed-cleaned-up`
+
+type LifecycleStateVariable =
+  | `phase`
+  | `owners`
+  | `attempts`
+  | `generations`
+  | `publication-barrier`
+  | `collection-status`
+
+type ReplayVerdict = `closed` | `open` | `failed` | `succeeded`
+
+// Facts an effect records for the reach predicates. They are data, not reach.
+type LifecycleStepFacts = {
+  // `change`: the replay verdict after each release, in release order.
+  releaseVerdicts: Array<ReplayVerdict>
+  // This step's replay judgment closed the barrier on a failed owner.
+  replayFailedOwnerDecided: boolean
+}
+
+function lifecyclePhase(model: LifecycleModel): LifecyclePhase {
+  if (model.unsubscribed)
+    return model.active ? `unsubscribed` : `unsubscribed-cleaned-up`
+  return model.active ? `live` : `cleaned-up`
+}
+
+function attemptOf(model: LifecycleModel, attemptId: number): LifecycleAttempt {
+  const attempt = model.attempts[attemptId]
+  if (!attempt) throw new Error(`model lost attempt ${attemptId}`)
+  return attempt
+}
+
+// A held attempt in the replacement's publication boundary keeps it open.
+const replacementHeld = (attempt: LifecycleAttempt) =>
+  attempt.gating && attempt.inReplacement
+
 function setStatus(model: LifecycleModel, queuedReplay = false): void {
   if (model.unsubscribed) return
   const status =
@@ -340,14 +402,12 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 function replacementSucceeded(model: LifecycleModel): boolean {
   const loaded = ({ attemptId }: LifecycleOwner) =>
     attemptId === undefined ||
-    (model.attempts[attemptId]!.outcome === `resolve` &&
-      !model.attempts[attemptId]!.endedByAbort)
+    (attemptOf(model, attemptId).outcome === `resolve` &&
+      !attemptOf(model, attemptId).endedByAbort)
   const owesNothing = ({ attemptId }: LifecycleOwner) =>
-    attemptId === undefined || model.attempts[attemptId]!.endedByAbort
+    attemptId === undefined || attemptOf(model, attemptId).endedByAbort
   return (
-    !model.attempts.some(
-      ({ gating, inReplacement }) => gating && inReplacement,
-    ) &&
+    !model.attempts.some(replacementHeld) &&
     model.owners.every(
       (owner) =>
         loaded(owner) ||
@@ -360,55 +420,49 @@ function replacementSucceeded(model: LifecycleModel): boolean {
   )
 }
 
-// Judge an open replay: success closes the publication barrier.
-function judgeReplay(model: LifecycleModel): void {
-  if (!model.publicationBarrierOpen || !replacementSucceeded(model)) return
+// Judge an open replay: success closes the publication barrier. Returns
+// whether the closing judgment decided a failed owner.
+function judgeReplay(model: LifecycleModel): boolean {
+  if (!model.publicationBarrierOpen || !replacementSucceeded(model))
+    return false
   model.publicationBarrierOpen = false
-  if (
-    model.owners.some(
-      ({ attemptId }) =>
-        attemptId !== undefined &&
-        model.attempts[attemptId]!.outcome === `reject` &&
-        !model.attempts[attemptId]!.endedByAbort,
-    )
+  return model.owners.some(
+    ({ attemptId }) =>
+      attemptId !== undefined &&
+      attemptOf(model, attemptId).outcome === `reject` &&
+      !attemptOf(model, attemptId).endedByAbort,
   )
-    model.reach.add(`replacement-decides-failed-owner`)
+}
+
+// Every effect that can change the replay judges it, then updates status.
+function settleReplay(model: LifecycleModel, facts: LifecycleStepFacts): void {
+  facts.replayFailedOwnerDecided = judgeReplay(model)
+  setStatus(model)
 }
 
 // What judging the open replay now would decide. Only `change` asks, to name
 // the histories in which judging between its releases would differ.
-function replayVerdict(
-  model: LifecycleModel,
-): `closed` | `open` | `failed` | `succeeded` {
+function replayVerdict(model: LifecycleModel): ReplayVerdict {
   if (!model.publicationBarrierOpen) return `closed`
-  if (
-    model.attempts.some(({ gating, inReplacement }) => gating && inReplacement)
-  )
-    return `open`
+  if (model.attempts.some(replacementHeld)) return `open`
   return replacementSucceeded(model) ? `succeeded` : `failed`
 }
 
 // Retire one logical owner and its acquisition lease without judging the
 // replay: the caller judges once its whole demand change has retired.
-function retireOwner(
-  model: LifecycleModel,
-  demand: DemandName,
-): LifecycleOwner | undefined {
-  const index = model.owners.findIndex((owner) => owner.demand === demand)
-  if (index === -1) return undefined
-  const [owner] = model.owners.splice(index, 1)
-  retireAttempt(model, owner!, { unload: true })
+function retireOwner(model: LifecycleModel, owner: LifecycleOwner): void {
+  model.owners.splice(model.owners.indexOf(owner), 1)
+  retireAttempt(model, owner, true)
   // Retirement removes the logical owner, including its older transports.
-  for (const attempt of model.attempts) {
-    if (attempt.ownerId === owner!.id) attempt.gating = false
-  }
-  return owner
+  for (const attempt of model.attempts)
+    if (attempt.ownerId === owner.id) attempt.gating = false
 }
 
+// Starts the owner's acquisition attempt. The caller traces the load, so
+// that the trace order is the caller's.
 function startAttempt(
   model: LifecycleModel,
   owner: LifecycleOwner,
-  trace = true,
 ): LifecycleAttempt {
   const id = model.nextAttemptId++
   const attempt: LifecycleAttempt = {
@@ -430,58 +484,46 @@ function startAttempt(
     failure: model.failureForAttempt(id),
   }
   model.attempts.push(attempt)
-  model.reach.add(
-    `attempt-sync-run:${attempt.syncRunGeneration === 0 ? `initial` : `restarted`}`,
-  )
-  model.reach.add(
-    `attempt-replay:${attempt.replayGeneration === 0 ? `initial` : `replayed`}`,
-  )
-  model.reach.add(
-    `attempt-location:${attempt.syncRunGeneration === 0 ? `initial` : `restarted`}:${attempt.replayGeneration === 0 ? `initial` : `replayed`}`,
-  )
-  model.loads.push({
-    id,
-    demand: attempt.demand,
-    syncRunGeneration: attempt.syncRunGeneration,
-    replayGeneration: attempt.replayGeneration,
-  })
-  if (trace) {
-    model.trace.push({
-      type: `load`,
-      id,
-      demand: attempt.demand,
-      syncRunGeneration: attempt.syncRunGeneration,
-      replayGeneration: attempt.replayGeneration,
-    })
-  }
-  owner.attemptId = id
+  model.loads.push(loadEventOf(attempt))
+  owner.attemptId = attempt.id
   return attempt
 }
 
+function loadEventOf(attempt: LifecycleAttempt): LifecycleLoadEvent {
+  return {
+    id: attempt.id,
+    demand: attempt.demand,
+    syncRunGeneration: attempt.syncRunGeneration,
+    replayGeneration: attempt.replayGeneration,
+  }
+}
+
+function traceLoad(model: LifecycleModel, attempt: LifecycleAttempt): void {
+  model.trace.push({ type: `load`, ...loadEventOf(attempt) })
+}
+
+// Ends the owner's current attempt. `unload` gives the adapter its unload.
 function retireAttempt(
   model: LifecycleModel,
   owner: LifecycleOwner,
-  options: { unload: boolean; trace?: boolean },
+  unload: boolean,
 ): void {
   if (owner.attemptId === undefined) return
-  const attempt = model.attempts[owner.attemptId]
+  const attempt = attemptOf(model, owner.attemptId)
   owner.attemptId = undefined
-  if (!attempt) throw new Error(`model lost attempt`)
   attempt.gating = false
   attempt.reportable = false
   abortAttempt(model, attempt)
-  if (options.unload) {
+  if (unload) {
     model.unloads.push({
       attemptId: attempt.id,
       handlerSyncRunGeneration: model.syncRunGeneration,
     })
-    if (options.trace !== false) {
-      model.trace.push({
-        type: `unload`,
-        attemptId: attempt.id,
-        handlerSyncRunGeneration: model.syncRunGeneration,
-      })
-    }
+    model.trace.push({
+      type: `unload`,
+      attemptId: attempt.id,
+      handlerSyncRunGeneration: model.syncRunGeneration,
+    })
   }
 }
 
@@ -495,6 +537,8 @@ function abortAttempt(model: LifecycleModel, attempt: LifecycleAttempt): void {
     attempt.outcome = `reject`
 }
 
+// The attempt a settlement names: an open attempt of the demand that is
+// current (or obsolete, for `scope`), oldest or newest by `age`.
 function selectAttempt(
   model: LifecycleModel,
   command: Extract<LifecycleCommand, { type: `settle` }>,
@@ -515,277 +559,696 @@ function selectAttempt(
   return command.age === `oldest` ? candidates[0] : candidates.at(-1)
 }
 
+// A logical owner admitted by `request`. An active Collection starts its
+// acquisition; a cleaned-up one holds the owner without claiming one.
+function admitRequest(
+  model: LifecycleModel,
+  demand: DemandName,
+  acquires: boolean,
+): LifecycleEffect {
+  const owner: LifecycleOwner = {
+    id: model.nextOwnerId++,
+    demand,
+    aborted: false,
+  }
+  model.owners.push(owner)
+  // A waiting owner gets a promise now, without claiming an acquisition.
+  let result: LifecycleResultEvent = {
+    attemptId: `unacquired`,
+    resultKind: `promise`,
+  }
+  if (acquires) {
+    const attempt = startAttempt(model, owner)
+    traceLoad(model, attempt)
+    result = {
+      attemptId: attempt.id,
+      resultKind:
+        model.acquisitionMode === `async-pending` ? `promise` : `true`,
+    }
+  }
+  model.results.push(result)
+  model.trace.push({ type: `result`, ...result })
+  setStatus(model)
+  if (!model.publicationBarrierOpen) {
+    model.publications++
+    model.trace.push({ type: `publication` })
+  }
+  return { ownerId: owner.id, requestResult: true }
+}
+
+// Replay setup is asynchronous even when every acquisition is synchronous or
+// canceled. Logical owners queue setup; live owners start acquisitions.
+function startReplay(model: LifecycleModel, facts: LifecycleStepFacts): void {
+  model.replayGeneration++
+  setStatus(model, model.owners.length > 0)
+  // A canceled-only truncate starts no new work. It still opens the
+  // barrier when a prior replay's current attempt was pending; aborting that
+  // attempt below ends its wait.
+  model.publicationBarrierOpen =
+    model.owners.some(({ aborted }) => !aborted) ||
+    model.attempts.some(replacementHeld)
+  for (const owner of model.owners) {
+    // Replacing an acquisition is not releasing its logical owner, but it
+    // ends the replaced load: it holds neither readiness nor publication.
+    retireAttempt(model, owner, true)
+    if (!owner.aborted) traceLoad(model, startAttempt(model, owner))
+  }
+  settleReplay(model, facts)
+}
+
+// The sync-run boundary that cleanup ends and restart begins.
+function endSyncRun(model: LifecycleModel): void {
+  model.active = false
+  model.collectionStatus = `cleaned-up`
+  setStatus(model)
+}
+
+function beginSyncRun(model: LifecycleModel): void {
+  model.active = true
+  model.syncRunGeneration++
+  model.replayGeneration = 0
+  model.collectionStatus = `ready`
+}
+
+// Unsubscribe ends this subscription: its owners retire and release their
+// acquisition leases. The Collection's sync run survives.
+function unsubscribeOwners(model: LifecycleModel): void {
+  for (const owner of model.owners) retireAttempt(model, owner, true)
+  model.owners.length = 0
+  model.unsubscribed = true
+}
+
+type LifecycleEvent = LifecycleCommand[`type`] | `*`
+type CommandFor<E extends LifecycleEvent> = E extends `*`
+  ? LifecycleCommand
+  : Extract<LifecycleCommand, { type: E }>
+
+export type LifecycleRow = {
+  id: string
+  kind: `effect` | `noop`
+  from: ReadonlyArray<LifecyclePhase>
+  event: LifecycleEvent
+  to: LifecyclePhase | `same`
+  // The target a row acts on, found once. A row whose select finds none does
+  // not fire, and the noop row for its event fires instead.
+  select?: (model: LifecycleModel, command: LifecycleCommand) => unknown
+  reads: ReadonlyArray<LifecycleStateVariable>
+  writes: ReadonlyArray<LifecycleStateVariable>
+  effect: (
+    model: LifecycleModel,
+    command: LifecycleCommand,
+    target: unknown,
+    facts: LifecycleStepFacts,
+  ) => LifecycleEffect
+  // The contract clause or dated decision for this row. A flagged inference
+  // names what the grammar assumes beyond the contract.
+  authority: string
+}
+
+type RowSpec<E extends LifecycleEvent, T> = {
+  id: string
+  from: ReadonlyArray<LifecyclePhase>
+  event: E
+  to: LifecyclePhase | `same`
+  select?: (model: LifecycleModel, command: CommandFor<E>) => T | undefined
+  reads?: ReadonlyArray<LifecycleStateVariable>
+  writes: ReadonlyArray<LifecycleStateVariable>
+  effect: (
+    model: LifecycleModel,
+    command: CommandFor<E>,
+    target: T,
+    facts: LifecycleStepFacts,
+  ) => LifecycleEffect
+  authority: string
+}
+
+function defineRow<E extends LifecycleEvent, T = undefined>(
+  spec: RowSpec<E, T>,
+): LifecycleRow {
+  // Erases the row's command and target types to the table's shared shape.
+  return { kind: `effect`, reads: [], ...spec } as unknown as LifecycleRow
+}
+
+function defineNoopRow<E extends LifecycleEvent>(spec: {
+  id: string
+  from: ReadonlyArray<LifecyclePhase>
+  event: E
+  reads: ReadonlyArray<LifecycleStateVariable>
+  result?: LifecycleEffect
+  authority: string
+}): LifecycleRow {
+  const { result, ...row } = spec
+  return {
+    kind: `noop`,
+    to: `same`,
+    writes: [],
+    effect: () => result ?? {},
+    ...row,
+  } as LifecycleRow
+}
+
+const ENDED: ReadonlyArray<LifecyclePhase> = [
+  `unsubscribed`,
+  `unsubscribed-cleaned-up`,
+]
+const SUBSCRIBED: ReadonlyArray<LifecyclePhase> = [`live`, `cleaned-up`]
+const LIVE: ReadonlyArray<LifecyclePhase> = [`live`]
+const CLEANED: ReadonlyArray<LifecyclePhase> = [`cleaned-up`]
+
+const lifecycleTable: ReadonlyArray<LifecycleRow> = [
+  // An ended subscription keeps only the Collection's sync-run lifecycle.
+  defineRow({
+    id: `ended-cleanup`,
+    from: [`unsubscribed`],
+    event: `cleanup`,
+    to: `unsubscribed-cleaned-up`,
+    writes: [`phase`, `collection-status`],
+    effect: (model) => {
+      endSyncRun(model)
+      return { requestResult: false }
+    },
+    authority: `Header: "cleanup ends the current sync run"; unsubscribe does not end it, so cleanup still applies. Flagged inference: adapter cleanup settles before the next command, so the status is cleaned-up at once. ARCHITECTURE law 14 keeps the prior status only while adapter cleanup is pending, which this grammar does not model.`,
+  }),
+  defineRow({
+    id: `ended-restart`,
+    from: [`unsubscribed-cleaned-up`],
+    event: `restart`,
+    to: `unsubscribed`,
+    writes: [
+      `phase`,
+      `generations`,
+      `publication-barrier`,
+      `collection-status`,
+    ],
+    effect: (model) => {
+      beginSyncRun(model)
+      model.publicationBarrierOpen = false
+      return { requestResult: false }
+    },
+    authority: `Header: "restart starts a new sync run"; restart applies only after cleanup, since unsubscribe does not end the Collection's sync run. Flagged inference: restart closes the publication barrier, because no replay is open for an ended subscription.`,
+  }),
+  defineNoopRow({
+    id: `ended-noop`,
+    from: ENDED,
+    event: `*`,
+    reads: [],
+    result: { requestResult: false },
+    authority: `none: no contract clause. Unsubscribe ends this subscription, so a later command has no target. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `request-live`,
+    from: LIVE,
+    event: `request`,
+    to: `same`,
+    reads: [`publication-barrier`],
+    writes: [`owners`, `attempts`],
+    effect: (model, command) => admitRequest(model, command.demand, true),
+    authority: `Header: "a request combines a new logical owner with any acquisition attempt it starts"; glossary: logical subset owner, acquisition attempt.`,
+  }),
+  defineRow({
+    id: `request-cleaned`,
+    from: CLEANED,
+    event: `request`,
+    to: `same`,
+    reads: [`publication-barrier`],
+    writes: [`owners`],
+    effect: (model, command) => admitRequest(model, command.demand, false),
+    authority: `Header: a request admits a logical owner. A Collection that is cleaned up starts no attempt; the cleanedRestartDemandCases comment says a demand created while cleaned up waits for the next sync run's evidence.`,
+  }),
+
+  defineRow({
+    id: `abort-owner`,
+    from: SUBSCRIBED,
+    event: `abort`,
+    to: `same`,
+    select: (model, command) =>
+      model.owners.find(
+        ({ demand, aborted }) => demand === command.demand && !aborted,
+      ),
+    reads: [`owners`, `attempts`, `publication-barrier`],
+    writes: [`owners`, `attempts`, `publication-barrier`],
+    effect: (model, _command, owner, facts) => {
+      const abortedOwner = owner
+      abortedOwner.aborted = true
+      if (abortedOwner.attemptId !== undefined) {
+        const attempt = attemptOf(model, abortedOwner.attemptId)
+        abortAttempt(model, attempt)
+        attempt.reportable = false
+      }
+      // The abort ends the attempt, so the replay is judged as after any
+      // settlement: a held replacement can still cover it.
+      settleReplay(model, facts)
+      return { ownerId: abortedOwner.id }
+    },
+    authority: `Header: "abort cancels the owner's current acquisition attempt but does not retire the owner"; "an abort ends the load" (maintainer decision): the attempt holds no readiness and a later settlement reports nothing.`,
+  }),
+  defineNoopRow({
+    id: `abort-noop`,
+    from: SUBSCRIBED,
+    event: `abort`,
+    reads: [`owners`],
+    authority: `none: no live owner for the demand. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `release-owner`,
+    from: SUBSCRIBED,
+    event: `release`,
+    to: `same`,
+    select: (model, command) =>
+      model.owners.find(({ demand }) => demand === command.demand),
+    reads: [`owners`, `attempts`, `publication-barrier`],
+    writes: [`owners`, `attempts`, `publication-barrier`],
+    effect: (model, _command, owner, facts) => {
+      const released = owner
+      retireOwner(model, released)
+      settleReplay(model, facts)
+      return { ownerId: released.id }
+    },
+    authority: `Header: "release combines demand retirement with release of that owner's acquisition lease."`,
+  }),
+  defineNoopRow({
+    id: `release-noop`,
+    from: SUBSCRIBED,
+    event: `release`,
+    reads: [`owners`],
+    authority: `none: no logical owner for the demand. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `change-demands`,
+    from: SUBSCRIBED,
+    event: `change`,
+    to: `same`,
+    select: (model, command) =>
+      command.release.some((demand) =>
+        model.owners.some((owner) => owner.demand === demand),
+      )
+        ? true
+        : undefined,
+    reads: [`owners`, `attempts`, `publication-barrier`],
+    writes: [`owners`, `attempts`, `publication-barrier`],
+    effect: (model, command, _target, facts) => {
+      // Law 9: the change is one step. Every named owner retires first, and
+      // the replay is judged once after the last. The verdicts between its
+      // releases are recorded only to name the histories they would mislead.
+      const retired: Array<LifecycleOwner> = []
+      for (const demand of command.release) {
+        const owner = model.owners.find(
+          (candidate) => candidate.demand === demand,
+        )
+        if (!owner) continue
+        retireOwner(model, owner)
+        retired.push(owner)
+        facts.releaseVerdicts.push(replayVerdict(model))
+      }
+      settleReplay(model, facts)
+      return { ownerIds: retired.map(({ id }) => id) }
+    },
+    authority: `ARCHITECTURE normative law 9 ("A demand change counts as one step"); header: change "retires several logical owners at once".`,
+  }),
+  defineNoopRow({
+    id: `change-noop`,
+    from: SUBSCRIBED,
+    event: `change`,
+    reads: [`owners`],
+    authority: `none: no named demand has a logical owner. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `replace-owner`,
+    from: SUBSCRIBED,
+    event: `replace`,
+    to: `same`,
+    select: (model, command) => {
+      const replacement = model.owners.find(
+        ({ demand }) => demand === command.demand,
+      )
+      const replaced = model.owners
+        .filter(({ demand }) => demand === command.replaced)
+        .map(({ id }) => id)
+      return replacement && replaced.length > 0
+        ? { replacement, replaced }
+        : undefined
+    },
+    reads: [`owners`],
+    writes: [`owners`],
+    effect: (_model, _command, target) => {
+      const { replacement, replaced } = target
+      // Flagged inference: a second replace names the replacement anew, so
+      // its replaced set is its latest union. The grammar does not accumulate.
+      replacement.replaces = replaced
+      return { ownerId: replacement.id }
+    },
+    authority: `ARCHITECTURE normative law 10 ("A fragmented churn replacement retires prior coverage only after its union applies"); header: replace "marks one held owner as the replacement". Without a replaced owner nothing is replaced, so the row does not apply.`,
+  }),
+  defineNoopRow({
+    id: `replace-noop`,
+    from: SUBSCRIBED,
+    event: `replace`,
+    reads: [`owners`],
+    authority: `none: no held replacement or no owner for the replaced demand. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `settle-attempt`,
+    from: SUBSCRIBED,
+    event: `settle`,
+    to: `same`,
+    select: (model, command) => selectAttempt(model, command),
+    reads: [`owners`, `attempts`, `publication-barrier`],
+    writes: [`attempts`, `publication-barrier`],
+    effect: (model, command, target, facts) => {
+      const attempt = target
+      attempt.outcome = command.outcome
+      attempt.gating = false
+      // A reject reports only while the attempt is reportable and was not
+      // ended by an abort: a later outcome decides nothing. Selected attempts
+      // have no outcome, so `aborted` and `endedByAbort` agree for them.
+      if (
+        attempt.outcome === `reject` &&
+        attempt.reportable &&
+        !attempt.endedByAbort
+      ) {
+        model.lastError = attempt.failure
+        model.errors.push({ attemptId: attempt.id, error: attempt.failure })
+        model.trace.push({ type: `error`, attemptId: attempt.id })
+      }
+      settleReplay(model, facts)
+      return { attemptId: attempt.id }
+    },
+    authority: `Header: "settle changes an acquisition attempt". A reject reports only while the attempt is reportable and not ended by an abort ("a later settlement reports nothing").`,
+  }),
+  defineNoopRow({
+    id: `settle-noop`,
+    from: SUBSCRIBED,
+    event: `settle`,
+    reads: [`attempts`],
+    authority: `none: no open attempt matches the scope and age. Grammar convention, flagged.`,
+  }),
+
+  defineRow({
+    id: `truncate-replay`,
+    from: LIVE,
+    event: `truncate`,
+    to: `same`,
+    reads: [`generations`, `owners`, `attempts`, `publication-barrier`],
+    writes: [`generations`, `owners`, `attempts`, `publication-barrier`],
+    effect: (model, _command, _target, facts) => {
+      startReplay(model, facts)
+      return {}
+    },
+    authority: `ARCHITECTURE normative law 9 (a truncate replacement stays private until all work started by its active replay demands settles); header: "A replay that replaces an attempt aborts it too".`,
+  }),
+  defineNoopRow({
+    id: `truncate-noop`,
+    from: CLEANED,
+    event: `truncate`,
+    reads: [`phase`],
+    authority: `inference from the cleanup sentence: no sync run is active, so a truncate has no replay to start. Flagged.`,
+  }),
+
+  defineRow({
+    id: `cleanup-run`,
+    from: LIVE,
+    event: `cleanup`,
+    to: `cleaned-up`,
+    reads: [`owners`, `attempts`, `generations`],
+    writes: [
+      `owners`,
+      `attempts`,
+      `publication-barrier`,
+      `phase`,
+      `collection-status`,
+    ],
+    effect: (model) => {
+      // Cleanup releases the resources at once and gives no unload.
+      for (const owner of model.owners) retireAttempt(model, owner, false)
+      for (const attempt of model.attempts) attempt.gating = false
+      model.publicationBarrierOpen = false
+      endSyncRun(model)
+      return {}
+    },
+    authority: `Header: "cleanup ends the current sync run" and releases its resources; ARCHITECTURE law 14: cleanup start synchronously closes restart admission. Flagged inference: the Collection status changes at once, as in ended-cleanup.`,
+  }),
+  defineNoopRow({
+    id: `cleanup-noop`,
+    from: CLEANED,
+    event: `cleanup`,
+    reads: [`phase`],
+    authority: `inference from the cleanup sentence: the sync run already ended. Flagged.`,
+  }),
+
+  defineRow({
+    id: `restart-run`,
+    from: CLEANED,
+    event: `restart`,
+    to: `live`,
+    reads: [`owners`, `attempts`, `phase`],
+    writes: [
+      `phase`,
+      `generations`,
+      `owners`,
+      `attempts`,
+      `publication-barrier`,
+      `collection-status`,
+    ],
+    effect: (model, _command, _target, facts) => {
+      beginSyncRun(model)
+      model.publicationBarrierOpen = model.owners.some(
+        ({ aborted }) => !aborted,
+      )
+      setStatus(model, model.owners.length > 0)
+      const replayAttempts = model.owners
+        .filter(({ aborted }) => !aborted)
+        .map((owner) => startAttempt(model, owner))
+      facts.replayFailedOwnerDecided = judgeReplay(model)
+      model.publications++
+      model.trace.push({ type: `publication` })
+      for (const attempt of replayAttempts) traceLoad(model, attempt)
+      setStatus(model)
+      return {}
+    },
+    authority: `Header: "restart starts a new sync run". ARCHITECTURE law 9: a replay stays private until its work settles, so the barrier opens for the owners that are not aborted. Flagged inferences: the publication is emitted before the replay loads, and an aborted owner starts no new attempt ("an abort ends the load").`,
+  }),
+  defineNoopRow({
+    id: `restart-noop`,
+    from: LIVE,
+    event: `restart`,
+    reads: [`phase`],
+    authority: `inference from the restart sentence: the sync run is still active. Flagged.`,
+  }),
+
+  defineRow({
+    id: `unsubscribe-live`,
+    from: LIVE,
+    event: `unsubscribe`,
+    to: `unsubscribed`,
+    reads: [`owners`, `attempts`],
+    writes: [`owners`, `attempts`, `phase`],
+    effect: (model) => {
+      unsubscribeOwners(model)
+      return {}
+    },
+    authority: `Header: "unsubscribe ends this subscription, retires its logical subset owners, and releases their acquisition leases. It does not end the Collection's sync run."`,
+  }),
+  defineRow({
+    id: `unsubscribe-cleaned`,
+    from: CLEANED,
+    event: `unsubscribe`,
+    to: `unsubscribed-cleaned-up`,
+    reads: [`owners`, `attempts`],
+    writes: [`owners`, `attempts`, `phase`],
+    effect: (model) => {
+      unsubscribeOwners(model)
+      return {}
+    },
+    authority: `Header: as unsubscribe-live. The cleaned-up Collection keeps its status.`,
+  }),
+]
+
+/** The reach labels of every row. A campaign that declares them must fire each row. */
+export const lifecycleRowLabels: ReadonlyArray<string> = lifecycleTable.map(
+  ({ id }) => `row:${id}`,
+)
+
+// The observations a step may name. Each is data about one step, not reach.
+type LifecycleStep = {
+  command: LifecycleCommand
+  row: LifecycleRow
+  before: {
+    attemptCount: number
+    duplicateOwner: boolean
+    overlappingReplay: boolean
+    partialGenerationSupersession: boolean
+  }
+  facts: LifecycleStepFacts
+  attempts: ReadonlyArray<LifecycleAttempt>
+}
+
+function attemptLabels(attempt: LifecycleAttempt): Array<string> {
+  const sync = attempt.syncRunGeneration === 0 ? `initial` : `restarted`
+  const replay = attempt.replayGeneration === 0 ? `initial` : `replayed`
+  return [
+    `attempt-sync-run:${sync}`,
+    `attempt-replay:${replay}`,
+    `attempt-location:${sync}:${replay}`,
+  ]
+}
+
+function settleLabels(command: Extract<LifecycleCommand, { type: `settle` }>) {
+  return [
+    `settle-scope:${command.scope}`,
+    `settle-age:${command.age}`,
+    `settle-outcome:${command.outcome}`,
+    `settle:${command.scope}:${command.age}:${command.outcome}`,
+  ]
+}
+
+function changeLabels(verdicts: ReadonlyArray<ReplayVerdict>): Array<string> {
+  const verdict = verdicts.at(-1)!
+  const between = verdicts.slice(0, -1)
+  const labels: Array<string> = []
+  if (verdicts.length > 1 && verdict !== `closed`)
+    labels.push(`change:several-owners-during-replay`)
+  if (verdict === `failed` && between.includes(`succeeded`))
+    labels.push(`change:between-releases-would-publish`)
+  if (verdict === `succeeded` && between.includes(`failed`))
+    labels.push(`change:between-releases-would-fail`)
+  return labels
+}
+
+function lifecycleReachLabels(step: LifecycleStep): Array<string> {
+  const { command, row, before, facts, attempts } = step
+  const labels = [
+    `row:${row.id}`,
+    `command:${command.type}`,
+    `${row.kind === `effect` ? `effective` : `noop`}:${command.type}`,
+    ...attempts.flatMap(attemptLabels),
+  ]
+  if (facts.replayFailedOwnerDecided)
+    labels.push(`replacement-decides-failed-owner`)
+  if (row.kind === `effect` && command.type === `settle`)
+    labels.push(...settleLabels(command))
+  switch (row.id) {
+    case `request-live`:
+    case `request-cleaned`:
+      if (before.duplicateOwner) labels.push(`duplicate-owner`)
+      if (row.id === `request-cleaned`) labels.push(`request-while-cleaned`)
+      break
+    case `truncate-replay`:
+      if (before.overlappingReplay) labels.push(`overlapping-replay`)
+      break
+    case `cleanup-run`:
+      if (before.partialGenerationSupersession)
+        labels.push(`partial-generation-supersession`)
+      break
+    case `change-demands`:
+      labels.push(...changeLabels(facts.releaseVerdicts))
+      break
+  }
+  return labels
+}
+
+function observeBefore(
+  model: LifecycleModel,
+  command: LifecycleCommand,
+): LifecycleStep[`before`] {
+  const current = model.attempts.filter(
+    ({ syncRunGeneration }) => syncRunGeneration === model.syncRunGeneration,
+  )
+  return {
+    attemptCount: model.attempts.length,
+    duplicateOwner:
+      command.type === `request` &&
+      model.owners.some(({ demand }) => demand === command.demand),
+    overlappingReplay:
+      command.type === `truncate` &&
+      model.replayGeneration > 0 &&
+      current.some(({ outcome }) => outcome === undefined),
+    partialGenerationSupersession:
+      command.type === `cleanup` &&
+      current.some(({ outcome }) => outcome !== undefined) &&
+      current.some(({ outcome }) => outcome === undefined),
+  }
+}
+
+// The first row that the phase, event, and select admit, with its target.
+function selectRow(
+  model: LifecycleModel,
+  command: LifecycleCommand,
+): { row: LifecycleRow; target: unknown } {
+  const phase = lifecyclePhase(model)
+  for (const row of lifecycleTable) {
+    if (!row.from.includes(phase)) continue
+    if (row.event !== `*` && row.event !== command.type) continue
+    const target = row.select?.(model, command)
+    if (row.select && target === undefined) continue
+    return { row, target }
+  }
+  throw new Error(`lifecycle table has no row for ${phase} ${command.type}`)
+}
+
+// The state variables the engine checks for undeclared writes. Outputs such as
+// `status`, `trace`, `reach`, and the adapter lists are observations, not state.
+function projectVariables(
+  model: LifecycleModel,
+): Record<LifecycleStateVariable, string> {
+  return {
+    phase: lifecyclePhase(model),
+    owners: JSON.stringify(model.owners),
+    attempts: JSON.stringify(model.attempts, (key, value) =>
+      key === `failure` ? undefined : value,
+    ),
+    generations: `${model.syncRunGeneration}/${model.replayGeneration}`,
+    'publication-barrier': String(model.publicationBarrierOpen),
+    'collection-status': model.collectionStatus,
+  }
+}
+
+const stateVariables = Object.keys(
+  projectVariables(createLifecycleModel()),
+) as Array<LifecycleStateVariable>
+
 /** Pure reference transition. It never reads adapter callbacks or SUT state. */
 export function reduceLifecycle(
   model: LifecycleModel,
   command: LifecycleCommand,
 ): LifecycleEffect {
-  model.reach.add(`command:${command.type}`)
-  if (model.unsubscribed) {
-    if (command.type === `cleanup` && model.active) {
-      model.reach.add(`effective:cleanup`)
-      model.active = false
-      model.collectionStatus = `cleaned-up`
-    } else if (command.type === `restart` && !model.active) {
-      model.reach.add(`effective:restart`)
-      model.active = true
-      model.syncRunGeneration++
-      model.replayGeneration = 0
-      model.publicationBarrierOpen = false
-      model.collectionStatus = `ready`
-    } else {
-      model.reach.add(`noop:${command.type}`)
-    }
-    return { requestResult: false }
+  const phaseBefore = lifecyclePhase(model)
+  const { row, target } = selectRow(model, command)
+  const before = observeBefore(model, command)
+  const variablesBefore = projectVariables(model)
+  const facts: LifecycleStepFacts = {
+    releaseVerdicts: [],
+    replayFailedOwnerDecided: false,
   }
-
-  if (command.type === `request`) {
-    model.reach.add(`effective:request`)
-    if (model.owners.some(({ demand }) => demand === command.demand)) {
-      model.reach.add(`duplicate-owner`)
-    }
-    if (!model.active) model.reach.add(`request-while-cleaned`)
-    const owner: LifecycleOwner = {
-      id: model.nextOwnerId++,
-      demand: command.demand,
-      aborted: false,
-    }
-    model.owners.push(owner)
-    if (model.active) {
-      const attemptId = startAttempt(model, owner).id
-      const result = {
-        attemptId,
-        resultKind:
-          model.acquisitionMode === `async-pending`
-            ? (`promise` as const)
-            : (`true` as const),
-      }
-      model.results.push(result)
-      model.trace.push({ type: `result`, ...result })
-    } else {
-      // A waiting owner gets a promise now, without claiming an acquisition.
-      const result = { attemptId: `unacquired`, resultKind: `promise` } as const
-      model.results.push(result)
-      model.trace.push({ type: `result`, ...result })
-    }
-    setStatus(model)
-    if (!model.publicationBarrierOpen) {
-      model.publications++
-      model.trace.push({ type: `publication` })
-    }
-    return { ownerId: owner.id, requestResult: true }
-  }
-
-  if (command.type === `abort`) {
-    const owner = model.owners.find(
-      ({ demand, aborted }) => demand === command.demand && !aborted,
+  const effect = row.effect(model, command, target, facts)
+  const phaseAfter = lifecyclePhase(model)
+  const expectedPhase = row.to === `same` ? phaseBefore : row.to
+  if (phaseAfter !== expectedPhase)
+    throw new Error(
+      `lifecycle row ${row.id} ended in ${phaseAfter}, not ${expectedPhase}`,
     )
-    if (!owner) {
-      model.reach.add(`noop:abort`)
-      return {}
-    }
-    model.reach.add(`effective:abort`)
-    owner.aborted = true
-    if (owner.attemptId !== undefined) {
-      const attempt = model.attempts[owner.attemptId]!
-      abortAttempt(model, attempt)
-      attempt.reportable = false
-    }
-    // The abort ends the attempt, so the replay is judged as after any
-    // settlement: a held replacement can still cover it.
-    judgeReplay(model)
-    setStatus(model)
-    return { ownerId: owner.id }
-  }
-
-  if (command.type === `release`) {
-    const owner = retireOwner(model, command.demand)
-    if (!owner) {
-      model.reach.add(`noop:release`)
-      return {}
-    }
-    model.reach.add(`effective:release`)
-    judgeReplay(model)
-    setStatus(model)
-    return { ownerId: owner.id }
-  }
-
-  if (command.type === `change`) {
-    // Law 9: the change is one step. Every named owner retires first, and
-    // the replay is judged once after the last. The verdicts between its
-    // releases are recorded only to name the histories they would mislead.
-    const verdicts: Array<ReturnType<typeof replayVerdict>> = []
-    const retired: Array<LifecycleOwner> = []
-    for (const demand of command.release) {
-      const owner = retireOwner(model, demand)
-      if (!owner) continue
-      retired.push(owner)
-      verdicts.push(replayVerdict(model))
-    }
-    if (retired.length === 0) {
-      model.reach.add(`noop:change`)
-      return {}
-    }
-    model.reach.add(`effective:change`)
-    const verdict = verdicts.at(-1)!
-    if (retired.length > 1 && verdict !== `closed`)
-      model.reach.add(`change:several-owners-during-replay`)
-    const between = verdicts.slice(0, -1)
-    if (verdict === `failed` && between.includes(`succeeded`))
-      model.reach.add(`change:between-releases-would-publish`)
-    if (verdict === `succeeded` && between.includes(`failed`))
-      model.reach.add(`change:between-releases-would-fail`)
-    judgeReplay(model)
-    setStatus(model)
-    return { ownerIds: retired.map(({ id }) => id) }
-  }
-
-  if (command.type === `replace`) {
-    const replacement = model.owners.find(
-      ({ demand }) => demand === command.demand,
+  const variablesAfter = projectVariables(model)
+  for (const variable of stateVariables)
+    if (
+      variablesAfter[variable] !== variablesBefore[variable] &&
+      !row.writes.includes(variable)
     )
-    if (!replacement) {
-      model.reach.add(`noop:replace`)
-      return {}
-    }
-    model.reach.add(`effective:replace`)
-    replacement.replaces = model.owners
-      .filter(({ demand }) => demand === command.replaced)
-      .map(({ id }) => id)
-    return { ownerId: replacement.id }
-  }
-
-  if (command.type === `settle`) {
-    const attempt = selectAttempt(model, command)
-    if (!attempt) {
-      model.reach.add(`noop:settle`)
-      return {}
-    }
-    model.reach.add(`effective:settle`)
-    model.reach.add(`settle-scope:${command.scope}`)
-    model.reach.add(`settle-age:${command.age}`)
-    model.reach.add(`settle-outcome:${command.outcome}`)
-    model.reach.add(`settle:${command.scope}:${command.age}:${command.outcome}`)
-    attempt.outcome = command.outcome
-    attempt.gating = false
-    if (
-      command.outcome === `reject` &&
-      attempt.reportable &&
-      !attempt.aborted
-    ) {
-      model.lastError = attempt.failure
-      model.errors.push({ attemptId: attempt.id, error: attempt.failure })
-      model.trace.push({ type: `error`, attemptId: attempt.id })
-    }
-    judgeReplay(model)
-    setStatus(model)
-    return { attemptId: attempt.id }
-  }
-
-  if (command.type === `truncate`) {
-    if (!model.active) {
-      model.reach.add(`noop:truncate`)
-      return {}
-    }
-    model.reach.add(`effective:truncate`)
-    if (
-      model.replayGeneration > 0 &&
-      model.attempts.some(
-        ({ syncRunGeneration, outcome }) =>
-          syncRunGeneration === model.syncRunGeneration &&
-          outcome === undefined,
+      throw new Error(
+        `lifecycle row ${row.id} wrote ${variable}, which it does not declare`,
       )
-    ) {
-      model.reach.add(`overlapping-replay`)
-    }
-    model.replayGeneration++
-    // Replay setup is asynchronous even when every acquisition is synchronous
-    // or canceled. Logical owners queue setup; live owners start acquisitions.
-    setStatus(model, model.owners.length > 0)
-    // A canceled-only truncate starts no new work. It still opens the
-    // barrier when a prior replay's current attempt was pending; aborting
-    // that attempt below ends its wait.
-    model.publicationBarrierOpen =
-      model.owners.some(({ aborted }) => !aborted) ||
-      model.attempts.some(
-        ({ gating, inReplacement }) => gating && inReplacement,
-      )
-    for (const owner of model.owners) {
-      // Replacing an acquisition is not releasing its logical owner, but it
-      // ends the replaced load: it holds neither readiness nor publication.
-      retireAttempt(model, owner, { unload: true })
-      if (!owner.aborted) {
-        startAttempt(model, owner)
-      }
-    }
-    judgeReplay(model)
-    setStatus(model)
-    return {}
+  const step: LifecycleStep = {
+    command,
+    row,
+    before,
+    facts,
+    attempts: model.attempts.slice(before.attemptCount),
   }
-
-  if (command.type === `cleanup`) {
-    if (!model.active) {
-      model.reach.add(`noop:cleanup`)
-      return {}
-    }
-    model.reach.add(`effective:cleanup`)
-    const current = model.attempts.filter(
-      ({ syncRunGeneration }) => syncRunGeneration === model.syncRunGeneration,
-    )
-    if (
-      current.some(({ outcome }) => outcome !== undefined) &&
-      current.some(({ outcome }) => outcome === undefined)
-    ) {
-      model.reach.add(`partial-generation-supersession`)
-    }
-    for (const owner of model.owners)
-      retireAttempt(model, owner, { unload: false })
-    for (const attempt of model.attempts) attempt.gating = false
-    model.active = false
-    model.publicationBarrierOpen = false
-    model.collectionStatus = `cleaned-up`
-    setStatus(model)
-    return {}
-  }
-
-  if (command.type === `restart`) {
-    if (model.active) {
-      model.reach.add(`noop:restart`)
-      return {}
-    }
-    model.reach.add(`effective:restart`)
-    model.active = true
-    model.syncRunGeneration++
-    model.replayGeneration = 0
-    model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
-    model.collectionStatus = `ready`
-    setStatus(model, model.owners.length > 0)
-    const replayLoads: Array<LifecycleLoadEvent> = []
-    for (const owner of model.owners) {
-      if (!owner.aborted) replayLoads.push(startAttempt(model, owner, false))
-    }
-    judgeReplay(model)
-    model.publications++
-    model.trace.push({ type: `publication` })
-    for (const load of replayLoads) {
-      model.trace.push({
-        type: `load`,
-        id: load.id,
-        demand: load.demand,
-        syncRunGeneration: load.syncRunGeneration,
-        replayGeneration: load.replayGeneration,
-      })
-    }
-    setStatus(model)
-    return {}
-  }
-
-  model.reach.add(`effective:unsubscribe`)
-  for (const owner of model.owners)
-    retireAttempt(model, owner, { unload: true })
-  model.owners.length = 0
-  model.unsubscribed = true
-  return {}
+  for (const label of lifecycleReachLabels(step)) model.reach.add(label)
+  return effect
 }
 
 export const greenLifecycleHistoryArbitrary = fc.array(
@@ -793,10 +1256,7 @@ export const greenLifecycleHistoryArbitrary = fc.array(
   { minLength: 1, maxLength: 20 },
 )
 
-export const syncLifecycleHistoryArbitrary = fc.array(
-  lifecycleCommandArbitrary,
-  { minLength: 1, maxLength: 20 },
-)
+export const syncLifecycleHistoryArbitrary = greenLifecycleHistoryArbitrary
 
 /**
  * The demand-change grammar: three demands, with `change` and `replace`.
@@ -1287,6 +1747,19 @@ export const parkedReloadDemandCases: ReadonlyArray<ParkedReloadDemandCase> = (
   ] as const
 ).map((newRun) => ({ newRun }))
 
+// Attempts that start work for each case. The reload's replay starts one
+// unless a snapshot supersedes it first; a later snapshot starts another.
+const parkedReloadAttempts: Record<ParkedReloadDemandCase[`newRun`], number> = {
+  // The reload's replay starts one attempt and nothing supersedes it.
+  ready: 1,
+  // A snapshot inside `sync()` supersedes the replay before it starts any
+  // request, so readiness and the snapshot name one attempt (parkedReloadDemandCases).
+  'ready-then-snapshot': 1,
+  'snapshot-then-ready': 1,
+  // A later snapshot is a newer attempt: it replaces the settled acquisition.
+  'ready-then-later-snapshot': 2,
+}
+
 export function expectedParkedReloadDemand({
   newRun,
 }: ParkedReloadDemandCase): {
@@ -1296,9 +1769,7 @@ export function expectedParkedReloadDemand({
   status: `ready`
   collectionStatus: `ready`
 } {
-  // Attempts that start work: the reload's replay, which a snapshot inside
-  // `sync()` supersedes before it begins, and a later snapshot's replay.
-  const attempts = newRun === `ready-then-later-snapshot` ? 2 : 1
+  const attempts = parkedReloadAttempts[newRun]
   return {
     loads: attempts,
     // Each later attempt replaces the acquisition of the one before it.
@@ -1432,15 +1903,16 @@ export type StartHandoffHistory = {
   cause: `error` | `undefined`
 }
 
+const STATUS_OF_OUTCOME = {
+  ready: `ready`,
+  fail: `error`,
+  throw: `crashed`,
+} as const
+
 export function expectedStartHandoff(history: StartHandoffHistory) {
   return {
     throws: history.outcome === `throw` && history.timing === `during-release`,
-    status:
-      history.outcome === `ready`
-        ? `ready`
-        : history.outcome === `fail`
-          ? `error`
-          : `crashed`,
+    status: STATUS_OF_OUTCOME[history.outcome],
     starts: 1,
   } as const
 }

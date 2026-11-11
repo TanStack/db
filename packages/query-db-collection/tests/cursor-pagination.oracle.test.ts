@@ -3,20 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   differs,
   oracleProperty,
-  oracleRouteOf,
   pass,
 } from '../../db/tests/oracle-property.js'
 import { createDeferred } from '../../db/src/deferred.js'
-import {
-  oraclePropertyOptions,
-  oracleRoute,
-  readOracleRunConfig,
-} from '../../db/tests/oracle-config.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
-import type { Observation } from '../../db/tests/oracle-property.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 import type { Row, Scope, Window } from './cursor-pagination/model-oracle.js'
 
 /**
@@ -67,52 +62,94 @@ const fixtureRows: Array<Row> = Array.from({ length: 9 }, (_, id) => ({
 const allAscending: Scope = { group: undefined, descending: false }
 
 const fixedSeed = 1_779_001
-const replay = readOracleRunConfig()
-
-/** Both ordinary campaigns use the same property and run budget. */
-async function assertCursorProperty<Ts>(
-  property: fc.IAsyncProperty<Ts>,
-  runs: number,
-  name: string,
-): Promise<void> {
-  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
-  const options = oraclePropertyOptions(runs, name)
-  if (replay.campaignSeed === undefined) {
-    await fc.assert(property, { ...options, seed: fixedSeed })
-  }
-  oracleRoute(oracleRouteOf(options))
-  await fc.assert(property, options)
+const pagerLaw = {
+  authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
+  limits: `Bounded immutable backend sequences; no changing HTTP endpoint snapshots.`,
 }
 
-it(`backend sequences reject foreign tokens while retaining their own continuations`, async () => {
-  await assertCursorProperty(
-    fc.asyncProperty(
-      fc.integer({ min: 1, max: 5 }),
-      fc.boolean(),
-      async (size, descending) => {
-        const scope = { group: undefined, descending }
-        const rows = Array.from({ length: size * 3 }, (_, id) => ({
-          id,
-          rank: id,
-          group: 0,
-        }))
-        const a = createBackend(rows, scope, size)
-        const b = createBackend(rows, scope, size)
-        const firstA = await a.fetchPage(undefined),
-          firstB = await b.fetchPage(undefined)
-        expect(firstA.nextCursor).not.toBe(firstB.nextCursor)
-        await expect(
-          Promise.resolve().then(() => b.fetchPage(firstA.nextCursor!)),
-        ).rejects.toThrow(`Foreign`)
-        const own = await b.fetchPage(firstB.nextCursor!)
-        expect(own.rows).toEqual(
-          expectedRows(rows, scope, { offset: size, limit: size }),
-        )
-      },
-    ),
-    50,
-    `cursor-pagination.backend-ownership`,
+// Keep the old exact comparisons, including Error equality, in the native
+// check. Only a comparison AssertionError becomes a law verdict; runtime and
+// cleanup errors remain errors from the production driver.
+function checkPagerTrace(
+  trace: ReadonlyArray<Observation>,
+  expected: Readonly<Record<string, unknown>>,
+): Verdict {
+  for (const observation of trace) {
+    try {
+      expect(observation.value, observation.checkpoint).toEqual(
+        expected[observation.checkpoint],
+      )
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== `AssertionError`)
+        throw error
+      return {
+        kind: `violation`,
+        checkpoint: observation.checkpoint,
+        law: `opaque pager`,
+        difference: error.message,
+        cause: error,
+      }
+    }
+  }
+  return (
+    differs(
+      `complete pager history`,
+      `opaque pager`,
+      trace.length,
+      Object.keys(expected).length,
+    ) ?? pass
   )
+}
+
+oracleProperty({
+  id: `cursor-pagination.backend-ownership`,
+  law: {
+    ...pagerLaw,
+    statement: `Backend sequences reject foreign continuation tokens while retaining their own continuations.`,
+  },
+  // What this oracle owns: the opaque cursor pager that createCursorPager builds
+  // over a backend. The pager's reads must equal the full-relation model (see
+  // the declaration below), and its fetched-page counts must follow the
+  // transport rules.
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
+  histories: {
+    arbitrary: fc.tuple(fc.integer({ min: 1, max: 5 }), fc.boolean()),
+    runs: 50,
+    fixedSeeds: [fixedSeed],
+  },
+  model: ([size, descending]) => ({
+    'separate-tokens': true,
+    'foreign-rejected': true,
+    own: expectedRows(
+      Array.from({ length: size * 3 }, (_, id) => ({ id, rank: id, group: 0 })),
+      { group: undefined, descending },
+      { offset: size, limit: size },
+    ),
+  }),
+  driver: async ([size, descending], observe) => {
+    const scope = { group: undefined, descending }
+    const rows = Array.from({ length: size * 3 }, (_, id) => ({
+      id,
+      rank: id,
+      group: 0,
+    }))
+    const a = createBackend(rows, scope, size)
+    const b = createBackend(rows, scope, size)
+    const firstA = await a.fetchPage(undefined),
+      firstB = await b.fetchPage(undefined)
+    observe(`separate-tokens`, firstA.nextCursor !== firstB.nextCursor)
+    try {
+      await Promise.resolve().then(() => b.fetchPage(firstA.nextCursor!))
+      observe(`foreign-rejected`, false)
+    } catch (error) {
+      observe(
+        `foreign-rejected`,
+        error instanceof Error && error.message.includes(`Foreign`),
+      )
+    }
+    observe(`own`, (await b.fetchPage(firstB.nextCursor!)).rows)
+  },
+  check: (_history, trace, expected) => checkPagerTrace(trace, expected),
 })
 
 async function checkRead(
@@ -164,27 +201,35 @@ describe(`cursor pagination reference`, () => {
 })
 
 describe(`opaque cursor adapter`, () => {
-  it(`keeps answers invariant under backend page repartition`, async () => {
-    await assertCursorProperty(
-      fc.asyncProperty(
-        rowsArbitrary,
-        scopeArbitrary,
-        windowArbitrary,
-        async (rows, scope, window) => {
-          for (const size of [1, 4, 50]) {
-            const backend = createBackend(rows, scope, size, true)
-            await checkRead(
-              rows,
-              scope,
-              window,
-              createCursorPager(backend.fetchPage).read,
-            )
-          }
-        },
+  oracleProperty({
+    id: `cursor-pagination.partition`,
+    law: {
+      ...pagerLaw,
+      statement: `The requested full-relation slice is invariant under backend page repartition.`,
+    },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
+    histories: {
+      arbitrary: fc.tuple(rowsArbitrary, scopeArbitrary, windowArbitrary),
+      runs: 100,
+      fixedSeeds: [fixedSeed],
+    },
+    model: ([rows, scope, window]) =>
+      Object.fromEntries(
+        [1, 4, 50].map((size) => [
+          `page-size-${size}`,
+          expectedRows(rows, scope, window),
+        ]),
       ),
-      100,
-      `cursor-pagination.partition`,
-    )
+    driver: async ([rows, scope, window], observe) => {
+      for (const size of [1, 4, 50]) {
+        const backend = createBackend(rows, scope, size, true)
+        observe(
+          `page-size-${size}`,
+          await createCursorPager(backend.fetchPage).read(window),
+        )
+      }
+    },
+    check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
 
   it.each([`abort`, `reject`, `reset`] as const)(
@@ -241,42 +286,65 @@ describe(`opaque cursor adapter`, () => {
     },
   )
 
-  it(`resets source generations and isolates filter/order scopes`, async () => {
-    await assertCursorProperty(
-      fc.asyncProperty(
-        rowsArbitrary,
-        scopeArbitrary,
-        scopeArbitrary,
-        async (rows, firstScope, secondScope) => {
-          let backend = createBackend(rows, firstScope, 3)
-          const pager = createCursorPager((cursor, signal) =>
-            backend.fetchPage(cursor, signal),
-          )
-          const all = { offset: 0, limit: undefined }
-          await checkRead(rows, firstScope, all, pager.read)
-          const changed = rows.map((row) => ({
-            ...row,
-            rank: -row.rank,
-            id: row.id + 100,
-          }))
-          backend = createBackend(changed, secondScope, 2)
-          pager.reset()
-          await checkRead(changed, secondScope, all, pager.read)
-          const independent = createCursorPager(
-            createBackend(rows, firstScope, 4).fetchPage,
-          )
-          await checkRead(rows, firstScope, all, independent.read)
-          await checkRead(changed, secondScope, all, pager.read)
-        },
-      ),
-      50,
-      `cursor-pagination.reset`,
-    )
+  oracleProperty({
+    id: `cursor-pagination.reset`,
+    law: {
+      ...pagerLaw,
+      statement: `Resetting a pager changes its source generation without changing an independent filter/order scope.`,
+    },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
+    histories: {
+      arbitrary: fc.tuple(rowsArbitrary, scopeArbitrary, scopeArbitrary),
+      runs: 50,
+      fixedSeeds: [fixedSeed],
+    },
+    model: ([rows, firstScope, secondScope]) => {
+      const changed = rows.map((row) => ({
+        ...row,
+        rank: -row.rank,
+        id: row.id + 100,
+      }))
+      const all = { offset: 0, limit: undefined }
+      return {
+        initial: expectedRows(rows, firstScope, all),
+        changed: expectedRows(changed, secondScope, all),
+        independent: expectedRows(rows, firstScope, all),
+        reread: expectedRows(changed, secondScope, all),
+      }
+    },
+    driver: async ([rows, firstScope, secondScope], observe) => {
+      let backend = createBackend(rows, firstScope, 3)
+      const pager = createCursorPager((cursor, signal) =>
+        backend.fetchPage(cursor, signal),
+      )
+      const all = { offset: 0, limit: undefined }
+      observe(`initial`, await pager.read(all))
+      const changed = rows.map((row) => ({
+        ...row,
+        rank: -row.rank,
+        id: row.id + 100,
+      }))
+      backend = createBackend(changed, secondScope, 2)
+      pager.reset()
+      observe(`changed`, await pager.read(all))
+      const independent = createCursorPager(
+        createBackend(rows, firstScope, 4).fetchPage,
+      )
+      observe(`independent`, await independent.read(all))
+      observe(`reread`, await pager.read(all))
+    },
+    check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
 
-  it(`recovers after faults at generated intermediate page boundaries`, async () => {
-    await assertCursorProperty(
-      fc.asyncProperty(
+  oracleProperty({
+    id: `cursor-pagination.failure`,
+    law: {
+      ...pagerLaw,
+      statement: `An intermediate page fault rejects its reader without preventing a healthy peer or causing refetches of an already cached slice.`,
+    },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
+    histories: {
+      arbitrary: fc.tuple(
         fc.array(fc.integer({ min: -2, max: 2 }), {
           minLength: 12,
           maxLength: 24,
@@ -285,53 +353,59 @@ describe(`opaque cursor adapter`, () => {
         fc.integer({ min: 0, max: 2 }),
         fc.boolean(),
         fc.constantFrom(`reject`, `abort`),
-        async (ranks, size, faultPage, descending, fault) => {
-          const rows = ranks.map((rank, id) => ({ id, rank, group: id % 2 }))
-          const scope = { group: undefined, descending }
-          const backend = createBackend(rows, scope, size)
-          const abort = new AbortController()
-          const error = new Error(`page failure`)
-          let calls = 0
-          const pager = createCursorPager(async (cursor, signal) => {
-            const page = await backend.fetchPage(cursor, signal)
-            if (calls++ === faultPage) {
-              if (fault === `reject`) throw error
-              abort.abort(error)
-            }
-            return page
-          })
-          const all = { offset: 0, limit: undefined }
-          const failed = pager.read(all, abort.signal)
-          // Attach observers before the healthy peer can expose a failure.
-          const outcomes = Promise.allSettled([failed, pager.read(all)])
-          const [first, peer] = await outcomes
-          expect(first).toEqual({ status: `rejected`, reason: error })
-          expect(peer).toEqual({
-            status: `fulfilled`,
-            value: expectedRows(rows, scope, all),
-          })
-          expect(backend.calls).toHaveLength(
-            // Query marks failed fetches stale and rebuilds their prefix.
-            Math.ceil(rows.length / size) +
-              (fault === `reject` ? faultPage + 1 : 0),
-          )
-          const before = backend.calls.length
-          await checkRead(rows, scope, { offset: 1, limit: 3 }, pager.read)
-          expect(backend.calls).toHaveLength(before)
-        },
       ),
-      100,
-      `cursor-pagination.failure`,
-    )
+      runs: 100,
+      fixedSeeds: [fixedSeed],
+    },
+    model: ([ranks, size, faultPage, descending, fault]) => {
+      const rows = ranks.map((rank, id) => ({ id, rank, group: id % 2 }))
+      const scope = { group: undefined, descending }
+      return {
+        outcomes: [
+          { status: `rejected`, reason: new Error(`page failure`) },
+          {
+            status: `fulfilled`,
+            value: expectedRows(rows, scope, { offset: 0, limit: undefined }),
+          },
+        ],
+        'page-count':
+          Math.ceil(rows.length / size) +
+          (fault === `reject` ? faultPage + 1 : 0),
+        'cached-slice': expectedRows(rows, scope, { offset: 1, limit: 3 }),
+        'cached-fetch-count': 0,
+      }
+    },
+    driver: async ([ranks, size, faultPage, descending, fault], observe) => {
+      const rows = ranks.map((rank, id) => ({ id, rank, group: id % 2 }))
+      const scope = { group: undefined, descending }
+      const backend = createBackend(rows, scope, size)
+      const abort = new AbortController()
+      const error = new Error(`page failure`)
+      let calls = 0
+      const pager = createCursorPager(async (cursor, signal) => {
+        const page = await backend.fetchPage(cursor, signal)
+        if (calls++ === faultPage) {
+          if (fault === `reject`) throw error
+          abort.abort(error)
+        }
+        return page
+      })
+      const all = { offset: 0, limit: undefined }
+      const failed = pager.read(all, abort.signal)
+      // Attach observers before the healthy peer can expose a failure.
+      const outcomes = Promise.allSettled([failed, pager.read(all)])
+      const [first, peer] = await outcomes
+      observe(`outcomes`, [first, peer])
+      observe(`page-count`, backend.calls.length)
+      const before = backend.calls.length
+      observe(`cached-slice`, await pager.read({ offset: 1, limit: 3 }))
+      observe(`cached-fetch-count`, backend.calls.length - before)
+    },
+    check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
 })
 
-// What this oracle owns: the opaque cursor pager that createCursorPager builds
-// over a backend. The pager's reads must equal the full-relation model (see
-// the declaration below), and its fetched-page counts must follow the
-// transport rules.
 declareOracle({
-  owns: [`src/cursor-pagination.ts#createCursorPager`],
   check: [checkRead],
   model: [expectedRows],
 })
@@ -592,8 +666,8 @@ oracleProperty({
     statement: `A cursor pager returns exactly the requested slice of the whole filtered ordered relation, rejects an invalid window with RangeError before transport, captures each window when called, and fetches only the shortest prefix of backend pages that covers what was read, reusing fetched pages.`,
     authority: `packages/query-db-collection/tests/cursor-pagination/README.md, "Contract before implementation" (transport rules) and "Chosen implementation" (loading more fetches the missing suffix); the exact page counts the previous fixed tests pinned; the exported createCursorPager API`,
     limits: `One scope per pager; no reset, faults, or cancellation in this property; a stable backend relation, not snapshot consistency for changing endpoints.`,
-    owner: `Opaque backend pagination`,
   },
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
   histories: {
     arbitrary: readHistory,
     states: [],

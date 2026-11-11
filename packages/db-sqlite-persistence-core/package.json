@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-sqlite-persistence-core",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "SQLite persisted collection core for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -61,6 +61,11 @@
   },
   "peerDependencies": {
     "typescript": ">=4.7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^5.1.0",

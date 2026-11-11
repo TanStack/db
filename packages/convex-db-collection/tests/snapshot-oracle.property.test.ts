@@ -28,17 +28,23 @@ import { isDeepStrictEqual } from 'node:util'
 import { createCollection } from '@tanstack/db'
 import { fc } from '@fast-check/vitest'
 import { makeFunctionReference } from 'convex/server'
-import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
 
-declareOracle({
-  owns: [`src/index.ts#convexCollectionOptions`],
-})
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 type KeyedRow = Row & { key: string | number }
 const query = makeFunctionReference<
@@ -68,208 +74,239 @@ const states = [
   `initial-duplicate-rejected`,
 ] as const
 
-it(`refines complete snapshots throughout generated histories`, async () => {
-  await runOracleCampaign(
-    `CONVEX_SNAPSHOT_ORACLE`,
-    states,
-    async (reach, parameters) => {
-      const property = fc.asyncProperty(
-        fc.double({ min: -100, max: 100, noNaN: true }),
-        fc.string({ maxLength: 12 }),
-        fc.array(fc.array(row, { maxLength: 5 }), {
-          minLength: 1,
-          maxLength: 30,
+const convex_snapshotHistory = fc.tuple(
+  fc.double({ min: -100, max: 100, noNaN: true }),
+  fc.string({ maxLength: 12 }),
+  fc.array(fc.array(row, { maxLength: 5 }), {
+    minLength: 1,
+    maxLength: 30,
+  }),
+)
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_snapshotJudgment(
+  [numberKey, text, suffix]: AssertionHistory<typeof convex_snapshotHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const keyKinds = [
+    { name: `string-keys`, keys: [`a`, `b`, `c`] },
+    { name: `numeric-keys`, keys: [numberKey, numberKey + 0.5, 1] },
+    { name: `mixed-key-types`, keys: [1, `1`, numberKey] },
+  ] as const
+  for (const keyKind of keyKinds) {
+    const first: KeyedRow = {
+      _id: `first`,
+      key: keyKind.keys[0],
+      text: `lower:${text}`,
+      optional: `remove`,
+    }
+    const second: KeyedRow = {
+      _id: `second`,
+      key: keyKind.keys[1],
+      text,
+    }
+    // The first two keys are always distinct. This constructive
+    // prefix forces adjacent laws even when the random suffix is empty.
+    const history: Array<Array<KeyedRow>> = [
+      [first, second],
+      [{ _id: first._id, key: first.key, text: `updated:${text}` }],
+      [],
+      [first, second],
+      [second, first],
+      [first, { ...first, text: `duplicate:${text}` }],
+      [{ ...second, text: `recovered:${text}` }],
+      ...suffix.map((snapshot) =>
+        snapshot.map((value): KeyedRow => ({
+          _id: `source:${value.slot}`,
+          key: keyKind.keys[value.slot]!,
+          text: value.text,
+          ...(value.optional === undefined ? {} : { optional: value.optional }),
+        })),
+      ),
+    ]
+    for (const [projected, initiallyInvalid] of [
+      [false, false],
+      [false, true],
+      [true, false],
+      [true, true],
+    ] as const) {
+      const transport = controlledClient()
+      const collection = createCollection(
+        convexCollectionOptions({
+          client: transport.client,
+          query,
+          queryArgs: { owner: `alice` },
+          getKey: (value) => value.key,
+          ...(projected
+            ? {
+                select: (rows: Array<KeyedRow>): Array<KeyedRow> =>
+                  rows.map((value) => ({
+                    ...value,
+                    key:
+                      typeof value.key === `number`
+                        ? String(value.key)
+                        : `selected:${value.key}`,
+                    text: value.text.toUpperCase(),
+                  })),
+              }
+            : {}),
+          gcTime: 0,
         }),
-        async (numberKey, text, suffix) => {
-          reach.beginHistory()
-          const keyKinds = [
-            { name: `string-keys`, keys: [`a`, `b`, `c`] },
-            { name: `numeric-keys`, keys: [numberKey, numberKey + 0.5, 1] },
-            { name: `mixed-key-types`, keys: [1, `1`, numberKey] },
-          ] as const
-          for (const keyKind of keyKinds) {
-            const first: KeyedRow = {
-              _id: `first`,
-              key: keyKind.keys[0],
-              text: `lower:${text}`,
-              optional: `remove`,
-            }
-            const second: KeyedRow = {
-              _id: `second`,
-              key: keyKind.keys[1],
-              text,
-            }
-            // The first two keys are always distinct. This constructive
-            // prefix forces adjacent laws even when the random suffix is empty.
-            const history: Array<Array<KeyedRow>> = [
-              [first, second],
-              [{ _id: first._id, key: first.key, text: `updated:${text}` }],
-              [],
-              [first, second],
-              [second, first],
-              [first, { ...first, text: `duplicate:${text}` }],
-              [{ ...second, text: `recovered:${text}` }],
-              ...suffix.map((snapshot) =>
-                snapshot.map((value): KeyedRow => ({
-                  _id: `source:${value.slot}`,
-                  key: keyKind.keys[value.slot]!,
-                  text: value.text,
-                  ...(value.optional === undefined
-                    ? {}
-                    : { optional: value.optional }),
-                })),
+      )
+      collection.startSyncImmediate()
+      let expected: Array<KeyedRow> = []
+      const seen: Array<string | number> = []
+      let previousInvalid = false
+      await withTestCleanup(
+        async () => {
+          // Both startup forms remain reachable: prepending a
+          // duplicate must reject without publishing even one row.
+          const deliveries = initiallyInvalid
+            ? [[first, { ...first }], ...history]
+            : history
+          for (const [deliveryIndex, snapshot] of deliveries.entries()) {
+            // The public projection contract supplies these expected
+            // values; no adapter helper or key map computes them.
+            const selected = snapshot.map((value): KeyedRow => ({
+              ...value,
+              key: projected
+                ? typeof value.key === `number`
+                  ? `${value.key}`
+                  : `selected:${value.key}`
+                : value.key,
+              text: projected ? value.text.toUpperCase() : value.text,
+            }))
+            const valid = selected.every((value, index) =>
+              selected
+                .slice(index + 1)
+                .every((other) => other.key !== value.key),
+            )
+            const prior = expected
+            if (valid) expected = selected
+            if (valid && collection.status === `error`) {
+              transport.cache(snapshot)
+              await collection.reload()
+            } else transport.emit(snapshot)
+            oracleAssertion(`snapshot-oracle.property.test.ts:186:toBe`, () =>
+              expect(collection.status).toBe(
+                deliveryIndex === 0 && !valid ? `error` : `ready`,
               ),
-            ]
-            for (const [projected, initiallyInvalid] of [
-              [false, false],
-              [false, true],
-              [true, false],
-              [true, true],
-            ] as const) {
-              const transport = controlledClient()
-              const collection = createCollection(
-                convexCollectionOptions({
-                  client: transport.client,
-                  query,
-                  queryArgs: { owner: `alice` },
-                  getKey: (value) => value.key,
-                  ...(projected
-                    ? {
-                        select: (rows: Array<KeyedRow>): Array<KeyedRow> =>
-                          rows.map((value) => ({
-                            ...value,
-                            key:
-                              typeof value.key === `number`
-                                ? String(value.key)
-                                : `selected:${value.key}`,
-                            text: value.text.toUpperCase(),
-                          })),
-                      }
-                    : {}),
-                  gcTime: 0,
-                }),
-              )
-              collection.startSyncImmediate()
-              let expected: Array<KeyedRow> = []
-              const seen: Array<string | number> = []
-              let previousInvalid = false
-              await withTestCleanup(
-                async () => {
-                  // Both startup forms remain reachable: prepending a
-                  // duplicate must reject without publishing even one row.
-                  const deliveries = initiallyInvalid
-                    ? [[first, { ...first }], ...history]
-                    : history
-                  for (const [
-                    deliveryIndex,
-                    snapshot,
-                  ] of deliveries.entries()) {
-                    // The public projection contract supplies these expected
-                    // values; no adapter helper or key map computes them.
-                    const selected = snapshot.map((value): KeyedRow => ({
-                      ...value,
-                      key: projected
-                        ? typeof value.key === `number`
-                          ? `${value.key}`
-                          : `selected:${value.key}`
-                        : value.key,
-                      text: projected ? value.text.toUpperCase() : value.text,
-                    }))
-                    const valid = selected.every((value, index) =>
-                      selected
-                        .slice(index + 1)
-                        .every((other) => other.key !== value.key),
-                    )
-                    const prior = expected
-                    if (valid) expected = selected
-                    if (valid && collection.status === `error`) {
-                      transport.cache(snapshot)
-                      await collection.reload()
-                    } else transport.emit(snapshot)
-                    expect(collection.status).toBe(
-                      deliveryIndex === 0 && !valid ? `error` : `ready`,
-                    )
-                    expect(collection.health.hasErrors).toBe(!valid)
-                    expect(collection.utils.getSyncError() !== undefined).toBe(
-                      !valid,
-                    )
-                    // Keep public key types and cardinality. String sorting or
-                    // a string-keyed object would erase the 1/'1' distinction.
-                    const actual = [...collection.entries()].map(
-                      ([key, value]) => {
-                        const observed: KeyedRow = {
-                          _id: value._id,
-                          key: value.key,
-                          text: value.text,
-                        }
-                        if (Object.hasOwn(value, `optional`))
-                          observed.optional = value.optional
-                        return { key, row: observed }
-                      },
-                    )
-                    expect(actual).toHaveLength(expected.length)
-                    for (const wanted of expected) {
-                      const entry = actual.find(({ key }) => key === wanted.key)
-                      expect(isDeepStrictEqual(entry?.row, wanted)).toBe(true)
-                    }
-                    if (deliveryIndex === 0)
-                      reach.reach(
-                        valid ? `initial-valid` : `initial-duplicate-rejected`,
-                      )
-                    if (!valid) reach.reach(`duplicate-rejected`)
-                    else {
-                      if (projected && selected.length > 0)
-                        reach.reach(`selected-key-representation`)
-                      if (!projected && selected.length > 0)
-                        reach.reach(keyKind.name)
-                      if (
-                        selected.some((value) => value.key === 1) &&
-                        selected.some((value) => value.key === `1`)
-                      )
-                        reach.reach(`equal-looking-typed-keys`)
-                      if (expected.length === 0) reach.reach(`empty-result`)
-                      if (previousInvalid) reach.reach(`valid-after-error`)
-                      if (
-                        prior.some(
-                          (old) =>
-                            !selected.some((value) => value.key === old.key),
-                        )
-                      )
-                        reach.reach(`omitted-key`)
-                      if (
-                        selected.some((value) =>
-                          prior.some(
-                            (old) =>
-                              old.key === value.key &&
-                              Object.hasOwn(old, `optional`) &&
-                              !Object.hasOwn(value, `optional`),
-                          ),
-                        )
-                      )
-                        reach.reach(`omitted-field`)
-                      if (
-                        selected.some(
-                          (value) =>
-                            seen.includes(value.key) &&
-                            !prior.some((old) => old.key === value.key),
-                        )
-                      )
-                        reach.reach(`reintroduced-key`)
-                      for (const value of selected) {
-                        if (!seen.includes(value.key)) seen.push(value.key)
-                      }
-                    }
-                    previousInvalid = !valid
-                  }
-                },
-                () => collection.cleanup(),
+            )
+            oracleAssertion(`snapshot-oracle.property.test.ts:189:toBe`, () =>
+              expect(collection.health.hasErrors).toBe(!valid),
+            )
+            oracleAssertion(`snapshot-oracle.property.test.ts:190:toBe`, () =>
+              expect(collection.utils.getSyncError() !== undefined).toBe(
+                !valid,
+              ),
+            )
+            // Keep public key types and cardinality. String sorting or
+            // a string-keyed object would erase the 1/'1' distinction.
+            const actual = [...collection.entries()].map(([key, value]) => {
+              const observed: KeyedRow = {
+                _id: value._id,
+                key: value.key,
+                text: value.text,
+              }
+              if (Object.hasOwn(value, `optional`))
+                observed.optional = value.optional
+              return { key, row: observed }
+            })
+            oracleAssertion(
+              `snapshot-oracle.property.test.ts:207:toHaveLength`,
+              () => expect(actual).toHaveLength(expected.length),
+            )
+            for (const wanted of expected) {
+              const entry = actual.find(({ key }) => key === wanted.key)
+              oracleAssertion(`snapshot-oracle.property.test.ts:210:toBe`, () =>
+                expect(isDeepStrictEqual(entry?.row, wanted)).toBe(true),
               )
             }
+            if (deliveryIndex === 0)
+              reach.reach(
+                valid ? `initial-valid` : `initial-duplicate-rejected`,
+              )
+            if (!valid) reach.reach(`duplicate-rejected`)
+            else {
+              if (projected && selected.length > 0)
+                reach.reach(`selected-key-representation`)
+              if (!projected && selected.length > 0) reach.reach(keyKind.name)
+              if (
+                selected.some((value) => value.key === 1) &&
+                selected.some((value) => value.key === `1`)
+              )
+                reach.reach(`equal-looking-typed-keys`)
+              if (expected.length === 0) reach.reach(`empty-result`)
+              if (previousInvalid) reach.reach(`valid-after-error`)
+              if (
+                prior.some(
+                  (old) => !selected.some((value) => value.key === old.key),
+                )
+              )
+                reach.reach(`omitted-key`)
+              if (
+                selected.some((value) =>
+                  prior.some(
+                    (old) =>
+                      old.key === value.key &&
+                      Object.hasOwn(old, `optional`) &&
+                      !Object.hasOwn(value, `optional`),
+                  ),
+                )
+              )
+                reach.reach(`omitted-field`)
+              if (
+                selected.some(
+                  (value) =>
+                    seen.includes(value.key) &&
+                    !prior.some((old) => old.key === value.key),
+                )
+              )
+                reach.reach(`reintroduced-key`)
+              for (const value of selected) {
+                if (!seen.includes(value.key)) seen.push(value.key)
+              }
+            }
+            previousInvalid = !valid
           }
         },
+        () => collection.cleanup(),
       )
-      await fc.assert(property, { numRuns: oracleRuns(150), ...parameters })
-    },
-    { fixedSeed: 20261022 },
-  )
+    }
+  }
+}
+
+oracleProperty({
+  id: `convex.snapshot`,
+  law: {
+    statement: `refines complete snapshots throughout generated histories`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/index.ts#convexCollectionOptions`],
+  histories: {
+    arbitrary: convex_snapshotHistory,
+    runs: 150,
+    fixedSeeds: [20261022],
+    states: states,
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: states,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.snapshot`, plan, observe, () =>
+      convex_snapshotJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })

@@ -43,6 +43,24 @@ import type { Transaction } from '@tanstack/db'
 /** How many settled ids an executor remembers to reject late waiters. */
 const SETTLED_TRANSACTIONS_REMEMBERED = 1000
 
+// Pending callers and restored optimism belong to surviving Collections, even
+// when their executor is replaced. Adapter objects can change over one store.
+// Weak keys keep this coordination local to the Collections' runtime lifetime.
+const completionOwners = new WeakMap<
+  OfflineConfig[`collections`][string],
+  Set<OfflineExecutor>
+>()
+
+/** A replacement may add Collections while retaining every prior registry entry. */
+function retainsCollections(
+  configured: OfflineConfig[`collections`],
+  prior: OfflineConfig[`collections`],
+): boolean {
+  return Object.entries(prior).every(
+    ([name, collection]) => configured[name] === collection,
+  )
+}
+
 export class OfflineExecutor {
   private config: OfflineConfig
 
@@ -493,34 +511,86 @@ export class OfflineExecutor {
       deferred.reject = reject
     })
 
+    this.trackCompletion()
     this.pendingTransactionPromises.set(transactionId, deferred)
     return deferred.promise
   }
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
-    this.rememberSettled(transactionId)
-    const deferred = this.pendingTransactionPromises.get(transactionId)
-    if (deferred) {
-      deferred.resolve(result)
-      this.pendingTransactionPromises.delete(transactionId)
-    }
-
-    // Clean up the restoration transaction - the sync will provide authoritative data
-    this.cleanupRestorationTransaction(transactionId)
+    this.settleTransaction(transactionId, result)
   }
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
-    this.rememberSettled(transactionId)
-    const deferred = this.pendingTransactionPromises.get(transactionId)
-    if (deferred) {
-      deferred.reject(error)
-      this.pendingTransactionPromises.delete(transactionId)
-    }
+    this.settleTransaction(transactionId, undefined, error)
+  }
 
-    // Clean up the restoration transaction and rollback optimistic state
-    this.cleanupRestorationTransaction(transactionId, true)
+  private trackCompletion(): void {
+    if (
+      this.pendingTransactionPromises.size > 0 ||
+      this.restorationTransactions.size > 0
+    )
+      return
+    for (const collection of Object.values(this.config.collections)) {
+      let owners = completionOwners.get(collection)
+      if (!owners) completionOwners.set(collection, (owners = new Set()))
+      owners.add(this)
+    }
+  }
+
+  private settleTransaction(
+    transactionId: string,
+    result: unknown,
+    error?: Error,
+  ): void {
+    const candidates = new Set<OfflineExecutor>([this])
+    for (const collection of Object.values(this.config.collections)) {
+      for (const owner of completionOwners.get(collection) ?? [])
+        candidates.add(owner)
+    }
+    // Select every recipient before publication can reenter this executor.
+    const owners = [...candidates].filter(
+      (owner) =>
+        owner === this ||
+        ((owner.pendingTransactionPromises.has(transactionId) ||
+          owner.restorationTransactions.has(transactionId)) &&
+          // Either executor may deliver the outcome: a retired issued call or
+          // its successor's replay. An ancillary overlap alone is insufficient.
+          (retainsCollections(
+            this.config.collections,
+            owner.config.collections,
+          ) ||
+            retainsCollections(
+              owner.config.collections,
+              this.config.collections,
+            ))),
+    )
+
+    const cleanupErrors: Array<unknown> = []
+    for (const owner of owners) {
+      owner.rememberSettled(transactionId)
+      const deferred = owner.pendingTransactionPromises.get(transactionId)
+      owner.pendingTransactionPromises.delete(transactionId)
+      if (error) deferred?.reject(error)
+      else deferred?.resolve(result)
+      // Publication can throw from user subscribers. Every owner still receives
+      // its durable outcome before that exception leaves this operation.
+      try {
+        owner.cleanupRestorationTransaction(transactionId, !!error)
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError)
+      }
+
+      if (
+        owner.pendingTransactionPromises.size === 0 &&
+        owner.restorationTransactions.size === 0
+      ) {
+        for (const collection of Object.values(owner.config.collections))
+          completionOwners.get(collection)?.delete(owner)
+      }
+    }
+    if (cleanupErrors.length > 0) throw cleanupErrors[0]
   }
 
   // Method for TransactionExecutor to register restoration transactions
@@ -528,6 +598,7 @@ export class OfflineExecutor {
     offlineTransactionId: string,
     restorationTransaction: Transaction,
   ): void {
+    this.trackCompletion()
     this.restorationTransactions.set(
       offlineTransactionId,
       restorationTransaction,

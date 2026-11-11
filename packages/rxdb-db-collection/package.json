@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/rxdb-db-collection",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "Reactive, Offline-First adapter for TanStack DB using RxDB. Sync, Replication and Local-First support.",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -72,6 +72,11 @@
     "rxdb": ">=17.0.0",
     "rxjs": ">=7.8.2",
     "typescript": ">=4.7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/debug": "^4.1.13",

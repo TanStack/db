@@ -1,14 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
-} from '../../db/tests/oracle-config.js'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
 /**
  * # Does a structural identity agree with D2 value identity?
@@ -66,7 +66,7 @@ type Spec =
 
 const SYMBOL = Symbol(`s`)
 const ENUMERABLE_SYMBOL = Symbol(`enumerable`)
-const { replayProperty, campaignSeed } = readOracleRunConfig()
+const it = oracleReplayTest(vitestIt)
 const LEAVES: ReadonlyArray<unknown> = [
   0,
   -0,
@@ -351,34 +351,90 @@ function normal(spec: Spec): string | undefined {
   }
 }
 
+type AgreementPlan = {
+  leftSpec: Spec
+  rightSpec: Spec
+  left: unknown
+  right: unknown
+}
+
+// Normal forms decide value identity independently of production. The original
+// reference-equality exception also permits a value to agree with itself.
+function expectedAgreement({
+  leftSpec,
+  rightSpec,
+  left,
+  right,
+}: AgreementPlan): boolean {
+  const leftNormal = normal(leftSpec)
+  return (
+    left === right ||
+    (leftNormal !== undefined && leftNormal === normal(rightSpec))
+  )
+}
+
+// Read equality and both structural identities at the original comparison cut.
+function driveAgreement(
+  { left, right }: AgreementPlan,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
+  observe(`value identity`, {
+    equal: equalHashValues(left, right),
+    leftIdentity: structuralIdentity(left),
+    rightIdentity: structuralIdentity(right),
+  })
+}
+
+function checkAgreement(
+  _plan: AgreementPlan,
+  trace: ReadonlyArray<Observation>,
+  expected: boolean,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const { equal, leftIdentity, rightIdentity } = value as {
+      equal: boolean
+      leftIdentity: string | undefined
+      rightIdentity: string | undefined
+    }
+    const mismatch =
+      differs(checkpoint, `model vs equalHashValues`, equal, expected) ??
+      (expected
+        ? differs(checkpoint, `equal values`, leftIdentity, rightIdentity)
+        : undefined) ??
+      (leftIdentity !== undefined && leftIdentity === rightIdentity
+        ? differs(
+            checkpoint,
+            `a shared identity: ${leftIdentity}`,
+            expected,
+            true,
+          )
+        : undefined)
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+// Retained fixed histories use the generated campaign's shared judgment.
 function expectAgreement(
   leftSpec: Spec,
   rightSpec: Spec,
   left: unknown,
   right: unknown,
 ): void {
-  const leftNormal = normal(leftSpec)
-  const equal =
-    left === right ||
-    (leftNormal !== undefined && leftNormal === normal(rightSpec))
-  // Sanity: the independent model agrees with D2's own equality.
-  expect(equalHashValues(left, right), `model vs equalHashValues`).toBe(equal)
-  const leftIdentity = structuralIdentity(left)
-  const rightIdentity = structuralIdentity(right)
-  if (equal) expect(leftIdentity, `equal values`).toBe(rightIdentity)
-  if (leftIdentity !== undefined && leftIdentity === rightIdentity)
-    expect(equal, `a shared identity: ${leftIdentity}`).toBe(true)
+  const plan = { leftSpec, rightSpec, left, right }
+  const trace: Array<Observation> = []
+  driveAgreement(plan, (checkpoint, value) => trace.push({ checkpoint, value }))
+  const verdict = checkAgreement(plan, trace, expectedAgreement(plan))
+  if (verdict.kind === `violation`)
+    expect(verdict.values?.actual, verdict.difference).toBe(
+      verdict.values?.expected,
+    )
 }
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/hashing/hash.ts#structuralIdentity`,
-    `src/hashing/hash.ts#equalHashValues`,
-  ],
-  check: [expectAgreement],
-  model: [normal],
+  check: [expectAgreement, checkAgreement],
+  model: [normal, expectedAgreement],
+  grammar: [specArbitrary, equalSpecPairArbitrary],
 })
 
 function decisions(...values: Array<boolean>): () => boolean {
@@ -423,39 +479,43 @@ describe(`structuralIdentity`, () => {
     expectAgreement(spec, spec, plain, nullPrototype)
   })
 
-  it(`agrees with D2 value identity for equal representations`, async () => {
-    if (
-      replayProperty !== undefined &&
-      replayProperty !== `structural-identity.equal-representations`
-    )
-      return
-    // The guarded replay records completed runs through an async reporter.
-    const property = fc.asyncProperty(
-      equalSpecPairArbitrary,
-      fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
-      ([leftSpec, rightSpec], coins) => {
-        let index = 0
-        const vary = () => coins[index++ % coins.length]!
-        expectAgreement(
-          leftSpec,
-          rightSpec,
-          build(leftSpec, () => false),
-          build(rightSpec, vary),
-        )
-        return Promise.resolve()
-      },
-    )
-    const options = oraclePropertyOptions(
-      2000,
-      `structural-identity.equal-representations`,
-    )
-    if (campaignSeed === undefined) {
-      const fixed = oracleFixedSeed(20261014, { numRuns: options.numRuns })
-      oracleRoute(oracleRouteOf(fixed))
-      await fc.assert(property, fixed)
-    }
-    oracleRoute(oracleRouteOf(options))
-    await fc.assert(property, options)
+  oracleProperty({
+    id: `structural-identity.equal-representations`,
+    law: {
+      statement: `D2 equality agrees with the independent normal-form model, and structural identity preserves equality while every shared defined identity denotes equal values.`,
+      authority: `The existing structural-identity law documented above.`,
+      limits: `The original equal-spec grammar and sixty-four representation decisions; no additional value domain or mutation cut is introduced.`,
+    },
+    // What this oracle owns: the gap report judges these entries, and their
+    // reference trees within the package, by this file's tests.
+    owns: [
+      `src/hashing/hash.ts#structuralIdentity`,
+      `src/hashing/hash.ts#equalHashValues`,
+    ],
+    histories: {
+      arbitrary: fc.tuple(
+        equalSpecPairArbitrary,
+        fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
+      ),
+      runs: 2000,
+      fixedSeeds: [20261014],
+    },
+    resolve: ([[leftSpec, rightSpec], coins]) => {
+      let index = 0
+      const vary = () => coins[index++ % coins.length]!
+      return {
+        leftSpec,
+        rightSpec,
+        left: build(leftSpec, () => false),
+        right: build(rightSpec, vary),
+      }
+    },
+    model: expectedAgreement,
+    driver: (plan, observe) => {
+      driveAgreement(plan, observe)
+      return Promise.resolve()
+    },
+    check: checkAgreement,
   })
 
   // Named fixed histories of counterexamples the random campaign found. Nested `deep`
@@ -591,35 +651,33 @@ describe(`structuralIdentity`, () => {
     },
   )
 
-  it(`agrees with D2 value identity for independent values`, async () => {
-    if (
-      replayProperty !== undefined &&
-      replayProperty !== `structural-identity.independent-values`
-    )
-      return
-    const property = fc.asyncProperty(
-      specArbitrary,
-      specArbitrary,
-      (left, right) => {
-        expectAgreement(
-          left,
-          right,
-          build(left, () => false),
-          build(right, () => false),
-        )
-        return Promise.resolve()
-      },
-    )
-    const options = oraclePropertyOptions(
-      2000,
-      `structural-identity.independent-values`,
-    )
-    if (campaignSeed === undefined) {
-      const fixed = oracleFixedSeed(1158727847, { numRuns: options.numRuns })
-      oracleRoute(oracleRouteOf(fixed))
-      await fc.assert(property, fixed)
-    }
-    oracleRoute(oracleRouteOf(options))
-    await fc.assert(property, options)
+  oracleProperty({
+    id: `structural-identity.independent-values`,
+    law: {
+      statement: `D2 equality agrees with the independent normal-form model, and structural identity preserves equality while every shared defined identity denotes equal values.`,
+      authority: `The existing structural-identity law documented above.`,
+      limits: `The original independent-spec grammar with plain representations; no additional value domain or mutation cut is introduced.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#structuralIdentity`,
+      `src/hashing/hash.ts#equalHashValues`,
+    ],
+    histories: {
+      arbitrary: fc.tuple(specArbitrary, specArbitrary),
+      runs: 2000,
+      fixedSeeds: [1158727847],
+    },
+    resolve: ([leftSpec, rightSpec]) => ({
+      leftSpec,
+      rightSpec,
+      left: build(leftSpec, () => false),
+      right: build(rightSpec, () => false),
+    }),
+    model: expectedAgreement,
+    driver: (plan, observe) => {
+      driveAgreement(plan, observe)
+      return Promise.resolve()
+    },
+    check: checkAgreement,
   })
 })

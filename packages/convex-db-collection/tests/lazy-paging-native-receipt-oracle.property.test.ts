@@ -15,18 +15,25 @@
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import { ordered } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
 
-declareOracle({
-  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
-})
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 const turns = async () => {
   for (let i = 0; i < 25; i++) await Promise.resolve()
@@ -89,10 +96,14 @@ async function nativeHistory(
       const observeApplied = () => {
         try {
           for (const row of batch.rows)
-            expect(
-              f.source.base.get(row.id),
-              `receipt before authored fact visibility`,
-            ).toEqual(row)
+            oracleAssertion(
+              `lazy-paging-native-receipt-oracle.property.test.ts:94:toEqual`,
+              () =>
+                expect(
+                  f.source.base.get(row.id),
+                  `receipt before authored fact visibility`,
+                ).toEqual(row),
+            )
           model.apply(batch.id)
           for (const value of facts) applied.add(value)
         } catch (error) {
@@ -179,17 +190,28 @@ async function nativeHistory(
       const c = acquire(`c`, rows, h.size)
       const drain = hold(`first-overlay`)
       await f.remote.pump(() => false, h.reverse)
-      expect(
-        [...edges.values()].some(
-          (ids) => ids.includes(`a`) && ids.includes(`c`),
-        ),
-        `unique new facts must witness shared establishment`,
-      ).toBe(true)
-      expect(f.batches.some((batch) => batch.receipt !== true)).toBe(true)
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:184:toBe`,
+        () =>
+          expect(
+            [...edges.values()].some(
+              (ids) => ids.includes(`a`) && ids.includes(`c`),
+            ),
+            `unique new facts must witness shared establishment`,
+          ).toBe(true),
+      )
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:190:toBe`,
+        () =>
+          expect(f.batches.some((batch) => batch.receipt !== true)).toBe(true),
+      )
       const cachedHeld = acquire(`cached-held`, warmRows, 1)
       // These facts were applied before the peer's deeper acquisition. The
       // cached caller owes no new receipt, but may lawfully wait behind it.
-      expect([...edges.values()].flat()).not.toContain(`cached-held`)
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:194:toContain`,
+        () => expect([...edges.values()].flat()).not.toContain(`cached-held`),
+      )
       if (h.cancel) {
         model.abort(`a`)
         a.attempt.active = false
@@ -197,35 +219,58 @@ async function nativeHistory(
       }
       await turns()
       checkpoint()
-      expect(
-        a.attempt.outcome,
-        `native caller escaped a held receipt`,
-      ).toBeUndefined()
-      expect(
-        c.attempt.outcome,
-        `native shared caller escaped a held receipt`,
-      ).toBeUndefined()
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:202:toBeUndefined`,
+        () =>
+          expect(
+            a.attempt.outcome,
+            `native caller escaped a held receipt`,
+          ).toBeUndefined(),
+      )
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:206:toBeUndefined`,
+        () =>
+          expect(
+            c.attempt.outcome,
+            `native shared caller escaped a held receipt`,
+          ).toBeUndefined(),
+      )
       await drain()
       await turns()
       checkpoint()
-      expect(
-        a.attempt.outcome,
-        `receipt progress: quiescent native a stranded`,
-      ).toBe(h.cancel ? `canceled` : `success`)
-      expect(
-        c.attempt.outcome,
-        `receipt progress: quiescent native c stranded`,
-      ).toBe(`success`)
-      expect(
-        cachedHeld.attempt.outcome,
-        `receipt progress: cached native caller stranded after peer drain`,
-      ).toBe(`success`)
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:213:toBe`,
+        () =>
+          expect(
+            a.attempt.outcome,
+            `receipt progress: quiescent native a stranded`,
+          ).toBe(h.cancel ? `canceled` : `success`),
+      )
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:217:toBe`,
+        () =>
+          expect(
+            c.attempt.outcome,
+            `receipt progress: quiescent native c stranded`,
+          ).toBe(`success`),
+      )
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:221:toBe`,
+        () =>
+          expect(
+            cachedHeld.attempt.outcome,
+            `receipt progress: cached native caller stranded after peer drain`,
+          ).toBe(`success`),
+      )
       const cached = acquire(`cached`, rows, h.size)
       await f.remote.pump()
       await cached.load.complete()
       await turns()
       checkpoint()
-      expect([...edges.values()].flat()).not.toContain(`cached`)
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:230:toContain`,
+        () => expect([...edges.values()].flat()).not.toContain(`cached`),
+      )
       const revised = rows.map((row) => ({ ...row, text: `${h.text}:v2` }))
       f.remote.change(revised)
       // The SDK has atomically installed this authored revision while its
@@ -235,10 +280,16 @@ async function nativeHistory(
       const secondDrain = hold(`second-overlay`)
       const changed = acquire(`changed`, revised, h.size, undefined, true)
       await f.remote.pump(() => false, !h.reverse)
-      expect([...edges.values()].flat()).toContain(`changed`)
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:240:toContain`,
+        () => expect([...edges.values()].flat()).toContain(`changed`),
+      )
       await turns()
       checkpoint()
-      expect(changed.attempt.outcome).toBeUndefined()
+      oracleAssertion(
+        `lazy-paging-native-receipt-oracle.property.test.ts:243:toBeUndefined`,
+        () => expect(changed.attempt.outcome).toBeUndefined(),
+      )
       await secondDrain()
       await changed.load.complete()
       await turns()
@@ -254,10 +305,47 @@ async function nativeHistory(
   )
 }
 
-it(`refines the same receipt model through native uniquely establishing batches`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_NATIVE_RECEIPT_ORACLE`,
-    [
+const convex_lazy_native_receiptHistory = fc.record({
+  size: fc.integer({ min: 7, max: 12 }),
+  pageSize: fc.integer({ min: 2, max: 4 }),
+  descending: fc.boolean(),
+  react: fc.boolean(),
+  reverse: fc.boolean(),
+  text: fc.string({ maxLength: 8 }),
+})
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_native_receiptJudgment(
+  h: AssertionHistory<typeof convex_lazy_native_receiptHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const cancel of [false, true]) await nativeHistory({ ...h, cancel })
+  for (const state of [
+    `native-shared-held`,
+    `native-cached-zero`,
+    `native-cached-behind-peer`,
+    `native-new-version`,
+    `native-canceled-held`,
+    `native-success-held`,
+  ] as const)
+    reach.reach(state)
+  reach.reach(h.react ? `react` : `javascript`)
+}
+
+oracleProperty({
+  id: `convex.lazy-native-receipt`,
+  law: {
+    statement: `refines the same receipt model through native uniquely establishing batches`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_lazy_native_receiptHistory,
+    runs: 45,
+    fixedSeeds: [20261027],
+    states: [
       `native-shared-held`,
       `native-cached-zero`,
       `native-cached-behind-peer`,
@@ -267,53 +355,60 @@ it(`refines the same receipt model through native uniquely establishing batches`
       `javascript`,
       `react`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            size: fc.integer({ min: 7, max: 12 }),
-            pageSize: fc.integer({ min: 2, max: 4 }),
-            descending: fc.boolean(),
-            react: fc.boolean(),
-            reverse: fc.boolean(),
-            text: fc.string({ maxLength: 8 }),
-          }),
-          async (h) => {
-            reach.beginHistory()
-            for (const cancel of [false, true])
-              await nativeHistory({ ...h, cancel })
-            for (const state of [
-              `native-shared-held`,
-              `native-cached-zero`,
-              `native-cached-behind-peer`,
-              `native-new-version`,
-              `native-canceled-held`,
-              `native-success-held`,
-            ] as const)
-              reach.reach(state)
-            reach.reach(h.react ? `react` : `javascript`)
-          },
-        ),
-        { numRuns: oracleRuns(45), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
+    constructed: [
+      ...([false, true] as const).map((react) => ({
+        name: react
+          ? `existing React receiver`
+          : `existing JavaScript receiver`,
+        enters: (
+          [
+            `native-shared-held`,
+            `native-cached-zero`,
+            `native-cached-behind-peer`,
+            `native-new-version`,
+            `native-canceled-held`,
+            `native-success-held`,
+            `javascript`,
+            `react`,
+          ] as const
+        ).filter((state) => state !== (react ? `javascript` : `react`)),
+        build: (
+          generated: AssertionHistory<typeof convex_lazy_native_receiptHistory>,
+        ) => ({ ...generated, react }),
+      })),
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.lazy-native-receipt`, plan, observe, () =>
+      convex_lazy_native_receiptJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 60000,
+})
 
 it(`rejects a native receiver borrowing the applied startup receipt`, async () => {
   oracleRoute(`calibration`)
-  await expect(
-    nativeHistory(
-      {
-        size: 8,
-        pageSize: 2,
-        descending: false,
-        react: false,
-        cancel: false,
-        reverse: false,
-        text: ``,
-      },
-      true,
-    ),
-  ).rejects.toThrow(/receipt law/)
+  await oracleAssertion(
+    `lazy-paging-native-receipt-oracle.property.test.ts:317:toThrow`,
+    () =>
+      expect(
+        nativeHistory(
+          {
+            size: 8,
+            pageSize: 2,
+            descending: false,
+            react: false,
+            cancel: false,
+            reverse: false,
+            text: ``,
+          },
+          true,
+        ),
+      ).rejects.toThrow(/receipt law/),
+  )
 })

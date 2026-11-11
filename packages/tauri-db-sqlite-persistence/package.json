@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/tauri-db-sqlite-persistence",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "Tauri SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -61,6 +61,11 @@
   "peerDependencies": {
     "@tauri-apps/plugin-sql": "^2.3.2",
     "typescript": ">=4.7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@tauri-apps/plugin-sql": "^2.6.0",

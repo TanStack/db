@@ -64,14 +64,14 @@ import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
+import { oracleRoute } from './oracle-config.js'
+import { oracleProperty } from './oracle-property.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
-import { createOracleReach } from './oracle-reach.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { declareOracle } from './oracle-declaration.js'
 import {
   EXPECTED_IDS,
@@ -81,6 +81,8 @@ import {
   pooledQuery,
   settle,
 } from './live-query-deferred-acquisition-support.js'
+import type { Verdict } from './oracle-property.js'
+import type { StartHandoffHistory } from './collection-subscription-lifecycle-grammar-oracle.js'
 import type {
   QueryShape,
   Row,
@@ -451,12 +453,6 @@ describe(`live-query deferred acquisition`, () => {
 // What this oracle owns: the gap report judges the deferred sync-start and resumption
 // entry points and pooled live-query creation by this file's histories.
 declareOracle({
-  owns: [
-    `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
-    `src/query/pooled-live-query.ts#createPooledLiveQuery`,
-    `src/collection/index.ts#CollectionImpl._deferSyncStart`,
-    `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
-  ],
   check: [runAcquisitionHistory, runPooledHistory, runDeferredSiblingHistory],
   model: [
     initialModel,
@@ -681,103 +677,151 @@ describe(`a subscriber that outlives cleanup`, () => {
  * release, so both are declared reach states. No second start
  * without cleanup is legal. The shared judgment also feeds the React driver.
  */
+const startHandoffHistory = fc.record({
+  outcome: fc.constantFrom(`ready` as const, `fail` as const, `throw` as const),
+  timing: fc.constantFrom(`before-release` as const, `during-release` as const),
+  cause: fc.constantFrom(`error` as const, `undefined` as const),
+})
+async function runStartHandoffHistory(
+  history: StartHandoffHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const expected = expectedStartHandoff(history)
+  const failure =
+    history.cause === `error` ? new Error(`source failure`) : undefined
+  let starts = 0
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: {
+      sync: ({ markReady, fail }) => {
+        starts++
+        if (history.outcome === `throw`) throw failure
+        if (history.outcome === `fail`) fail(failure)
+        else markReady()
+      },
+    },
+  })
+  source._deferSyncStart()
+  source.startSyncImmediate()
+  try {
+    if (history.timing === `before-release`) {
+      try {
+        source._resumeSyncStart()
+      } catch {
+        /* Independent reader owns this error. */
+      }
+    }
+    if (source.status === `error`) observe(`reach`, `prior-error`)
+    if (source.status === `crashed`) observe(`reach`, `prior-crash`)
+    if (history.outcome === `fail`) observe(`reach`, `failed`)
+    if (expected.throws) observe(`reach`, `own-throw`)
+    if (history.cause === `undefined`) observe(`reach`, `undefined-cause`)
+    if (history.outcome === `ready`) observe(`reach`, `healthy`)
+    const pending = new Set([source])
+    let result: { threw: boolean; error?: unknown } = { threw: false }
+    try {
+      resumeDeferredLiveQueryCollections(pending)
+    } catch (error) {
+      result = { threw: true, error }
+    }
+    oracleAssertion(`runStartHandoffHistory:744`, () =>
+      expect(result.threw, JSON.stringify(history)).toBe(expected.throws),
+    )
+    if (expected.throws)
+      oracleAssertion(`runStartHandoffHistory:747`, () =>
+        expect(result.error).toBe(failure),
+      )
+    oracleAssertion(`runStartHandoffHistory:748`, () =>
+      expect(source.status).toBe(expected.status),
+    )
+    oracleAssertion(`runStartHandoffHistory:749`, () =>
+      expect(starts).toBe(expected.starts),
+    )
+    oracleAssertion(`runStartHandoffHistory:750`, () =>
+      expect(pending.size).toBe(0),
+    )
+    resumeDeferredLiveQueryCollections(pending)
+    source._resumeSyncStart()
+    oracleAssertion(`runStartHandoffHistory:753`, () =>
+      expect(starts, `old render handles never retry`).toBe(1),
+    )
+  } finally {
+    await source.cleanup()
+  }
+}
 describe(`render sync-start handoff error provenance`, () => {
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`reports only its own thrown starts (${campaign})`, async () => {
-      const reach = createOracleReach(`start-handoff`, [
+  oracleProperty<StartHandoffHistory, Verdict>({
+    id: `live-query.start-handoff`,
+    law: {
+      statement: `A handoff reports only its own throwing sync start, preserves the source outcome, and never retries an old render handle.`,
+      authority: `The shared expectedStartHandoff model and source-error ownership contract above.`,
+      limits: `The unchanged ready/fail/throw, before/during-release, Error/undefined grammar; no source rows or recovery.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: {
+      arbitrary: startHandoffHistory,
+      runs: 100,
+      fixedSeeds: [2229],
+      states: [
         `prior-error`,
         `prior-crash`,
         `failed`,
         `own-throw`,
         `undefined-cause`,
         `healthy`,
-      ])
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(2229, { numRuns: oracleRuns(100) })
-          : oraclePropertyOptions(100, `live-query.start-handoff`)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            outcome: fc.constantFrom(
-              `ready` as const,
-              `fail` as const,
-              `throw` as const,
-            ),
-            timing: fc.constantFrom(
-              `before-release` as const,
-              `during-release` as const,
-            ),
-            cause: fc.constantFrom(`error` as const, `undefined` as const),
+      ],
+      constructed: [
+        {
+          name: `independent earlier loading error`,
+          enters: [`prior-error`, `failed`, `undefined-cause`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `fail` as const,
+            timing: `before-release` as const,
+            cause: `undefined` as const,
           }),
-          async (history) => {
-            reach.beginHistory()
-            const expected = expectedStartHandoff(history)
-            const failure =
-              history.cause === `error`
-                ? new Error(`source failure`)
-                : undefined
-            let starts = 0
-            const source = createCollection<{ id: string }>({
-              getKey: (row) => row.id,
-              gcTime: 0,
-              sync: {
-                sync: ({ markReady, fail }) => {
-                  starts++
-                  if (history.outcome === `throw`) throw failure
-                  if (history.outcome === `fail`) fail(failure)
-                  else markReady()
-                },
-              },
-            })
-            source._deferSyncStart()
-            source.startSyncImmediate()
-            try {
-              if (history.timing === `before-release`) {
-                try {
-                  source._resumeSyncStart()
-                } catch {
-                  /* Independent reader owns this error. */
-                }
-              }
-              if (source.status === `error`) reach.reach(`prior-error`)
-              if (source.status === `crashed`) reach.reach(`prior-crash`)
-              if (history.outcome === `fail`) reach.reach(`failed`)
-              if (expected.throws) reach.reach(`own-throw`)
-              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
-              if (history.outcome === `ready`) reach.reach(`healthy`)
-              const pending = new Set([source])
-              let result: { threw: boolean; error?: unknown } = { threw: false }
-              try {
-                resumeDeferredLiveQueryCollections(pending)
-              } catch (error) {
-                result = { threw: true, error }
-              }
-              expect(result.threw, JSON.stringify(history)).toBe(
-                expected.throws,
-              )
-              if (expected.throws) expect(result.error).toBe(failure)
-              expect(source.status).toBe(expected.status)
-              expect(starts).toBe(expected.starts)
-              expect(pending.size).toBe(0)
-              resumeDeferredLiveQueryCollections(pending)
-              source._resumeSyncStart()
-              expect(starts, `old render handles never retry`).toBe(1)
-            } finally {
-              await source.cleanup()
-            }
-          },
-        ),
-        parameters,
-      )
-      reach.assertReached()
-      console.info(
-        `start-handoff ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    })
-  }
+        },
+        {
+          name: `independent earlier crash`,
+          enters: [`prior-crash`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `throw` as const,
+            timing: `before-release` as const,
+          }),
+        },
+        {
+          name: `owned throwing start`,
+          enters: [`own-throw`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `throw` as const,
+            timing: `during-release` as const,
+          }),
+        },
+        {
+          name: `healthy source start`,
+          enters: [`healthy`],
+          build: (generated) => ({ ...generated, outcome: `ready` as const }),
+        },
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `sync-start handoff provenance`,
+        history,
+        observe,
+        () => runStartHandoffHistory(history, observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -823,7 +867,10 @@ const deferredSiblingHistories: Array<DeferredSiblingHistory> = (
 function deferredSiblingRows(rows: ReadonlyArray<{ id: string }>) {
   return rows.map(({ id }) => ({ id, peer: id }))
 }
-async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
+async function runDeferredSiblingHistory(
+  history: DeferredSiblingHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
   const rows = Array.from({ length: history.rowCount }, (_, i) => ({
     id: `row-${i}`,
   }))
@@ -865,10 +912,7 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
         .select(({ left, right }) => ({ id: left.id, peer: right.id })),
     gcTime: 0,
   })
-  const reach = createOracleReach(`deferred-sibling`, [
-    `deferred joined demand`,
-  ])
-  reach.beginHistory()
+  let joinedDemand = false
   const original = CollectionSubscription.prototype.requestSnapshot
   const spy = vi
     .spyOn(CollectionSubscription.prototype, `requestSnapshot`)
@@ -877,8 +921,10 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
       const isPending = () => this.hasPendingTruncateReplacement
       const before = isPending()
       const result = original.apply(this, args)
-      if (deferred && !before && isPending())
-        reach.reach(`deferred joined demand`)
+      if (deferred && !before && isPending()) {
+        joinedDemand = true
+        observe(`reach`, `deferred joined demand`)
+      }
       return result
     })
   let subscription: ReturnType<typeof query.subscribeChanges> | undefined
@@ -887,7 +933,9 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
   try {
     query.startSyncImmediate()
     await settle()
-    expect(loads, `deferred query starts no acquisition`).toBe(0)
+    oracleAssertion(`runDeferredSiblingHistory:914`, () =>
+      expect(loads, `deferred query starts no acquisition`).toBe(0),
+    )
     if (history.reader === `subscribe`)
       subscription = query.subscribeChanges(() => {})
     else
@@ -904,33 +952,47 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
     // abort, window move or extra preload is allowed to repair this history.
     await settle()
     if (history.rootAsync || history.siblingAsync) {
-      expect(query.status, `held acquisition gates initial readiness`).toBe(
-        `loading`,
+      oracleAssertion(`runDeferredSiblingHistory:931`, () =>
+        expect(query.status, `held acquisition gates initial readiness`).toBe(
+          `loading`,
+        ),
       )
-      expect(preloadSettled).toBe(false)
+      oracleAssertion(`runDeferredSiblingHistory:934`, () =>
+        expect(preloadSettled).toBe(false),
+      )
     }
     for (let turn = 0; turn < 12; turn++) {
       const resolve = history.newestFirst ? gates.pop() : gates.shift()
       resolve?.()
       await settle()
     }
-    console.info(
-      `deferred-sibling reach`,
-      history,
-      Object.fromEntries(reach.counts()),
+    console.info(`deferred-sibling reach`, history, {
+      'deferred joined demand': Number(joinedDemand),
+    })
+    oracleAssertion(`runDeferredSiblingHistory:946`, () =>
+      expect(joinedDemand, `deferred sibling entered joined demand`).toBe(true),
     )
-    reach.assertReached()
-    expect(loads, `each source subscription acquires once`).toBe(2)
-    expect(query.status, `resumed sibling replay must finish`).toBe(`ready`)
+    oracleAssertion(`runDeferredSiblingHistory:947`, () =>
+      expect(loads, `each source subscription acquires once`).toBe(2),
+    )
+    oracleAssertion(`runDeferredSiblingHistory:948`, () =>
+      expect(query.status, `resumed sibling replay must finish`).toBe(`ready`),
+    )
     if (history.reader === `preload`) {
-      expect(preloadFailure).toBeUndefined()
-      expect(preloadSettled).toBe(true)
+      oracleAssertion(`runDeferredSiblingHistory:950`, () =>
+        expect(preloadFailure).toBeUndefined(),
+      )
+      oracleAssertion(`runDeferredSiblingHistory:951`, () =>
+        expect(preloadSettled).toBe(true),
+      )
     }
-    expect(
-      query.toArray
-        .map(({ id, peer }) => ({ id, peer }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
-    ).toEqual(deferredSiblingRows(rows))
+    oracleAssertion(`runDeferredSiblingHistory:953`, () =>
+      expect(
+        query.toArray
+          .map(({ id, peer }) => ({ id, peer }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      ).toEqual(deferredSiblingRows(rows)),
+    )
   } finally {
     spy.mockRestore()
     for (const resolve of gates.splice(0)) resolve()
@@ -940,9 +1002,28 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
   }
 }
 describe(`deferred demand joining a sibling replay`, () => {
-  for (const history of deferredSiblingHistories)
-    it(`finishes after resumption: ${JSON.stringify(history)}`, () => {
-      oracleRoute(`case`)
-      return runDeferredSiblingHistory(history)
-    })
+  oracleProperty<DeferredSiblingHistory, Verdict>({
+    id: `live-query.deferred-sibling`,
+    law: {
+      statement: `Deferred joined demand resumes without a readiness cycle, acquires each source subscription once, and publishes the independent self-join result.`,
+      authority: `ARCHITECTURE laws 9, 10, and 15 and the self-join rule stated above.`,
+      limits: `The unchanged finite subscriber/preload, one/two rows, synchronous/held root and sibling results, and both release orders; no general provider or framework schedule.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: deferredSiblingHistories,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `deferred sibling resumption`,
+        history,
+        observe,
+        () => runDeferredSiblingHistory(history, observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

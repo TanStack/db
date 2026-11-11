@@ -11,15 +11,19 @@ import {
 } from '@tanstack/db'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  oracleAssertion,
+  rejectAt,
+} from '../../db/tests/oracle-assertion-adapter'
+import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import {
-  oracleFixedSeed,
-  oracleRoute,
-  oracleRouteOf,
-} from '../../db/tests/oracle-config'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  browserReplayAlias,
+  registerBrowserProperty,
+} from './browser-property-registration-oracle'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
   ControlledBroadcastChannel,
@@ -65,7 +69,6 @@ import type {
   AdapterCall,
   CleanupDiagnostic,
   CollectionName,
-  CoordinatorOracleProperty,
   PullFixtureResult,
   RealTabRow,
   RealTabSource,
@@ -79,42 +82,14 @@ import type {
 
 const FIXED_SEED = 165902
 
-type CoordinatorOracleCampaign = {
-  mode: `fixed` | `random` | `replay`
-  parameters: {
-    numRuns: number
-    seed?: number
-    path?: string
-  }
-}
-
 const { runs: RUNS, replay: REPLAY } = readCoordinatorOracleConfig()
-
-function coordinatorOracleCampaigns(
-  property: CoordinatorOracleProperty,
-): Array<CoordinatorOracleCampaign> {
-  if (REPLAY) {
-    return REPLAY.property === property
-      ? [
-          {
-            mode: `replay`,
-            parameters: {
-              numRuns: RUNS,
-              seed: REPLAY.seed,
-              path: REPLAY.path,
-            },
-          },
-        ]
-      : []
-  }
-  return [
-    {
-      mode: `fixed`,
-      parameters: oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
-    },
-    { mode: `random`, parameters: { numRuns: RUNS } },
-  ]
-}
+browserReplayAlias(
+  REPLAY && {
+    property: 'browser-coordinator.' + REPLAY.property,
+    seed: REPLAY.seed,
+    path: REPLAY.path,
+  },
+)
 
 /*
 Coverage owner and test cards
@@ -1251,9 +1226,7 @@ describe(`remote subset ownership lease oracle`, () => {
     ])
   })
 
-  async function runRemoteLeaseCampaign(
-    campaign: CoordinatorOracleCampaign,
-  ): Promise<void> {
+  function createRemoteLeaseJudgment() {
     let originalHistory: RemoteLeaseHistory | undefined
     let originalViolation: RemoteLeaseTakeoverViolation | undefined
     let targetDiscriminant: string | undefined
@@ -1263,28 +1236,10 @@ describe(`remote subset ownership lease oracle`, () => {
     const executionDiagnostics: Array<
       CleanupDiagnostic & { history: RemoteLeaseHistory; checkpoint: string }
     > = []
-    let propertyFailure: unknown | typeof NO_PRIMARY_FAILURE =
-      NO_PRIMARY_FAILURE
     let run = 0
-
-    try {
-      const campaignParameters = {
-        ...campaign.parameters,
-        examples: [
-          [
-            {
-              siblingCount: 2,
-              releasePrefix: 1,
-              identical: true,
-              duplicateRelease: true,
-              reverseFinalRelease: true,
-            },
-          ],
-        ],
-      }
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(remoteLeaseHistoryArbitrary, async (history) => {
+    return async (sample: RemoteLeaseHistory) => {
+      try {
+        await (async (history) => {
           const firstOwner = new RemoteLeaseOwnerLedger()
           const secondOwner = new RemoteLeaseOwnerLedger()
           const suffix = `${++run}-${history.siblingCount}-${history.releasePrefix}`
@@ -1481,22 +1436,43 @@ describe(`remote subset ownership lease oracle`, () => {
               history: structuredClone(history),
             })),
           )
-          if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
-        }),
-        campaignParameters,
-      )
-    } catch (error) {
-      propertyFailure = error
+          if (semanticFailure !== NO_PRIMARY_FAILURE) {
+            if (semanticFailure instanceof Error)
+              rejectAt(checkpoint, semanticFailure)
+            throw semanticFailure
+          }
+        })(sample)
+      } finally {
+        expect.soft(cleanupDiagnostics).toEqual([])
+        expect.soft(executionDiagnostics).toEqual([])
+      }
     }
-
-    expect.soft(cleanupDiagnostics).toEqual([])
-    expect.soft(executionDiagnostics).toEqual([])
-    if (propertyFailure !== NO_PRIMARY_FAILURE) throw propertyFailure
   }
 
-  for (const campaign of coordinatorOracleCampaigns(`remote-lease`)) {
-    it(`preserves independent sibling leases through release, retry-safe takeover, and cleanup histories (${campaign.mode})`, () =>
-      runRemoteLeaseCampaign(campaign))
+  {
+    let judge = createRemoteLeaseJudgment()
+    registerBrowserProperty(
+      remoteLeaseHistoryArbitrary,
+      {
+        id: 'browser-coordinator.remote-lease',
+        runs: RUNS,
+        fixedSeed: FIXED_SEED,
+        examples: [
+          {
+            siblingCount: 2,
+            releasePrefix: 1,
+            identical: true,
+            duplicateRelease: true,
+            reverseFinalRelease: true,
+          },
+        ],
+        beforeCampaign: () => {
+          judge = createRemoteLeaseJudgment()
+        },
+      },
+      `preserves independent sibling leases through release, retry-safe takeover, and cleanup histories`,
+      (history) => judge(history),
+    )
   }
 })
 
@@ -2008,18 +1984,22 @@ async function requestBothCollections(
     ),
   )
   for (const collectionId of deliveryOrder) {
-    expect(
-      ControlledBroadcastChannel.deliverWhere(
-        (data) =>
-          payloadType(data) === `rpc:applyLocalMutations:req` &&
-          envelopeCollection(data) === collectionId,
-      ),
-    ).toBe(true)
+    oracleAssertion('requestBothCollections', () =>
+      expect(
+        ControlledBroadcastChannel.deliverWhere(
+          (data) =>
+            payloadType(data) === `rpc:applyLocalMutations:req` &&
+            envelopeCollection(data) === collectionId,
+        ),
+      ).toBe(true),
+    )
     await nextTurn()
   }
   await pumpNetwork()
   const responses = await Promise.all(pending)
-  expect(responses.every((response) => response.ok)).toBe(true)
+  oracleAssertion('requestBothCollections', () =>
+    expect(responses.every((response) => response.ok)).toBe(true),
+  )
 }
 
 describe(`generated collection-route histories`, () => {
@@ -2339,9 +2319,7 @@ describe(`generated collection-route histories`, () => {
     ])
   })
 
-  async function runRoutingCampaign(
-    campaign: CoordinatorOracleCampaign,
-  ): Promise<void> {
+  function createRoutingJudgment() {
     let originalFailingTrace: RoutingHistory | undefined
     let originalViolation: RouteViolation | undefined
     let targetDiscriminant: string | undefined
@@ -2351,13 +2329,9 @@ describe(`generated collection-route histories`, () => {
     const executionDiagnostics: Array<
       CleanupDiagnostic & { history: RoutingHistory; checkpoint: string }
     > = []
-    let propertyFailure: unknown | typeof NO_PRIMARY_FAILURE =
-      NO_PRIMARY_FAILURE
-
-    try {
-      oracleRoute(oracleRouteOf(campaign.parameters))
-      await fc.assert(
-        fc.asyncProperty(routingHistoryArbitrary, async (history) => {
+    return async (sample: RoutingHistory) => {
+      try {
+        await (async (history) => {
           const plan = routingGrammarPlan(history)
           const oracle = new PerCollectionRouteOracle()
           const leaderAdapters = {
@@ -2571,26 +2545,34 @@ describe(`generated collection-route histories`, () => {
             })),
           )
 
-          if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
-        }),
-        campaign.parameters,
-      )
-    } catch (error) {
-      propertyFailure = error
+          if (semanticFailure !== NO_PRIMARY_FAILURE) {
+            if (semanticFailure instanceof Error)
+              rejectAt(checkpoint, semanticFailure)
+            throw semanticFailure
+          }
+        })(sample)
+      } finally {
+        expect.soft(cleanupDiagnostics).toEqual([])
+        expect.soft(executionDiagnostics).toEqual([])
+      }
     }
-
-    // Cleanup diagnostics are evaluated outside fast-check, so cleanup cannot
-    // become the predicate that selects or shrinks a semantic route failure.
-    expect.soft(cleanupDiagnostics).toEqual([])
-    // Setup/reach/fixture failures are also reported outside the property;
-    // only the locked semantic discriminant is eligible for shrinking.
-    expect.soft(executionDiagnostics).toEqual([])
-    if (propertyFailure !== NO_PRIMARY_FAILURE) throw propertyFailure
   }
 
-  for (const campaign of coordinatorOracleCampaigns(`routing`)) {
-    it(`uses the collection's registered adapter before and after leadership transfer (${campaign.mode})`, () =>
-      runRoutingCampaign(campaign))
+  {
+    let judge = createRoutingJudgment()
+    registerBrowserProperty(
+      routingHistoryArbitrary,
+      {
+        id: 'browser-coordinator.routing',
+        runs: RUNS,
+        fixedSeed: FIXED_SEED,
+        beforeCampaign: () => {
+          judge = createRoutingJudgment()
+        },
+      },
+      `uses the collection's registered adapter before and after leadership transfer`,
+      (history) => judge(history),
+    )
   }
 })
 
@@ -2888,7 +2870,11 @@ async function runRealTabFollowerHistory(
     tabs.push(follower)
     follower.collection.startSyncImmediate()
 
-    await vi.waitFor(() => expect(follower.storageCollectionId()).toBeDefined())
+    await vi.waitFor(() =>
+      oracleAssertion('runRealTabFollowerHistory', () =>
+        expect(follower.storageCollectionId()).toBeDefined(),
+      ),
+    )
     gateApply = true
     if (history.placement === `queued`) holdLeaderUpstream = true
     // The consumer settles at first ready (live query) or when the load
@@ -2933,8 +2919,12 @@ async function runRealTabFollowerHistory(
       // queued behind it.
       await vi.waitFor(
         () => {
-          expect(follower.trace).toContain(`ensure`)
-          expect(leader.trace).toContain(`upstream`)
+          oracleAssertion('runRealTabFollowerHistory', () =>
+            expect(follower.trace).toContain(`ensure`),
+          )
+          oracleAssertion('runRealTabFollowerHistory', () =>
+            expect(leader.trace).toContain(`upstream`),
+          )
         },
         { timeout: 15_000 },
       )
@@ -2946,9 +2936,15 @@ async function runRealTabFollowerHistory(
       )
       queries.push(other)
       void other.preload().catch(() => undefined)
-      await vi.waitFor(() => expect(hydrationReached).toBe(true), {
-        timeout: 15_000,
-      })
+      await vi.waitFor(
+        () =>
+          oracleAssertion('runRealTabFollowerHistory', () =>
+            expect(hydrationReached).toBe(true),
+          ),
+        {
+          timeout: 15_000,
+        },
+      )
       holdLeaderUpstream = false
       upstreamGate.resolve()
     }
@@ -2958,27 +2954,37 @@ async function runRealTabFollowerHistory(
     // hydration. The model says the query has not reached first ready.
     await vi.waitFor(
       () => {
-        expect(
-          history.placement === `direct` ? applyReached : hydrationReached,
-        ).toBe(true)
-        expect(follower.trace).toContain(`ensure-settled`)
+        oracleAssertion('runRealTabFollowerHistory', () =>
+          expect(
+            history.placement === `direct` ? applyReached : hydrationReached,
+          ).toBe(true),
+        )
+        oracleAssertion('runRealTabFollowerHistory', () =>
+          expect(follower.trace).toContain(`ensure-settled`),
+        )
       },
       { timeout: 15_000 },
     )
     for (let turn = 0; turn < 20; turn++) await nextTurn()
     const expected = expectedRealTabFollower(history)
-    expect(settledAt !== undefined).toBe(expected.settledWhileApplyHeld)
+    oracleAssertion('runRealTabFollowerHistory', () =>
+      expect(settledAt !== undefined).toBe(expected.settledWhileApplyHeld),
+    )
     hydrationGate.resolve()
     applyGate.resolve()
     const settled = await outcome
     await vi.waitFor(() =>
-      expect(follower.collection.status).toBe(expected.settled.source),
+      oracleAssertion('runRealTabFollowerHistory', () =>
+        expect(follower.collection.status).toBe(expected.settled.source),
+      ),
     )
-    expect({
-      outcome: settled,
-      rows: settledAt?.rows,
-      source: follower.collection.status,
-    }).toEqual(expected.settled)
+    oracleAssertion('runRealTabFollowerHistory', () =>
+      expect({
+        outcome: settled,
+        rows: settledAt?.rows,
+        source: follower.collection.status,
+      }).toEqual(expected.settled),
+    )
   } finally {
     hydrationGate.resolve()
     applyGate.resolve()
