@@ -11,4 +11,3 @@ oracleProperty({
   ...options,
   check: (h, trace, expected) => options.check(h, trace, expected),
 })
-

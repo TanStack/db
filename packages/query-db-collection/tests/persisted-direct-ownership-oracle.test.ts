@@ -25,4 +25,3 @@ for (const host of ['controlled', 'node-sqlite'] as const)
       check: (h, trace, expected) => options.check(h, trace, expected),
     })
   })
-

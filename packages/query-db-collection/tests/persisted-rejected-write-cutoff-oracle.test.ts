@@ -15,7 +15,6 @@ import {
 } from './persisted-rejected-write-cutoff-oracle'
 import type { History, Trace } from './persisted-rejected-write-cutoff-oracle'
 
-
 for (const host of ['controlled', 'node-sqlite'] as const)
   describe(host, () => {
     let sequence = 0
