@@ -100,7 +100,7 @@ import {
   getLiveQueryHash,
   getStableQueryBuilderHash,
 } from '@tanstack/db'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { Component, Suspense } from 'react'
 import { renderToPipeableStream, renderToString } from 'react-dom/server'
@@ -112,7 +112,7 @@ import {
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import { ssrStreamHydrationMismatches } from '../../db/tests/ssr-stream-view-oracle'
-import { oracleProperty, oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -187,327 +187,376 @@ describe(`standalone descriptor query binding`, () => {
   // while a deferring subscription preserves the zero-start cut. Ordinary
   // admission also crosses startup cleanup: cleanup retires this start, and
   // only fresh later demand can restart it. Both startSync settings must work.
-  it.each(
-    (
-      [
-        { reader: `preload`, startSync: true },
-        { reader: `preload`, startSync: false },
-        { reader: `subscriber`, startSync: true },
-        { reader: `subscriber`, startSync: false },
-        { reader: `resumed subscriber`, startSync: true },
-        { reader: `resumed subscriber`, startSync: false },
-        { reader: `deferring subscriber`, startSync: true },
-        { reader: `deferring subscriber`, startSync: false },
-      ] as const
-    ).flatMap((history) =>
-      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
-        (history.reader === `subscriber` ||
-        history.reader === `resumed subscriber`
-          ? subscriberStartCleanupHistories
-          : [subscriberStartCleanupHistories[0]]
-        ).map((cleanupHistory) => ({
-          ...history,
-          syncMode,
-          ...cleanupHistory,
-        })),
-      ),
-    ),
-  )(
-    `$reader after an abandoned render (startSync=$startSync, $syncMode, cleanup=$cleanupAt, pending=$cleanupPending)`,
-    async (history) => {
-      oracleRoute(`case`)
-      const { reader, startSync, syncMode, cleanupAt, cleanupPending } = history
-      const expected = modelSubscriberStartCleanup(history)
-      const pendingCleanup = createDeferred<void>()
-      const client = new DbClient()
-      let starts = 0
-      let cleanups = 0
-      const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
-        id: `suspended-direct-reader`,
-        getKey: (row: Row) => row.id,
-        startSync,
+  const abandonedRenderReaderHistories = (
+    [
+      { reader: `preload`, startSync: true },
+      { reader: `preload`, startSync: false },
+      { reader: `subscriber`, startSync: true },
+      { reader: `subscriber`, startSync: false },
+      { reader: `resumed subscriber`, startSync: true },
+      { reader: `resumed subscriber`, startSync: false },
+      { reader: `deferring subscriber`, startSync: true },
+      { reader: `deferring subscriber`, startSync: false },
+    ] as const
+  ).flatMap((history) =>
+    ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+      (history.reader === `subscriber` ||
+      history.reader === `resumed subscriber`
+        ? subscriberStartCleanupHistories
+        : [subscriberStartCleanupHistories[0]]
+      ).map((cleanupHistory) => ({
+        ...history,
         syncMode,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            starts++
-            const publish = () => {
-              begin()
-              write({ type: `insert`, value: { id: `one`, value: `live` } })
-              commit()
-              return true as const
-            }
-            if (syncMode === `eager`) publish()
-            markReady()
-            return {
-              loadSubset: publish,
-              cleanup: () => {
-                cleanups++
-                return cleanupPending ? pendingCleanup.promise : undefined
-              },
-            }
-          },
-        },
-      }))
-      const query = new Query().from({ item: descriptor })
-      const never = new Promise<void>(() => {})
-      function Suspended(): ReactNode {
-        useLiveQuery({ query })
-        throw never
-      }
-      const mounted = render(
-        <DbProvider client={client}>
-          <Suspense fallback={<div>Waiting</div>}>
-            <Suspended />
-          </Suspense>
-        </DbProvider>,
-      )
-      const source = client.collection(descriptor)
-      const statuses: Array<string> = []
-      let cleanup: Promise<void> | undefined
-      let cleanupRequested = false
-      const removeStatusListener = source.on(`status:change`, ({ status }) => {
-        statuses.push(status)
-        if (!cleanupRequested && status === cleanupAt) {
-          cleanupRequested = true
-          cleanup = source.cleanup()
-        }
-      })
-      let directRead: Promise<void> | undefined
-      let subscription: ReturnType<typeof source.subscribeChanges> | undefined
-      let peer: ReturnType<typeof source.subscribeChanges> | undefined
-      try {
-        oracleAssertion(
-          'expect(mounted.getByText(`Waiting`)).toBeDefined()',
-          () => expect(mounted.getByText(`Waiting`)).toBeDefined(),
-        )
-        oracleAssertion(
-          'expect(starts, `before commit or direct demand`).toBe(0)',
-          () => expect(starts, `before commit or direct demand`).toBe(0),
-        )
-        if (reader === `preload`) {
-          directRead = source.preload()
-          void directRead.catch(() => {})
-        } else {
-          subscription = source.subscribeChanges(() => {}, {
-            deferAcquisition:
-              reader === `deferring subscriber` ||
-              reader === `resumed subscriber`,
-            includeInitialState: true,
-          })
-          if (reader === `resumed subscriber`) {
-            oracleAssertion('expect(', () =>
-              expect(
-                starts,
-                `deferred demand preserves the abandoned-render cut`,
-              ).toBe(0),
-            )
-            subscription.resumeDeferredAcquisition()
+        ...cleanupHistory,
+      })),
+    ),
+  )
+  type AbandonedRenderReaderHistory =
+    (typeof abandonedRenderReaderHistories)[number]
+  async function runAbandonedRenderReader(
+    history: AbandonedRenderReaderHistory,
+  ): Promise<void> {
+    const { reader, startSync, syncMode, cleanupAt, cleanupPending } = history
+    const expected = modelSubscriberStartCleanup(history)
+    const pendingCleanup = createDeferred<void>()
+    const client = new DbClient()
+    let starts = 0
+    let cleanups = 0
+    const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
+      id: `suspended-direct-reader`,
+      getKey: (row: Row) => row.id,
+      startSync,
+      syncMode,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          starts++
+          const publish = () => {
+            begin()
+            write({ type: `insert`, value: { id: `one`, value: `live` } })
+            commit()
+            return true as const
           }
+          if (syncMode === `eager`) publish()
+          markReady()
+          return {
+            loadSubset: publish,
+            cleanup: () => {
+              cleanups++
+              return cleanupPending ? pendingCleanup.promise : undefined
+            },
+          }
+        },
+      },
+    }))
+    const query = new Query().from({ item: descriptor })
+    const never = new Promise<void>(() => {})
+    function Suspended(): ReactNode {
+      useLiveQuery({ query })
+      throw never
+    }
+    const mounted = render(
+      <DbProvider client={client}>
+        <Suspense fallback={<div>Waiting</div>}>
+          <Suspended />
+        </Suspense>
+      </DbProvider>,
+    )
+    const source = client.collection(descriptor)
+    const statuses: Array<string> = []
+    let cleanup: Promise<void> | undefined
+    let cleanupRequested = false
+    const removeStatusListener = source.on(`status:change`, ({ status }) => {
+      statuses.push(status)
+      if (!cleanupRequested && status === cleanupAt) {
+        cleanupRequested = true
+        cleanup = source.cleanup()
+      }
+    })
+    let directRead: Promise<void> | undefined
+    let subscription: ReturnType<typeof source.subscribeChanges> | undefined
+    let peer: ReturnType<typeof source.subscribeChanges> | undefined
+    try {
+      oracleAssertion(
+        'expect(mounted.getByText(`Waiting`)).toBeDefined()',
+        () => expect(mounted.getByText(`Waiting`)).toBeDefined(),
+      )
+      oracleAssertion(
+        'expect(starts, `before commit or direct demand`).toBe(0)',
+        () => expect(starts, `before commit or direct demand`).toBe(0),
+      )
+      if (reader === `preload`) {
+        directRead = source.preload()
+        void directRead.catch(() => {})
+      } else {
+        subscription = source.subscribeChanges(() => {}, {
+          deferAcquisition:
+            reader === `deferring subscriber` ||
+            reader === `resumed subscriber`,
+          includeInitialState: true,
+        })
+        if (reader === `resumed subscriber`) {
+          oracleAssertion('expect(', () =>
+            expect(
+              starts,
+              `deferred demand preserves the abandoned-render cut`,
+            ).toBe(0),
+          )
+          subscription.resumeDeferredAcquisition()
         }
+      }
+      oracleAssertion(
+        'expect(starts, `direct demand starts the source`).toBe(',
+        () =>
+          expect(starts, `direct demand starts the source`).toBe(
+            reader === `deferring subscriber` ? 0 : expected.starts,
+          ),
+      )
+      oracleAssertion('expect(cleanups).toBe(expected.cleanups)', () =>
+        expect(cleanups).toBe(expected.cleanups),
+      )
+      oracleAssertion('expect(source.status).toBe(', () =>
+        expect(source.status).toBe(
+          reader === `deferring subscriber` ? `idle` : expected.statusOnReturn,
+        ),
+      )
+      oracleAssertion('expect(statuses).toEqual(', () =>
+        expect(statuses).toEqual(
+          reader === `deferring subscriber` ? [] : expected.statusesOnReturn,
+        ),
+      )
+      pendingCleanup.resolve()
+      await cleanup
+      await directRead
+      oracleAssertion('expect(source.status).toBe(', () =>
+        expect(source.status).toBe(
+          reader === `deferring subscriber`
+            ? `idle`
+            : expected.statusAfterCleanup,
+        ),
+      )
+      oracleAssertion('expect(statuses).toEqual(', () =>
+        expect(statuses).toEqual(
+          reader === `deferring subscriber`
+            ? []
+            : expected.statusesAfterCleanup,
+        ),
+      )
+      if (cleanupAt === `none`) {
+        const expectsRow =
+          reader !== `deferring subscriber` &&
+          (syncMode === `eager` ||
+            reader === `subscriber` ||
+            reader === `resumed subscriber`)
         oracleAssertion(
-          'expect(starts, `direct demand starts the source`).toBe(',
+          'expect(source.get(`one`)?.value).toBe(expectsRow ? `live` : undefined)',
           () =>
-            expect(starts, `direct demand starts the source`).toBe(
-              reader === `deferring subscriber` ? 0 : expected.starts,
+            expect(source.get(`one`)?.value).toBe(
+              expectsRow ? `live` : undefined,
             ),
         )
-        oracleAssertion('expect(cleanups).toBe(expected.cleanups)', () =>
-          expect(cleanups).toBe(expected.cleanups),
-        )
-        oracleAssertion('expect(source.status).toBe(', () =>
-          expect(source.status).toBe(
-            reader === `deferring subscriber`
-              ? `idle`
-              : expected.statusOnReturn,
-          ),
-        )
-        oracleAssertion('expect(statuses).toEqual(', () =>
-          expect(statuses).toEqual(
-            reader === `deferring subscriber` ? [] : expected.statusesOnReturn,
-          ),
-        )
-        pendingCleanup.resolve()
-        await cleanup
-        await directRead
-        oracleAssertion('expect(source.status).toBe(', () =>
-          expect(source.status).toBe(
-            reader === `deferring subscriber`
-              ? `idle`
-              : expected.statusAfterCleanup,
-          ),
-        )
-        oracleAssertion('expect(statuses).toEqual(', () =>
-          expect(statuses).toEqual(
-            reader === `deferring subscriber`
-              ? []
-              : expected.statusesAfterCleanup,
-          ),
-        )
-        if (cleanupAt === `none`) {
-          const expectsRow =
-            reader !== `deferring subscriber` &&
-            (syncMode === `eager` ||
-              reader === `subscriber` ||
-              reader === `resumed subscriber`)
-          oracleAssertion(
-            'expect(source.get(`one`)?.value).toBe(expectsRow ? `live` : undefined)',
-            () =>
-              expect(source.get(`one`)?.value).toBe(
-                expectsRow ? `live` : undefined,
-              ),
-          )
-        }
-        removeStatusListener()
-        if (reader !== `deferring subscriber`) {
-          peer = source.subscribeChanges(() => {})
-          oracleAssertion(
-            'expect(starts, `later demand reuses or restarts the source`).toBe(',
-            () =>
-              expect(starts, `later demand reuses or restarts the source`).toBe(
-                expected.starts + (cleanupAt === `none` ? 0 : 1),
-              ),
-          )
-          oracleAssertion('expect(source.status).toBe(`ready`)', () =>
-            expect(source.status).toBe(`ready`),
-          )
-        }
-      } finally {
-        removeStatusListener()
-        pendingCleanup.resolve()
-        await cleanup
-        peer?.unsubscribe()
-        subscription?.unsubscribe()
-        mounted.unmount()
-        await client.cleanup()
-        await directRead?.catch(() => {})
       }
+      removeStatusListener()
+      if (reader !== `deferring subscriber`) {
+        peer = source.subscribeChanges(() => {})
+        oracleAssertion(
+          'expect(starts, `later demand reuses or restarts the source`).toBe(',
+          () =>
+            expect(starts, `later demand reuses or restarts the source`).toBe(
+              expected.starts + (cleanupAt === `none` ? 0 : 1),
+            ),
+        )
+        oracleAssertion('expect(source.status).toBe(`ready`)', () =>
+          expect(source.status).toBe(`ready`),
+        )
+      }
+    } finally {
+      removeStatusListener()
+      pendingCleanup.resolve()
+      await cleanup
+      peer?.unsubscribe()
+      subscription?.unsubscribe()
+      mounted.unmount()
+      await client.cleanup()
+      await directRead?.catch(() => {})
+    }
+  }
+  oracleProperty({
+    id: `react.descriptor-abandoned-render-reader`,
+    law: {
+      statement: `A suspended render owns no provider demand; a later independent preload or subscriber starts exactly one sync run, a deferring subscriber preserves the zero-start cut, and startup cleanup retires the start until fresh demand restarts it.`,
+      authority: `The standalone Query contract and SSR factory-descriptor promise documented above; modelSubscriberStartCleanup.`,
+      limits: `The unchanged reader, startSync, sync mode and subscriber cleanup-point histories through one abandoned DbProvider render.`,
     },
-  )
-  it.each(histories)(
-    `binds one prebuilt Query to each receiving DbClient with $name`,
-    async ({ name, initial, writes }) => {
-      oracleRoute(`case`)
-      const descriptor = collectionOptions(
-        `standalone-descriptor-rows-${name}`,
-        (client) =>
-          mockSyncCollectionOptions<Row>({
-            id: `standalone-descriptor-rows-${name}`,
-            getKey: (row) => row.id,
-            initialData: client.requireDependency<Array<Row>>(`rows`),
-          }),
-      )
-      // Definition happens outside React and before either DbClient exists.
-      const query = new Query()
-        .from({ item: descriptor })
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: abandonedRenderReaderHistories,
+    label: (history) =>
+      `${history.reader} after an abandoned render (startSync=${history.startSync}, ${history.syncMode}, cleanup=${history.cleanupAt}, pending=${history.cleanupPending})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `abandoned render descriptor demand`,
+        plan,
+        observe,
+        () => runAbandonedRenderReader(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+  async function runPrebuiltQueryBinding({
+    name,
+    initial,
+    writes,
+  }: (typeof histories)[number]): Promise<void> {
+    const descriptor = collectionOptions(
+      `standalone-descriptor-rows-${name}`,
+      (client) =>
+        mockSyncCollectionOptions<Row>({
+          id: `standalone-descriptor-rows-${name}`,
+          getKey: (row) => row.id,
+          initialData: client.requireDependency<Array<Row>>(`rows`),
+        }),
+    )
+    // Definition happens outside React and before either DbClient exists.
+    const query = new Query()
+      .from({ item: descriptor })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const firstModel = new Map<string, Row>([[initial.first.id, initial.first]])
+    const secondModel = new Map<string, Row>([
+      [initial.second.id, initial.second],
+    ])
+    const seedRows = (model: ReadonlyMap<string, Row>) =>
+      expectedRows(model).map((row) => ({ ...row }))
+    const firstClient = new DbClient({ rows: seedRows(firstModel) })
+    const secondClient = new DbClient({ rows: seedRows(secondModel) })
+    const planIdentity = getStableQueryBuilderHash(query)
+    const boundShape = (client: DbClient) =>
+      new Query()
+        .from({ item: client.collection(descriptor) })
         .select(({ item }) => ({ id: item.id, value: item.value }))
-      const firstModel = new Map<string, Row>([
-        [initial.first.id, initial.first],
-      ])
-      const secondModel = new Map<string, Row>([
-        [initial.second.id, initial.second],
-      ])
-      const seedRows = (model: ReadonlyMap<string, Row>) =>
-        expectedRows(model).map((row) => ({ ...row }))
-      const firstClient = new DbClient({ rows: seedRows(firstModel) })
-      const secondClient = new DbClient({ rows: seedRows(secondModel) })
-      const planIdentity = getStableQueryBuilderHash(query)
-      const boundShape = (client: DbClient) =>
-        new Query()
-          .from({ item: client.collection(descriptor) })
-          .select(({ item }) => ({ id: item.id, value: item.value }))
-      oracleAssertion('expect(planIdentity).toBe(', () =>
-        expect(planIdentity).toBe(
-          getStableQueryBuilderHash(boundShape(firstClient)),
-        ),
-      )
-      oracleAssertion('expect(planIdentity).toBe(', () =>
-        expect(planIdentity).toBe(
-          getStableQueryBuilderHash(boundShape(secondClient)),
-        ),
-      )
-      let firstReceivingClient = firstClient
-      const first = renderHook(() => useLiveQuery({ query }), {
-        wrapper: ({ children }: { children: ReactNode }) => (
-          <DbProvider client={firstReceivingClient}>{children}</DbProvider>
-        ),
-      })
-      const second = renderHook(() => useLiveQuery({ query }), {
-        wrapper: ({ children }: { children: ReactNode }) => (
-          <DbProvider client={secondClient}>{children}</DbProvider>
-        ),
-      })
-      // Compare after each publication. The same descriptor ID and query shape
-      // must not make either provider observe the other provider's Collection.
-      const check = async (
-        firstScopeModel: ReadonlyMap<string, Row> = firstModel,
-      ) => {
-        await waitFor(() => {
-          for (const [observed, model] of [
-            [first.result.current.data, firstScopeModel],
-            [second.result.current.data, secondModel],
-          ] as const) {
-            oracleAssertion('expect(', () =>
-              expect(
-                observed
-                  .map(({ id, value }) => ({ id, value }))
-                  .sort((left, right) => left.id.localeCompare(right.id)),
-              ).toEqual(expectedRows(model)),
+    oracleAssertion('expect(planIdentity).toBe(', () =>
+      expect(planIdentity).toBe(
+        getStableQueryBuilderHash(boundShape(firstClient)),
+      ),
+    )
+    oracleAssertion('expect(planIdentity).toBe(', () =>
+      expect(planIdentity).toBe(
+        getStableQueryBuilderHash(boundShape(secondClient)),
+      ),
+    )
+    let firstReceivingClient = firstClient
+    const first = renderHook(() => useLiveQuery({ query }), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <DbProvider client={firstReceivingClient}>{children}</DbProvider>
+      ),
+    })
+    const second = renderHook(() => useLiveQuery({ query }), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <DbProvider client={secondClient}>{children}</DbProvider>
+      ),
+    })
+    // Compare after each publication. The same descriptor ID and query shape
+    // must not make either provider observe the other provider's Collection.
+    const check = async (
+      firstScopeModel: ReadonlyMap<string, Row> = firstModel,
+    ) => {
+      await waitFor(() => {
+        for (const [observed, model] of [
+          [first.result.current.data, firstScopeModel],
+          [second.result.current.data, secondModel],
+        ] as const) {
+          oracleAssertion('expect(', () =>
+            expect(
+              observed
+                .map(({ id, value }) => ({ id, value }))
+                .sort((left, right) => left.id.localeCompare(right.id)),
+            ).toEqual(expectedRows(model)),
+          )
+          for (const row of observed) {
+            oracleAssertion('expect(row.$key).toBe(row.id)', () =>
+              expect(row.$key).toBe(row.id),
             )
-            for (const row of observed) {
-              oracleAssertion('expect(row.$key).toBe(row.id)', () =>
-                expect(row.$key).toBe(row.id),
-              )
-              oracleAssertion('expect(Object.keys(row).sort()).toEqual(', () =>
-                expect(Object.keys(row).sort()).toEqual(
-                  [
-                    `$collectionId`,
-                    `$hasPendingWrites`,
-                    `$key`,
-                    `$origin`,
-                    `id`,
-                    `value`,
-                  ].sort(),
-                ),
-              )
-            }
+            oracleAssertion('expect(Object.keys(row).sort()).toEqual(', () =>
+              expect(Object.keys(row).sort()).toEqual(
+                [
+                  `$collectionId`,
+                  `$hasPendingWrites`,
+                  `$key`,
+                  `$origin`,
+                  `id`,
+                  `value`,
+                ].sort(),
+              ),
+            )
           }
-        })
-      }
-      await check()
-      oracleAssertion(
-        'expect(firstClient.collection(descriptor)).not.toBe(',
-        () =>
-          expect(firstClient.collection(descriptor)).not.toBe(
-            secondClient.collection(descriptor),
-          ),
-      )
-      const write = (client: DbClient, model: Map<string, Row>, next: Row) => {
-        act(() => {
-          const collection = client.collection(descriptor)
-          if (model.has(next.id)) {
-            collection.update(next.id, (draft) => {
-              draft.value = next.value
-            })
-          } else {
-            collection.insert({ ...next })
-          }
-        })
-        applyModelWrite(model, next)
-      }
-      write(firstClient, firstModel, writes.first)
-      await check()
-      write(secondClient, secondModel, writes.second)
-      await check()
-      firstReceivingClient = secondClient
-      first.rerender()
-      await check(secondModel)
-      firstReceivingClient = firstClient
-      first.rerender()
-      await check()
-      first.unmount()
-      second.unmount()
+        }
+      })
+    }
+    await check()
+    oracleAssertion(
+      'expect(firstClient.collection(descriptor)).not.toBe(',
+      () =>
+        expect(firstClient.collection(descriptor)).not.toBe(
+          secondClient.collection(descriptor),
+        ),
+    )
+    const write = (client: DbClient, model: Map<string, Row>, next: Row) => {
+      act(() => {
+        const collection = client.collection(descriptor)
+        if (model.has(next.id)) {
+          collection.update(next.id, (draft) => {
+            draft.value = next.value
+          })
+        } else {
+          collection.insert({ ...next })
+        }
+      })
+      applyModelWrite(model, next)
+    }
+    write(firstClient, firstModel, writes.first)
+    await check()
+    write(secondClient, secondModel, writes.second)
+    await check()
+    firstReceivingClient = secondClient
+    first.rerender()
+    await check(secondModel)
+    firstReceivingClient = firstClient
+    first.rerender()
+    await check()
+    first.unmount()
+    second.unmount()
+  }
+  oracleProperty({
+    id: `react.descriptor-prebuilt-query-binding`,
+    law: {
+      statement: `One prebuilt descriptor Query binds to each receiving DbClient, and each client's rows follow only its own writes, including across a mounted provider switch.`,
+      authority: `The standalone Query contract and SSR factory-descriptor promise documented above; the per-client row model expectedRows and applyModelWrite.`,
+      limits: `The disjoint-key and colliding-key two-client histories; no on-demand load or other query clause.`,
     },
-  )
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories,
+    label: ({ name }) =>
+      `binds one prebuilt Query to each receiving DbClient with ${name}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `prebuilt descriptor Query binding`,
+        plan,
+        observe,
+        () => runPrebuiltQueryBinding(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 /**
  * React receives the source-error premise through actual descriptor startup.
@@ -780,6 +829,10 @@ describe(`SSR snapshot admission`, () => {
   const properties = {
     ordinary: `react.ssr-ordinary`,
     infinite: `react.ssr-infinite`,
+  } as const
+  const exampleProperties = {
+    ordinary: `react.ssr-ordinary-examples`,
+    infinite: `react.ssr-infinite-examples`,
   } as const
   for (const hook of [`ordinary`, `infinite`] as const) {
     const snapshotStates = [
@@ -1080,12 +1133,33 @@ describe(`SSR snapshot admission`, () => {
         await server.cleanup()
       }
     }
-    for (const history of ssrSnapshotExamples) {
-      it(`replays ${hook} SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`, async () => {
-        oracleRoute(`case`)
-        await checkHistory(history, makeReach())
-      })
-    }
+    // The shared examples replayed with a reach recorder that records
+    // nothing, as the former per-example tests did. The generated property
+    // below also runs them as fixed histories.
+    oracleProperty({
+      id: exampleProperties[hook],
+      law: {
+        statement: `Server rows and readiness are admitted only when the first browser hook can reproduce them; transported seeds give way to browser sync after commit.`,
+        authority: `expectedSsrSnapshot from ssr-snapshot-admission-oracle.ts, maintainer server-only snapshot rejection decision and SSR guide rendered-view law.`,
+        limits: `The shared ssrSnapshotExamples through the unchanged ordinary/infinite server render and hydrateRoot admission paths.`,
+      },
+      owns: [
+        `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+        `src/DbProvider.tsx#DbProvider`,
+        `src/useLiveQuery.ts#useLiveQuery`,
+        `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+      ],
+      histories: ssrSnapshotExamples,
+      label: (history) =>
+        `replays ${hook} SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`,
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(`SSR snapshot admission`, plan, observe, () =>
+          checkHistory(plan.history, makeReach()),
+        ),
+      check: forwardAssertionJudgment,
+    })
     oracleProperty({
       id: properties[hook],
       law: {
@@ -1600,77 +1674,97 @@ const createStreamReach = (
   reach: (state: (typeof streamStates)[number]) => observe(`reach`, state),
 })
 describe(`stream render snapshot cut`, () => {
-  for (const ordinaryFirst of [false, true])
-    for (const splitHydration of [false, true])
-      it(`retains an ordinary loading view when its stream later fails, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () => {
-        oracleRoute(`case`)
-        return checkStreamCut(
-          {
-            count: 0,
+  // Named histories that the generated stream grammar cannot take back: each
+  // omits fields that the grammar always supplies. They replay through the
+  // same checkStreamCut driver with a reach recorder that records nothing, as
+  // the former per-history tests did.
+  const streamFixedHistories: Array<{
+    name: string
+    history: SsrStreamHistory
+  }> = [
+    ...[false, true].flatMap((ordinaryFirst) =>
+      [false, true].map((splitHydration) => ({
+        name: `retains an ordinary loading view when its stream later fails, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`,
+        history: {
+          count: 0,
+          writes: 0,
+          ordinaryFirst,
+          ordinaryLast: !ordinaryFirst,
+          holdSourceReadiness: true,
+          sourceError: true,
+          splitHydration,
+        },
+      })),
+    ),
+    ...[0, 1].flatMap((count) =>
+      [false, true].flatMap((ordinaryFirst) =>
+        [false, true].map((splitHydration) => ({
+          name: `hydrates each held-source view with count=${count}, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`,
+          history: {
+            count,
             writes: 0,
             ordinaryFirst,
             ordinaryLast: !ordinaryFirst,
             holdSourceReadiness: true,
-            sourceError: true,
+            browserWrite: true,
             splitHydration,
           },
-          createStreamReach(),
-        )
-      })
-  for (const count of [0, 1])
-    for (const ordinaryFirst of [false, true])
-      for (const splitHydration of [false, true])
-        it(`hydrates each held-source view with count=${count}, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () => {
-          oracleRoute(`case`)
-          return checkStreamCut(
-            {
-              count,
-              writes: 0,
-              ordinaryFirst,
-              ordinaryLast: !ordinaryFirst,
-              holdSourceReadiness: true,
-              browserWrite: true,
-              splitHydration,
-            },
-            createStreamReach(),
-          )
-        })
-  it(`keeps an ordinary reader from blocking a shared Suspense preload`, () => {
-    oracleRoute(`fixed history`)
-    return checkStreamCut(
-      { count: 1, writes: 0, ordinaryFirst: true, browserWrite: true },
-      createStreamReach(),
-    )
-  })
-  it(`hydrates an ordinary reader rendered after its Suspense sibling`, () => {
-    oracleRoute(`fixed history`)
-    return checkStreamCut(
-      { count: 1, writes: 0, ordinaryLast: true, browserWrite: true },
-      createStreamReach(),
-    )
-  })
-  it(`retains the Suspense view after its ordinary sibling commits`, () => {
-    oracleRoute(`fixed history`)
-    return checkStreamCut(
-      {
+        })),
+      ),
+    ),
+    {
+      name: `keeps an ordinary reader from blocking a shared Suspense preload`,
+      history: { count: 1, writes: 0, ordinaryFirst: true, browserWrite: true },
+    },
+    {
+      name: `hydrates an ordinary reader rendered after its Suspense sibling`,
+      history: { count: 1, writes: 0, ordinaryLast: true, browserWrite: true },
+    },
+    {
+      name: `retains the Suspense view after its ordinary sibling commits`,
+      history: {
         count: 1,
         writes: 0,
         ordinaryFirst: true,
         browserWrite: true,
         splitHydration: true,
       },
-      createStreamReach(),
-    )
+    },
+    ...[
+      { count: 0, writes: 1 },
+      { count: 1, writes: 1 },
+      { count: 1, writes: 0 },
+    ].map((history) => ({
+      name: `replays count=${history.count} later-writes=${history.writes}`,
+      history,
+    })),
+  ]
+  oracleProperty({
+    id: `react.ssr-stream-cut-fixed`,
+    law: {
+      statement: `Each first browser reader reproduces its own rendered server view, including ordinary loading beside a pending or failed Suspense stream.`,
+      authority: `SSR guide per-reader hydration promise and ssrStreamHydrationMismatches independent metamorphic comparison.`,
+      limits: `Named regressions that the generated stream grammar cannot produce; each is replayed through the same driver and comparison.`,
+    },
+    owns: [
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: streamFixedHistories,
+    label: ({ name }) => name,
+    resolve: ({ history }) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `SSR stream first-view transport`,
+        plan,
+        observe,
+        () => checkStreamCut(plan.history, createStreamReach()),
+      ),
+    check: forwardAssertionJudgment,
   })
-  for (const history of [
-    { count: 0, writes: 1 },
-    { count: 1, writes: 1 },
-    { count: 1, writes: 0 },
-  ])
-    it(`replays count=${history.count} later-writes=${history.writes}`, () => {
-      oracleRoute(`case`)
-      return checkStreamCut(history, createStreamReach())
-    })
   const streamArbitrary = fc
     .record({
       count: fc.integer({ min: 0, max: 3 }),

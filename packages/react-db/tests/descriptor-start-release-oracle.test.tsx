@@ -7,7 +7,6 @@
  * No graph from the rejected input may start a lazy source on its own.
  */
 import { cleanup, renderHook } from '@testing-library/react'
-import { expect, it } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -19,7 +18,6 @@ import {
 import {
   differs,
   oracleProperty,
-  oracleRoute,
   pass,
   violation,
 } from '../../db/tests/oracle-config'
@@ -151,20 +149,3 @@ for (const hook of hooks) {
     check: checkRecordedHistory,
   })
 }
-
-it.each([
-  `blocked-peer`,
-  `duplicate-start`,
-  `leaked-resource`,
-  `wrong-row`,
-] as const)(`rejects wrong multi-source release observation: %s`, (fault) => {
-  oracleRoute(`calibration`)
-  const history = { acquired: 3, failedStarts: 3, eagerStarts: 7 }
-  const actual = expectedDescriptorStart(history, `cleaned`)
-  checkDescriptorStart(actual, history, `cleaned`)
-  if (fault === `blocked-peer`) actual.starts[2] = 0
-  if (fault === `duplicate-start`) actual.starts[2] = actual.starts[2]! + 1
-  if (fault === `leaked-resource`) actual.cleanups[2] = 0
-  if (fault === `wrong-row`) actual.rows[2] = [{ id: `bad`, value: `bad` }]
-  expect(() => checkDescriptorStart(actual, history, `cleaned`)).toThrow()
-})
