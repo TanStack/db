@@ -41,11 +41,12 @@
  * Without `cwd`, the checkout is the one that holds this script.
  *
  * The lint needs the checkout's installed dependencies, which a fresh worktree
- * does not have. This script imports them only after it has checked that they
- * resolve, so it never crashes on a missing install: it writes one line that
- * names the checkout and says to run `pnpm install`. A hook then exits 0, so a
- * missing install does not block the agent. A command-line run exits 1,
- * because CI and the pre-commit hook must not pass a lint that did not run.
+ * does not have. This script loads them with dynamic imports and catches a
+ * failure, so it never crashes on a missing or partial install: it reports one
+ * line that names the checkout and says to run `pnpm install`, or, for another
+ * load error, one line with its message. A hook hands the line to the agent and
+ * exits 0. A command-line run writes it to stderr and exits 1, because CI and
+ * the pre-commit hook must not pass a lint that did not run.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
@@ -96,43 +97,57 @@ const root =
 const ownScript = join(root, `scripts`, `agent-lint-feedback.mjs`)
 const delegate = root !== scriptRoot && existsSync(ownScript)
 
-/** Whether a package resolves from this script, as its import would. */
-function resolves(specifier) {
+// Packages that are absent, or present without the file that an import names.
+const missingModule = new Set([
+  `ERR_MODULE_NOT_FOUND`,
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`,
+])
+
+/**
+ * The lint modules, or `unavailable`: the one line that says why they cannot
+ * load. Only loading them proves an install: a package can resolve while its
+ * entry file, or a package that it imports, is missing. A missing module means
+ * the install is missing or partial. Any other error, such as a cut-off file,
+ * is reported by its message, so the run still does not crash.
+ */
+async function loadLint() {
   try {
-    import.meta.resolve(specifier)
-    return true
+    const [parser, eslint, plugin, rule, runBudgets] = await Promise.all([
+      import(`@typescript-eslint/parser`),
+      import(`eslint`),
+      import(`@tanstack/eslint-plugin-oracles`),
+      import(`@tanstack/eslint-plugin-oracles/rules/no-unit-test`),
+      // The run-budget module imports the parser too.
+      import(`./check-oracle-run-counts.mjs`),
+    ])
+    return {
+      tsParser: parser.default,
+      ESLint: eslint.ESLint,
+      oraclePlugin: plugin.default,
+      resolveImportedTestModule: rule.resolveImportedTestModule,
+      ...runBudgets,
+    }
   } catch (error) {
-    if (error.code === `ERR_MODULE_NOT_FOUND`) return false
-    throw error
+    return {
+      unavailable: missingModule.has(error?.code)
+        ? `oracle lint skipped: dependencies are not installed in ${scriptRoot}; run pnpm install`
+        : `oracle lint failed: ${String(error?.message ?? error).split(`\n`)[0]}`,
+    }
   }
 }
 
-// A delegating run lints nothing itself, so it needs no install. Otherwise the
-// lint modules load only when their packages resolve.
-const linting =
-  !delegate &&
-  [
-    `eslint`,
-    `@typescript-eslint/parser`,
-    `@tanstack/eslint-plugin-oracles`,
-  ].every(resolves)
-const { default: tsParser } = linting
-  ? await import(`@typescript-eslint/parser`)
-  : {}
-const { ESLint } = linting ? await import(`eslint`) : {}
-const { default: oraclePlugin } = linting
-  ? await import(`@tanstack/eslint-plugin-oracles`)
-  : {}
-const { resolveImportedTestModule } = linting
-  ? await import(`@tanstack/eslint-plugin-oracles/rules/no-unit-test`)
-  : {}
-// The run-budget module imports the parser too, so it loads after the check.
+// A delegating run lints nothing itself, so it loads nothing.
 const {
+  tsParser,
+  ESLint,
+  oraclePlugin,
+  resolveImportedTestModule,
   describeLoweredRunBudget,
   isOracleFile,
   loweredRunBudgetsBetween,
   mergeBase,
-} = linting ? await import(`./check-oracle-run-counts.mjs`) : {}
+  unavailable,
+} = delegate ? {} : await loadLint()
 
 function git(...args) {
   return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
@@ -369,14 +384,13 @@ function reportText(results) {
 }
 
 /**
- * Writes the report in the harness's format. A post-edit report reaches the
- * model beside the tool result. A stop report makes the agent take another
- * turn, once: when the harness says a stop hook already continued this turn,
- * the report is left for the pre-commit hook and CI, so a report the agent
- * cannot fix does not loop.
+ * Writes the report in the harness's format. A command-line run writes it to
+ * stderr and exits 1. A hook hands it to the agent: a post-edit report reaches
+ * the model beside the tool result, and a stop report makes the agent take
+ * another turn. A run that could not lint (`scope` is `unavailable`) reports
+ * its one line the same way, except that every hook exits 0.
  */
 function respond(report, input, scope) {
-  const { format, event } = options
   if (!isHook) {
     if (report !== ``) {
       process.stderr.write(`${report}\n`)
@@ -384,40 +398,58 @@ function respond(report, input, scope) {
     }
     return
   }
+  if (scope === `unavailable`) {
+    tellAgent(report, input, false)
+    return
+  }
   const header =
     scope === `edited`
       ? `Oracle lint reports for the file you edited, and the oracle files that depend on it:`
       : `Oracle lint reports in this branch's changed files. Fix them before finishing:`
-  const reason = `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`
-  if (report === `` || (event === `stop` && input.stop_hook_active === true)) {
+  tellAgent(
+    report === ``
+      ? ``
+      : `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`,
+    input,
+    true,
+  )
+}
+
+/**
+ * Hands a hook's message to the agent. A stop message continues the turn
+ * once: when the harness says a stop hook already continued this turn, the
+ * message is left for the pre-commit hook and CI, so a message the agent
+ * cannot act on does not loop. Claude Code and Codex return stderr to the
+ * model on exit 2, which a report uses (`exitTwo`). Otherwise each harness
+ * reads JSON on stdout from a hook that exits 0; Copilot treats a nonzero exit
+ * as a warning, so it always needs the JSON.
+ */
+function tellAgent(message, input, exitTwo) {
+  const { format, event } = options
+  if (message === `` || (event === `stop` && input.stop_hook_active === true)) {
     // Codex requires JSON on stdout when a stop hook exits 0.
     if (format === `codex` && event === `stop`) process.stdout.write(`{}\n`)
     return
   }
-  if (format === `claude` || format === `codex`) {
-    // Exit code 2 returns stderr to the model in both harnesses.
-    process.stderr.write(`${reason}\n`)
+  if (exitTwo && (format === `claude` || format === `codex`)) {
+    process.stderr.write(`${message}\n`)
     process.exitCode = 2
     return
   }
-  if (format === `gemini`) {
-    const output =
-      event === `stop`
-        ? { decision: `deny`, reason }
-        : {
-            hookSpecificOutput: {
-              hookEventName: `AfterTool`,
-              additionalContext: reason,
-            },
-          }
-    process.stdout.write(`${JSON.stringify(output)}\n`)
-    return
-  }
-  // Copilot treats a nonzero exit as a warning, so it needs JSON on stdout.
-  const output =
-    event === `stop`
-      ? { decision: `block`, reason }
-      : { additionalContext: reason }
+  let output
+  if (event === `stop`)
+    output = {
+      decision: format === `gemini` ? `deny` : `block`,
+      reason: message,
+    }
+  else if (format === `copilot`) output = { additionalContext: message }
+  else
+    output = {
+      hookSpecificOutput: {
+        hookEventName: format === `gemini` ? `AfterTool` : `PostToolUse`,
+        additionalContext: message,
+      },
+    }
   process.stdout.write(`${JSON.stringify(output)}\n`)
 }
 
@@ -462,14 +494,8 @@ if (delegate) {
     { cwd: root, input: inputText, stdio: [`pipe`, `inherit`, `inherit`] },
   )
   process.exitCode = result.status ?? 1
-} else if (!linting) {
-  process.stderr.write(
-    `oracle lint skipped: dependencies are not installed in ${scriptRoot}; run pnpm install\n`,
-  )
-  if (!isHook) process.exitCode = 1
-  // Codex requires JSON on stdout when a stop hook exits 0.
-  else if (options.format === `codex` && options.event === `stop`)
-    process.stdout.write(`{}\n`)
+} else if (unavailable !== undefined) {
+  respond(unavailable, input, `unavailable`)
 } else {
   const { scope, files } = selectFiles(input)
   const report = [
